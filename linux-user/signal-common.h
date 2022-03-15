@@ -31,6 +31,32 @@ int sas_ss_flags(unsigned long sp);
 abi_ulong target_sigsp(abi_ulong sp, struct target_sigaction *ka);
 void target_save_altstack(target_stack_t *uss, CPUArchState *env);
 
+/**
+ * process_sigsuspend_mask: read and apply syscall-local signal mask
+ *
+ * Read the guest signal mask from @sigset, length @sigsize.
+ * Convert that to a host signal mask and save it to sigpending_mask.
+ *
+ * Return value: negative target errno, or zero;
+ *               store &sigpending_mask into *pset on success.
+ */
+int process_sigsuspend_mask(sigset_t **pset, target_ulong sigset,
+                            target_ulong sigsize);
+
+/**
+ * finish_sigsuspend_mask: finish a sigsuspend-like syscall
+ *
+ * Set in_sigsuspend if we need to use the modified sigset
+ * during process_pending_signals.
+ */
+static inline void finish_sigsuspend_mask(int ret)
+{
+    if (ret != -TARGET_ERESTARTSYS) {
+        TaskState *ts = (TaskState *)thread_cpu->opaque;
+        ts->in_sigsuspend = 1;
+    }
+}
+
 static inline void target_sigemptyset(target_sigset_t *set)
 {
     memset(set, 0, sizeof(*set));
@@ -52,5 +78,5 @@ void setup_frame(int sig, struct target_sigaction *ka,
 void setup_rt_frame(int sig, struct target_sigaction *ka,
                     target_siginfo_t *info,
                     target_sigset_t *set, CPUArchState *env);
-
 #endif
+
