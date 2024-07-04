@@ -39,10 +39,16 @@ static int is_data32(IR1_INST *pir1)
 {
     int dflag = 32;
 #ifdef TARGET_X86_64
-    if (ir1_rex(pir1) & 0x8) {
-        dflag = 64;
-    } else if (ir1_prefix_opnd_size(pir1)) {
-        dflag = 16;
+    if (CODEIS64) {
+        if (ir1_rex(pir1) & 0x8) {
+            dflag = 64;
+        } else if (ir1_prefix_opnd_size(pir1)) {
+            dflag = 16;
+        }
+    } else {
+        if (ir1_prefix_opnd_size(pir1)) {
+            dflag = 16;
+        }
     }
 #else
     if (ir1_prefix_opnd_size(pir1)) {
@@ -132,10 +138,12 @@ static void restore_fpr(void)
 static void save_gpr(void)
 {
 #ifdef TARGET_X86_64
-    for (int i = 8; i < 16; i++) {
-        IR2_OPND gpr_opnd = ra_alloc_gpr(i);
-        la_st_d(gpr_opnd, env_ir2_opnd,
-                lsenv_offset_of_gpr(lsenv, i));
+    if (CODEIS64) {
+        for (int i = 8; i < 16; i++) {
+            IR2_OPND gpr_opnd = ra_alloc_gpr(i);
+            la_st_d(gpr_opnd, env_ir2_opnd,
+                    lsenv_offset_of_gpr(lsenv, i));
+        }
     }
 #endif
 }
@@ -143,10 +151,12 @@ static void save_gpr(void)
 static void restore_gpr(void)
 {
 #ifdef TARGET_X86_64
-    for (int i = 8; i < 16; i++) {
-        IR2_OPND gpr_opnd = ra_alloc_gpr(i);
-        la_ld_d(gpr_opnd, env_ir2_opnd,
-                lsenv_offset_of_gpr(lsenv, i));
+    if (CODEIS64) {
+        for (int i = 8; i < 16; i++) {
+            IR2_OPND gpr_opnd = ra_alloc_gpr(i);
+            la_ld_d(gpr_opnd, env_ir2_opnd,
+                    lsenv_offset_of_gpr(lsenv, i));
+        }
     }
 #endif
 }
@@ -157,6 +167,9 @@ static void save_xmm(void)
     la_addi_d(tmp_env, env_ir2_opnd, 0x7f0);
 #ifdef TARGET_X86_64
     int save_no = 16;
+    if (!CODEIS64) {
+        save_no = 8;
+    }
 #else
     int save_no = 8;
 #endif
@@ -173,6 +186,9 @@ static void restore_xmm(void)
     la_addi_d(tmp_env, env_ir2_opnd, 0x7f0);
 #ifdef TARGET_X86_64
     int save_no = 16;
+    if (!CODEIS64) {
+        save_no = 8;
+    }
 #else
     int save_no = 8;
 #endif

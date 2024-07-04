@@ -119,6 +119,7 @@ struct dt_x86 {
     uint8_t addr_size;
     uint8_t rex;
     uint8_t op_count;
+    uint8_t modrm;
     dt_cs_x86_op operands[8];
     dt_x86_avx_cc avx_cc;
 };
@@ -146,7 +147,7 @@ typedef enum dt_cs_ac_type {
 } dt_cs_ac_type; 
 void disassemble_trace_init(int abi_bits, int args);
 void disassemble_trace_loop(const uint8_t *code, size_t code_size,
-    uint64_t address, size_t count, struct la_dt_insn *inputinsn);
+    uint64_t address, size_t count, struct la_dt_insn *inputinsn, int mode);
 void lacapstone_init(int abi_bits);
 void nextcapstone_init(int abi_bits);
 void gitcapstone_init(int abi_bits);
@@ -159,7 +160,7 @@ int lacapstone_get(const uint8_t *code, size_t code_size,
 int gitcapstone_get(const uint8_t *code, size_t code_size,
         uint64_t address,
         size_t count, struct la_dt_insn **insn,
-        int ir1_num, void *pir1_base);
+        int ir1_num, void *pir1_base, int mode);
 int nextcapstone_get(const uint8_t *code, size_t code_size,
         uint64_t address,
         size_t count, struct la_dt_insn **insn,
@@ -167,26 +168,26 @@ int nextcapstone_get(const uint8_t *code, size_t code_size,
 int laxed_get(const uint8_t *code, size_t code_size,
         uint64_t address,
         size_t count, struct la_dt_insn **insn,
-        int ir1_num, void *pir1_base);
+        int ir1_num, void *pir1_base, int mode);
 int lazydis_get(const uint8_t *code, size_t code_size,
         uint64_t address,
         size_t count, struct la_dt_insn **insn,
-        int ir1_num, void *pir1_base);
+        int ir1_num, void *pir1_base, int mode);
 static inline void disassemble_trace_cmp_nop(
         const uint8_t *code, size_t code_size,
         uint64_t address,
         size_t count,
-        struct la_dt_insn *inputinsn)
+        struct la_dt_insn *inputinsn, int mode)
 {
 
 }
 extern int (*la_disa_v1)(const uint8_t *code, size_t code_size,
         uint64_t address,
         size_t count, struct la_dt_insn **insn,
-        int ir1_num, void *pir1_base);
+        int ir1_num, void *pir1_base, int mode);
 extern void (*disassemble_trace_cmp)(const uint8_t *code, size_t code_size,
         uint64_t address,
         size_t count,
-        struct la_dt_insn *inputinsn);
+        struct la_dt_insn *inputinsn, int mode);
 
 #endif

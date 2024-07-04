@@ -25,8 +25,8 @@
 #else
 #define CS_MODE CS_MODE_64
 #endif
+extern csh handle[2];
 
-extern csh handle;
 
 typedef enum {
     IR1_EFLAG_FIRST = 96,

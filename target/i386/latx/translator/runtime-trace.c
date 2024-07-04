@@ -8,6 +8,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include "ir1.h"
+#include "lsenv.h"
 
 #define TRACE_REG_STACK_OFFSET 0x10
 
@@ -41,12 +42,22 @@ static void print_disass(const uint8_t *bin, size_t length)
 {
     cs_insn *insn;
     IR1_INST ir1;
+#ifdef TARGET_X86_64
 #ifdef CONFIG_LATX_CAPSTONE_GIT
-    int count = latx_cs_disasm(handle, bin, length,
+    int count = latx_cs_disasm(handle[CODEIS64], bin, length,
         (uint64_t)0, 1, &insn, 1, &ir1);
 #else
-    int count = la_cs_disasm(handle, bin, length,
+    int count = la_cs_disasm(handle[CODEIS64], bin, length,
         (uint64_t)0, 1, &insn, 1, &ir1);
+#endif
+#else
+#ifdef CONFIG_LATX_CAPSTONE_GIT
+    int count = latx_cs_disasm(handle[CODEIS64], bin, length,
+        (uint64_t)0, 1, &insn, 1, &ir1);
+#else
+    int count = la_cs_disasm(handle[CODEIS64], bin, length,
+        (uint64_t)0, 1, &insn, 1, &ir1);
+#endif
 #endif
     if (count) {
         printf("[");
@@ -61,12 +72,22 @@ static bool is_branch(const uint8_t *bin, size_t length)
 {
     cs_insn *insn;
     IR1_INST ir1 = {0};
+#ifdef TARGET_X86_64
 #ifdef CONFIG_LATX_CAPSTONE_GIT
-    int count = latx_cs_disasm(handle, bin, length,
+    int count = latx_cs_disasm(handle[CODEIS64], bin, length,
         (uint64_t)0, 1, &insn, 1, &ir1);
 #else
-    int count = la_cs_disasm(handle, bin, length,
+    int count = la_cs_disasm(handle[CODEIS64], bin, length,
         (uint64_t)0, 1, &insn, 1, &ir1);
+#endif
+#else
+#ifdef CONFIG_LATX_CAPSTONE_GIT
+    int count = latx_cs_disasm(handle[CODEIS64], bin, length,
+        (uint64_t)0, 1, &insn, 1, &ir1);
+#else
+    int count = la_cs_disasm(handle[CODEIS64], bin, length,
+        (uint64_t)0, 1, &insn, 1, &ir1);
+#endif
 #endif
     if (count && ir1.info && (ir1_is_jump(&ir1) || ir1_is_branch(&ir1)
         || ir1_is_call(&ir1) || ir1_is_return(&ir1))) {
@@ -295,7 +316,9 @@ static void gen_trace_helper(ADDR helper_method, IR1_INST *pir1)
     la_addi_d(sp_ir2_opnd, sp_ir2_opnd, 0x300);
     ra_free_all();
 #ifdef TARGET_X86_64
-    lsenv->tr_data->curr_ir1_inst->info->x86.addr_size = org_x86_addr_size;
+    if(CODEIS64) {
+        lsenv->tr_data->curr_ir1_inst->info->x86.addr_size = org_x86_addr_size;
+    }
 #endif
 }
 

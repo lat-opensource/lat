@@ -266,6 +266,10 @@ static void gen_set_next_tb_code(IR2_OPND *esp_ir2_opnd)
 
 #ifndef TARGET_X86_64
     la_bstrpick_d(*esp_ir2_opnd, *esp_ir2_opnd, 31, 0);
+#else
+    if (!CODEIS64) {
+        la_bstrpick_d(*esp_ir2_opnd, *esp_ir2_opnd, 31, 0);
+    }
 #endif
     la_load_addrx(nextip_ir2_opnd, *esp_ir2_opnd, 0);
 
@@ -292,12 +296,13 @@ static void gen_set_last_tb_code(TranslationBlock *tb)
 static void save_reg(void)
 {
 #ifdef TARGET_X86_64
-    /* save R12-R15 because they are itemp regs */
-    for (int i = 17; i < 21; i++) {
-        la_store_addrx(ir2_opnd_new(IR2_OPND_GPR, i),
-           env_ir2_opnd, lsenv_offset_of_all_gpr(lsenv, i));
+    if (CODEIS64) {
+        /* save R12-R15 because they are itemp regs */
+        for (int i = 17; i < 21; i++) {
+            la_store_addrx(ir2_opnd_new(IR2_OPND_GPR, i),
+               env_ir2_opnd, lsenv_offset_of_all_gpr(lsenv, i));
+        }
     }
-#else
 #endif
     la_store_addrx(ra_alloc_eflags(),
         env_ir2_opnd, lsenv_offset_of_eflags(lsenv));
@@ -309,11 +314,12 @@ static void save_reg(void)
 static void restore_reg(void)
 {
 #ifdef TARGET_X86_64
-    for (int i = 17; i < 21; i++) {
-        la_load_addrx(ir2_opnd_new(IR2_OPND_GPR, i),
-            env_ir2_opnd, lsenv_offset_of_all_gpr(lsenv, i));
+    if (CODEIS64) {
+        for (int i = 17; i < 21; i++) {
+            la_load_addrx(ir2_opnd_new(IR2_OPND_GPR, i),
+                env_ir2_opnd, lsenv_offset_of_all_gpr(lsenv, i));
+        }
     }
-#else
 #endif
     la_load_addrx(ra_alloc_eflags(),
         env_ir2_opnd, lsenv_offset_of_eflags(lsenv));
@@ -349,6 +355,10 @@ static size_t gen_tunnel_glue(TranslationBlock *tb,
     tr_init(tb);
 #ifndef TARGET_X86_64
     la_bstrpick_d(esp_ir2_opnd, esp_ir2_opnd, 31, 0);
+#else
+    if (!CODEIS64) {
+        la_bstrpick_d(esp_ir2_opnd, esp_ir2_opnd, 31, 0);
+    }
 #endif
     /* save context registor */
     ARCH(save_reg)();

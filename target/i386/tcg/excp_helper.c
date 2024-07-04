@@ -164,7 +164,7 @@ static hwaddr get_hphys(CPUState *cs, hwaddr gphys, MMUAccessType access_type,
         target_ulong pdpe_addr;
 
 #ifdef TARGET_X86_64
-        if (env->nested_pg_mode & SVM_NPT_LMA) {
+        if (CODEIS64 && env->nested_pg_mode & SVM_NPT_LMA) {
             uint64_t pml5e;
             uint64_t pml4e_addr, pml4e;
 

@@ -597,6 +597,13 @@ void latx_lsenv_init(CPUArchState *env)
     env->fpu_clobber = false;
     env->insn_save[0] = 0;
     env->insn_save[1] = 0;
+#ifdef CONFIG_LATX
+#ifdef TARGET_X86_64
+    env->sys.codemode = LATX_DT_X64;
+#else
+    env->sys.codemode = LATX_DT_X86;
+#endif
+#endif
 #ifdef CONFIG_LATX_DEBUG
     env->tb_exec_count = 0;
     env->last_store_insn = 0;

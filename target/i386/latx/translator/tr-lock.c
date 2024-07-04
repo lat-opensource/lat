@@ -76,7 +76,7 @@ bool translate_lock_sbb(IR1_INST *pir1)
 
     gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG);
 
-    if (opnd0_size == 64) {
+    if (CODEIS64 && opnd0_size == 64) {
         la_sbc_d(dest, zero_ir2_opnd, src1);
         la_amadd_db_d(src0, dest, mem_opnd);
         generate_eflag_calculation(dest, src0, src1, pir1, true);
@@ -214,7 +214,7 @@ bool translate_lock_add(IR1_INST *pir1)
     gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG);
 
 #ifdef TARGET_X86_64
-    if (opnd0_size == 64) {
+    if (CODEIS64 && opnd0_size == 64) {
         la_amadd_db_d(src0, src1, mem_opnd);
         generate_eflag_calculation(dest, src0, src1, pir1, true);
         return true;
@@ -349,7 +349,7 @@ bool translate_lock_adc(IR1_INST *pir1)
     gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG);
 
 #ifdef TARGET_X86_64
-    if (opnd0_size == 64) {
+    if (CODEIS64 && opnd0_size == 64) {
         la_adc_d(dest, zero_ir2_opnd, src1);
         la_amadd_db_d(src0, dest, mem_opnd);
         generate_eflag_calculation(dest, src0, src1, pir1, true);
@@ -485,7 +485,7 @@ bool translate_lock_and(IR1_INST *pir1)
     gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG);
 
 #ifdef TARGET_X86_64
-    if (opnd0_size == 64) {
+    if (CODEIS64 && opnd0_size == 64) {
         la_amand_db_d(src0, src1, mem_opnd);
         generate_eflag_calculation(dest, src0, src1, pir1, true);
         return true;
@@ -613,7 +613,7 @@ bool translate_lock_inc(IR1_INST *pir1)
     gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG);
 
 #ifdef TARGET_X86_64
-    if (opnd0_size == 64) {
+    if (CODEIS64 && opnd0_size == 64) {
         la_addi_d(tmp, zero_ir2_opnd, 1);
         la_amadd_db_d(src0, tmp, mem_opnd);
         generate_eflag_calculation(dest, src0, src0, pir1, true);
@@ -747,7 +747,7 @@ bool translate_lock_dec(IR1_INST *pir1)
     gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG);
 
 #ifdef TARGET_X86_64
-    if (opnd0_size == 64) {
+    if (CODEIS64 && opnd0_size == 64) {
         la_addi_d(tmp, zero_ir2_opnd, -1);
         la_amadd_db_d(src0, tmp, mem_opnd);
         generate_eflag_calculation(dest, src0, src0, pir1, true);
@@ -886,7 +886,7 @@ bool translate_lock_sub(IR1_INST *pir1)
     gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG);
 
 #ifdef TARGET_X86_64
-    if (opnd0_size == 64) {
+    if (CODEIS64 && opnd0_size == 64) {
         la_sub_d(dest, zero_ir2_opnd, src1);
         la_amadd_db_d(src0, dest, mem_opnd);
         generate_eflag_calculation(dest, src0, src1, pir1, true);
@@ -1019,7 +1019,7 @@ bool translate_lock_neg(IR1_INST *pir1)
 
 #ifdef TARGET_X86_64
     IR2_OPND label_ll_d = ra_alloc_label();
-    if (opnd0_size == 64) {
+    if (CODEIS64 && opnd0_size == 64) {
         la_label(label_ll_d);
         la_ll_d(src0, mem_opnd, 0);
         la_sub_d(dest, zero_ir2_opnd, src0);
@@ -1164,7 +1164,7 @@ bool translate_lock_or(IR1_INST *pir1)
     gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG);
 
 #ifdef TARGET_X86_64
-    if (opnd0_size == 64) {
+    if (CODEIS64 && opnd0_size == 64) {
         la_amor_db_d(src0, src1, mem_opnd);
         generate_eflag_calculation(dest, src0, src1, pir1, true);
         return true;
@@ -1293,7 +1293,7 @@ bool translate_lock_not(IR1_INST *pir1)
     gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG);
 
 #ifdef TARGET_X86_64
-    if (opnd0_size == 64) {
+    if (CODEIS64 && opnd0_size == 64) {
         la_addi_d(tmp, zero_ir2_opnd, -1);
         la_amxor_db_d(src0, tmp, mem_opnd);
         return true;
@@ -1429,7 +1429,7 @@ bool translate_lock_xor(IR1_INST *pir1)
     gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG);
 
 #ifdef TARGET_X86_64
-    if (opnd0_size == 64) {
+    if (CODEIS64 && opnd0_size == 64) {
         la_amxor_db_d(src0, src1, mem_opnd);
         generate_eflag_calculation(dest, src0, src1, pir1, true);
         return true;
@@ -1566,7 +1566,7 @@ bool translate_lock_xadd(IR1_INST *pir1)
     gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG);
 
 #ifdef TARGET_X86_64
-    if (opnd0_size == 64) {
+    if (CODEIS64 && opnd0_size == 64) {
         la_amadd_db_d(src0, src1, mem_opnd);
         store_ireg_to_ir1(src0, opnd1, false);
         generate_eflag_calculation(dest, src0, src1, pir1, true);
@@ -1721,7 +1721,7 @@ bool translate_lock_cmpxchg(IR1_INST *pir1)
 
 #ifdef TARGET_X86_64
     IR2_OPND label_ll_d = ra_alloc_label();
-    if (opnd0_size == 64) {
+    if (CODEIS64 && opnd0_size == 64) {
         la_label(label_ll_d);
         la_or(dest, zero_ir2_opnd, src1);
         la_ll_d(src0, mem_opnd, 0);

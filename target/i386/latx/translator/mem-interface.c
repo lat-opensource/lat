@@ -52,7 +52,11 @@ static void index_add_base(IR2_OPND dest, IR2_OPND base,
                     IR2_OPND index, int scale)
 {
 #ifdef TARGET_X86_64
-    la_alsl = &la_alsl_d;
+    if (!CODEIS64) {
+        la_alsl = &la_alsl_wu;
+    } else {
+        la_alsl = &la_alsl_d;
+    }
 #else
     la_alsl = &la_alsl_wu;
 #endif
@@ -204,7 +208,7 @@ static IR2_OPND convert_mem_helper(IR1_OPND *opnd1, IR2_OPND *arg_dest_op,
     TranslationBlock *tb __attribute__((unused)) = lsenv->tr_data->curr_tb;
 
 #ifdef TARGET_X86_64
-    if (ir1_opnd_base_reg(opnd1) == dt_X86_REG_RIP) {
+    if (CODEIS64 && ir1_opnd_base_reg(opnd1) == dt_X86_REG_RIP) {
         /*
          * Intel SDM Volume 1 3.5.1
          *    In 64-bit mode, the RIP register becomes the instruction

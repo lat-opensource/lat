@@ -9,7 +9,10 @@ bool translate_popf(IR1_INST *pir1)
 #ifndef TARGET_X86_64
     const int sp_step = 4;
 #else
-    const int sp_step = 8;
+    int sp_step = 8;
+    if (!CODEIS64) {
+        sp_step = 4;
+    }
 #endif
 
     IR2_OPND esp_opnd = ra_alloc_gpr(esp_index);
@@ -21,7 +24,12 @@ bool translate_popf(IR1_INST *pir1)
     la_bstrpick_d(esp_opnd, esp_opnd, 31, 0);
     la_ld_w(eflags_opnd, esp_opnd, 0);
 #else
-    la_ld_d(eflags_opnd, esp_opnd, 0);
+    if (CODEIS64) {
+        la_ld_d(eflags_opnd, esp_opnd, 0);
+    } else {
+        la_bstrpick_d(esp_opnd, esp_opnd, 31, 0);
+        la_ld_w(eflags_opnd, esp_opnd, 0);
+    }
 #endif
 
     la_andi(eflags_temp_opnd, eflags_opnd, 0x100);
@@ -50,7 +58,10 @@ bool translate_pushf(IR1_INST *pir1)
 #ifndef TARGET_X86_64
     const int sp_step = 4;
 #else
-    const int sp_step = 8;
+    int sp_step = 8;
+    if (!CODEIS64) {
+        sp_step = 4;
+    }
 #endif
     IR2_OPND eflags_opnd = ra_alloc_eflags();
     IR2_OPND esp_opnd = ra_alloc_gpr(esp_index);
@@ -60,6 +71,10 @@ bool translate_pushf(IR1_INST *pir1)
     ra_free_temp(temp);
 #ifndef TARGET_X86_64
     la_bstrpick_d(esp_opnd, esp_opnd, 31, 0);
+#else
+    if (!CODEIS64) {
+        la_bstrpick_d(esp_opnd, esp_opnd, 31, 0);
+    }
 #endif
     la_store_addrx(temp, esp_opnd, -sp_step);
 

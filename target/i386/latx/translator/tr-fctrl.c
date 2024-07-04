@@ -705,6 +705,10 @@ void tr_fpu_store_tag_to_mem(IR2_OPND mem_opnd, int mem_imm)
 #ifndef TARGET_X86_64
     /*in 32 situation, mem_opnd must to clear hight 32bit*/
     la_bstrpick_d(mem_opnd, mem_opnd, 31, 0);
+#else
+    if (!CODEIS64) {
+        la_bstrpick_d(mem_opnd, mem_opnd, 31, 0);
+    }
 #endif
     la_st_h(temp_2, mem_opnd, mem_imm);
 

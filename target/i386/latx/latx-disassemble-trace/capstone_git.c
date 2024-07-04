@@ -1,5 +1,7 @@
 #include "capstone_git.h"
 #undef X86_INS_
+#define LATX_DT_X86    0
+#define LATX_DT_X64    1
 
 la_name_enum_t git_x86_insn_tr[X86_INS_ENDING + 1];
 
@@ -8,9 +10,9 @@ la_name_enum_t git_x86_insn_bcast[5];
 la_name_enum_t git_x86_insn_op_type[4];
 la_name_enum_t git_x86_insn_avx_cc[X86_AVX_CC_TRUE_US + 1];
 
-csh git_handle;
+csh git_handle[2];
+uint8_t dt_gitcatstone_mode[2];
 char git_cap_tmp[IR1_INST_SIZE];
-uint8_t dt_gitcatstone_mode;
 struct la_dt_insn *gitcapstone_get_from_insn(cs_insn *inputinfo,
     int ir1_num, void *pir1_base)
 {
@@ -44,6 +46,7 @@ struct la_dt_insn *gitcapstone_get_from_insn(cs_insn *inputinfo,
     }
     ret->x86.addr_size = inputinfo->detail->x86.addr_size;
     ret->x86.rex = inputinfo->detail->x86.rex;
+    ret->x86.modrm = inputinfo->detail->x86.modrm;
     ret->x86.op_count = inputinfo->detail->x86.op_count;
     for (int i = 0; i < 8; i++) {
         int otype = inputinfo->detail->x86.operands[i].type; 
@@ -108,12 +111,12 @@ struct la_dt_insn *gitcapstone_get_from_insn(cs_insn *inputinfo,
 int gitcapstone_get(const uint8_t *code, size_t code_size,
         uint64_t address,
         size_t count, struct la_dt_insn **insn,
-        int ir1_num, void *pir1_base)
+        int ir1_num, void *pir1_base, int mode)
 {
     cs_insn *inputinfo;
     struct la_dt_insn *ret;
-    dtassert(git_handle);
-    int git_count = latx_cs_disasm(git_handle, code, code_size,
+    dtassert(git_handle[mode]);
+    int git_count = latx_cs_disasm(git_handle[mode], code, code_size,
         address, count, &inputinfo, 0, git_cap_tmp);
     if (inputinfo == NULL) {
         *insn = NULL;
@@ -133,24 +136,27 @@ static void init_insn_op_type();
 static void init_insn_avx_cc();
 static void xtm_capstone_init(int abi_bits)
 {
-    int mode = 0;
-    dt_gitcatstone_mode = abi_bits;
-    if(abi_bits == 32)
-        mode = CS_MODE_32;
-    else
-        mode = CS_MODE_64;
-    if (cs_open(CS_ARCH_X86, mode, &git_handle) != CS_ERR_OK) {
-        fprintf(stderr, "%s %s %d error : cs_open\n",
-                __FILE__, __func__, __LINE__);
-        exit(-1);
-    }   
-    cs_option(git_handle, CS_OPT_DETAIL, CS_OPT_ON);
+    dt_gitcatstone_mode[LATX_DT_X86] = 32;
+    dt_gitcatstone_mode[LATX_DT_X64] = 64;
+    if (cs_open(CS_ARCH_X86, CS_MODE_32, &git_handle[LATX_DT_X86]) != CS_ERR_OK) {
+       fprintf(stderr, "%s %s %d error : cs_open\n",
+               __FILE__, __func__, __LINE__);
+       exit(-1);
+    }
+    if (cs_open(CS_ARCH_X86, CS_MODE_64, &git_handle[LATX_DT_X64]) != CS_ERR_OK) {
+       fprintf(stderr, "%s %s %d error : cs_open\n",
+               __FILE__, __func__, __LINE__);
+       exit(-1);
+    }
+    cs_option(git_handle[LATX_DT_X86], CS_OPT_DETAIL, CS_OPT_ON);
+    cs_option(git_handle[LATX_DT_X64], CS_OPT_DETAIL, CS_OPT_ON);
 }
 
 void gitcapstone_init(int abi_bits)
 {
     xtm_capstone_init(abi_bits);
-    handle   = git_handle;
+    handle[0]   = git_handle[0];
+    handle[1]   = git_handle[1];
     init_insn_tr();
     init_insn_reg();
     init_insn_bcast();

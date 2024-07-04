@@ -35,6 +35,7 @@
 #include "reg-map.h"
 #include "latx-options.h"
 #include "loongarch-extcontext.h"
+#include "lsenv.h"
 #endif
 #include "exec/translate-all.h"
 #if defined(CONFIG_LATX_KZT) && defined(CONFIG_LATX_DEBUG)
@@ -1492,8 +1493,14 @@ static void handle_pending_signal(CPUArchState *cpu_env, int sig,
         ts->in_sigsuspend = 0;
 
         /* if the CPU is in VM86 mode, we restore the 32 bit values */
-#if defined(TARGET_I386) && !defined(TARGET_X86_64)
+#if !defined(TARGET_X86_64)
         {
+            CPUX86State *env = cpu_env;
+            if (env->eflags & VM_MASK)
+                save_v86_state(env);
+        }
+#else
+        if (!CODEIS64) {
             CPUX86State *env = cpu_env;
             if (env->eflags & VM_MASK)
                 save_v86_state(env);

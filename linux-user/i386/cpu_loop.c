@@ -195,6 +195,13 @@ static void emulate_vsyscall(CPUX86State *env)
     gen_signal(env, TARGET_SIGSEGV, TARGET_SI_KERNEL, 0);
 }
 #endif
+#ifdef TARGET_X86_64
+#include "syscall_64_nr.h"
+#include "syscall_target_32_nr.h"
+int syscall_64_to_32[TARGET32_TARGET_NR_LATX_LAST + 1] = {0};
+#include "syscall_64_to_32_map.h"
+#include "lsenv.h"
+#endif
 
 void cpu_loop(CPUX86State *env)
 {
@@ -203,6 +210,9 @@ void cpu_loop(CPUX86State *env)
     abi_ulong pc;
     abi_ulong ret;
 
+ #ifdef TARGET_X86_64
+     INIT_SYSCALL_64_TO_32();
+ #endif
     for(;;) {
         cpu_exec_start(cs);
         trapnr = cpu_exec(cs);
@@ -216,7 +226,11 @@ void cpu_loop(CPUX86State *env)
         case 0x80:
             /* linux syscall from int $0x80 */
             ret = do_syscall(env,
+#ifdef TARGET_X86_64
+                             syscall_64_to_32[env->regs[R_EAX]],
+#else
                              env->regs[R_EAX],
+#endif
                              env->regs[R_EBX],
                              env->regs[R_ECX],
                              env->regs[R_EDX],

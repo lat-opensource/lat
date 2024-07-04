@@ -142,7 +142,7 @@ TRANS_FUNC_DEF(in);
 TRANS_FUNC_DEF(out);
 TRANS_FUNC_DEF(call);
 TRANS_FUNC_DEF(jmp);
-TRANS_FUNC_DEF(jmp_far);
+TRANS_FUNC_DEF(ljmp);
 TRANS_FUNC_DEF(hlt);
 TRANS_FUNC_DEF(cmc);
 TRANS_FUNC_DEF(clc);
@@ -939,9 +939,7 @@ IR2_OPND save_h128_of_ymm(IR1_INST *ir1);
 void restore_h128_of_ymm(IR1_INST *ir1, IR2_OPND temp);
 void gen_test_page_flag(IR2_OPND mem_opnd, int mem_imm, uint32_t flag);
 
-#ifndef TARGET_X86_64
 void clear_h32(IR2_OPND *opnd);
-#endif
 
 #include "qemu-def.h"
 

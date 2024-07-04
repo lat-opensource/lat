@@ -186,7 +186,11 @@ def convertToConstructorForPseudo(name = str, header_list = list):
                     + "#ifndef TARGET_X86_64\n" \
                     + "    return la_add_w(op0, op1, op2);\n" \
                     + "#else\n" \
-                    + "    return la_add_d(op0, op1, op2);\n" \
+                    + "    if (CODEIS64) {\n" \
+                    + "        return la_add_d(op0, op1, op2);\n" \
+                    + "    } else {\n" \
+                    + "        return la_add_w(op0, op1, op2);\n" \
+                    + "    }\n" \
                     + "#endif\n" \
                     + "}"
         func_header = "IR2_INST *la_{}".format(name) \
@@ -198,7 +202,11 @@ def convertToConstructorForPseudo(name = str, header_list = list):
                     + "#ifndef TARGET_X86_64\n" \
                     + "    return la_sub_w(op0, op1, op2);\n" \
                     + "#else\n" \
-                    + "    return la_sub_d(op0, op1, op2);\n" \
+                    + "    if (CODEIS64) {\n" \
+                    + "        return la_sub_d(op0, op1, op2);\n" \
+                    + "    } else {\n" \
+                    + "        return la_sub_w(op0, op1, op2);\n" \
+                    + "    }\n" \
                     + "#endif\n" \
                     + "}"
         func_header = "IR2_INST *la_{}".format(name) \
@@ -210,7 +218,11 @@ def convertToConstructorForPseudo(name = str, header_list = list):
                     + "#ifndef TARGET_X86_64\n" \
                     + "    return la_addi_w(op0, op1, imm);\n" \
                     + "#else\n" \
-                    + "    return la_addi_d(op0, op1, imm);\n" \
+                    + "    if (CODEIS64) {\n" \
+                    + "        return la_addi_d(op0, op1, imm);\n" \
+                    + "    } else {\n" \
+                    + "        return la_addi_w(op0, op1, imm);\n" \
+                    + "    }\n" \
                     + "#endif\n" \
                     + "}"
         func_header = "IR2_INST *la_{}(IR2_OPND op0, IR2_OPND op1, int imm);\n".format(name)
@@ -221,7 +233,11 @@ def convertToConstructorForPseudo(name = str, header_list = list):
                     + "#ifndef TARGET_X86_64\n" \
                     + "    return la_ld_wu(op0, op1, imm);\n" \
                     + "#else\n" \
-                    + "    return la_ld_d(op0, op1, imm);\n" \
+                    + "    if (CODEIS64) {\n" \
+                    + "        return la_ld_d(op0, op1, imm);\n" \
+                    + "    } else {\n" \
+                    + "        return la_ld_wu(op0, op1, imm);\n" \
+                    + "    }\n" \
                     + "#endif\n" \
                     + "}"
         func_header = "IR2_INST *la_{}(IR2_OPND op0, IR2_OPND op1, int imm);\n".format(name)
@@ -232,7 +248,11 @@ def convertToConstructorForPseudo(name = str, header_list = list):
                     + "#ifndef TARGET_X86_64\n" \
                     + "    return la_st_w(op0, op1, imm);\n" \
                     + "#else\n" \
-                    + "    return la_st_d(op0, op1, imm);\n" \
+                    + "    if (CODEIS64) {\n" \
+                    + "        return la_st_d(op0, op1, imm);\n" \
+                    + "    } else {\n" \
+                    + "        return la_st_w(op0, op1, imm);\n" \
+                    + "    }\n" \
                     + "#endif\n" \
                     + "}"
         func_header = "IR2_INST *la_{}(IR2_OPND op0, IR2_OPND op1, int imm);\n".format(name)

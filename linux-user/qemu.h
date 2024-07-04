@@ -114,13 +114,11 @@ typedef struct TaskState {
 #if defined(TARGET_ARM) || defined(TARGET_RISCV)
     int swi_errno;
 #endif
-#if defined(TARGET_I386) && !defined(TARGET_X86_64)
     abi_ulong target_v86;
     struct vm86_saved_state vm86_saved_regs;
     struct target_vm86plus_struct vm86plus;
     uint32_t v86flags;
     uint32_t v86mask;
-#endif
     abi_ulong child_tidptr;
 #ifdef TARGET_M68K
     abi_ulong tp_value;

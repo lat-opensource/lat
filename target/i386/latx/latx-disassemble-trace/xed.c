@@ -4,7 +4,7 @@
 la_name_enum_t la_xed_insn_tr[XED_ICLASS_LAST + 1];
 la_name_enum_t la_xed_insn_reg[XED_REG_LAST + 1];
 
-xed_state_t dstate;
+xed_state_t dstate[2];
 xed_decoded_inst_t xedd;
 uint8_t dt_laxed_mode;
 static void handle_prefix(struct la_dt_insn *ret, xed_decoded_inst_t *inputinfo)
@@ -420,12 +420,12 @@ foroperand:
 int laxed_get(const uint8_t *code, size_t code_size,
         uint64_t address,
         size_t count, struct la_dt_insn **insn,
-        int ir1_num, void *pir1_base)
+        int ir1_num, void *pir1_base, int mode)
 {
     xed_error_enum_t xed_error;
     struct la_dt_insn *ret;
     memset(&xedd, 0, sizeof(xed_operand_values_t));
-    xed_operand_values_set_mode(&xedd, &dstate);
+    xed_operand_values_set_mode(&xedd, &dstate[mode]);
     xed_error = xed_decode(&xedd, code, code_size);
     switch (xed_error) {
     case XED_ERROR_NONE:
@@ -454,12 +454,13 @@ static void init_insn_reg(void);
 static void dt_xed_init(int abi_bits)
 {
     xed_tables_init();
-    xed_state_zero(&dstate);
-    dstate.mmode = XED_MACHINE_MODE_LEGACY_32;
-    dstate.stack_addr_width = XED_ADDRESS_WIDTH_32b;
-    if (abi_bits == 64) {
-        dstate.mmode = XED_MACHINE_MODE_LONG_64;
-    }
+    xed_state_zero(&dstate[0]);
+    dstate[0].mmode = XED_MACHINE_MODE_LEGACY_32;
+    dstate[0].stack_addr_width = XED_ADDRESS_WIDTH_32b;
+    xed_tables_init();
+    xed_state_zero(&dstate[1]);
+    dstate[0].mmode = XED_MACHINE_MODE_LONG_64;
+    
 }
 
 void laxed_init(int abi_bits)

@@ -189,7 +189,7 @@ IR1_INST *get_ir1_list(struct TranslationBlock *tb, ADDRX pc, int max_insns)
     /*
      * Detect entry into the vsyscall page and invoke the syscall.
      */
-    if ((pc & TARGET_PAGE_MASK) == TARGET_VSYSCALL_PAGE) {
+    if (CODEIS64 && (pc & TARGET_PAGE_MASK) == TARGET_VSYSCALL_PAGE) {
             mmap_unlock();
             helper_raise_exception((CPUX86State *)lsenv->cpu_state,
                                     EXCP_VSYSCALL);
@@ -1095,7 +1095,7 @@ static bool (*translate_functions[])(IR1_INST *) = {
     TRANS_FUNC_GEN(CMPORDPD, cmpordpd),
     TRANS_FUNC_GEN(ENDBR32, endbr32),
     TRANS_FUNC_GEN(ENDBR64, endbr64),
-    TRANS_FUNC_GEN(LJMP, nop),
+    TRANS_FUNC_GEN(LJMP, ljmp),
     TRANS_FUNC_GEN(LCALL, nop),
     TRANS_FUNC_GEN(LDS, nop),
     TRANS_FUNC_GEN(ENTER, enter),

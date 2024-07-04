@@ -84,7 +84,7 @@ bool translate_xor(IR1_INST *pir1)
     if (ir1_opnd_is_gpr(opnd0)) {
 #ifdef TARGET_X86_64
         /* r32 */
-        if (!GHBR_ON(pir1) && opnd0_size == 32) {
+        if (!GHBR_ON(pir1) && CODEIS64 && opnd0_size == 32) {
             la_mov32_zx(dest, dest);
         } else
 #endif
@@ -248,7 +248,7 @@ bool translate_and(IR1_INST *pir1)
     if (ir1_opnd_is_gpr(opnd0)) {
 #ifdef TARGET_X86_64
         /* r32, also low_mask will clear high bits */
-        if (!GHBR_ON(pir1) && opnd0_size == 32 && !low_mask) {
+        if (!GHBR_ON(pir1) && CODEIS64 && opnd0_size == 32 && !low_mask) {
             la_mov32_zx(dest, dest);
         } else
 #endif
@@ -347,7 +347,7 @@ bool translate_or(IR1_INST *pir1)
     if (ir1_opnd_is_gpr(opnd0)) {
 #ifdef TARGET_X86_64
         /* r32 */
-        if (!GHBR_ON(pir1) && opnd0_size == 32) {
+        if (!GHBR_ON(pir1) && CODEIS64 && opnd0_size == 32) {
             la_mov32_zx(dest, dest);
         } else
 #endif
@@ -412,7 +412,7 @@ bool translate_not(IR1_INST *pir1)
     /* calculate */
     la_nor(dest, zero_ir2_opnd, src0);
 #ifdef TARGET_X86_64
-    if (!GHBR_ON(pir1) && ir1_opnd_is_gpr(opnd0) && opnd0_size == 32) {
+    if (!GHBR_ON(pir1) && CODEIS64 && ir1_opnd_is_gpr(opnd0) && opnd0_size == 32) {
         la_mov32_zx(dest, dest);
     }
 #endif
@@ -773,18 +773,23 @@ bool translate_rol(IR1_INST *pir1)
     la_andi(count, original_count, 0x1f);
     la_beq(count, zero_ir2_opnd, label_exit);
 #else
-    if (ir1_opnd_size(opnd0) == 64) {
-        la_andi(count, original_count, 0x3f);
+    if (CODEIS64) {
+        if (ir1_opnd_size(opnd0) == 64) {
+            la_andi(count, original_count, 0x3f);
+        } else {
+            la_andi(count, original_count, 0x1f);
+        }
+        if (!GHBR_ON(pir1) && ir1_opnd_size(ir1_get_opnd(pir1, 0)) == 32
+        && ir1_opnd_is_gpr(ir1_get_opnd(pir1, 0))) {
+            /* clean the target*/
+            IR2_OPND gpr_opnd = ra_alloc_gpr(ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 0)));
+            la_mov32_zx(gpr_opnd, gpr_opnd);
+            la_beq(count, zero_ir2_opnd, label_exit);
+        } else {
+            la_beq(count, zero_ir2_opnd, label_exit);
+        }
     } else {
         la_andi(count, original_count, 0x1f);
-    }
-    if (!GHBR_ON(pir1) && ir1_opnd_size(ir1_get_opnd(pir1, 0)) == 32
-    && ir1_opnd_is_gpr(ir1_get_opnd(pir1, 0))) {
-        /* clean the target*/
-        IR2_OPND gpr_opnd = ra_alloc_gpr(ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 0)));
-        la_mov32_zx(gpr_opnd, gpr_opnd);
-        la_beq(count, zero_ir2_opnd, label_exit);
-    } else {
         la_beq(count, zero_ir2_opnd, label_exit);
     }
 #endif
@@ -821,9 +826,15 @@ bool translate_rol(IR1_INST *pir1)
     la_or(tmp_dest, tmp_dest, tmp);
     la_bstrins_d(tmp_dest, zero_ir2_opnd, 63, 32);
 #else
-    if (dest_size != 64) {
+    if (CODEIS64) {
+        if (dest_size != 64) {
+            la_srli_d(tmp, tmp_dest, 64 - dest_size);
+            la_or(tmp_dest, tmp_dest, tmp);
+        }
+    } else {
         la_srli_d(tmp, tmp_dest, 64 - dest_size);
         la_or(tmp_dest, tmp_dest, tmp);
+        la_bstrins_d(tmp_dest, zero_ir2_opnd, 63, 32);
     }
 #endif
     store_ireg_to_ir1(tmp_dest, ir1_get_opnd(pir1, 0), false);
@@ -855,18 +866,23 @@ bool translate_ror(IR1_INST *pir1)
     la_andi(count, original_count, 0x1f);
     la_beq(count, zero_ir2_opnd, label_exit);
 #else
-    if (ir1_opnd_size(ir1_get_opnd(pir1, 0)) == 64) {
-        la_andi(count, original_count, 0x3f);
+    if (CODEIS64) {
+        if (ir1_opnd_size(ir1_get_opnd(pir1, 0)) == 64) {
+            la_andi(count, original_count, 0x3f);
+        } else {
+            la_andi(count, original_count, 0x1f);
+        }
+        if (!GHBR_ON(pir1) && ir1_opnd_size(ir1_get_opnd(pir1, 0)) == 32
+        && ir1_opnd_is_gpr(ir1_get_opnd(pir1, 0))) {
+            /* clean the target*/
+            IR2_OPND gpr_opnd = ra_alloc_gpr(ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 0)));
+            la_mov32_zx(gpr_opnd, gpr_opnd);
+            la_beq(count, zero_ir2_opnd, label_exit);
+        } else {
+            la_beq(count, zero_ir2_opnd, label_exit);
+        }
     } else {
         la_andi(count, original_count, 0x1f);
-    }
-    if (!GHBR_ON(pir1) && ir1_opnd_size(ir1_get_opnd(pir1, 0)) == 32
-    && ir1_opnd_is_gpr(ir1_get_opnd(pir1, 0))) {
-        /* clean the target*/
-        IR2_OPND gpr_opnd = ra_alloc_gpr(ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 0)));
-        la_mov32_zx(gpr_opnd, gpr_opnd);
-        la_beq(count, zero_ir2_opnd, label_exit);
-    } else {
         la_beq(count, zero_ir2_opnd, label_exit);
     }
 #endif
@@ -899,9 +915,15 @@ bool translate_ror(IR1_INST *pir1)
     la_or(tmp_dest, tmp_dest, tmp);
     la_bstrins_d(tmp_dest, zero_ir2_opnd, 63, 32);
 #else
-    if (dest_size != 64) {
+    if(CODEIS64) {
+        if (dest_size != 64) {
+            la_srli_d(tmp, tmp_dest, 64 - dest_size);
+            la_or(tmp_dest, tmp_dest, tmp);
+        }
+    } else {
         la_srli_d(tmp, tmp_dest, 64 - dest_size);
         la_or(tmp_dest, tmp_dest, tmp);
+        la_bstrins_d(tmp_dest, zero_ir2_opnd, 63, 32);
     }
 #endif
     store_ireg_to_ir1(tmp_dest, ir1_get_opnd(pir1, 0), false);
@@ -955,15 +977,20 @@ bool translate_rcl(IR1_INST *pir1)
     la_andi(count, original_count, 0x1f);
     la_beq(count, zero_ir2_opnd, label_exit);
 #else
-    int32 mask = (dest_size == 64) ? 63 : 31;
-    la_andi(count, original_count, mask);
-    if (!GHBR_ON(pir1) && dest_size == 32 && ir1_opnd_is_gpr(ir1_get_opnd(pir1, 0))) {
-        /* clean the target*/
-        IR2_OPND gpr_opnd =
-            ra_alloc_gpr(ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 0)));
-        la_mov32_zx(gpr_opnd, gpr_opnd);
-        la_beq(count, zero_ir2_opnd, label_exit);
+    if (CODEIS64) {
+        int32 mask = (dest_size == 64) ? 63 : 31;
+        la_andi(count, original_count, mask);
+        if (!GHBR_ON(pir1) && dest_size == 32 && ir1_opnd_is_gpr(ir1_get_opnd(pir1, 0))) {
+            /* clean the target*/
+            IR2_OPND gpr_opnd =
+                ra_alloc_gpr(ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 0)));
+            la_mov32_zx(gpr_opnd, gpr_opnd);
+            la_beq(count, zero_ir2_opnd, label_exit);
+        } else {
+            la_beq(count, zero_ir2_opnd, label_exit);
+        }
     } else {
+        la_andi(count, original_count, 0x1f);
         la_beq(count, zero_ir2_opnd, label_exit);
     }
 #endif
@@ -1000,61 +1027,82 @@ bool translate_rcl(IR1_INST *pir1)
     ra_free_temp(tmp);
     ra_free_temp(tmp_dest);
 #else
-    IR2_OPND cf = ra_alloc_itemp();
-    get_eflag_condition(&cf, pir1);
-    if (dest_size <= 32) {
-        la_slli_d(cf, cf, dest_size);
+    if (CODEIS64) {
+        IR2_OPND cf = ra_alloc_itemp();
+        get_eflag_condition(&cf, pir1);
+        if (dest_size <= 32) {
+            la_slli_d(cf, cf, dest_size);
+        } else {
+            IR2_OPND cf_move = ra_alloc_itemp();
+            /* 64 bits, cf will put the right bit now */
+            /* cf_move <- count - 1 */
+            la_addi_w(cf_move, count, -1);
+            /* cf <- cf << cf_move */
+            la_sll_d(cf, cf, cf_move);
+            ra_free_temp(cf_move);
+        }
+
+        IR2_OPND tmp_dest;
+        IR2_OPND high_dest = ra_alloc_itemp();
+        IR2_OPND label_finish = ra_alloc_label();
+        /* but if size = 64, no more bits for the cf */
+        if (dest_size != 64) {
+            tmp_dest = ra_alloc_itemp();
+            /* for 32bits etc. we can put the cf at the upper bit */
+            la_or(tmp_dest, dest, cf);
+            la_sll_d(high_dest, tmp_dest, count);
+        } else {
+            la_sll_d(high_dest, dest, count);
+            /* attach the cf at the high_dest */
+            la_or(high_dest, high_dest, cf);
+            la_addi_w(cf, count, -1);
+            la_beq(cf, zero_ir2_opnd, label_finish);
+            tmp_dest = dest;
+        }
+        ra_free_temp(cf);
+
+        la_addi_d(count, count, -1 - dest_size);
+        la_sub_d(count, zero_ir2_opnd, count);
+
+        IR2_OPND low_dest = ra_alloc_itemp();
+        la_srl_d(low_dest, tmp_dest, count);
+        la_sub_d(count, zero_ir2_opnd, count);
+        la_addi_d(count, count, 1 + dest_size);
+
+        if (dest_size != 64) {
+            ra_free_temp(tmp_dest);
+        }
+
+        la_or(high_dest, high_dest, low_dest);
+    /* label_finish: */
+        la_label(label_finish);
+        generate_eflag_calculation(high_dest, dest, count, pir1, true);
+        /* we can't move the dest directly */
+        /* because eflag_calculation need the resource data */
+        store_ireg_to_ir1(high_dest, ir1_get_opnd(pir1, 0), false);
+        ra_free_temp(high_dest);
+        ra_free_temp(low_dest);
+        ra_free_temp(count);
+
     } else {
-        IR2_OPND cf_move = ra_alloc_itemp();
-        /* 64 bits, cf will put the right bit now */
-        /* cf_move <- count - 1 */
-        la_addi_w(cf_move, count, -1);
-        /* cf <- cf << cf_move */
-        la_sll_d(cf, cf, cf_move);
-        ra_free_temp(cf_move);
-    }
+        IR2_OPND tmp_dest = ra_alloc_itemp();
 
-    IR2_OPND tmp_dest;
-    IR2_OPND high_dest = ra_alloc_itemp();
-    IR2_OPND label_finish = ra_alloc_label();
-    /* but if size = 64, no more bits for the cf */
-    if (dest_size != 64) {
-        tmp_dest = ra_alloc_itemp();
-        /* for 32bits etc. we can put the cf at the upper bit */
-        la_or(tmp_dest, dest, cf);
-        la_sll_d(high_dest, tmp_dest, count);
-    } else {
-        la_sll_d(high_dest, dest, count);
-        /* attach the cf at the high_dest */
-        la_or(high_dest, high_dest, cf);
-        la_addi_w(cf, count, -1);
-        la_beq(cf, zero_ir2_opnd, label_finish);
-        tmp_dest = dest;
-    }
-    ra_free_temp(cf);
+        get_eflag_condition(&tmp_dest, pir1);
+        la_slli_d(tmp_dest, tmp_dest, dest_size);
+        la_bstrins_d(tmp_dest, dest, dest_size - 1, 0);
 
-    la_addi_d(count, count, -1 - dest_size);
-    la_sub_d(count, zero_ir2_opnd, count);
-
-    IR2_OPND low_dest = ra_alloc_itemp();
-    la_srl_d(low_dest, tmp_dest, count);
-    la_sub_d(count, zero_ir2_opnd, count);
-    la_addi_d(count, count, 1 + dest_size);
-
-    if (dest_size != 64) {
+        IR2_OPND tmp = ra_alloc_itemp();
+        li_wu(tmp, dest_size + 1);
+        la_sub_d(tmp, tmp, count);
+        la_rotr_d(tmp, tmp_dest, tmp);
+        la_srli_d(tmp_dest, tmp, 63 - dest_size);
+        la_or(tmp_dest, tmp_dest, tmp);
+        la_bstrins_d(tmp_dest, zero_ir2_opnd, 63, 32);
+        generate_eflag_calculation(tmp_dest, dest, count, pir1, true);
+        store_ireg_to_ir1(tmp_dest, ir1_get_opnd(pir1, 0), false);
+        ra_free_temp(tmp);
         ra_free_temp(tmp_dest);
     }
-
-    la_or(high_dest, high_dest, low_dest);
-/* label_finish: */
-    la_label(label_finish);
-    generate_eflag_calculation(high_dest, dest, count, pir1, true);
-    /* we can't move the dest directly */
-    /* because eflag_calculation need the resource data */
-    store_ireg_to_ir1(high_dest, ir1_get_opnd(pir1, 0), false);
-    ra_free_temp(high_dest);
-    ra_free_temp(low_dest);
-    ra_free_temp(count);
 #endif
 /* label_exit: */
     la_label(label_exit);
@@ -1083,15 +1131,20 @@ bool translate_rcr(IR1_INST *pir1)
     la_andi(count, original_count, 0x1f);
     la_beq(count, zero_ir2_opnd, label_exit);
 #else
-    int32 mask = (dest_size == 64) ? 63 : 31;
-    la_andi(count, original_count, mask);
-    if (!GHBR_ON(pir1) && dest_size == 32 && ir1_opnd_is_gpr(ir1_get_opnd(pir1, 0))) {
-        /* clean the target*/
-        IR2_OPND gpr_opnd =
-            ra_alloc_gpr(ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 0)));
-        la_mov32_zx(gpr_opnd, gpr_opnd);
-        la_beq(count, zero_ir2_opnd, label_exit);
+    if (CODEIS64) {
+        int32 mask = (dest_size == 64) ? 63 : 31;
+        la_andi(count, original_count, mask);
+        if (!GHBR_ON(pir1) && dest_size == 32 && ir1_opnd_is_gpr(ir1_get_opnd(pir1, 0))) {
+            /* clean the target*/
+            IR2_OPND gpr_opnd =
+                ra_alloc_gpr(ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 0)));
+            la_mov32_zx(gpr_opnd, gpr_opnd);
+            la_beq(count, zero_ir2_opnd, label_exit);
+        } else {
+            la_beq(count, zero_ir2_opnd, label_exit);
+        }
     } else {
+        la_andi(count, original_count, 0x1f);
         la_beq(count, zero_ir2_opnd, label_exit);
     }
 #endif
@@ -1123,63 +1176,81 @@ bool translate_rcr(IR1_INST *pir1)
     ra_free_temp(tmp);
     ra_free_temp(tmp_dest);
 #else
-    IR2_OPND cf = ra_alloc_itemp();
-    get_eflag_condition(&cf, pir1);
-    if (dest_size <= 32) {
-        la_slli_d(cf, cf, dest_size);
+    if (CODEIS64) {
+        IR2_OPND cf = ra_alloc_itemp();
+        get_eflag_condition(&cf, pir1);
+        if (dest_size <= 32) {
+            la_slli_d(cf, cf, dest_size);
+        } else {
+            IR2_OPND cf_move = ra_alloc_itemp();
+            /* 64 bits, cf will put the right bit now */
+            /* cf_move <- size - count */
+            la_addi_d(cf_move, zero_ir2_opnd, 64);
+            la_sub_w(cf_move, cf_move, count);
+            /* cf <- cf << cf_move */
+            la_sll_d(cf, cf, cf_move);
+            ra_free_temp(cf_move);
+        }
+
+        IR2_OPND tmp_dest;
+        IR2_OPND low_dest = ra_alloc_itemp();
+        IR2_OPND label_finish = ra_alloc_label();
+
+        /* but if size = 64, no more bits for the cf */
+        if (dest_size != 64) {
+            tmp_dest = ra_alloc_itemp();
+            /* for 32bits etc. we can put the cf at the upper bit */
+            la_or(tmp_dest, dest, cf);
+            la_srl_d(low_dest, tmp_dest, count);
+        } else {
+            la_srl_d(low_dest, dest, count);
+            /* if count = 1 */
+            /* attach the cf at the low_dest */
+            la_or(low_dest, low_dest, cf);
+            la_addi_w(cf, count, -1);
+            la_beq(cf, zero_ir2_opnd, label_finish);
+            tmp_dest = dest;
+        }
+        ra_free_temp(cf);
+
+        /* attention: dsllv $reg, $reg(=64) is not work */
+        la_addi_d(count, count, -1 - dest_size);
+        la_sub_d(count, zero_ir2_opnd, count);
+    
+        IR2_OPND high_dest = ra_alloc_itemp();
+        la_sll_d(high_dest, tmp_dest, count);
+        la_sub_d(count, zero_ir2_opnd, count);
+        la_addi_d(count, count, 1 + dest_size);
+    
+        if (dest_size != 64) {
+            ra_free_temp(tmp_dest);
+        }
+
+        la_or(low_dest, high_dest, low_dest);
+        ra_free_temp(high_dest);
+    /* label_finish: */
+        la_label(label_finish);
+        generate_eflag_calculation(low_dest, dest, count, pir1, true);
+        ra_free_temp(count);
+        store_ireg_to_ir1(low_dest, ir1_get_opnd(pir1, 0), false);
+        ra_free_temp(low_dest);
     } else {
-        IR2_OPND cf_move = ra_alloc_itemp();
-        /* 64 bits, cf will put the right bit now */
-        /* cf_move <- size - count */
-        la_addi_d(cf_move, zero_ir2_opnd, 64);
-        la_sub_w(cf_move, cf_move, count);
-        /* cf <- cf << cf_move */
-        la_sll_d(cf, cf, cf_move);
-        ra_free_temp(cf_move);
-    }
+        IR2_OPND tmp_dest = ra_alloc_itemp();
 
-    IR2_OPND tmp_dest;
-    IR2_OPND low_dest = ra_alloc_itemp();
-    IR2_OPND label_finish = ra_alloc_label();
+        get_eflag_condition(&tmp_dest, pir1);
+        la_bstrins_d(tmp_dest, dest, dest_size, 1);
 
-    /* but if size = 64, no more bits for the cf */
-    if (dest_size != 64) {
-        tmp_dest = ra_alloc_itemp();
-        /* for 32bits etc. we can put the cf at the upper bit */
-        la_or(tmp_dest, dest, cf);
-        la_srl_d(low_dest, tmp_dest, count);
-    } else {
-        la_srl_d(low_dest, dest, count);
-        /* if count = 1 */
-        /* attach the cf at the low_dest */
-        la_or(low_dest, low_dest, cf);
-        la_addi_w(cf, count, -1);
-        la_beq(cf, zero_ir2_opnd, label_finish);
-        tmp_dest = dest;
-    }
-    ra_free_temp(cf);
+        IR2_OPND tmp = ra_alloc_itemp();
+        la_rotr_d(tmp, tmp_dest, count);
+        la_srli_d(tmp_dest, tmp, 63 - dest_size);
+        la_or(tmp_dest, tmp_dest, tmp);
 
-    /* attention: dsllv $reg, $reg(=64) is not work */
-    la_addi_d(count, count, -1 - dest_size);
-    la_sub_d(count, zero_ir2_opnd, count);
-
-    IR2_OPND high_dest = ra_alloc_itemp();
-    la_sll_d(high_dest, tmp_dest, count);
-    la_sub_d(count, zero_ir2_opnd, count);
-    la_addi_d(count, count, 1 + dest_size);
-
-    if (dest_size != 64) {
+        la_bstrpick_d(tmp_dest, tmp_dest, dest_size, 1);
+        generate_eflag_calculation(tmp_dest, dest, count, pir1, true);
+        store_ireg_to_ir1(tmp_dest, ir1_get_opnd(pir1, 0), false);
+        ra_free_temp(tmp);
         ra_free_temp(tmp_dest);
     }
-
-    la_or(low_dest, high_dest, low_dest);
-    ra_free_temp(high_dest);
-/* label_finish: */
-    la_label(label_finish);
-    generate_eflag_calculation(low_dest, dest, count, pir1, true);
-    ra_free_temp(count);
-    store_ireg_to_ir1(low_dest, ir1_get_opnd(pir1, 0), false);
-    ra_free_temp(low_dest);
 #endif
 /* label_exit: */
     la_label(label_exit);
@@ -1201,7 +1272,7 @@ static bool translate_shrd_cl(IR1_INST *pir1)
     IR2_OPND label_exit = ra_alloc_label();
     /* if reg size is 32 and dest is not 32 zero extend */
 #ifdef TARGET_X86_64
-    if (!GHBR_ON(pir1) && ir1_opnd_is_gpr(ir1_get_opnd(pir1, 0)) &&
+    if (!GHBR_ON(pir1) && CODEIS64 && ir1_opnd_is_gpr(ir1_get_opnd(pir1, 0)) &&
         opnd0_size == 32) {
         /* clean the target */
         IR2_OPND dest_opnd =
@@ -1256,7 +1327,7 @@ static bool translate_shrd_imm(IR1_INST *pir1)
 
     if (count == 0) {
 #ifdef TARGET_X86_64
-        if (!GHBR_ON(pir1) && ir1_opnd_is_gpr(ir1_get_opnd(pir1, 0))
+        if (!GHBR_ON(pir1) && CODEIS64 && ir1_opnd_is_gpr(ir1_get_opnd(pir1, 0))
             && opnd0_size == 32) {
             /* clean high 32 bits */
             IR2_OPND dest_opnd =
@@ -1324,7 +1395,7 @@ static bool translate_shld_cl(IR1_INST *pir1)
     IR2_OPND label_exit = ra_alloc_label();
     /* if reg size is 32 and dest is not 32 zero extend */
 #ifdef TARGET_X86_64
-    if (!GHBR_ON(pir1) && ir1_opnd_is_gpr(ir1_get_opnd(pir1, 0)) &&
+    if (!GHBR_ON(pir1) && CODEIS64 && ir1_opnd_is_gpr(ir1_get_opnd(pir1, 0)) &&
         opnd0_size == 32) {
         /* clean the target */
         IR2_OPND dest_opnd =
@@ -1387,7 +1458,7 @@ static bool translate_shld_imm(IR1_INST *pir1)
     int count = ir1_opnd_simm(ir1_get_opnd(pir1, 2)) & mask;
     if (count == 0) {
 #ifdef TARGET_X86_64
-        if (!GHBR_ON(pir1) && ir1_opnd_is_gpr(ir1_get_opnd(pir1, 0))
+        if (!GHBR_ON(pir1) && CODEIS64 && ir1_opnd_is_gpr(ir1_get_opnd(pir1, 0))
             && opnd0_size == 32) {
             /* clean high 32 bits */
             IR2_OPND dest_opnd =

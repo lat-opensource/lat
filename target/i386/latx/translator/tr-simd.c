@@ -3456,7 +3456,9 @@ bool translate_pcmpestri(IR1_INST *pir1)
     int imm = ir1_opnd_uimm(opnd2);
 #ifdef TARGET_X86_64
     /* Presence of REX.W is indicated by bit 8*/
-    imm |= ir1_rex_w(pir1) << 8;
+    if (CODEIS64) {
+        imm |= ir1_rex_w(pir1) << 8;
+    }
 #endif
     int d = ir1_opnd_base_reg_num(opnd0);
     if (ir1_opnd_is_xmm(opnd1)) {
@@ -3483,7 +3485,9 @@ bool translate_pcmpestrm(IR1_INST *pir1)
     int imm = ir1_opnd_uimm(opnd2);
 #ifdef TARGET_X86_64
     /* Presence of REX.W is indicated by bit 8*/
-    imm |= ir1_rex_w(pir1) << 8;
+    if (CODEIS64) {
+        imm |= ir1_rex_w(pir1) << 8;
+    }
 #endif
     if (ir1_opnd_is_xmm(opnd1)) {
         int s = ir1_opnd_base_reg_num(opnd1);

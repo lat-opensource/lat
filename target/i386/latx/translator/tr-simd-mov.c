@@ -173,6 +173,10 @@ bool translate_maskmovq(IR1_INST *pir1)
     IR2_OPND xmm_data = ra_alloc_ftemp();
 #ifndef TARGET_X86_64
        la_bstrpick_d(base_opnd, base_opnd, 31, 0);
+#else
+    if(!CODEIS64) {
+        la_bstrpick_d(base_opnd, base_opnd, 31, 0);
+    }
 #endif
     la_fld_d(mem_data, base_opnd, 0);
     la_vand_v(xmm_data, src, temp_mask);
@@ -194,6 +198,10 @@ bool translate_maskmovdqu(IR1_INST *pir1)
     IR2_OPND base_opnd = ra_alloc_gpr(edi_index);
 #ifndef TARGET_X86_64
     la_bstrpick_d(base_opnd, base_opnd, 31, 0);
+#else
+    if(!CODEIS64) {
+        la_bstrpick_d(base_opnd, base_opnd, 31, 0);
+    }
 #endif
     IR2_OPND temp_mask = ra_alloc_ftemp();
     la_vandi_b(temp_mask, mask, 0x80);

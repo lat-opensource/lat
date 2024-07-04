@@ -15,7 +15,11 @@ bool translate_pop(IR1_INST *pir1)
 
     if (pop_size == 16 && ir1_opnd_is_seg(ir1_get_opnd(pir1, 0))) {
 #ifdef TARGET_X86_64
-        esp_increment = 64 >> 3;
+        if (CODEIS64) {
+            esp_increment = 64 >> 3;
+        } else {
+            esp_increment = 32 >> 3;
+        }
 #else
         esp_increment = 32 >> 3;
 #endif
@@ -23,21 +27,75 @@ bool translate_pop(IR1_INST *pir1)
 
     /*  2. pop value from mem */
 #ifdef TARGET_X86_64
-    if (pop_size == 64) {/* 64 bits */
-        ir1_opnd_build_mem(&mem_ir1_opnd, 64, dt_X86_REG_RSP, 0);
-        if (ir1_opnd_is_gpr(ir1_get_opnd(pir1, 0))) {
-            /* when dest is gpr, load into gpr directly */
-            IR2_OPND dest_opnd
-                    = load_ireg_from_ir1(ir1_get_opnd(pir1, 0), UNKNOWN_EXTENSION, false);
-            load_ireg_from_ir1_2(dest_opnd, &mem_ir1_opnd, UNKNOWN_EXTENSION, false);
-            if (!has_esp) {
+    if (CODEIS64) {
+        if (pop_size == 64) {/* 64 bits */
+            ir1_opnd_build_mem(&mem_ir1_opnd, 64, dt_X86_REG_RSP, 0);
+            if (ir1_opnd_is_gpr(ir1_get_opnd(pir1, 0))) {
+                /* when dest is gpr, load into gpr directly */
+                IR2_OPND dest_opnd
+                        = load_ireg_from_ir1(ir1_get_opnd(pir1, 0), UNKNOWN_EXTENSION, false);
+                load_ireg_from_ir1_2(dest_opnd, &mem_ir1_opnd, UNKNOWN_EXTENSION, false);
+                if (!has_esp) {
+                    la_addi_addrx(esp_opnd, esp_opnd,
+                                            esp_increment);
+                }
+            } else {
+                /* load value */
+                IR2_OPND value_opnd =
+                        load_ireg_from_ir1(&mem_ir1_opnd, SIGN_EXTENSION, false);
+                IR1_OPND *dest_ir1_opnd = ir1_get_opnd(pir1, 0);
+                if (has_esp) {
+                    dest_ir1_opnd->mem.disp += esp_increment;
+                }
+                store_ireg_to_ir1(value_opnd, dest_ir1_opnd, false);
                 la_addi_addrx(esp_opnd, esp_opnd,
                                         esp_increment);
             }
+        } else if (pop_size == 16) {
+                ir1_opnd_build_mem(&mem_ir1_opnd, 16, dt_X86_REG_ESP, 0);
+                /* load value */
+                IR2_OPND value_opnd =
+                    load_ireg_from_ir1(&mem_ir1_opnd, ZERO_EXTENSION, false);
+                IR1_OPND *dest_ir1_opnd = ir1_get_opnd(pir1, 0);
+                if (has_esp) {
+                    dest_ir1_opnd->mem.disp += esp_increment;
+                }
+                store_ireg_to_ir1(value_opnd, dest_ir1_opnd, false);
+                la_addi_addrx(esp_opnd, esp_opnd,
+                                        esp_increment);
         } else {
+            ir1_opnd_build_mem(&mem_ir1_opnd, 32, dt_X86_REG_ESP, 0);
+            if (ir1_opnd_is_gpr(ir1_get_opnd(pir1, 0))) {
+                IR2_OPND dest_opnd =
+                    load_ireg_from_ir1(ir1_get_opnd(pir1, 0), UNKNOWN_EXTENSION, false);
+                EXTENSION_MODE dest_em = SIGN_EXTENSION;
+                // if (ir2_opnd_default_em(&dest_opnd) != SIGN_EXTENSION)
+                //     dest_em = ZERO_EXTENSION;
+
+                load_ireg_from_ir1_2(dest_opnd, &mem_ir1_opnd, dest_em, false);
+                if (!has_esp) {
+                    la_addi_addrx(esp_opnd, esp_opnd,
+                                                                esp_increment);
+                }
+            } else {
+                /* dest is mem, as normal */
+                IR2_OPND value_opnd =
+                    load_ireg_from_ir1(&mem_ir1_opnd, SIGN_EXTENSION, false);
+                IR1_OPND *dest_ir1_opnd = ir1_get_opnd(pir1, 0);
+                if (has_esp) {
+                    dest_ir1_opnd->mem.disp += esp_increment;
+                }
+                store_ireg_to_ir1(value_opnd, dest_ir1_opnd, false);
+                la_addi_addrx(esp_opnd, esp_opnd,
+                                        esp_increment);
+            }
+        }
+     } else {
+        if (pop_size == 16) {
+            ir1_opnd_build_mem(&mem_ir1_opnd, 16, dt_X86_REG_ESP, 0);
             /* load value */
             IR2_OPND value_opnd =
-                    load_ireg_from_ir1(&mem_ir1_opnd, SIGN_EXTENSION, false);
+                load_ireg_from_ir1(&mem_ir1_opnd, ZERO_EXTENSION, false);
             IR1_OPND *dest_ir1_opnd = ir1_get_opnd(pir1, 0);
             if (has_esp) {
                 dest_ir1_opnd->mem.disp += esp_increment;
@@ -45,9 +103,35 @@ bool translate_pop(IR1_INST *pir1)
             store_ireg_to_ir1(value_opnd, dest_ir1_opnd, false);
             la_addi_addrx(esp_opnd, esp_opnd,
                                     esp_increment);
+        } else {
+            ir1_opnd_build_mem(&mem_ir1_opnd, 32, dt_X86_REG_ESP, 0);
+            if (ir1_opnd_is_gpr(ir1_get_opnd(pir1, 0))) {
+                IR2_OPND dest_opnd =
+                    load_ireg_from_ir1(ir1_get_opnd(pir1, 0), UNKNOWN_EXTENSION, false);
+                EXTENSION_MODE dest_em = SIGN_EXTENSION;
+                // if (ir2_opnd_default_em(&dest_opnd) != SIGN_EXTENSION)
+                //     dest_em = ZERO_EXTENSION;
+        
+                load_ireg_from_ir1_2(dest_opnd, &mem_ir1_opnd, dest_em, false);
+                if (!has_esp) {
+                    la_addi_addrx(esp_opnd, esp_opnd,
+                                                                esp_increment);
+                }
+            } else {
+                /* dest is mem, as normal */
+                IR2_OPND value_opnd =
+                    load_ireg_from_ir1(&mem_ir1_opnd, SIGN_EXTENSION, false);
+                IR1_OPND *dest_ir1_opnd = ir1_get_opnd(pir1, 0);
+                if (has_esp) {
+                    dest_ir1_opnd->mem.disp += esp_increment;
+                }
+                store_ireg_to_ir1(value_opnd, dest_ir1_opnd, false);
+                la_addi_addrx(esp_opnd, esp_opnd,
+                                        esp_increment);
+            }
         }
-    } else
-#endif
+    }
+#else
     if (pop_size == 16) {
         ir1_opnd_build_mem(&mem_ir1_opnd, 16, dt_X86_REG_ESP, 0);
         /* load value */
@@ -87,6 +171,7 @@ bool translate_pop(IR1_INST *pir1)
                                     esp_increment);
         }
     }
+#endif
     return true;
 }
 
@@ -98,7 +183,11 @@ bool translate_push(IR1_INST *pir1)
 
     if (push_size == 16 && ir1_opnd_is_seg(ir1_get_opnd(pir1, 0))) {
 #ifdef TARGET_X86_64
-        esp_decrement = 64 >> 3;
+        if (CODEIS64) {
+            esp_decrement = 64 >> 3;
+        } else {
+            esp_decrement = 32 >> 3;
+        }
 #else
         esp_decrement = 32 >> 3;
 #endif
@@ -111,8 +200,13 @@ bool translate_push(IR1_INST *pir1)
     ir1_opnd_build_mem(&mem_ir1_opnd, esp_decrement << 3,
         dt_X86_REG_ESP, -esp_decrement);
 #else
-    ir1_opnd_build_mem(&mem_ir1_opnd, esp_decrement << 3,
-        dt_X86_REG_RSP, -esp_decrement);
+    if (CODEIS64) {
+        ir1_opnd_build_mem(&mem_ir1_opnd, esp_decrement << 3,
+            dt_X86_REG_RSP, -esp_decrement);
+    } else {
+        ir1_opnd_build_mem(&mem_ir1_opnd, esp_decrement << 3,
+            dt_X86_REG_ESP, -esp_decrement);
+    }
 #endif
     IR2_OPND value_opnd =
         load_ireg_from_ir1(ir1_get_opnd(pir1, 0), UNKNOWN_EXTENSION, false);
@@ -389,6 +483,14 @@ bool translate_movzx(IR1_INST *pir1)
         source_ir1->mem.base == dt_X86_REG_INVALID){
         source_ir1->mem.segment = dt_X86_REG_DS;
     }
+#else
+    if (!CODEIS64) {
+        if (ir1_opnd_type(source_ir1) == dt_X86_OP_MEM &&
+            source_ir1->mem.segment == dt_X86_REG_INVALID &&
+            source_ir1->mem.base == dt_X86_REG_INVALID){
+            source_ir1->mem.segment = dt_X86_REG_DS;
+        }
+    }
 #endif
     /*
      * source is mem but:
@@ -426,7 +528,7 @@ bool translate_movsxd(IR1_INST *pir1)
     IR2_OPND gpr_opnd = ra_alloc_gpr(gpr_num);
     load_ireg_from_ir1_2(gpr_opnd, ir1_get_opnd(pir1, 1), SIGN_EXTENSION, false);
 #ifdef TARGET_X86_64
-    if (ir1_opnd_size(ir1_get_opnd(pir1, 0)) == 32)
+    if (CODEIS64 && ir1_opnd_size(ir1_get_opnd(pir1, 0)) == 32)
         la_bstrpick_d(gpr_opnd, gpr_opnd, 31, 0);
 #endif
     return true;
@@ -511,6 +613,11 @@ bool translate_movs(IR1_INST *pir1)
 #ifndef TARGET_X86_64
     clear_h32(&edi_opnd);
     clear_h32(&esi_opnd);
+#else
+    if (!CODEIS64) {
+        clear_h32(&edi_opnd);
+        clear_h32(&esi_opnd);
+    }
 #endif
     /* 1. exit when initial count is zero */
     IR2_OPND label_exit = ra_alloc_label();
@@ -518,6 +625,10 @@ bool translate_movs(IR1_INST *pir1)
     if (ir1_prefix(pir1) != 0) {
 #ifndef TARGET_X86_64
         clear_h32(&ecx_opnd);
+#else
+        if (!CODEIS64) {
+            clear_h32(&ecx_opnd);
+        }
 #endif
         la_beq(ecx_opnd, zero_ir2_opnd, label_exit);
     }
@@ -529,9 +640,16 @@ bool translate_movs(IR1_INST *pir1)
             mem_di = &edi_mem8_ir1_opnd;
             mem_si = &esi_mem8_ir1_opnd;
 #ifdef TARGET_X86_64
-            if (pir1->info->x86.prefix[3] != 0x67) {
-                mem_di = &rdi_mem8_ir1_opnd;
-                mem_si = &rsi_mem8_ir1_opnd;
+            if (CODEIS64) {
+                if (pir1->info->x86.prefix[3] != 0x67) {
+                    mem_di = &rdi_mem8_ir1_opnd;
+                    mem_si = &rsi_mem8_ir1_opnd;
+                }
+            } else {
+                if (pir1->info->x86.prefix[3] == 0x67) {
+                    mem_di = &di_mem8_ir1_opnd;
+                    mem_si = &si_mem8_ir1_opnd;
+                }
             }
 #else
             if (pir1->info->x86.prefix[3] == 0x67) {
@@ -544,9 +662,16 @@ bool translate_movs(IR1_INST *pir1)
             mem_di = &edi_mem16_ir1_opnd;
             mem_si = &esi_mem16_ir1_opnd;
 #ifdef TARGET_X86_64
-            if (pir1->info->x86.prefix[3] != 0x67) {
-                mem_di = &rdi_mem16_ir1_opnd;
-                mem_si = &rsi_mem16_ir1_opnd;
+            if (CODEIS64) {
+                if (pir1->info->x86.prefix[3] != 0x67) {
+                    mem_di = &rdi_mem16_ir1_opnd;
+                    mem_si = &rsi_mem16_ir1_opnd;
+                }
+            } else {
+                if (pir1->info->x86.prefix[3] == 0x67) {
+                    mem_di = &di_mem16_ir1_opnd;
+                    mem_si = &si_mem16_ir1_opnd;
+                }
             }
 #else
             if (pir1->info->x86.prefix[3] == 0x67) {
@@ -559,9 +684,17 @@ bool translate_movs(IR1_INST *pir1)
             mem_di = &edi_mem32_ir1_opnd;
             mem_si = &esi_mem32_ir1_opnd;
 #ifdef TARGET_X86_64
-            if (pir1->info->x86.prefix[3] != 0x67) {
-                mem_di = &rdi_mem32_ir1_opnd;
-                mem_si = &rsi_mem32_ir1_opnd;
+            if (CODEIS64) {
+                if (pir1->info->x86.prefix[3] != 0x67) {
+                    mem_di = &rdi_mem32_ir1_opnd;
+                    mem_si = &rsi_mem32_ir1_opnd;
+                }
+
+            } else {
+                if (pir1->info->x86.prefix[3] == 0x67) {
+                    mem_di = &di_mem32_ir1_opnd;
+                    mem_si = &si_mem32_ir1_opnd;
+                }
             }
 #else
             if (pir1->info->x86.prefix[3] == 0x67) {
@@ -610,6 +743,11 @@ bool translate_movs(IR1_INST *pir1)
 #ifndef TARGET_X86_64
     clear_h32(&edi_opnd);
     clear_h32(&esi_opnd);
+#else
+    if (!CODEIS64) {
+        clear_h32(&edi_opnd);
+        clear_h32(&esi_opnd);
+    }
 #endif
 
     /* 4. loop ends? when ecx==0 */
@@ -618,7 +756,11 @@ bool translate_movs(IR1_INST *pir1)
 #ifndef TARGET_X86_64
         la_addi_w(ecx_opnd, ecx_opnd, -1);
 #else
-        la_addi_d(ecx_opnd, ecx_opnd, -1);
+        if (CODEIS64) {
+            la_addi_d(ecx_opnd, ecx_opnd, -1);
+        } else {
+            la_addi_w(ecx_opnd, ecx_opnd, -1);
+        }
 #endif
         la_bne(ecx_opnd, zero_ir2_opnd, label_loop_begin);
         store_ireg_to_ir1(ecx_opnd, &ecx_ir1_opnd, false);
@@ -642,6 +784,10 @@ bool translate_stos(IR1_INST *pir1)
      */
 #ifndef TARGET_X86_64
     clear_h32(&edi_opnd);
+#else
+    if (!CODEIS64) {
+        clear_h32(&edi_opnd);
+    }
 #endif
 
     /* 1. exit when initial count is zero */
@@ -650,6 +796,10 @@ bool translate_stos(IR1_INST *pir1)
     if (ir1_prefix(pir1) != 0) {
 #ifndef TARGET_X86_64
         clear_h32(&ecx_opnd);
+#else
+        if (!CODEIS64) {
+            clear_h32(&ecx_opnd);
+        }
 #endif
         la_beq(ecx_opnd, zero_ir2_opnd, label_exit);
     }
@@ -667,9 +817,16 @@ bool translate_stos(IR1_INST *pir1)
             opnd_eax = &eax_ir1_opnd;
             opnd_di = &edi_mem8_ir1_opnd;
 #ifdef TARGET_X86_64
-            if (pir1->info->x86.prefix[3] != 0x67) {
-                opnd_eax = &rax_ir1_opnd;
-                opnd_di = &rdi_mem8_ir1_opnd;
+            if (CODEIS64) {
+                if (pir1->info->x86.prefix[3] != 0x67) {
+                    opnd_eax = &rax_ir1_opnd;
+                    opnd_di = &rdi_mem8_ir1_opnd;
+                }
+            } else {
+                if (pir1->info->x86.prefix[3] == 0x67) {
+                    opnd_eax = &ax_ir1_opnd;
+                    opnd_di = &di_mem8_ir1_opnd;
+                }
             }
 #else
             if (pir1->info->x86.prefix[3] == 0x67) {
@@ -682,9 +839,16 @@ bool translate_stos(IR1_INST *pir1)
             opnd_eax = &eax_ir1_opnd;
             opnd_di = &edi_mem16_ir1_opnd;
 #ifdef TARGET_X86_64
-            if (pir1->info->x86.prefix[3] != 0x67) {
-                opnd_eax = &rax_ir1_opnd;
-                opnd_di = &rdi_mem16_ir1_opnd;
+            if (CODEIS64) {
+                if (pir1->info->x86.prefix[3] != 0x67) {
+                    opnd_eax = &rax_ir1_opnd;
+                    opnd_di = &rdi_mem16_ir1_opnd;
+                }
+            } else {
+                if (pir1->info->x86.prefix[3] == 0x67) {
+                    opnd_eax = &ax_ir1_opnd;
+                    opnd_di = &di_mem16_ir1_opnd;
+                }
             }
 #else
             if (pir1->info->x86.prefix[3] == 0x67) {
@@ -697,9 +861,16 @@ bool translate_stos(IR1_INST *pir1)
             opnd_eax = &eax_ir1_opnd;
             opnd_di = &edi_mem32_ir1_opnd;
 #ifdef TARGET_X86_64
-            if (pir1->info->x86.prefix[3] != 0x67) {
-                opnd_eax = &rax_ir1_opnd;
-                opnd_di = &rdi_mem32_ir1_opnd;
+            if (CODEIS64) {
+                if (pir1->info->x86.prefix[3] != 0x67) {
+                    opnd_eax = &rax_ir1_opnd;
+                    opnd_di = &rdi_mem32_ir1_opnd;
+                }
+            } else {
+                if (pir1->info->x86.prefix[3] == 0x67) {
+                    opnd_eax = &ax_ir1_opnd;
+                    opnd_di = &di_mem32_ir1_opnd;
+                }
             }
 #else
             if (pir1->info->x86.prefix[3] == 0x67) {
@@ -710,13 +881,18 @@ bool translate_stos(IR1_INST *pir1)
             break;
 #ifdef TARGET_X86_64
         case dt_X86_INS_STOSQ:
-            opnd_eax = &eax_ir1_opnd;
-            opnd_di = &edi_mem32_ir1_opnd;
-            if (pir1->info->x86.prefix[3] != 0x67) {
-                opnd_eax = &rax_ir1_opnd;
-                opnd_di = &rdi_mem64_ir1_opnd;
+            if (CODEIS64) {
+                opnd_eax = &eax_ir1_opnd;
+                opnd_di = &edi_mem32_ir1_opnd;
+                if (pir1->info->x86.prefix[3] != 0x67) {
+                    opnd_eax = &rax_ir1_opnd;
+                    opnd_di = &rdi_mem64_ir1_opnd;
+                }
+                break;
+            } else {
+                lsassert(0);
+                break;
             }
-            break;
 #endif
         default:
             lsassert(0);
@@ -763,6 +939,10 @@ bool translate_stos(IR1_INST *pir1)
     la_sub(edi_opnd, edi_opnd, step_opnd);
 #ifndef TARGET_X86_64
     clear_h32(&edi_opnd);
+#else
+    if (!CODEIS64) {
+        clear_h32(&edi_opnd);
+    }
 #endif
 
     /* 4. loop ends? when ecx==0 */
@@ -771,7 +951,11 @@ bool translate_stos(IR1_INST *pir1)
 #ifndef TARGET_X86_64
         la_addi_w(ecx_opnd, ecx_opnd, -1);
 #else
-        la_addi_d(ecx_opnd, ecx_opnd, -1);
+        if (CODEIS64) {
+            la_addi_d(ecx_opnd, ecx_opnd, -1);
+        } else {
+            la_addi_w(ecx_opnd, ecx_opnd, -1);
+        }
 #endif
         la_bne(ecx_opnd, zero_ir2_opnd, label_loop_begin);
         store_ireg_to_ir1(ecx_opnd, &ecx_ir1_opnd, false);
@@ -794,6 +978,10 @@ bool translate_lods(IR1_INST *pir1)
      */
 #ifndef TARGET_X86_64
     clear_h32(&esi_opnd);
+#else
+    if (!CODEIS64) {
+        clear_h32(&esi_opnd);
+    }
 #endif
 
     /* 1. exit when initial count is zero */
@@ -802,6 +990,10 @@ bool translate_lods(IR1_INST *pir1)
     if (ir1_prefix(pir1) != 0) {
 #ifndef TARGET_X86_64
         clear_h32(&ecx_opnd);
+#else
+        if (!CODEIS64) {
+            clear_h32(&ecx_opnd);
+        }
 #endif
         la_beq(ecx_opnd, zero_ir2_opnd, label_exit);
     }
@@ -829,7 +1021,11 @@ bool translate_lods(IR1_INST *pir1)
 #ifndef TARGET_X86_64
         la_addi_w(ecx_opnd, ecx_opnd, -1);
 #else
-        la_addi_d(ecx_opnd, ecx_opnd, -1);
+        if (CODEIS64) {
+            la_addi_d(ecx_opnd, ecx_opnd, -1);
+        } else {
+            la_addi_w(ecx_opnd, ecx_opnd, -1);
+        }
 #endif
         la_bne(ecx_opnd, zero_ir2_opnd, label_loop_begin);
         store_ireg_to_ir1(ecx_opnd, &ecx_ir1_opnd, false);
@@ -852,6 +1048,10 @@ bool translate_cmps(IR1_INST *pir1)
     if (ir1_prefix(pir1) != 0) {
 #ifndef TARGET_X86_64
         clear_h32(&ecx_opnd);
+#else
+        if (!CODEIS64) {
+            clear_h32(&ecx_opnd);
+        }
 #endif
         la_beq(ecx_opnd, zero_ir2_opnd, label_exit);
     }
@@ -878,6 +1078,11 @@ bool translate_cmps(IR1_INST *pir1)
 #ifndef TARGET_X86_64
     clear_h32(&edi_opnd);
     clear_h32(&esi_opnd);
+#else
+    if (!CODEIS64) {
+        clear_h32(&edi_opnd);
+        clear_h32(&esi_opnd);
+    }
 #endif
 
     /* 3.3 compare */
@@ -889,7 +1094,11 @@ bool translate_cmps(IR1_INST *pir1)
 #ifndef TARGET_X86_64
         la_addi_w(ecx_opnd, ecx_opnd, -1);
 #else
-        la_addi_d(ecx_opnd, ecx_opnd, -1);
+        if (CODEIS64) {
+            la_addi_d(ecx_opnd, ecx_opnd, -1);
+        } else {
+            la_addi_w(ecx_opnd, ecx_opnd, -1);
+        }
 #endif
         /* 4.1. loop ends when ecx==0 */
         IR2_OPND condition = ra_alloc_itemp();
@@ -934,6 +1143,10 @@ bool translate_scas(IR1_INST *pir1)
     if (ir1_prefix(pir1) != 0) {
 #ifndef TARGET_X86_64
         clear_h32(&ecx_opnd);
+#else
+        if (!CODEIS64) {
+            clear_h32(&ecx_opnd);
+        }
 #endif
         la_beq(ecx_opnd, zero_ir2_opnd, label_exit);
     }
@@ -997,6 +1210,10 @@ bool translate_scas(IR1_INST *pir1)
     la_sub(edi_opnd, edi_opnd, step_opnd);
 #ifndef TARGET_X86_64
     clear_h32(&edi_opnd);
+#else
+    if (!CODEIS64) {
+        clear_h32(&edi_opnd);
+    }
 #endif
 
     /* 3.3 compare */
@@ -1004,7 +1221,11 @@ bool translate_scas(IR1_INST *pir1)
 #ifndef TARGET_X86_64
     la_sub_w(cmp_result, eax_value_opnd, edi_mem_value);
 #else
-    la_sub_d(cmp_result, eax_value_opnd, edi_mem_value);
+    if (CODEIS64) {
+        la_sub_d(cmp_result, eax_value_opnd, edi_mem_value);
+    } else {
+        la_sub_w(cmp_result, eax_value_opnd, edi_mem_value);
+    }
 #endif
 
     /* 4. loop ends? */
@@ -1012,7 +1233,11 @@ bool translate_scas(IR1_INST *pir1)
 #ifndef TARGET_X86_64
         la_addi_w(ecx_opnd, ecx_opnd, -1);
 #else
-        la_addi_d(ecx_opnd, ecx_opnd, -1);
+        if (CODEIS64) {
+            la_addi_d(ecx_opnd, ecx_opnd, -1);
+        } else {
+            la_addi_w(ecx_opnd, ecx_opnd, -1);
+        }
 #endif
 
         /* 4.1. loop ends when ecx==0 */
@@ -1039,7 +1264,11 @@ bool translate_scas(IR1_INST *pir1)
 #ifndef TARGET_X86_64
         store_ireg_to_ir1(ecx_opnd, &ecx_ir1_opnd, false);
 #else
-        store_ireg_to_ir1(ecx_opnd, &rcx_ir1_opnd, false);
+        if (CODEIS64) {
+            store_ireg_to_ir1(ecx_opnd, &rcx_ir1_opnd, false);
+        } else {
+            store_ireg_to_ir1(ecx_opnd, &ecx_ir1_opnd, false);
+        }
 #endif
     }
 
@@ -1192,7 +1421,7 @@ bool translate_xchg(IR1_INST *pir1)
 
         if (ir1_opnd_is_same_reg(opnd0, opnd1)) {
 #ifdef TARGET_X86_64
-            if (!GHBR_ON(pir1) && opnd0_size == 32) {
+            if (!GHBR_ON(pir1) && CODEIS64 && opnd0_size == 32) {
                 la_mov32_zx(src0, src0);
             }
 #endif
@@ -1271,7 +1500,7 @@ bool translate_xchg(IR1_INST *pir1)
     }
 
 #ifdef TARGET_X86_64
-    if (opnd0_size == 64) {
+    if (CODEIS64 && opnd0_size == 64) {
         la_amswap_db_d(src0, src1, mem_opnd);
         la_or(src1, src0, zero_ir2_opnd);
         return true;
@@ -1640,38 +1869,40 @@ bool translate_movq(IR1_INST *pir1)
         return true;
     }
 #ifdef TARGET_X86_64
-    else if (ir1_opnd_is_xmm(dest) && ir1_opnd_is_gpr(src)) {
-        lsassert(ir1_opnd_size(src) == 64);
-        /* gpr -> xmm */
+    else if (CODEIS64) {
+        if (ir1_opnd_is_xmm(dest) && ir1_opnd_is_gpr(src)) {
+                lsassert(ir1_opnd_size(src) == 64);
+                /* gpr -> xmm */
 
-        la_vandi_b(ra_alloc_xmm(ir1_opnd_base_reg_num(dest)),
-                   ra_alloc_xmm(ir1_opnd_base_reg_num(dest)), 0);
-        la_vinsgr2vr_d(ra_alloc_xmm(ir1_opnd_base_reg_num(dest)),
-                      ra_alloc_gpr(ir1_opnd_base_reg_num(src)), 0);
+                la_vandi_b(ra_alloc_xmm(ir1_opnd_base_reg_num(dest)),
+                           ra_alloc_xmm(ir1_opnd_base_reg_num(dest)), 0);
+                la_vinsgr2vr_d(ra_alloc_xmm(ir1_opnd_base_reg_num(dest)),
+                              ra_alloc_gpr(ir1_opnd_base_reg_num(src)), 0);
 
-        return true;
-    } else if (ir1_opnd_is_xmm(src) && ir1_opnd_is_gpr(dest)) {
-        lsassert(ir1_opnd_size(dest) == 64);
-        la_vpickve2gr_du(ra_alloc_gpr(ir1_opnd_base_reg_num(dest)),
-                         ra_alloc_xmm(ir1_opnd_base_reg_num(src)), 0);
-        return true;
-    } else if (ir1_opnd_is_mmx(src) && ir1_opnd_is_gpr(dest)) {
-        lsassert(ir1_opnd_size(dest) == 64);
-        /* transfer to mmx mode */
-        transfer_to_mmx_mode();
-        IR2_OPND ir2_src =
-            load_ireg_from_ir1(src, UNKNOWN_EXTENSION, false);
-        store_ireg_to_ir1(ir2_src, dest, false);
-        return true;
-     } else if (ir1_opnd_is_mmx(dest) && ir1_opnd_is_gpr(src)) {
-        lsassert(ir1_opnd_size(src) == 64);
-        /* transfer to mmx mode */
-        transfer_to_mmx_mode();
-        IR2_OPND ir2_src =
-            load_ireg_from_ir1(src, UNKNOWN_EXTENSION, false);
-        store_ireg_to_ir1(ir2_src, dest, false);
-        return true;
-     }
+                return true;
+            } else if (ir1_opnd_is_xmm(src) && ir1_opnd_is_gpr(dest)) {
+                lsassert(ir1_opnd_size(dest) == 64);
+                la_vpickve2gr_du(ra_alloc_gpr(ir1_opnd_base_reg_num(dest)),
+                                 ra_alloc_xmm(ir1_opnd_base_reg_num(src)), 0);
+                return true;
+            } else if (ir1_opnd_is_mmx(src) && ir1_opnd_is_gpr(dest)) {
+                lsassert(ir1_opnd_size(dest) == 64);
+                /* transfer to mmx mode */
+                transfer_to_mmx_mode();
+                IR2_OPND ir2_src =
+                    load_ireg_from_ir1(src, UNKNOWN_EXTENSION, false);
+                store_ireg_to_ir1(ir2_src, dest, false);
+                return true;
+             } else if (ir1_opnd_is_mmx(dest) && ir1_opnd_is_gpr(src)) {
+                lsassert(ir1_opnd_size(src) == 64);
+                /* transfer to mmx mode */
+                transfer_to_mmx_mode();
+                IR2_OPND ir2_src =
+                    load_ireg_from_ir1(src, UNKNOWN_EXTENSION, false);
+                store_ireg_to_ir1(ir2_src, dest, false);
+                return true;
+             }
+    }
 #endif
     if (ir1_opnd_is_xmm(dest) || ir1_opnd_is_xmm(src)){
         lsassert(0);
@@ -1730,7 +1961,7 @@ bool translate_movd(IR1_INST *pir1)
         la_movfr2gr_s(ra_alloc_gpr(ir1_opnd_base_reg_num(dest)),
                       ra_alloc_xmm(ir1_opnd_base_reg_num(src)));
 #ifdef TARGET_X86_64
-        if (!GHBR_ON(pir1)) {
+        if (!GHBR_ON(pir1) && CODEIS64) {
             IR2_OPND ir2_dest = ra_alloc_gpr(ir1_opnd_base_reg_num(dest));
             la_mov32_zx(ir2_dest, ir2_dest);
         }

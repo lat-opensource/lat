@@ -151,7 +151,7 @@
 #include <linux/nsfs.h>
 #ifdef CONFIG_LATX
 #define TUNNEL_VIRTUAL_SYSCALL_ID 600
-#include "env.h"
+#include "lsenv.h"
 #include <tunnel_lib.h>
 #include "aot.h"
 #include "latx-options.h"
@@ -8627,12 +8627,18 @@ static abi_long do_modify_ldt(CPUX86State *env, int func, abi_ulong ptr,
     return ret;
 }
 
-#if defined(TARGET_ABI32)
+#ifdef TARGET_X86_64
+static
+#endif
 abi_long do_set_thread_area(CPUX86State *env, abi_ulong ptr)
 {
     uint64_t *gdt_table = g2h_untagged(env->gdt.base);
     struct target_modify_ldt_ldt_s ldt_info;
+#ifdef TARGET_X86_64
+    struct target_modify_ldt_ldt_s_32 *target_ldt_info;
+#else
     struct target_modify_ldt_ldt_s *target_ldt_info;
+#endif
     int seg_32bit, contents, read_exec_only, limit_in_pages;
     int seg_not_present, useable, lm;
     uint32_t *lp, entry_1, entry_2;
@@ -8715,7 +8721,11 @@ install:
 
 static abi_long do_get_thread_area(CPUX86State *env, abi_ulong ptr)
 {
+#ifdef TARGET_X86_64
+    struct target_modify_ldt_ldt_s_32 *target_ldt_info;
+#else
     struct target_modify_ldt_ldt_s *target_ldt_info;
+#endif
     uint64_t *gdt_table = g2h_untagged(env->gdt.base);
     uint32_t base_addr, limit, flags;
     int seg_32bit, contents, read_exec_only, limit_in_pages, idx;
@@ -8760,6 +8770,7 @@ static abi_long do_get_thread_area(CPUX86State *env, abi_ulong ptr)
     return 0;
 }
 
+#if defined(TARGET_ABI32)
 abi_long do_arch_prctl(CPUX86State *env, int code, abi_ulong addr)
 {
     return -TARGET_ENOSYS;
@@ -13854,13 +13865,16 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
             unlock_user_struct(buf, arg1, 1);
         }
         return ret;
-#ifdef TARGET_I386
     case TARGET_NR_modify_ldt:
-        return do_modify_ldt(cpu_env, arg1, arg2, arg3);
+        if (!CODEIS64) {
+            return do_modify_ldt(cpu_env, arg1, arg2, arg3);
+        } else {
+            lsassert(0);
+            return -TARGET_ENOSYS;
+        }
 #if !defined(TARGET_X86_64)
     case TARGET_NR_vm86:
         return do_vm86(cpu_env, arg1, arg2);
-#endif
 #endif
 #if defined(TARGET_NR_adjtimex)
     case TARGET_NR_adjtimex:
@@ -15917,6 +15931,8 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
 #if defined(TARGET_MIPS)
       ((CPUMIPSState *) cpu_env)->active_tc.CP0_UserLocal = arg1;
       return 0;
+#elif defined(TARGET_I386)
+      return do_set_thread_area(cpu_env, arg1);
 #elif defined(TARGET_CRIS)
       if (arg1 & 0xff)
           ret = -TARGET_EINVAL;
@@ -15925,8 +15941,6 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
           ret = 0;
       }
       return ret;
-#elif defined(TARGET_I386) && defined(TARGET_ABI32)
-      return do_set_thread_area(cpu_env, arg1);
 #elif defined(TARGET_M68K)
       {
           TaskState *ts = cpu->opaque;
@@ -15934,20 +15948,28 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
           return 0;
       }
 #else
-      return -TARGET_ENOSYS;
+      if (!CODEIS64) {
+          return do_set_thread_area(cpu_env, arg1);
+      } else {
+          lsassert(0);
+          return -TARGET_ENOSYS;
+      }
 #endif
 #endif
 #ifdef TARGET_NR_get_thread_area
     case TARGET_NR_get_thread_area:
-#if defined(TARGET_I386) && defined(TARGET_ABI32)
-        return do_get_thread_area(cpu_env, arg1);
-#elif defined(TARGET_M68K)
+#if defined(TARGET_M68K)
         {
             TaskState *ts = cpu->opaque;
             return ts->tp_value;
         }
 #else
-        return -TARGET_ENOSYS;
+        if (!CODEIS64) {
+            return do_get_thread_area(cpu_env, arg1);
+        } else {
+            lsassert(0);
+            return -TARGET_ENOSYS;
+        }
 #endif
 #endif
 #ifdef TARGET_NR_getdomainname
@@ -17219,6 +17241,7 @@ defined(__loongarch__)
 #endif
     default:
         qemu_log_mask(LOG_UNIMP, "Unsupported syscall: %d\n", num);
+        lsassert(CODEIS64);
         return -TARGET_ENOSYS;
     }
     return ret;

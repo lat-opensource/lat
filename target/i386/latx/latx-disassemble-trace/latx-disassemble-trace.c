@@ -6,7 +6,7 @@ uint8_t dt_mode;
 int (*la_disa_v2)(const uint8_t *code, size_t code_size,
         uint64_t address,
         size_t count, struct la_dt_insn **insn,
-        int ir1_num, void *pir1_base) = NULL;
+        int ir1_num, void *pir1_base, int mode) = NULL;
 void disassemble_trace_init(int abi_bits, int args)
 {
     dt_mode = abi_bits;
@@ -155,12 +155,12 @@ static void cmp_insn(struct la_dt_insn* v1,struct la_dt_insn* v2)
 static void *disassemble_trace_vscapstone(const uint8_t *code, size_t code_size,
 		uint64_t address,
 		size_t count,
-        struct la_dt_insn *inputinsn)
+        struct la_dt_insn *inputinsn, int mode)
 {
     struct la_dt_insn *v1 = inputinsn;
     struct la_dt_insn *v2 = NULL;
     int cmp_count = la_disa_v2(code, code_size ,
-        address, count, &v2, 0, NULL);
+        address, count, &v2, 0, NULL, mode);
     if (cmp_count < 0) {
         return v2;
     }
@@ -178,11 +178,11 @@ static void disassemble_trace_dump(struct la_dt_insn *inputinsn, void *dt_insn)
 void disassemble_trace_loop(const uint8_t *code, size_t code_size,
     uint64_t address,
     size_t count,
-    struct la_dt_insn *inputinsn)
+    struct la_dt_insn *inputinsn, int mode)
 {
     void *ret;
     ret = disassemble_trace_vscapstone(code, code_size,
-        address, count, inputinsn);
+        address, count, inputinsn, mode);
     if (ret != NULL)
     {
         disassemble_trace_dump(inputinsn, ret);

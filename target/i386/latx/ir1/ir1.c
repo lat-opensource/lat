@@ -6,6 +6,7 @@
 #include "latx-config.h"
 #include "latx-options.h"
 #include "latx-disassemble-trace.h"
+#include "lsenv.h"
 
 IR1_OPND al_ir1_opnd;
 IR1_OPND ah_ir1_opnd;
@@ -96,25 +97,28 @@ IR1_OPND rsi_mem16_ir1_opnd;
 IR1_OPND rdi_mem16_ir1_opnd;
 IR1_OPND esi_mem64_ir1_opnd;
 IR1_OPND edi_mem64_ir1_opnd;
+extern int GPR_USEDEF_TO_SAVE;
+extern int FPR_USEDEF_TO_SAVE;
+extern int XMM_USEDEF_TO_SAVE;
 #endif
+csh handle[2];
 
-csh handle;
 #ifdef CONFIG_LATX_CAPSTONE_GIT
 int (*la_disa_v1)(const uint8_t *code, size_t code_size,
         uint64_t address,
         size_t count, struct la_dt_insn **insn,
         //int ir1_num, void *pir1_base) = &nextcapstone_get;
-        int ir1_num, void *pir1_base) = &gitcapstone_get;
+        int ir1_num, void *pir1_base, int mode) = &gitcapstone_get;
 #else
 int (*la_disa_v1)(const uint8_t *code, size_t code_size,
         uint64_t address,
         size_t count, struct la_dt_insn **insn,
-        int ir1_num, void *pir1_base) = &lacapstone_get;
+        int ir1_num, void *pir1_base, int mode) = &lacapstone_get;
 #endif
 void (*disassemble_trace_cmp)(const uint8_t *code, size_t code_size,
         uint64_t address,
         size_t count,
-        struct la_dt_insn *inputinsn) = disassemble_trace_cmp_nop;
+        struct la_dt_insn *inputinsn, int mode) = disassemble_trace_cmp_nop;
 static IR1_OPND ir1_opnd_new_static_reg(IR1_OPND_TYPE opnd_type, int size,
                                         dt_x86_reg reg)
 {
@@ -334,8 +338,20 @@ ADDRX ir1_disasm(IR1_INST *ir1, uint8_t *addr, ADDRX t_pc, int ir1_num, void *pi
      * there should be a performance improvement if we increase the number, but
      * for now there are some problems if we change it. It will be settled later.
      */
+#ifdef TARGET_X86_64
+    if (!CODEIS64) {
+        GPR_USEDEF_TO_SAVE = 0x7;
+        FPR_USEDEF_TO_SAVE = 0xff;
+        XMM_USEDEF_TO_SAVE = 0xff;
+    }else{
+        GPR_USEDEF_TO_SAVE = 0xff07;
+        FPR_USEDEF_TO_SAVE = 0xff;
+        XMM_USEDEF_TO_SAVE = 0xffff;
+    }
+
+#endif
     int count = la_disa_v1(addr, 15, (uint64_t)t_pc,
-        1, &info, ir1_num, pir1_base);
+        1, &info, ir1_num, pir1_base, CODEIS64);
 
     ir1->info = info;
     ir1->cflag = 0;
@@ -350,7 +366,7 @@ ADDRX ir1_disasm(IR1_INST *ir1, uint8_t *addr, ADDRX t_pc, int ir1_num, void *pi
         exit(-1);
     }
 
-    disassemble_trace_cmp(addr, 15, (uint64_t)t_pc, 1, info);
+    disassemble_trace_cmp(addr, 15, (uint64_t)t_pc, 1, info, CODEIS64);
 
     ir1->_eflag = 0;
 
@@ -430,6 +446,13 @@ int ir1_get_opnd_size(IR1_INST *inst)
             return 4 << 3;
         }
 #else
+        if (!CODEIS64) {
+            if (ir1_prefix_opnd_size(inst) != 0) {
+                return 2 << 3;
+            } else {
+                return 4 << 3;
+            }
+        }
         /* call/... will use only 64 bit opnd-size in AMD64 */
         return 8 << 3;
 #endif
@@ -947,6 +970,11 @@ int ir1_opnd_is_8l(const IR1_OPND *opnd)
            (opnd->reg == dt_X86_REG_AL || opnd->reg == dt_X86_REG_BL ||
             opnd->reg == dt_X86_REG_CL || opnd->reg == dt_X86_REG_DL);
 #else
+    if (!CODEIS64) {
+        return opnd->type == dt_X86_OP_REG && opnd->size == 1 &&
+           (opnd->reg == dt_X86_REG_AL || opnd->reg == dt_X86_REG_BL ||
+            opnd->reg == dt_X86_REG_CL || opnd->reg == dt_X86_REG_DL);
+    }
     return opnd->type == dt_X86_OP_REG && opnd->size == 1 &&
            (opnd->reg == dt_X86_REG_AL   || opnd->reg == dt_X86_REG_BL   ||
             opnd->reg == dt_X86_REG_CL   || opnd->reg == dt_X86_REG_DL   ||
@@ -968,6 +996,13 @@ int ir1_opnd_is_16bit(const IR1_OPND *opnd)
             opnd->reg == dt_X86_REG_SP || opnd->reg == dt_X86_REG_BP ||
             opnd->reg == dt_X86_REG_SI || opnd->reg == dt_X86_REG_DI);
 #else
+     if (!CODEIS64) {
+        return opnd->type == dt_X86_OP_REG && opnd->size == 2 &&
+           (opnd->reg == dt_X86_REG_AX || opnd->reg == dt_X86_REG_BX ||
+            opnd->reg == dt_X86_REG_CX || opnd->reg == dt_X86_REG_DX ||
+            opnd->reg == dt_X86_REG_SP || opnd->reg == dt_X86_REG_BP ||
+            opnd->reg == dt_X86_REG_SI || opnd->reg == dt_X86_REG_DI);
+     }
     return opnd->type == dt_X86_OP_REG && opnd->size == 2 &&
            (opnd->reg == dt_X86_REG_AX   || opnd->reg == dt_X86_REG_BX   ||
             opnd->reg == dt_X86_REG_CX   || opnd->reg == dt_X86_REG_DX   ||
@@ -989,6 +1024,13 @@ int ir1_opnd_is_32bit(const IR1_OPND *opnd)
             opnd->reg == dt_X86_REG_ESP || opnd->reg == dt_X86_REG_EBP ||
             opnd->reg == dt_X86_REG_ESI || opnd->reg == dt_X86_REG_EDI);
 #else
+    if (!CODEIS64) {
+        return opnd->type == dt_X86_OP_REG && opnd->size == 4 &&
+           (opnd->reg == dt_X86_REG_EAX || opnd->reg == dt_X86_REG_EBX ||
+            opnd->reg == dt_X86_REG_ECX || opnd->reg == dt_X86_REG_EDX ||
+            opnd->reg == dt_X86_REG_ESP || opnd->reg == dt_X86_REG_EBP ||
+            opnd->reg == dt_X86_REG_ESI || opnd->reg == dt_X86_REG_EDI);
+    }
     return opnd->type == dt_X86_OP_REG && opnd->size == 4 &&
            (opnd->reg == dt_X86_REG_EAX || opnd->reg == dt_X86_REG_EBX ||
             opnd->reg == dt_X86_REG_ECX || opnd->reg == dt_X86_REG_EDX ||
@@ -1115,7 +1157,7 @@ int ir1_opnd_is_gpr_used(IR1_OPND *opnd, uint8_t gpr_index)
     } else if (ir1_opnd_is_mem(opnd)) {
         if (ir1_opnd_has_base(opnd)) {
 #ifdef TARGET_X86_64
-            if (ir1_opnd_base_reg(opnd) == dt_X86_REG_RIP) {
+            if (!CODEIS64 && ir1_opnd_base_reg(opnd) == dt_X86_REG_RIP) {
                 return 0;
             }
 #endif
@@ -1267,7 +1309,12 @@ int ir1_opnd_has_seg(IR1_OPND *opnd)
 int ir1_opnd_get_seg_index(IR1_OPND *opnd)
 {
 #ifdef TARGET_X86_64
-    lsassert(ir1_opnd_type(opnd) == dt_X86_OP_MEM);
+    if (CODEIS64) {
+        lsassert(ir1_opnd_type(opnd) == dt_X86_OP_MEM);
+    } else {
+        lsassert(ir1_opnd_type(opnd) == dt_X86_OP_MEM ||
+                 ir1_opnd_type(opnd) == dt_X86_OP_REG);
+    }
 #else
     /* in x64, seg reg may can be read by push/pop */
     /* so sometimes it might be a reg */
@@ -1377,7 +1424,7 @@ int ir1_is_branch(IR1_INST *ir1)
     }
 }
 
-int ir1_is_jump(IR1_INST *ir1) { return ir1->info->id == dt_X86_INS_JMP; }
+int ir1_is_jump(IR1_INST *ir1) { return ir1->info->id == dt_X86_INS_JMP ||ir1->info->id == dt_X86_INS_LJMP; }
 
 int ir1_is_call(IR1_INST *ir1)
 {
@@ -1513,8 +1560,13 @@ void ir1_make_ins_JMP(IR1_INST *ir1, ADDRX addr, int32 off)
     info->x86.operands[0].size = 4;
     info->x86.addr_size = 4;
 #else
-    info->x86.operands[0].size = 8;
-    info->x86.addr_size = 8;
+    if (!CODEIS64) {
+        info->x86.operands[0].size = 4;
+        info->x86.addr_size = 4;
+    } else {
+        info->x86.operands[0].size = 8;
+        info->x86.addr_size = 8;
+    }
 #endif
     info->id = dt_X86_INS_JMP;
     // TODO : other field in ir1 and detail->x86
@@ -1544,12 +1596,12 @@ int ir1_opcode_dump(IR1_INST *ir1)
 }
 
 const char * ir1_name(IR1_OPCODE op){
-    return la_cs_insn_name(handle, op);
+    return la_cs_insn_name(handle[CODEIS64], op);
 }
 
 const char *ir1_group_name(dt_x86_insn_group grp)
 {
-    return la_cs_group_name(handle, grp);
+    return la_cs_group_name(handle[CODEIS64], grp);
 }
 
 uint8_t ir1_get_opnd_num(const IR1_INST *ir1)
@@ -1580,7 +1632,7 @@ bool ir1_is_prefix_lock(IR1_INST *ir1)
 
 const char *ir1_reg_name(dt_x86_reg reg)
 {
-    return la_cs_reg_name(handle, reg);
+    return la_cs_reg_name(handle[CODEIS64], reg);
 }
 
 IR1_INST *tb_ir1_inst(TranslationBlock *tb, const int i)

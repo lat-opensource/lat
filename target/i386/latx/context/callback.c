@@ -24,6 +24,7 @@ uint64_t RunFunctionWithState(uintptr_t fnc, int nargs, ...)
 {
 #ifdef TARGET_X86_64
     lsassert(fnc);
+    lsassert(CODEIS64);
     CPUX86State *cpu = (CPUX86State *)lsenv->cpu_state;
     CPUState * cs = env_cpu(cpu);
 

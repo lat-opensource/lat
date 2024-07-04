@@ -245,6 +245,10 @@ IR2_OPND load_ireg_from_ir2_mem(IR2_OPND mem_opnd, int mem_imm, int mem_size,
     IR2_OPND opnd2 = ra_alloc_itemp_internal();
 #ifndef TARGET_X86_64
     la_mov32_zx(mem_opnd, mem_opnd);
+#else
+    if (!CODEIS64) {
+        la_mov32_zx(mem_opnd, mem_opnd);
+    }
 #endif
     if (mem_size == 32) {
         if (em == ZERO_EXTENSION) {
@@ -584,6 +588,24 @@ void store_ireg_to_ir1_seg(IR2_OPND seg_value_opnd, IR1_OPND *opnd1)
     IR2_OPND label_base_end = ra_alloc_label();
     IR2_OPND is_ldt = ra_alloc_itemp_internal(); /* [51:48] [15: 0] limit */
     IR2_OPND dt_opnd = ra_alloc_itemp_internal();
+#ifdef TARGET_X86_64
+    if (seg_num == cs_index) {
+        IR2_OPND ir2_tmp = ra_alloc_itemp();
+        IR2_OPND label_x64 = ra_alloc_label();
+        IR2_OPND label_csend = ra_alloc_label();//if (cs == 0x23) isx86 ; else is x64;
+        li_d(ir2_tmp, 0x23);
+        la_bne(seg_value_opnd, ir2_tmp,label_x64);
+        la_st_w(zero_ir2_opnd, env_ir2_opnd,
+            offsetof(CPUX86State, sys.codemode));
+        la_b(label_csend);
+        la_label(label_x64);
+        li_d(ir2_tmp, 1);
+        la_st_w(ir2_tmp, env_ir2_opnd,
+            offsetof(CPUX86State, sys.codemode));
+        la_label(label_csend);
+        ra_free_temp(ir2_tmp);
+    }
+#endif
     la_andi(is_ldt, seg_value_opnd, 0x4);
     la_bne(is_ldt, zero_ir2_opnd, label_ldt);
     ra_free_temp(is_ldt);
@@ -711,6 +733,10 @@ void store_ireg_to_ir2_mem(IR2_OPND value_opnd, IR2_OPND mem_opnd,
 
 #ifndef TARGET_X86_64
     la_bstrpick_d(mem_opnd, mem_opnd, 31, 0);
+#else
+    if (!CODEIS64) {
+        la_bstrpick_d(mem_opnd, mem_opnd, 31, 0);
+    }
 #endif
 
     if (mem_size == 32) {
@@ -741,6 +767,10 @@ void load_64_bit_freg_from_ir1_80_bit_mem(IR2_OPND opnd2,
 
 #ifndef TARGET_X86_64
     la_bstrpick_d(mem_opnd, mem_opnd, 31, 0);
+#else
+    if (!CODEIS64) {
+        la_bstrpick_d(mem_opnd, mem_opnd, 31, 0);
+    }
 #endif
 
     la_fld_s(ir2_sign_exp, mem_opnd, mem_imm + 8);
@@ -1007,6 +1037,10 @@ void store_64_bit_freg_to_ir1_80_bit_mem(IR2_OPND opnd2,
 
 #ifndef TARGET_X86_64
     la_bstrpick_d(mem_opnd, mem_opnd, 31, 0);
+#else
+    if (!CODEIS64) {
+        la_bstrpick_d(mem_opnd, mem_opnd, 31, 0);
+    }
 #endif
 
     /* Temporarily mask V to make the conversion don't trigger SIGFPE */
@@ -1229,12 +1263,12 @@ IR2_OPND load_freg128_from_ir1(IR1_OPND *opnd1){
     g_assert_not_reached();
 }
 
-#ifndef TARGET_X86_64
 void clear_h32(IR2_OPND *opnd)
 {
-     la_mov32_zx(*opnd, *opnd);
+     if (!CODEIS64) {
+         la_mov32_zx(*opnd, *opnd);
+     }
 }
-#endif
 
 /* load/store 256 bit mem or register */
 void store_freg256_to_ir1_mem(IR2_OPND opnd2, IR1_OPND * opnd1) {

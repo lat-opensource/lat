@@ -3,12 +3,12 @@
 
 la_name_enum_t la_zydis_insn_tr[ZYDIS_MNEMONIC_MAX_VALUE + 1];
 la_name_enum_t la_zydis_insn_reg[ZYDIS_REGISTER_MAX_VALUE + 1];
-ZydisDecoder decoder;
+ZydisDecoder decoder[2];
 uint8_t dt_lazydis_mode;
 #ifdef LATX_DISASSEMBLE_TRACE_DEBUG
-ZydisFormatter formatter;
+ZydisFormatter formatter[2];
 char lazydis_buffer[256];
-ZydisFormatterFunc default_pre_opnd;
+ZydisFormatterFunc default_pre_opnd[2];
 static ZyanStatus ZydisFormatterFormatFindOpndIndex(
     const ZydisFormatter *formatter,
     ZydisFormatterBuffer *buffer, ZydisFormatterContext *context)
@@ -126,7 +126,7 @@ static void handle_Operands(struct la_dt_insn *ret,
 static struct la_dt_insn *lazydis_get_from_insn(int64_t address,
     const ZydisDecodedInstruction *instruction,
     const ZydisDecodedOperand *operands,
-    int ir1_num, void *pir1_base)
+    int ir1_num, void *pir1_base, int mode)
 {
     dtassert((instruction != NULL) && (operands != NULL));
     struct la_dt_insn *ret;
@@ -141,7 +141,7 @@ static struct la_dt_insn *lazydis_get_from_insn(int64_t address,
     ret->address = address;
 #ifdef LATX_DISASSEMBLE_TRACE_DEBUG
     uint32_t opnd_index = 0;
-    ZydisFormatterFormatInstructionEx(&formatter, instruction, operands,
+    ZydisFormatterFormatInstructionEx(&formatter[mode], instruction, operands,
         instruction->operand_count_visible, &lazydis_buffer[0],
         sizeof(lazydis_buffer), address, &opnd_index);
     if (opnd_index > 0) {
@@ -171,16 +171,16 @@ static struct la_dt_insn *lazydis_get_from_insn(int64_t address,
 int lazydis_get(const uint8_t *code, size_t code_size,
         uint64_t address,
         size_t count, struct la_dt_insn **insn,
-        int ir1_num, void *pir1_base)
+        int ir1_num, void *pir1_base, int mode)
 {
     struct la_dt_insn *ret;
     ZydisDecodedInstruction instruction = { 0 };
     ZydisDecodedOperand operands[ZYDIS_MAX_OPERAND_COUNT_VISIBLE] = { { 0 } };
-    dtassert(ZYAN_SUCCESS(ZydisDecoderDecodeFull(&decoder,
+    dtassert(ZYAN_SUCCESS(ZydisDecoderDecodeFull(&decoder[mode],
         code, code_size, &instruction, operands,
         ZYDIS_MAX_OPERAND_COUNT_VISIBLE, ZYDIS_DFLAG_VISIBLE_OPERANDS_ONLY)));
     ret = lazydis_get_from_insn(address,
-        &instruction, operands, ir1_num, pir1_base);
+        &instruction, operands, ir1_num, pir1_base, mode);
     *insn = ret;
     return 1;
 }
@@ -190,27 +190,36 @@ static void init_insn_reg(void);
 
 void lazydis_init(int abi_bits)
 {
-    ZydisMachineMode machine_mode;
-    ZydisStackWidth stack_width;
+    ZydisMachineMode machine_mode[2];
+    ZydisStackWidth stack_width[2];
     dt_lazydis_mode = abi_bits;
-    if (abi_bits == 32) {
-        machine_mode = ZYDIS_MACHINE_MODE_LONG_COMPAT_32;
-        stack_width = ZYDIS_STACK_WIDTH_32;
-    } else if (abi_bits == 64) {
-        machine_mode = ZYDIS_MACHINE_MODE_LONG_64;
-        stack_width = ZYDIS_STACK_WIDTH_64;
-    }
-    ZydisDecoderInit(&decoder, machine_mode, stack_width);
+    machine_mode[0] = ZYDIS_MACHINE_MODE_LONG_COMPAT_32;
+    stack_width[0] = ZYDIS_STACK_WIDTH_32;
+    machine_mode[1] = ZYDIS_MACHINE_MODE_LONG_64;
+    stack_width[1] = ZYDIS_STACK_WIDTH_64;
+    ZydisDecoderInit(&decoder[0], machine_mode[0], stack_width[0]);
 #ifdef LATX_DISASSEMBLE_TRACE_DEBUG
-    ZydisFormatterInit(&formatter, ZYDIS_FORMATTER_STYLE_INTEL);
-    ZydisFormatterSetProperty(&formatter,
+    ZydisFormatterInit(&formatter[0], ZYDIS_FORMATTER_STYLE_INTEL);
+    ZydisFormatterSetProperty(&formatter[0],
         ZYDIS_FORMATTER_PROP_FORCE_SEGMENT, ZYAN_TRUE);
-    ZydisFormatterSetProperty(&formatter,
+    ZydisFormatterSetProperty(&formatter[0],
         ZYDIS_FORMATTER_PROP_FORCE_SIZE, ZYAN_TRUE);
-    default_pre_opnd = (ZydisFormatterFunc)&ZydisFormatterFormatFindOpndIndex;
-    ZydisFormatterSetHook(&formatter, ZYDIS_FORMATTER_FUNC_PRE_OPERAND,
-            (const void **)&default_pre_opnd);
+    default_pre_opnd[0] = (ZydisFormatterFunc)&ZydisFormatterFormatFindOpndIndex;
+    ZydisFormatterSetHook(&formatter[0], ZYDIS_FORMATTER_FUNC_PRE_OPERAND,
+            (const void **)&default_pre_opnd[0]);
 #endif
+    ZydisDecoderInit(&decoder[1], machine_mode[1], stack_width[1]);
+#ifdef LATX_DISASSEMBLE_TRACE_DEBUG
+    ZydisFormatterInit(&formatter[1], ZYDIS_FORMATTER_STYLE_INTEL);
+    ZydisFormatterSetProperty(&formatter[1],
+        ZYDIS_FORMATTER_PROP_FORCE_SEGMENT, ZYAN_TRUE);
+    ZydisFormatterSetProperty(&formatter[1],
+        ZYDIS_FORMATTER_PROP_FORCE_SIZE, ZYAN_TRUE);
+    default_pre_opnd[1] = (ZydisFormatterFunc)&ZydisFormatterFormatFindOpndIndex;
+    ZydisFormatterSetHook(&formatter[1], ZYDIS_FORMATTER_FUNC_PRE_OPERAND,
+            (const void **)&default_pre_opnd[1]);
+#endif
+
     init_insn_id();
     init_insn_reg();
 }

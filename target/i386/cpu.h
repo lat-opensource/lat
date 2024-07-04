@@ -1413,6 +1413,9 @@ typedef struct CPUX86State {
     /* TODO: why? in new qemu has no next_eip member */
     target_ulong exception_next_eip;
     void *tb_jmp_cache_ptr; /* struct TranslationBlock ** */
+    struct __sys {
+        int codemode;
+    } sys;
  #ifdef CONFIG_LATX_DEBUG
     uint64_t last_store_insn;
     uint64_t tb_exec_count;
