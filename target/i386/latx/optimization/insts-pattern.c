@@ -81,6 +81,38 @@ static inline void pattern_modify(IR1_INST *ir1, IR1_OPCODE opcode)
     ir1->cflag |= IR1_PATTERN_MASK;
 }
 
+static bool is_contain_edx(IR1_OPND *opnd)
+{
+    if (ir1_opnd_is_gpr(opnd)) {
+        switch (opnd->reg) {
+        case dt_X86_REG_DL:    case dt_X86_REG_DH:
+        case dt_X86_REG_DX:    case dt_X86_REG_EDX:
+        case dt_X86_REG_RDX:
+            return true;
+        default:
+            break;
+        }
+    } else if (ir1_opnd_is_mem(opnd)) {
+        switch (opnd->mem.base) {
+        case dt_X86_REG_DL:    case dt_X86_REG_DH:
+        case dt_X86_REG_DX:    case dt_X86_REG_EDX:
+        case dt_X86_REG_RDX:
+            return true;
+        default:
+            break;
+        }
+        switch (opnd->mem.index) {
+        case dt_X86_REG_DL:    case dt_X86_REG_DH:
+        case dt_X86_REG_DX:    case dt_X86_REG_EDX:
+        case dt_X86_REG_RDX:
+            return true;
+        default:
+            break;
+        }
+    }
+    return false;
+}
+
 static inline bool get_pattern_list(IR1_INST *ir1,
                                     IR1_INST *scan_buf[PTN_BUF_SIZE], int *ptr,
                                     IR1_OPCODE *opcode)
@@ -273,6 +305,13 @@ static inline bool get_pattern_list(IR1_INST *ir1,
         BUF_CHK(scan_buf, 0, false);
         switch (BUF_OP(scan_buf, 0)) {
         case WRAP(IDIV):
+            opnd0 = ir1_get_opnd(scan_buf[0], 0);
+            if (!ir1_opnd_is_gpr(opnd0))
+                return false;
+            if (ir1_opnd_size(opnd0) != 64)
+                return false;
+            if (is_contain_edx(opnd0))
+                return false;
             *ptr = 0;
             *opcode = WRAP(CQO_IDIV);
             return true;
@@ -292,6 +331,8 @@ static inline bool get_pattern_list(IR1_INST *ir1,
                 (opnd0->reg == dt_X86_REG_RDX && opnd1->reg == dt_X86_REG_RDX &&
                 ir1_opnd_size(ir1_get_opnd(scan_buf[0], 0)) == 64 &&
                 ir1_opnd_is_gpr(ir1_get_opnd(scan_buf[0], 0)))) {
+                    if (is_contain_edx(ir1_get_opnd(scan_buf[0], 0)))
+                        return false;
                     *ptr = 0;
                     *opcode = WRAP(XOR_DIV);
                     return true;
@@ -303,11 +344,13 @@ static inline bool get_pattern_list(IR1_INST *ir1,
         switch (BUF_OP(scan_buf, 0)) {
         case WRAP(IDIV):
             opnd0 = ir1_get_opnd(scan_buf[0], 0);
-            if (ir1_opnd_is_gpr(opnd0) && opnd0->reg != dt_X86_REG_EDX) {
-                *ptr = 0;
-                *opcode = WRAP(CDQ_IDIV);
-                return true;
-            }
+            if (ir1_opnd_size(opnd0) != 32)
+                return false;
+            if (is_contain_edx(opnd0))
+                return false;
+            *ptr = 0;
+            *opcode = WRAP(CDQ_IDIV);
+            return true;
             break;
         default:
             break;

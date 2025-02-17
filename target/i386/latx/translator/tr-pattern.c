@@ -451,11 +451,18 @@ static inline bool xcomisx_jcc(IR1_INST *ir1, bool is_double, bool qnan_exp)
         la_fcmp(fcc7_ir2_opnd, dest, src, FCMP_COND_CULE + qnan_exp);
         break;
     case WRAP(JE):
+    case WRAP(JLE):
 	/* equal or NAN, x86 special define */
         la_fcmp(fcc7_ir2_opnd, dest, src, FCMP_COND_CUEQ + qnan_exp);
         break;
     case WRAP(JNE):
+    case WRAP(JG):
         la_fcmp(fcc7_ir2_opnd, dest, src, FCMP_COND_CNE + qnan_exp);
+        break;
+    case WRAP(JL):
+        break;
+    case WRAP(JGE):
+        la_b(target_label_opnd);
         break;
     default:
         lsassert(0);
@@ -507,12 +514,19 @@ static inline bool xcomisx_jcc(IR1_INST *ir1, bool is_double, bool qnan_exp)
             la_fcmp(fcc7_ir2_opnd, dest, src, FCMP_COND_CULE + qnan_exp);
             break;
         case WRAP(JE):
+        case WRAP(JLE):
     	/* equal or NAN, x86 special define */
             la_fcmp(fcc7_ir2_opnd, dest, src, FCMP_COND_CUEQ + qnan_exp);
             break;
         case WRAP(JNE):
+        case WRAP(JG):
             la_fcmp(fcc7_ir2_opnd, dest, src, FCMP_COND_CNE + qnan_exp);
             break;
+        case WRAP(JL):
+            break;
+        case WRAP(JGE):
+            la_b(target_label_opnd);
+        break;
         default:
             lsassert(0);
             break;
