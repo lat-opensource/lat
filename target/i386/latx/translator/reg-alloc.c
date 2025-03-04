@@ -274,10 +274,50 @@ RA_ALLOC_FUNC(trace, IR2_OPND_GPR)
 /* ra_alloc_src */
 RA_ALLOC_FUNC(scr, IR2_OPND_SCR);
 /* ra_alloc_itemp_num() */
+#ifndef CONFIG_LATX_INSTS_PATTERN
 RA_ALLOC_TEMP_NUM_FUNC(itemp)
+#endif
 /* ra_alloc_ftemp_num() */
 RA_ALLOC_TEMP_NUM_FUNC(ftemp)
 
+#ifdef CONFIG_LATX_INSTS_PATTERN
+static int ra_alloc_itemp_num(void)
+{
+    int itemp_num, cto_num;
+    asm("cto.w %0, %1\n\t"
+    : "=r"(cto_num)
+    : "r"(lsenv->tr_data->itemp_status | lsenv->tr_data->ptn_itemp_status));
+
+    if (cto_num >= itemp_status_num && lsenv->tr_data->ptn_itemp_status) {
+        lsenv->tr_data->ptn_itemp_status = 0;
+        asm("cto.w %0, %1\n\t"
+        : "=r"(cto_num)
+        : "r"(lsenv->tr_data->itemp_status));
+    }
+
+    lsassertm(cto_num < itemp_status_num,
+              "\n%s:%d alloc \" itemp \" failed, cto_num %d\n",
+              __func__, __LINE__, cto_num);
+    itemp_num = reg_itemp_map[cto_num];
+    BITS_SET(lsenv->tr_data->itemp_status, 1 << cto_num);
+    return itemp_num;
+}
+
+static int ra_alloc_ptn_itemp_num(void)
+{
+    int itemp_num, cto_num;
+    asm("cto.w %0, %1\n\t"
+    : "=r"(cto_num)
+    : "r"(lsenv->tr_data->itemp_status | lsenv->tr_data->ptn_itemp_status));
+
+    lsassertm(cto_num < itemp_status_num,
+              "\n%s:%d alloc \" itemp \" failed, cto_num %d\n",
+              __func__, __LINE__, cto_num);
+    itemp_num = reg_itemp_map[cto_num];
+    BITS_SET(lsenv->tr_data->ptn_itemp_status, 1 << cto_num);
+    return itemp_num;
+}
+#endif
 /*
  * Some encapsulation of base interface
  */
@@ -305,6 +345,28 @@ IR2_OPND ra_alloc_itemp(void)
 
     return ir2_opnd;
 }
+
+#ifdef CONFIG_LATX_INSTS_PATTERN
+IR2_OPND ra_alloc_ptn_itemp(void)
+{
+    IR2_OPND ir2_opnd;
+    int itemp_reg_num;
+
+    itemp_reg_num = ra_alloc_ptn_itemp_num();
+#ifdef CONFIG_LATX_IMM_REG
+    if (option_imm_reg) {
+        int itemp_num = reg_itemp_reverse_map[itemp_reg_num];
+        if (imm_cache_is_imm_itemp(itemp_num)) {
+            // need free
+            free_imm_reg(itemp_num);
+        }
+    }
+#endif
+    ir2_opnd_build(&ir2_opnd, IR2_OPND_GPR, itemp_reg_num);
+
+    return ir2_opnd;
+}
+#endif
 
 IR2_OPND ra_alloc_ftemp(void)
 {
@@ -371,6 +433,13 @@ inline __attribute__((__always_inline__)) void ra_free_all(void)
 {
     lsenv->tr_data->all_temp_status = 0;
 }
+
+#ifdef CONFIG_LATX_INSTS_PATTERN
+inline __attribute__((__always_inline__)) void ra_free_ptn(void)
+{
+    lsenv->tr_data->ptn_itemp_status = 0;
+}
+#endif
 
 /*
  * Future patches may remove it.

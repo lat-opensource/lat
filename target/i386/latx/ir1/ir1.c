@@ -6,6 +6,7 @@
 #include "latx-config.h"
 #include "latx-options.h"
 #include "latx-disassemble-trace.h"
+#include "insts-pattern.h"
 #include "lsenv.h"
 
 IR1_OPND al_ir1_opnd;
@@ -348,7 +349,6 @@ ADDRX ir1_disasm(IR1_INST *ir1, uint8_t *addr, ADDRX t_pc, int ir1_num, void *pi
         1, &info, ir1_num, pir1_base, CODEIS64);
 
     ir1->info = info;
-    ir1->cflag = 0;
 
     /* Invalid Insn */
     if (info == NULL) {
@@ -378,7 +378,10 @@ ADDRX ir1_disasm(IR1_INST *ir1, uint8_t *addr, ADDRX t_pc, int ir1_num, void *pi
             }
         }
     }
-
+#ifdef CONFIG_LATX_INSTS_PATTERN
+    ir1->instptn.opc  = INSTPTN_OPC_NONE;
+    ir1->instptn.next = NULL;
+#endif
     return (ADDRX)(ir1->info->address + ir1->info->size);
 }
 
@@ -1120,6 +1123,254 @@ int ir1_opnd_is_same_reg(const IR1_OPND *opnd0, const IR1_OPND *opnd1)
 {
     return ir1_opnd_is_reg(opnd0) && ir1_opnd_is_reg(opnd1) &&
          opnd0->reg == opnd1->reg;
+}
+
+int ir1_opnd_is_same_reg_without_width(IR1_OPND *opnd0, IR1_OPND *opnd1)
+{
+    lsassert(opnd0->type == dt_X86_OP_REG && opnd1->type == dt_X86_OP_REG);
+
+    int opnd0_index = -1;
+    int opnd1_index = -1;
+    switch (opnd0->reg) {
+#ifdef TARGET_X86_64
+    case dt_X86_REG_RIP:
+    case dt_X86_REG_EIP:
+        opnd0_index = -1;   break;
+#endif
+    case dt_X86_REG_AL:
+    case dt_X86_REG_AH:
+    case dt_X86_REG_AX:
+    case dt_X86_REG_EAX:
+#ifdef TARGET_X86_64
+    case dt_X86_REG_RAX:
+#endif
+        opnd0_index = eax_index;   break;
+    case dt_X86_REG_BL:
+    case dt_X86_REG_BH:
+    case dt_X86_REG_BX:
+    case dt_X86_REG_EBX:
+#ifdef TARGET_X86_64
+    case dt_X86_REG_RBX:
+#endif
+        opnd0_index = ebx_index;   break;
+    case dt_X86_REG_CL:
+    case dt_X86_REG_CH:
+    case dt_X86_REG_CX:
+    case dt_X86_REG_ECX:
+#ifdef TARGET_X86_64
+    case dt_X86_REG_RCX:
+#endif
+        opnd0_index = ecx_index;   break;
+    case dt_X86_REG_DL:
+    case dt_X86_REG_DH:
+    case dt_X86_REG_DX:
+    case dt_X86_REG_EDX:
+#ifdef TARGET_X86_64
+    case dt_X86_REG_RDX:
+#endif
+        opnd0_index = edx_index;   break;
+    case dt_X86_REG_BP:
+    case dt_X86_REG_EBP:
+#ifdef TARGET_X86_64
+    case dt_X86_REG_RBP:
+    case dt_X86_REG_BPL:
+#endif
+        opnd0_index = ebp_index;   break;
+    case dt_X86_REG_SI:
+    case dt_X86_REG_ESI:
+#ifdef TARGET_X86_64
+    case dt_X86_REG_RSI:
+    case dt_X86_REG_SIL:
+#endif
+        opnd0_index = esi_index;   break;
+    case dt_X86_REG_DI:
+    case dt_X86_REG_EDI:
+#ifdef TARGET_X86_64
+    case dt_X86_REG_RDI:
+    case dt_X86_REG_DIL:
+#endif
+        opnd0_index = edi_index;   break;
+    case dt_X86_REG_SP:
+    case dt_X86_REG_ESP:
+#ifdef TARGET_X86_64
+    case dt_X86_REG_RSP:
+    case dt_X86_REG_SPL:
+#endif
+        opnd0_index = esp_index;   break;
+#ifdef TARGET_X86_64
+    case dt_X86_REG_R8B:
+    case dt_X86_REG_R8W:
+    case dt_X86_REG_R8D:
+    case dt_X86_REG_R8:
+        opnd0_index = r8_index;   break;
+    case dt_X86_REG_R9B:
+    case dt_X86_REG_R9W:
+    case dt_X86_REG_R9D:
+    case dt_X86_REG_R9:
+        opnd0_index = r9_index;   break;
+    case dt_X86_REG_R10B:
+    case dt_X86_REG_R10W:
+    case dt_X86_REG_R10D:
+    case dt_X86_REG_R10:
+        opnd0_index = r10_index;   break;
+    case dt_X86_REG_R11B:
+    case dt_X86_REG_R11W:
+    case dt_X86_REG_R11D:
+    case dt_X86_REG_R11:
+        opnd0_index = r11_index;   break;
+    case dt_X86_REG_R12B:
+    case dt_X86_REG_R12W:
+    case dt_X86_REG_R12D:
+    case dt_X86_REG_R12:
+        opnd0_index = r12_index;   break;
+    case dt_X86_REG_R13B:
+    case dt_X86_REG_R13W:
+    case dt_X86_REG_R13D:
+    case dt_X86_REG_R13:
+        opnd0_index = r13_index;   break;
+    case dt_X86_REG_R14B:
+    case dt_X86_REG_R14W:
+    case dt_X86_REG_R14D:
+    case dt_X86_REG_R14:
+        opnd0_index = r14_index;   break;
+    case dt_X86_REG_R15B:
+    case dt_X86_REG_R15W:
+    case dt_X86_REG_R15D:
+    case dt_X86_REG_R15:
+        opnd0_index = r15_index;   break;
+#endif
+    default:
+        printf("%s:%d reg no match.\n", __func__, __LINE__);
+        lsassert(0);
+    }
+    switch (opnd1->reg) {
+#ifdef TARGET_X86_64
+    case dt_X86_REG_RIP:
+    case dt_X86_REG_EIP:
+        opnd1_index = -1;   break;
+#endif
+    case dt_X86_REG_AL:
+    case dt_X86_REG_AH:
+    case dt_X86_REG_AX:
+    case dt_X86_REG_EAX:
+#ifdef TARGET_X86_64
+    case dt_X86_REG_RAX:
+#endif
+        opnd1_index = eax_index;   break;
+    case dt_X86_REG_BL:
+    case dt_X86_REG_BH:
+    case dt_X86_REG_BX:
+    case dt_X86_REG_EBX:
+#ifdef TARGET_X86_64
+    case X86_REG_RBX:
+#endif
+        opnd1_index = ebx_index;   break;
+    case dt_X86_REG_CL:
+    case dt_X86_REG_CH:
+    case dt_X86_REG_CX:
+    case dt_X86_REG_ECX:
+#ifdef TARGET_X86_64
+    case dt_X86_REG_RCX:
+#endif
+        opnd1_index = ecx_index;   break;
+    case dt_X86_REG_DL:
+    case dt_X86_REG_DH:
+    case dt_X86_REG_DX:
+    case dt_X86_REG_EDX:
+#ifdef TARGET_X86_64
+    case dt_X86_REG_RDX:
+#endif
+        opnd1_index = edx_index;   break;
+    case dt_X86_REG_BP:
+    case dt_X86_REG_EBP:
+#ifdef TARGET_X86_64
+    case dt_X86_REG_RBP:
+    case dt_X86_REG_BPL:
+#endif
+        opnd1_index = ebp_index;   break;
+    case dt_X86_REG_SI:
+    case dt_X86_REG_ESI:
+#ifdef TARGET_X86_64
+    case dt_X86_REG_RSI:
+    case dt_X86_REG_SIL:
+#endif
+        opnd1_index = esi_index;   break;
+    case dt_X86_REG_DI:
+    case dt_X86_REG_EDI:
+#ifdef TARGET_X86_64
+    case dt_X86_REG_RDI:
+    case dt_X86_REG_DIL:
+#endif
+        opnd1_index = edi_index;   break;
+    case dt_X86_REG_SP:
+    case dt_X86_REG_ESP:
+#ifdef TARGET_X86_64
+    case dt_X86_REG_RSP:
+    case dt_X86_REG_SPL:
+#endif
+        opnd1_index = esp_index;   break;
+#ifdef TARGET_X86_64
+    case dt_X86_REG_R8B:
+    case dt_X86_REG_R8W:
+    case dt_X86_REG_R8D:
+    case dt_X86_REG_R8:
+        opnd1_index = r8_index;   break;
+    case dt_X86_REG_R9B:
+    case dt_X86_REG_R9W:
+    case dt_X86_REG_R9D:
+    case dt_X86_REG_R9:
+        opnd1_index = r9_index;   break;
+    case dt_X86_REG_R10B:
+    case dt_X86_REG_R10W:
+    case dt_X86_REG_R10D:
+    case dt_X86_REG_R10:
+        opnd1_index = r10_index;   break;
+    case dt_X86_REG_R11B:
+    case dt_X86_REG_R11W:
+    case dt_X86_REG_R11D:
+    case dt_X86_REG_R11:
+        opnd1_index = r11_index;   break;
+    case dt_X86_REG_R12B:
+    case dt_X86_REG_R12W:
+    case dt_X86_REG_R12D:
+    case dt_X86_REG_R12:
+        opnd1_index = r12_index;   break;
+    case dt_X86_REG_R13B:
+    case dt_X86_REG_R13W:
+    case dt_X86_REG_R13D:
+    case dt_X86_REG_R13:
+        opnd1_index = r13_index;   break;
+    case dt_X86_REG_R14B:
+    case dt_X86_REG_R14W:
+    case dt_X86_REG_R14D:
+    case dt_X86_REG_R14:
+        opnd1_index = r14_index;   break;
+    case dt_X86_REG_R15B:
+    case dt_X86_REG_R15W:
+    case dt_X86_REG_R15D:
+    case dt_X86_REG_R15:
+        opnd1_index = r15_index;   break;
+#endif
+    default:
+        printf("%s:%d reg no match.\n", __func__, __LINE__);
+        lsassert(0);
+    }
+
+    return opnd0_index == opnd1_index;
+}
+
+int ir1_opnd_is_pc_relative(IR1_OPND *opnd)
+{
+    /* x86_64 : RIP/EIP relative addressing */
+    dt_x86_reg base = ir1_opnd_base_reg(opnd);
+    if (base == dt_X86_REG_RIP) {
+        return 1;
+    } else if (base == dt_X86_REG_EIP) {
+        /* legal but strange */
+        return 2;
+    } else {
+        return 0;
+    }
 }
 
 bool ir1_opnd_is_uimm12(IR1_OPND *opnd)

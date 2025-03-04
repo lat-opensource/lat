@@ -109,9 +109,6 @@ typedef struct IR1_INST {
         };
     };
 
-#define IR1_INVALID_MASK  0x01
-#define IR1_PATTERN_MASK  0x02
-    uint8_t cflag;              /** condition flag */
 #ifdef CONFIG_LATX_HBR
 #define SHBR_XMM_ZERO    0x00000000
 #define SHBR_XMM_OTHER   0x00010000
@@ -136,6 +133,12 @@ typedef struct IR1_INST {
 #define SHBR_CAN_OPT64    0x04
 #define GHBR_CAN_OPT      0x08
     uint8_t hbr_flag;
+#endif
+#ifdef CONFIG_LATX_INSTS_PATTERN
+    struct {
+        int opc;
+        struct IR1_INST * next; /* index of IR1 list */
+    } instptn;
 #endif
 } IR1_INST;
 
@@ -280,6 +283,8 @@ int ir1_opnd_is_32bit(const IR1_OPND *opnd);
 int ir1_opnd_is_64bit(const IR1_OPND *opnd);
 #endif
 int ir1_opnd_is_same_reg(const IR1_OPND *opnd0, const IR1_OPND *opnd1);
+int ir1_opnd_is_same_reg_without_width(IR1_OPND *opnd0, IR1_OPND *opnd1);
+int ir1_opnd_is_pc_relative(IR1_OPND *opnd);
 bool ir1_opnd_is_uimm12(IR1_OPND *opnd);
 bool ir1_opnd_is_simm12(IR1_OPND *opnd);
 bool ir1_opnd_is_s2uimm12(IR1_OPND *opnd);

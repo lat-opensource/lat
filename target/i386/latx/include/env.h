@@ -45,6 +45,11 @@ typedef struct TRANSLATION_DATA {
             uint16_t ftemp_status;
         };
     };
+#ifdef CONFIG_LATX_INSTS_PATTERN
+    uint16_t ptn_itemp_status;
+    IR2_OPND ptn_itemp0;
+    IR2_OPND ptn_itemp1;
+#endif
 
     int curr_top;               /* top value (changes when translating) */
 

@@ -451,7 +451,8 @@ void generate_eflag_calculation(IR2_OPND dest, IR2_OPND src0, IR2_OPND src1,
     }
 #ifdef CONFIG_LATX_PROFILER
     IR1_INST *curr = lsenv->tr_data->curr_ir1_inst;
-    if (!(curr->cflag & IR1_PATTERN_MASK)) {
+    if (curr->instptn.opc  != INSTPTN_OPC_NONE) {
+    //if (!(curr->cflag & IR1_PATTERN_MASK)) {
         TranslationBlock *tb = (TranslationBlock *)lsenv->tr_data->curr_tb;
         /* want generated flag number */
         ADD_TB_PROFILE(tb, sta_generate, 1);

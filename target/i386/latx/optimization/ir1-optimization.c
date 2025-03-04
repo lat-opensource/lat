@@ -44,7 +44,7 @@ static void ir1_optimization_over_tb(TranslationBlock *tb)
         /* do core optimize */
         OPT_FLAG_RDTN(rdtn, ir1);
         /* TODO: TU */
-        OPT_INSTS_PTN(ptn, ir1);
+        OPT_INSTS_PTN(tb, ir1, i, ptn);
     }
     SAVE_FLAG_TO_TB(rdtn, tb);
 }
@@ -158,7 +158,7 @@ void ir1_optimization(TranslationBlock *tb)
         /* do core optimize */
         OPT_FLAG_RDTN(rdtn, ir1);
         /* TODO: TU */
-        OPT_INSTS_PTN(ptn, ir1);
+        OPT_INSTS_PTN(tb, ir1, i, ptn);
     }
     SAVE_FLAG_TO_TB(rdtn, tb);
 }

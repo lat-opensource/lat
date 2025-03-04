@@ -315,6 +315,9 @@ static void gen_trace_helper(ADDR helper_method, IR1_INST *pir1)
     }
     la_addi_d(sp_ir2_opnd, sp_ir2_opnd, 0x300);
     ra_free_all();
+#ifdef CONFIG_LATX_INSTS_PATTERN
+    ra_free_ptn();
+#endif
 #ifdef TARGET_X86_64
     if(CODEIS64) {
         lsenv->tr_data->curr_ir1_inst->info->x86.addr_size = org_x86_addr_size;
