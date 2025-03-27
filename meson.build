@@ -17,7 +17,7 @@ cc = meson.get_compiler('c')
 config_host = keyval.load(meson.current_build_dir() / 'config-host.mak')
 enable_static = 'CONFIG_STATIC' in config_host
 
-latx_version_h = vcs_tag(command : ['git', 'describe'],
+latx_version_h = vcs_tag(command : ['git', 'describe', '--always'],
                         fallback : 'unknown',
 			input : 'linux-user/latx-version.h.in',
                         output :'latx-version.h')
