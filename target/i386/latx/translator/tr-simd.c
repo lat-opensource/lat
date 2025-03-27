@@ -807,11 +807,9 @@ bool translate_maxpd(IR1_INST *pir1)
     la_vfcmp_cond_d(mask, src, dest, 0x3);
     /* 2. when dest[i] > src[i] is true, dest[i] = dest[i] */
     la_vand_v(dest, dest, mask);
-    /* 3. mask = ~mask */
-    la_vnor_v(mask, mask, mask);
-    /* 4. when dest[i] > src[i] is false, dest[i] = src[i] */
-    la_vand_v(mask, src, mask);
-    /* 5. get final result */
+    /* 3. when dest[i] > src[i] is false, dest[i] = src[i] */
+    la_vandn_v(mask, mask, src);
+    /* 4. get final result */
     la_vor_v(dest, dest, mask);
     return true;
 }
@@ -836,11 +834,9 @@ bool translate_maxps(IR1_INST *pir1)
     la_vfcmp_cond_s(mask, src, dest, 0x3);
     /* 2. when dest[i] > src[i] is true, dest[i] = dest[i] */
     la_vand_v(dest, dest, mask);
-    /* 3. mask = ~mask */
-    la_vnor_v(mask, mask, mask);
-    /* 4. when dest[i] > src[i] is false, dest[i] = src[i] */
-    la_vand_v(mask, src, mask);
-    /* 5. get final result */
+    /* 3. when dest[i] > src[i] is false, dest[i] = src[i] */
+    la_vandn_v(mask, mask, src);
+    /* 4. get final result */
     la_vor_v(dest, dest, mask);
     return true;
 }
@@ -923,11 +919,9 @@ bool translate_minpd(IR1_INST *pir1)
     la_vfcmp_cond_d(mask, dest, src, 0x3);
     /* 2. when dest[i] > src[i] is true, dest[i] = dest[i] */
     la_vand_v(dest, dest, mask);
-    /* 3. mask = ~mask */
-    la_vnor_v(mask, mask, mask);
-    /* 4. when dest[i] > src[i] is false, dest[i] = src[i] */
-    la_vand_v(mask, src, mask);
-    /* 5. get final result */
+    /* 3. when dest[i] > src[i] is false, dest[i] = src[i] */
+    la_vandn_v(mask, mask, src);
+    /* 4. get final result */
     la_vor_v(dest, dest, mask);
     return true;
 }
@@ -952,11 +946,9 @@ bool translate_minps(IR1_INST *pir1)
     la_vfcmp_cond_s(mask, dest, src, 0x3);
     /* 2. when dest[i] > src[i] is true, dest[i] = dest[i] */
     la_vand_v(dest, dest, mask);
-    /* 3. mask = ~mask */
-    la_vnor_v(mask, mask, mask);
-    /* 4. when dest[i] > src[i] is false, dest[i] = src[i] */
-    la_vand_v(mask, src, mask);
-    /* 5. get final result */
+    /* 3. when dest[i] > src[i] is false, dest[i] = src[i] */
+    la_vandn_v(mask, mask, src);
+    /* 4. get final result */
     la_vor_v(dest, dest, mask);
     return true;
 }
