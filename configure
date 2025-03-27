@@ -269,9 +269,6 @@ gdb_bin=$(command -v "gdb-multiarch" || command -v "gdb")
 if test -e "$source_path/.git"
 then
     git_submodules_action="update"
-    git_submodules="ui/keycodemapdb"
-    git_submodules="$git_submodules tests/fp/berkeley-testfloat-3"
-    git_submodules="$git_submodules tests/fp/berkeley-softfloat-3"
 else
     git_submodules_action="ignore"
     git_submodules=""
@@ -5367,18 +5364,6 @@ if test "$libdaxctl" != "no"; then
 		libdaxctl="no"
 	fi
 fi
-
-##########################################
-# check for slirp
-
-case "$slirp" in
-  auto | enabled | internal)
-    # Simpler to always update submodule, even if not needed.
-    if test "$git_submodules_action" != "ignore"; then
-      git_submodules="${git_submodules} slirp"
-    fi
-    ;;
-esac
 
 ##########################################
 # check for usable __NR_keyctl syscall
