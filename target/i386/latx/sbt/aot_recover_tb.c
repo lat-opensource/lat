@@ -116,6 +116,15 @@ static void tb_unlink(TranslationBlock *tb) {
 
 #include "latx-signal.h"
 #include "qemu/atomic.h"
+#ifdef CONFIG_LATX_TBMINI_ENABLE
+static inline void aot_tbmini_set_pointer(uintptr_t tbm, uint64_t tb_addr,
+        uint64_t tc_size)
+{
+    *(uint64_t *)tbm = (tb_addr & MAKE_64BIT_MASK(0, HOST_VIRT_ADDR_SPACE_BITS)) |
+                (tc_size << HOST_VIRT_ADDR_SPACE_BITS);
+}
+#endif
+
 static void recover_tb_range(target_ulong page, struct aot_tb *p_aot_tbs,
         int num, abi_long start, abi_long end) 
 {
@@ -134,6 +143,12 @@ static void recover_tb_range(target_ulong page, struct aot_tb *p_aot_tbs,
         void *tb_buff = (void *)tcg_splitwx_to_rx(tcg_ctx->code_gen_ptr);
         copy_code_to_buff(tb_buff, &p_aot_tbs[i]);
         TranslationBlock *tb = creat_tb(&p_aot_tbs[i], start, base, tb_buff);
+#if defined(CONFIG_LATX_TBMINI_ENABLE)
+        /* set TBMini */
+        uint64_t *tbm;
+        tbm = (uint64_t *)((uintptr_t)tcg_ctx->code_gen_ptr - sizeof(struct TBMini));
+        aot_tbmini_set_pointer(tbm, (uint64_t)tb, TB_MAGIC);
+#endif
 #ifndef CONFIG_LATX_AOT2
         tb_unlink(tb);
 #endif
@@ -198,8 +213,21 @@ static void recover_tb_range(target_ulong page, struct aot_tb *p_aot_tbs,
 		return;
 	    }
         }
+#if defined(CONFIG_LATX_TBMINI_ENABLE)
+        int tb_num_in_tu = j - i;
+        /* Reserve space for tu tbmin table. */
+        uintptr_t last_tbmini_ptr = (uintptr_t)(ROUND_UP(
+                    sizeof(struct TBMini) * tb_num_in_tu
+                    + (uintptr_t)tcg_ctx->code_gen_ptr, qemu_icache_linesize));
+        qatomic_set(&tcg_ctx->code_gen_ptr, (void *)last_tbmini_ptr);
+        last_tbmini_ptr = (uintptr_t)tcg_ctx->code_gen_ptr - sizeof(struct TBMini);
+        /* First tbm save tb_num_in_tu and TB_MAGIC. */
+        aot_tbmini_set_pointer(last_tbmini_ptr, tb_num_in_tu, TB_MAGIC);
+#else
     	qatomic_set(&tcg_ctx->code_gen_ptr, (void *)
             ROUND_UP((uintptr_t)tcg_ctx->code_gen_ptr, CODE_GEN_ALIGN));
+#endif
+
         void *tu_begin_ptr = tcg_ctx->code_gen_ptr;
         memcpy(tcg_ctx->code_gen_ptr, aot_buffer + p_aot_tbs[i].tb_cache_offset,
                     p_aot_tbs[i].tu_size);
@@ -210,6 +238,10 @@ static void recover_tb_range(target_ulong page, struct aot_tb *p_aot_tbs,
         for (int k = i; k < j; k++) {
             TranslationBlock *tb = tb_in_order[k - i];
             tb->tc.ptr = tu_begin_ptr + tb->tc.offset_in_tu;
+#if defined(CONFIG_LATX_TBMINI_ENABLE)
+            last_tbmini_ptr -= sizeof(struct TBMini);
+            aot_tbmini_set_pointer(last_tbmini_ptr, (uint64_t)tb, (uint64_t)tb->tc.size);
+#endif
             tb->tu_search_addr = 
                 (uint8_t *)((uintptr_t)tb->tc.ptr + p_aot_tbs[k].tu_search_addr_offset);
 #ifndef CONFIG_LATX_AOT2

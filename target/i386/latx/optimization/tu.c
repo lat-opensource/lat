@@ -889,8 +889,16 @@ void translate_tu(uint32 tb_num_in_tu, TranslationBlock **tb_list)
     TranslationBlock *tb;
     bcc_jmp_fail = false;
 
+#if defined(CONFIG_LATX_TBMINI_ENABLE)
+    uintptr_t last_tbmini_ptr =
+        (uintptr_t)(ROUND_UP(sizeof(struct TBMini) * tb_num_in_tu +
+        (uintptr_t)tcg_ctx->code_gen_ptr, qemu_icache_linesize));
+    qatomic_set(&tcg_ctx->code_gen_ptr, (void *)last_tbmini_ptr);
+#else
     qatomic_set(&tcg_ctx->code_gen_ptr, (void *)
             ROUND_UP((uintptr_t)tcg_ctx->code_gen_ptr, CODE_GEN_ALIGN));
+#endif
+
 retry:
     for (uint32_t i = 0; i < tb_num_in_tu; i++) {
         tb = tb_list[i];

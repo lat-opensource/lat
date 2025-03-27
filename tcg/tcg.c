@@ -668,6 +668,21 @@ static void tcg_region_tree_reset_all(void)
     tcg_region_tree_unlock_all();
 }
 #else
+
+#ifdef CONFIG_LATX_TU
+#define MAX_TBM_TABLE_LEN 1000
+static void *query_tu_tbm_table(TBMini *tbm, uintptr_t tc_ptr)
+{
+    uintptr_t curr_pos = (uintptr_t)tbm + sizeof(struct TBMini);
+    do {
+        tbm -= 1;
+        curr_pos += tbm->mtbp_struct.magic;
+    } while(curr_pos < tc_ptr);
+    return (void *)(tbm->mtbp_uint64 &
+            MAKE_64BIT_MASK(0, HOST_VIRT_ADDR_SPACE_BITS));
+}
+#endif
+
 static void *tcg_tb_lookup_fast(uintptr_t tc_ptr)
 {
     if (!in_code_gen_buffer((void *)tc_ptr)) {
@@ -680,6 +695,11 @@ static void *tcg_tb_lookup_fast(uintptr_t tc_ptr)
     }
     void *tb = (void *)(tbm->mtbp_uint64 &
                 MAKE_64BIT_MASK(0, HOST_VIRT_ADDR_SPACE_BITS));
+#ifdef CONFIG_LATX_TU
+    if ((uintptr_t)tb <= MAX_TBM_TABLE_LEN) {
+        tb = query_tu_tbm_table(tbm, tc_ptr);
+    }
+#endif
     return tb;
 }
 
