@@ -136,6 +136,17 @@ LATX 基于 QEMU 6 版本开发并进行了深度优化，性能相比原生 QEM
 
 同时感谢在文档编写、社区管理、流程搭建、版本测试等方面做出贡献的所有伙伴。
 
+编译
+====
+
+.. code-block:: text
+# debian sid
+apt install -y git ninja-build libssl-dev libc6 gcc g++ pkg-config libglib2.0-dev libdrm-dev lsb-release make python3-setuptools
+git clone --depth=1 --recursive https://github.com/lat-opensource/lat
+cd lat/latxbuild
+./build-release-nw.sh
+
+
 未来规划（TODO）
 ===============
 
