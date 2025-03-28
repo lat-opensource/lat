@@ -392,7 +392,6 @@ latx_new_world="no"
 latx_profiler="no"
 latx_perf="no"
 latx_superblock="no"
-latx_flag_pattern="no"
 latx_tunnel_lib="no"
 latx_flag_reduction="no"
 latx_jrra="no"
@@ -842,6 +841,28 @@ if test "$mingw32" = "yes" ; then
   libs_qga="-lws2_32 -lwinmm -lpowrprof -lwtsapi32 -lwininet -liphlpapi -lnetapi32 $libs_qga"
 fi
 
+# test for new world by checking the header of ELF file
+# 0x43 is ABI 2.0, which is the new world; 0x03 is ABI 1.0, which is the old world
+if ! do_cc -o "$TMPE" "$TMPC"; then
+    error_exit "\"$cc\" cannot build an executable (is your linker broken?)"
+fi
+if [ ! -x "$TMPE" ]; then
+    error_exit "Detection file is not an executable"
+fi
+
+if ! command -v readelf >/dev/null 2>&1; then
+    error_exit "Error: readelf is not installed"
+fi
+
+if [ "$(LC_ALL=C readelf -h "$TMPE" \
+    | grep Flags \
+    | awk -F' ' '{print $2}' \
+    | awk -F',' '{print $1}')" = "0x43" ]; then
+    latx_new_world="yes"
+else
+    latx_new_world="no"
+fi
+
 werror=""
 
 for opt do
@@ -1133,8 +1154,6 @@ for opt do
   ;;
   --enable-latx) latx="yes"
                  capstone="disabled"
-  ;;
-  --enable-new-world) latx_new_world="yes"
   ;;
   --enable-latx-profiler) latx_profiler="yes"
   ;;
