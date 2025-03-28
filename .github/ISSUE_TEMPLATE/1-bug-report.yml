@@ -1,0 +1,99 @@
+name: Bug Report / 错误报告
+description: Report a bug to help us improve / 报告一个错误以帮助我们改进
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for taking the time to report a bug. Please fill out the form below to help us understand the issue.
+        感谢您抽出时间报告错误。请填写以下表单以帮助我们了解问题。
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description / 错误描述
+      description: Describe the bug in detail. Include steps to reproduce, expected behavior, and actual behavior. / 详细描述错误。包括重现步骤、预期行为和实际行为。
+      placeholder: Provide a detailed description of the bug / 提供错误的详细描述
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment / 环境
+      description: Specify the environment where the bug occurred (e.g., OS, version, or commit hash). / 指定错误发生的环境（例如：操作系统、版本或提交哈希号）。
+      placeholder: Enter environment details (e.g., OS, version, commit hash) / 输入环境详细信息（例如：操作系统、版本、提交哈希号）
+      value: |
+        **OS**: [e.g., Loongnix, etc.]
+        **操作系统**: [例如：龙芯操作系统等]
+
+        **Kernel Version**: [e.g., 5.4.0, etc.]
+        **Linux 内核版本**: [例如：5.4.0等]
+
+        **GCC Version**: [e.g., 9.3.0, etc.]
+        **GCC 版本**: [例如：9.3.0等]
+
+        **GLIBC Version**: [e.g., 2.31, etc.]
+        **GLIBC 版本**: [例如：2.31等]
+
+        **LAT Version / Commit Hash**: [e.g., 1.6.0, abc1234, etc.]
+        **LAT 版本号 / 提交 Hash**: [例如：1.6.0, abc1234等]
+
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce / 重现步骤
+      description: List the steps to reproduce the bug, including the software information if applicable. / 列出重现错误的步骤，包括使用的软件信息（如适用）。
+      placeholder: 1. Go to...\n2. Click on...\n3. See error / 1. 转到...\n2. 点击...\n3. 看到错误
+      value: |
+        **Describe the issue in detail**
+        **详细描述问题**
+
+        **Software Information (e.g., name, version, configuration, etc.)**
+        **使用的软件信息（例如：名称、版本、配置等）**
+
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected_behavior
+    attributes:
+      label: Expected Behavior / 预期行为
+      description: Describe what you expected to happen. / 描述您期望发生的情况。
+      placeholder: Describe the expected behavior / 描述预期行为
+
+  - type: textarea
+    id: actual_behavior
+    attributes:
+      label: Actual Behavior / 实际行为
+      description: Describe what actually happened. / 描述实际发生的情况。
+      placeholder: Describe the actual behavior / 描述实际行为
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots or Logs / 截图或日志
+      description: Provide links to screenshots or logs, or paste directly, if applicable. / 提供截图或日志的链接，或直接粘贴到此处（如果适用）。
+      placeholder: Add links or paste screenshots or logs / 添加链接或粘贴截图或日志
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity / 严重性
+      description: How severe is this bug? / 此错误的严重程度如何？
+      options:
+        - Critical / 严重
+        - High / 高
+        - Medium / 中
+        - Low / 低
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional_info
+    attributes:
+      label: Additional Information / 附加信息
+      description: Add any other context or information about the bug. / 添加有关错误的其他上下文或信息。
+      placeholder: Provide additional details / 提供其他详细信息

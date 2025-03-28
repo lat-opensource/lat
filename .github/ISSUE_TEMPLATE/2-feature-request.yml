@@ -1,0 +1,39 @@
+name: "Feature Request / 功能请求"
+description: "Suggest a new feature or enhancement / 提议新功能或改进"
+title: "[Feature Request]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for suggesting a feature! Please fill out the following details to help us understand your request.  
+        感谢您提出功能建议！请填写以下详细信息，以帮助我们了解您的请求。
+  - type: textarea
+    id: feature-description
+    attributes:
+      label: "Feature Description / 功能描述"
+      description: "Describe the feature in detail. What problem does it solve? Why is it useful? / 详细描述该功能。它解决了什么问题？为什么有用？"
+      placeholder: "Explain the feature and its benefits... / 解释该功能及其好处……"
+    validations:
+      required: true
+  - type: textarea
+    id: use-case
+    attributes:
+      label: "Use Case / 使用场景"
+      description: "Describe how this feature will be used and who will benefit from it. / 描述该功能的使用方式以及谁将从中受益。"
+      placeholder: "Provide specific examples or scenarios... / 提供具体示例或场景……"
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: "Alternatives Considered / 替代方案"
+      description: "Have you considered any alternative solutions or features? / 您是否考虑过其他替代解决方案或功能？"
+      placeholder: "List any alternatives... / 列出任何替代方案……"
+  - type: dropdown
+    id: priority
+    attributes:
+      label: "Priority Level / 优先级"
+      description: "How important is this feature to you? / 该功能对您的重要性如何？"
+      options:
+        - "Low / 低"
+        - "Medium / 中"
+        - "High / 高"
