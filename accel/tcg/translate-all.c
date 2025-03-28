@@ -4582,6 +4582,33 @@ int shared_private_interpret(siginfo_t *info, ucontext_t *uc)
         over_page_write(real_guest_addr + 16, UC_FREG(uc)[fd].__val64[2], 8);
         over_page_write(real_guest_addr + 24, UC_FREG(uc)[fd].__val64[3], 8);
         goto end;
+    case 0xc0:
+        if (inst & (1<<21)) {
+            /*VLDREPL.W*/
+            for(int i = 0; i < 8; i++) {
+                UC_FREG(uc)[fd].__val32[i] = *(int32_t *)mem_addr;
+            }
+            goto end;
+        }
+        /*VLDREPL.D*/
+        for(int i = 0; i < 4; i++) {
+            UC_FREG(uc)[fd].__val64[i] = *(int64_t *)mem_addr;
+        }
+        goto end;
+    case 0xc1:/*VLDREPL.H*/
+        for(int i = 0; i < 8; i++) {
+            *((int16_t *)&UC_FREG(uc)[fd].__val32[i] + 0) = *(int16_t *)mem_addr;
+            *((int16_t *)&UC_FREG(uc)[fd].__val32[i] + 1) = *(int16_t *)mem_addr;
+        }
+        goto end;
+    case 0xc2:/*VLDREPL.B*/
+        for(int i = 0; i < 8; i++) {
+            *((int8_t *)&UC_FREG(uc)[fd].__val32[i] + 0) = *(int8_t *)mem_addr;
+            *((int8_t *)&UC_FREG(uc)[fd].__val32[i] + 1) = *(int8_t *)mem_addr;
+            *((int8_t *)&UC_FREG(uc)[fd].__val32[i] + 2) = *(int8_t *)mem_addr;
+            *((int8_t *)&UC_FREG(uc)[fd].__val32[i] + 3) = *(int8_t *)mem_addr;
+        }
+        goto end;
 #else /* CONFIG_LOONGARCH_NEW_WORLD */
     case 0xac: /* FLD.S */
         UC_SET_FPR(&extctx, fd, mem_addr, int32_t);
@@ -4615,36 +4642,6 @@ int shared_private_interpret(siginfo_t *info, ucontext_t *uc)
         *(int64_t *)(mem_addr + 16) = UC_GET_LASX(&extctx, fd, 2, int64_t);
         *(int64_t *)(mem_addr + 24) = UC_GET_LASX(&extctx, fd, 3, int64_t);
         goto end;
-#endif
-#ifndef CONFIG_LOONGARCH_NEW_WORLD
-    case 0xc0:
-        if (inst & (1<<21)) {
-            /*VLDREPL.W*/
-            for(int i = 0; i < 8; i++) {
-                UC_FREG(uc)[fd].__val32[i] = *(int32_t *)mem_addr;
-            }
-            goto end;
-        }
-        /*VLDREPL.D*/
-        for(int i = 0; i < 4; i++) {
-            UC_FREG(uc)[fd].__val64[i] = *(int64_t *)mem_addr;
-        }
-        goto end;
-    case 0xc1:/*VLDREPL.H*/
-        for(int i = 0; i < 8; i++) {
-            *((int16_t *)&UC_FREG(uc)[fd].__val32[i] + 0) = *(int16_t *)mem_addr;
-            *((int16_t *)&UC_FREG(uc)[fd].__val32[i] + 1) = *(int16_t *)mem_addr;
-        }
-        goto end;
-    case 0xc2:/*VLDREPL.B*/
-        for(int i = 0; i < 8; i++) {
-            *((int8_t *)&UC_FREG(uc)[fd].__val32[i] + 0) = *(int8_t *)mem_addr;
-            *((int8_t *)&UC_FREG(uc)[fd].__val32[i] + 1) = *(int8_t *)mem_addr;
-            *((int8_t *)&UC_FREG(uc)[fd].__val32[i] + 2) = *(int8_t *)mem_addr;
-            *((int8_t *)&UC_FREG(uc)[fd].__val32[i] + 3) = *(int8_t *)mem_addr;
-        }
-        goto end;
-#else  /* CONFIG_LOONGARCH_NEW_WORLD */
     case 0xc0:
         if (inst & (1<<21)) {
             /*VLDREPL.W*/
@@ -4656,14 +4653,14 @@ int shared_private_interpret(siginfo_t *info, ucontext_t *uc)
         }
         /*VLDREPL.D*/
         for(int i = 0; i < 4; i++) {
-	    UC_SET_LASX(&extctx, fd, i, mem_addr, int64_t);
+	        UC_SET_LASX(&extctx, fd, i, mem_addr, int64_t);
         }
         goto end;
     case 0xc1:/*VLDREPL.H*/
 	{
         int64_t tmp_mem = EXPAND_TO_64BIT(int16_t, mem_addr);
         for(int i = 0; i < 4; i++) {
-	    UC_SET_LASX(&extctx, fd, i, &tmp_mem, int64_t);
+	        UC_SET_LASX(&extctx, fd, i, &tmp_mem, int64_t);
         }
 	}
         goto end;
