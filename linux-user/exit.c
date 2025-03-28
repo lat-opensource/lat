@@ -36,6 +36,10 @@ extern void __gcov_dump(void);
 #include "latx-perf.h"
 #endif
 
+#ifdef CONFIG_LATX_KZT
+#include "library.h"
+#endif
+
 void preexit_cleanup(CPUArchState *env, int code)
 {
 #ifdef CONFIG_LATX_PERF
@@ -54,6 +58,11 @@ void preexit_cleanup(CPUArchState *env, int code)
 #ifdef CONFIG_LATX_PROFILER
         if (qemu_loglevel_mask(LAT_LOG_PROFILE))
             dump_exec_info();
+#endif
+#ifdef CONFIG_LATX_KZT
+    if (option_kzt) {
+        FreeLoadedLibs();
+    }
 #endif
         gdb_exit(code);
         qemu_plugin_atexit_cb();

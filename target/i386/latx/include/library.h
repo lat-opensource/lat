@@ -25,6 +25,9 @@ int EmuLib_GetNoWeak(library_t* lib, const char* name, uintptr_t *offs, uintptr_
 int EmuLib_GetLocal(library_t* lib, const char* name, uintptr_t *offs, uintptr_t *sz, int version, const char* vername, int local);
 int NativeLib_GetLocal(library_t* lib, const char* name, khint_t pre_k, uintptr_t *offs, uintptr_t *sz, int version, const char* vername, int local);
 
+void FreeLoadedLibs(void);
+GList* FindLoadedLibs(const char* path);
+void AppendLoadedLibs(const char* path);
 library_t *NewLibrary(const char* path, box64context_t* box64);
 int ReloadLibrary(library_t* lib);
 int FinalizeLibrary(library_t* lib, lib_t* local_maplib, int bindnow);
