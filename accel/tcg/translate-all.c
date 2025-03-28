@@ -323,9 +323,7 @@ static target_long decode_sleb128(const uint8_t **pp)
 
 int encode_search(TranslationBlock *tb, uint8_t *block)
 {
-#ifndef CONFIG_LATX_TU
     uint8_t *highwater = tcg_ctx->code_gen_highwater;
-#endif
     uint8_t *p = block;
     int i, j, n;
 
@@ -347,11 +345,9 @@ int encode_search(TranslationBlock *tb, uint8_t *block)
            one row beginning below the high water mark cannot overrun
            the buffer completely.  Thus we can test for overflow after
            encoding a row without having to check during encoding.  */
-#ifndef CONFIG_LATX_TU
-        if (unlikely(p > highwater)) {
+        if (!in_pre_translate && unlikely(p > highwater)) {
             return -1;
         }
-#endif
     }
 
     return p - block;
