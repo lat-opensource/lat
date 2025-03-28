@@ -58,7 +58,8 @@ make_cmd() {
 
     ../configure --target-list=x86_64-linux-user --enable-latx \
                 --disable-debug-info --optimize-O1 --extra-ldflags=-ldl --enable-kzt \
-                --prefix=$install_dir --disable-blobs --disable-docs
+                --prefix=$install_dir --disable-blobs --disable-docs \
+                --disable-werror --disable-linux-io-uring
 
     if [ ! -f "/usr/bin/ninja" ]; then
         make -j $(nproc)
@@ -87,8 +88,8 @@ make_cmd() {
 
     ../configure --target-list=i386-linux-user --enable-latx \
                 --enable-guest-base-zero --disable-debug-info --optimize-O1 --static \
-                --extra-ldflags=-ldl --prefix=$install_dir --disable-blobs \
-                --disable-docs
+                --extra-ldflags=-ldl --prefix=$install_dir --disable-blobs --disable-docs  \
+                --disable-werror --disable-pie --disable-linux-io-uring
 
     if [ ! -f "/usr/bin/ninja" ]; then
         make -j $(nproc)
