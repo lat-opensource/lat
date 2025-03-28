@@ -111,7 +111,7 @@ LATX 基于 QEMU 6 版本开发并进行了深度优化，性能相比原生 QEM
 
    - eflags 消除相关优化主要作者
 
-6. **Yanzhi Lan <lanyanzhi19@mail.ustc.edu.cn>**
+6. **Yanzhi Lan <lanyanzhi19@mails.ucas.ac.cn>**
 
    - TU 优化开发者之一
    - 贡献很多指令级优化

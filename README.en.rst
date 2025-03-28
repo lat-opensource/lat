@@ -130,7 +130,7 @@ automation, and testing:
 
    - Primary author of eflags elimination-related optimizations
 
-6. **Yanzhi Lan <lanyanzhi19@mail.ustc.edu.cn>**
+6. **Yanzhi Lan <lanyanzhi19@mails.ucas.ac.cn>**
 
    - Co-developer of TU optimization
    - Extensive instruction-level optimization contributions
