@@ -47,14 +47,11 @@ bool translate_psllw(IR1_INST *pir1)
             IR2_OPND src = load_freg_from_ir1_1(
                 ir1_get_opnd(pir1, 0) + 1, false, IS_INTEGER);
             IR2_OPND temp1 = ra_alloc_ftemp();
-            la_vreplvei_d(temp1, src, 0);
-
+            la_vslei_du(temp1, src, 15);
             IR2_OPND temp2 = ra_alloc_ftemp();
-            la_vslei_du(temp2, temp1, 15);
-
-            la_vreplvei_h(temp1, src, 0);
-            la_vsll_h(dest, dest, temp1);
-            la_vand_v(dest, dest, temp2);
+            la_vreplvei_h(temp2, src, 0);
+            la_vsll_h(dest, dest, temp2);
+            la_vand_v(dest, dest, temp1);
         }
     }
     return true;
@@ -102,16 +99,12 @@ bool translate_pslld(IR1_INST *pir1)
                 ir1_get_opnd(pir1, 0), false, IS_INTEGER);
             IR2_OPND src = load_freg_from_ir1_1(
                 ir1_get_opnd(pir1, 0) + 1, false, IS_INTEGER);
-
             IR2_OPND temp1 = ra_alloc_ftemp();
-            la_vreplvei_d(temp1, src, 0);
-
+            la_vslei_du(temp1, src, 31);
             IR2_OPND temp2 = ra_alloc_ftemp();
-            la_vslei_du(temp2, temp1, 31);
-
-            la_vreplvei_w(temp1, src, 0);
-            la_vsll_w(dest, dest, temp1);
-            la_vand_v(dest, dest, temp2);
+            la_vreplvei_w(temp2, src, 0);
+            la_vsll_w(dest, dest, temp2);
+            la_vand_v(dest, dest, temp1);
         }
     }
     return true;
@@ -161,19 +154,11 @@ bool translate_psllq(IR1_INST *pir1)
                 ir1_get_opnd(pir1, 0), false, IS_INTEGER);
             IR2_OPND src = load_freg_from_ir1_1(
                 ir1_get_opnd(pir1, 0) + 1, false, IS_INTEGER);
-
             IR2_OPND temp1 = ra_alloc_ftemp();
-            la_vreplvei_d(temp1, src, 0);
-
-            IR2_OPND temp2 = ra_alloc_ftemp();
-            la_vldi(temp2, VLDI_IMM_TYPE0(3, 63));
-
-            IR2_OPND temp3 = ra_alloc_ftemp();
-            la_vsle_du(temp3, temp1, temp2);
-
-            la_vreplvei_d(temp1, src, 0);
-            la_vsll_d(dest, dest, temp1);
-            la_vand_v(dest, dest, temp3);
+            la_vldi(temp1, VLDI_IMM_TYPE0(3, 63));
+            la_vsle_du(temp1, src, temp1);
+            la_vsll_d(dest, dest, src);
+            la_vand_v(dest, dest, temp1);
         }
     }
     return true;
@@ -221,16 +206,12 @@ bool translate_psrlw(IR1_INST *pir1)
                 ir1_get_opnd(pir1, 0), false, IS_INTEGER);
             IR2_OPND src = load_freg_from_ir1_1(
                 ir1_get_opnd(pir1, 0) + 1, false, IS_INTEGER);
-
             IR2_OPND temp1 = ra_alloc_ftemp();
-            la_vreplvei_d(temp1, src, 0);
-
+            la_vslei_du(temp1, src, 15);
             IR2_OPND temp2 = ra_alloc_ftemp();
-            la_vslei_du(temp2, temp1, 15);
-
-            la_vreplvei_h(temp1, src, 0);
-            la_vsrl_h(dest, dest, temp1);
-            la_vand_v(dest, dest, temp2);
+            la_vreplvei_h(temp2, src, 0);
+            la_vsrl_h(dest, dest, temp2);
+            la_vand_v(dest, dest, temp1);
         }
     }
     return true;
@@ -278,16 +259,12 @@ bool translate_psrld(IR1_INST *pir1)
                 ir1_get_opnd(pir1, 0), false, IS_INTEGER);
             IR2_OPND src = load_freg_from_ir1_1(
                 ir1_get_opnd(pir1, 0) + 1, false, IS_INTEGER);
-
             IR2_OPND temp1 = ra_alloc_ftemp();
-            la_vreplvei_d(temp1, src, 0);
-
+            la_vslei_du(temp1, src, 31);
             IR2_OPND temp2 = ra_alloc_ftemp();
-            la_vslei_du(temp2, temp1, 31);
-
-            la_vreplvei_w(temp1, src, 0);
-            la_vsrl_w(dest, dest, temp1);
-            la_vand_v(dest, dest, temp2);
+            la_vreplvei_w(temp2, src, 0);
+            la_vsrl_w(dest, dest, temp2);
+            la_vand_v(dest, dest, temp1);
         }
     }
     return true;
@@ -341,19 +318,11 @@ bool translate_psrlq(IR1_INST *pir1)
                 ir1_get_opnd(pir1, 0), false, IS_INTEGER);
             IR2_OPND src = load_freg_from_ir1_1(
                 ir1_get_opnd(pir1, 0) + 1, false, IS_INTEGER);
-
             IR2_OPND temp1 = ra_alloc_ftemp();
-            la_vreplvei_d(temp1, src, 0);
-
-            IR2_OPND temp2 = ra_alloc_ftemp();
-            la_vldi(temp2, VLDI_IMM_TYPE0(3, 63));
-
-            IR2_OPND temp3 = ra_alloc_ftemp();
-            la_vsle_du(temp3, temp1, temp2);
-
-            la_vreplvei_d(temp1, src, 0);
-            la_vsrl_d(dest, dest, temp1);
-            la_vand_v(dest, dest, temp3);
+            la_vldi(temp1, VLDI_IMM_TYPE0(3, 63));
+            la_vsle_du(temp1, src, temp1);
+            la_vsrl_d(dest, dest, src);
+            la_vand_v(dest, dest, temp1);
         }
     }
     return true;
