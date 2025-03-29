@@ -955,7 +955,7 @@ uname(1) man page description of the -i option). For more details of this token
 expansion, see “System Specific Shared Objects”
 */
 extern const char *interp_prefix;
-int LoadNeededLibs(elfheader_t* h, lib_t *maplib, needed_libs_t* neededlibs, library_t *deplib, int local, int bindnow, box64context_t *box64)
+int LoadNeededLibs(elfheader_t* h, lib_t *maplib, needed_libs_t* neededlibs, library_t *deplib, int local, int bindnow, box64context_t *box64, int init_main_elf)
 {
     if (!h->latx_hasfix) return 1;
     if(relocation_dump) DumpDynamicRPath(h);
@@ -1038,7 +1038,7 @@ int LoadNeededLibs(elfheader_t* h, lib_t *maplib, needed_libs_t* neededlibs, lib
         }
 
     // TODO: Add LD_LIBRARY_PATH and RPATH handling
-    if(AddNeededLib(maplib, neededlibs, deplib, local, bindnow, nlibs, cnt, box64)) {
+    if(AddNeededLib(maplib, neededlibs, deplib, local, bindnow, nlibs, cnt, box64, init_main_elf)) {
         printf_log(LOG_INFO, "Error loading one of needed lib\n");
         if(!allow_missing_libs)
             return 1;   //error...

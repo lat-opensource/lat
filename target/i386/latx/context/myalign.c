@@ -2069,7 +2069,7 @@ static void init_main_elf(elfheader_t* elf_header,int fd, uintptr_t load_addr,
 
     AddMainElfToLinkmap(elf_header);
 
-    if (LoadNeededLibs(elf_header, my_context->maplib, &my_context->neededlibs, NULL, 0, 0, my_context)) {
+    if (LoadNeededLibs(elf_header, my_context->maplib, &my_context->neededlibs, NULL, 0, 0, my_context, 1 /* init_main_elf */)) {
         printf_log(LOG_INFO, "Error: loading needed libs in elf %s\n", my_context->argv[0]);
     }
     ResetSpecialCaseMainElf(elf_header);
@@ -2235,12 +2235,12 @@ static void kzt_tb_callback(CPUX86State *env)
     library_t* lib = NewLibrary(rbasename, my_context);
     if (lib) {
         const char* libs[] = {rbasename};
-        AddNeededLib(my_context->maplib, &my_context->neededlibs, NULL, 0, 1, libs, 1, my_context);
+        AddNeededLib(my_context->maplib, &my_context->neededlibs, NULL, 0, 1, libs, 1, my_context, 0 /* not init_main_elf */);
     }
     if (!lib && (!strncmp(rbasename, "libSDL", 6)||!strncmp(rbasename, "libCgGL.so", strlen("libCgGL.so")))) {
         printf_log(LOG_DEBUG, "%s libSDL need libGL.so.1\n", __func__);
         const char* libs[] = {"libGL.so.1"};
-        AddNeededLib(my_context->maplib, &my_context->neededlibs, NULL, 0, 1, libs, 1, my_context);
+        AddNeededLib(my_context->maplib, &my_context->neededlibs, NULL, 0, 1, libs, 1, my_context, 0 /* not init_main_elf */);
     }
     FILE *f = fopen(rfilename, "rb");
     if(!f) {
@@ -2261,7 +2261,7 @@ static void kzt_tb_callback(CPUX86State *env)
         findx86pthread_setcanceltype(h);
     }
     AddElfHeader(my_context, h);
-    LoadNeededLibs(h, my_context->maplib, &my_context->neededlibs, NULL, 0, 0, my_context);
+    LoadNeededLibs(h, my_context->maplib, &my_context->neededlibs, NULL, 0, 0, my_context, 0 /* not init_main_elf */);
     RelocateElf(my_context->maplib, NULL, 0, h);
     RelocateElfPlt(my_context->maplib, NULL, 0, h);
     if (lib) {
