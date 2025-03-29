@@ -213,7 +213,7 @@ void* my_dlopen(void *filename, int flag){
             return NULL;
 #endif
         }
-        if(AddNeededLib(NULL, NULL, NULL, is_local, bindnow, libs, 1, my_context)) {
+        if(AddNeededLib(NULL, NULL, NULL, is_local, bindnow, libs, 1, my_context, 0 /* not init_main_elf */)) {
             printf_dlsym(strchr(rfilename,'/')?LOG_DEBUG:LOG_INFO, "Warning: Cannot dlopen(\"%s\"/%p, %X)\n", rfilename, filename, flag);
             if(!dl->last_error)
                 dl->last_error = box_malloc(129);
@@ -392,7 +392,7 @@ void* my_dlsym(void *handle, void *symbol){
                 //if file is wrapped.
                 iswrapped = 1;
                 printf_dlsym(LOG_DEBUG, "find lib \"%s\" shuold be wrapped. init it.\n", libs[0]);
-                if(AddNeededLib(NULL, NULL, NULL, 0, 1, libs, 1, my_context)) {
+                if(AddNeededLib(NULL, NULL, NULL, 0, 1, libs, 1, my_context, 0 /* not init_main_elf */)) {
                     printf_dlsym(LOG_DEBUG, "Warning: Cannot AddNeededLib(\"%s\")\n", libs[0]);
                 }
                 printf_dlsym(LOG_DEBUG, "info: success AddNeededLib(\"%s\")\n", libs[0]);

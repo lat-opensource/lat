@@ -299,7 +299,7 @@ int AddNeededLib_add(lib_t* maplib, needed_libs_t* neededlibs, library_t* deplib
     return 0;
 }
 
-int AddNeededLib(lib_t* maplib, needed_libs_t* neededlibs, library_t* deplib, int local, int bindnow, const char** paths, int npath, box64context_t* box64)
+int AddNeededLib(lib_t* maplib, needed_libs_t* neededlibs, library_t* deplib, int local, int bindnow, const char** paths, int npath, box64context_t* box64, int init_main_elf)
 {
     if(!neededlibs) {
         neededlibs = box_calloc(1, sizeof(needed_libs_t));

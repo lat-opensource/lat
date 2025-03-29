@@ -216,7 +216,7 @@ static void initNativeLib(library_t *lib, box64context_t* context) {
             lib->getlocal = NativeLib_GetLocal;
             lib->type = LIB_WRAPPED;
             // Call librarian to load all dependant elf
-            if(AddNeededLib(context->maplib, &lib->needed, lib, 0, 0, (const char**)lib->priv.w.neededlibs, lib->priv.w.needed, context)) {
+            if(AddNeededLib(context->maplib, &lib->needed, lib, 0, 0, (const char**)lib->priv.w.neededlibs, lib->priv.w.needed, context, 0 /* not init_main_elf */)) {
                 printf_log(LOG_INFO, "Error: loading a needed libs in elf %s\n", lib->name);
                 return;
             }
@@ -257,8 +257,37 @@ static int isEssentialLib(const char* name) {
     return 0;
 }
 
+static GList* loaded_libs = NULL;
+
+void FreeLoadedLibs(void)
+{
+    if (loaded_libs) {
+        g_list_free(loaded_libs);
+        loaded_libs = NULL;
+    }
+}
+
+static gint compare_string(gconstpointer a, gconstpointer b)
+{
+    return g_strcmp0(a, b);
+}
+
+GList* FindLoadedLibs(const char* path)
+{
+    return g_list_find_custom(loaded_libs, path, compare_string);
+}
+
+void AppendLoadedLibs(const char* path)
+{
+    loaded_libs = g_list_append(loaded_libs, (void*)path);
+}
+
 library_t *NewLibrary(const char* path, box64context_t* context)
 {
+    if (FindLoadedLibs(path) != NULL) {
+        return NULL;
+    }
+    AppendLoadedLibs(path);
     printf_log(LOG_INFO, "Trying to load \"%s\"\n", path);
     library_t *lib = (library_t*)box_calloc(1, sizeof(library_t));
     lib->path = realpath(path, NULL);
