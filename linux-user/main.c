@@ -1261,6 +1261,7 @@ int main(int argc, char **argv, char **envp)
     target_environ = envlist_to_environ(envlist, NULL);
     envlist_free(envlist);
 
+#define KERNEL_CONFIG_LSM_MMAP_MIN_ADDR 65536
     /*
      * Read in mmap_min_addr kernel parameter.  This value is used
      * When loading the ELF image to determine whether guest_base
@@ -1271,24 +1272,34 @@ int main(int argc, char **argv, char **envp)
 
         if ((fp = fopen("/proc/sys/vm/mmap_min_addr", "r")) != NULL) {
             unsigned long tmp;
-            if (fscanf(fp, "%lu", &tmp) == 1 && tmp != 0) {
+            if (fscanf(fp, "%lu", &tmp) == 1) {
                 mmap_min_addr = tmp;
-                qemu_log_mask(CPU_LOG_PAGE, "host mmap_min_addr=0x%lx\n",
-                              mmap_min_addr);
+                /*
+                 * We prefer to not make NULL pointers accessible to QEMU.
+                 * If we're in a chroot with no /proc, fall back to 1 page.
+                 */
+                if (mmap_min_addr < qemu_host_page_size) {
+                    mmap_min_addr = qemu_host_page_size;
+                }
+
+                /* get the mmap_min_addr from kernel */
+                void *addr = mmap(
+                    (void *)mmap_min_addr, qemu_host_page_size,
+                    PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+                if (addr != MAP_FAILED) {
+                    munmap(addr, qemu_host_page_size);
+                    assert(!(addr > KERNEL_CONFIG_LSM_MMAP_MIN_ADDR &&
+                            addr > mmap_min_addr));
+                    mmap_min_addr = (unsigned long)addr;
+                    qemu_log_mask(CPU_LOG_PAGE, "host mmap_min_addr=0x%lx\n",
+                                  mmap_min_addr);
+                } else {
+                    /* error */
+                    qemu_log_mask(CPU_LOG_PAGE, "get mmap_min_addr error\n");
+                }
             }
             fclose(fp);
         }
-    }
-
-    /*
-     * We prefer to not make NULL pointers accessible to QEMU.
-     * If we're in a chroot with no /proc, fall back to 1 page.
-     */
-    if (mmap_min_addr == 0) {
-        mmap_min_addr = qemu_host_page_size;
-        qemu_log_mask(CPU_LOG_PAGE,
-                      "host mmap_min_addr=0x%lx (fallback)\n",
-                      mmap_min_addr);
     }
 
     /*
