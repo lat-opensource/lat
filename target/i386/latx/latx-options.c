@@ -5,7 +5,7 @@
 #include "latx-debug.h"
 
 #if defined(CONFIG_LATX_KZT)
-int option_kzt = 1;
+int option_kzt = 0;
 #endif
 
 #ifdef CONFIG_LATX_FLAG_REDUCTION
