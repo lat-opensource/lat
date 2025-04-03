@@ -1288,8 +1288,8 @@ int main(int argc, char **argv, char **envp)
                     PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
                 if (addr != MAP_FAILED) {
                     munmap(addr, qemu_host_page_size);
-                    assert(!(addr > KERNEL_CONFIG_LSM_MMAP_MIN_ADDR &&
-                            addr > mmap_min_addr));
+                    assert(!((unsigned long)addr > KERNEL_CONFIG_LSM_MMAP_MIN_ADDR &&
+                            (unsigned long)addr > mmap_min_addr));
                     mmap_min_addr = (unsigned long)addr;
                     qemu_log_mask(CPU_LOG_PAGE, "host mmap_min_addr=0x%lx\n",
                                   mmap_min_addr);
