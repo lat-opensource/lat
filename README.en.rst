@@ -153,6 +153,20 @@ automation, and testing:
 
     - Contributor for adaptation to new-world support
 
+Build
+=====
+
+.. code-block:: text
+# debian sid
+apt install -y git ninja-build libssl-dev libc6 gcc g++ pkg-config libglib2.0-dev libdrm-dev lsb-release make python3-setuptools
+git clone --depth=1 --recursive https://github.com/lat-opensource/lat
+cd lat/latxbuild
+./build-release.sh
+
+.. code-block:: text
+# Arch Linux
+pacman -S --noconfirm ninja gcc pkgconf python3 python-setuptools openssl-static openssl
+
 Future Plans (TODO)
 ===============
 
