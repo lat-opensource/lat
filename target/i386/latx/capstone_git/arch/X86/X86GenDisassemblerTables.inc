@@ -85877,7 +85877,7 @@ static const InstrUID modRMTable[] = {
   0x10a, /* ADD_FrST0 */
   0x6f9, /* MUL_FrST0 */
   0x0, /*  */
-  0x0, /*  */
+  0x2d1, /* COMP_FST0r */
   0xad6, /* SUBR_FrST0 */
   0xaf3, /* SUB_FrST0 */
   0x351, /* DIVR_FrST0 */
