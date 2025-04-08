@@ -2404,7 +2404,9 @@ void aot_tb_register(TranslationBlock *tb)
     existing_tb = tb_link_page(tb, phys_pc, phys_page2);
     /* if the TB already exists, discard what we just translated */
     if (existing_tb != tb) {
+#ifdef CONFIG_LATX_DEBUG
         fprintf(stderr, "aot_register_tb failed due to tb_link page\n");
+#endif
     }
     tcg_tb_insert(tb);
 }
