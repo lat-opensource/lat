@@ -858,8 +858,7 @@ static void over_tb_shbr_opt(TranslationBlock **tb_list, int tb_num_in_tu,
                         if ((ir1->xmm_def & SHBR_UPDATE_DES) && !(ir1->xmm_use & SHBR_NEED_DES)) {
                             no_opt_xmm &= ~(1 << dest_num);
                         }
-                        if (ir1->xmm_use & SHBR_NEED_SRC) {
-                            assert(ir1_opnd_is_xmm(opnd1));
+                        if ((ir1->xmm_use & SHBR_NEED_SRC) && ir1_opnd_is_xmm(opnd1)) {
                             src_num = ir1_opnd_base_reg_num(opnd1);
                             no_opt_xmm |= (1 << src_num);
                         }
