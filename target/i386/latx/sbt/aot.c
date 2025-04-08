@@ -1525,7 +1525,7 @@ void aot_exit_entry(CPUState *cpu, int is_end)
         goto parent_exit;
     }
 
-    if (old_sa.sa_handler == SIG_IGN) {
+    if (old_sa.sa_handler != SIG_DFL) {
         struct sigaction new_sa;
         new_sa.sa_handler = SIG_DFL;
         sigemptyset(&new_sa.sa_mask);
@@ -1550,7 +1550,7 @@ void aot_exit_entry(CPUState *cpu, int is_end)
     if (pid) {
         if (pid > 0) {
             wait(NULL);
-            if (old_sa.sa_handler == SIG_IGN) {
+            if (old_sa.sa_handler != SIG_DFL) {
                 sigaction(signum, &old_sa, NULL);
             }
             if (sigismember(&sigset, signum)) {
