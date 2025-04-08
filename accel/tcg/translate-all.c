@@ -452,6 +452,11 @@ static void page_init(void)
 
 }
 
+static bool is_shadow_page(target_ulong address)
+{
+    return page_get_target_data(address);
+}
+
 #ifndef CONFIG_USER_ONLY
 PageDesc *page_find_alloc(tb_page_addr_t index, int alloc)
 {
@@ -2236,7 +2241,7 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
      * but the paired page cross 16K boundary is still not protected.
      */
     int p_flags = page_get_flags(pc);
-    if (p_flags & PAGE_WRITE) {
+    if ((p_flags & PAGE_WRITE) && !is_shadow_page(pc)) {
         mprotect((void*)(pc & qemu_host_page_mask), qemu_host_page_size, PROT_READ);
     }
 
@@ -3803,8 +3808,10 @@ void page_protect(tb_page_addr_t address)
         }
 
         pageflags_set_clear(start, last, 0, PAGE_WRITE);
-        mprotect(g2h_untagged(start), qemu_host_page_size,
-                (prot & PAGE_BITS) & ~PAGE_WRITE);
+        if (!is_shadow_page(address)) {
+            mprotect(g2h_untagged(start), qemu_host_page_size,
+                    (prot & PAGE_BITS) & ~PAGE_WRITE);
+        }
     }
 }
 
@@ -3892,7 +3899,9 @@ int page_unprotect(target_ulong address, uintptr_t pc)
         if (prot & PAGE_EXEC) {
             prot = (prot & ~PAGE_EXEC) | PAGE_READ;
         }
-        mprotect((void *)g2h_untagged(start), len, prot & PAGE_BITS);
+        if (!is_shadow_page(address)) {
+            mprotect((void *)g2h_untagged(start), len, prot & PAGE_BITS);
+        }
     }
     mmap_unlock();
 
