@@ -4308,6 +4308,27 @@ static bool no_right(int64_t addr, int bit_count,
     return false;
 }
 
+static void set_interpret_glue_code(ucontext_t *uc, unsigned int inst, int rj)
+{
+    int cpu_index = current_cpu->cpu_index;
+    uint32_t *glue = cpu_index * 4 + interpret_glue;
+
+    /* save guest addr to scr0 */
+    UC_SCR(uc)[0] = UC_GR(uc)[rj];
+    /* save epc to scr1 */
+    UC_SCR(uc)[1] = UC_PC(uc) + 4;
+    /*
+     * glue:
+     *     inst
+     *     movscr2gr rj,0
+     *     jiscr1 0
+     */
+    glue[0] = inst;
+    glue[1] = ((0x18 << 7) | rj);
+    glue[2] = 0x48000300;
+    UC_PC(uc) = (unsigned long)glue;
+}
+
 int shared_private_interpret(siginfo_t *info, ucontext_t *uc)
 {
     /* fd: fd/vd/xd */
@@ -4507,40 +4528,43 @@ int shared_private_interpret(siginfo_t *info, ucontext_t *uc)
             return 1;
         }
         assert(siaddr == real_guest_addr);
-        assert((rj >= 11 && rj <= 20));
+        if (reg_itemp_reverse_map[rj] == INVALID_TEMP) {
+            set_interpret_glue_code(uc, inst, rj);
+        }
         UC_GR(uc)[rj] += shadow_pd->access_off;
-        UC_PC(uc) -= 4;
-        goto end;
+        goto ret;
     case 0xad: /* FST.S */
         if (no_right(real_guest_addr, 4, PAGE_WRITE, &siaddr)) {
             info->si_addr = (void *)siaddr;
             return 1;
         }
-        assert((rj >= 11 && rj <= 20));
         assert(siaddr == real_guest_addr);
+        if (reg_itemp_reverse_map[rj] == INVALID_TEMP) {
+            set_interpret_glue_code(uc, inst, rj);
+        }
         UC_GR(uc)[rj] += shadow_pd->access_off;
-        UC_PC(uc) -= 4;
-        goto end;
+        goto ret;
     case 0xae: /* FLD.D */
         if (no_right(real_guest_addr, 8, PAGE_READ, &siaddr)) {
             info->si_addr = (void *)siaddr;
             return 1;
         }
-        assert(siaddr == real_guest_addr);
-        assert((rj >= 11 && rj <= 20));
+        if (reg_itemp_reverse_map[rj] == INVALID_TEMP) {
+            set_interpret_glue_code(uc, inst, rj);
+        }
         UC_GR(uc)[rj] += shadow_pd->access_off;
-        UC_PC(uc) -= 4;
-        goto end;
+        goto ret;
     case 0xaf: /* FST.D */
         if (no_right(real_guest_addr, 8, PAGE_WRITE, &siaddr)) {
             info->si_addr = (void *)siaddr;
             return 1;
         }
         assert(siaddr == real_guest_addr);
-        assert((rj >= 11 && rj <= 20));
+        if (reg_itemp_reverse_map[rj] == INVALID_TEMP) {
+            set_interpret_glue_code(uc, inst, rj);
+        }
         UC_GR(uc)[rj] += shadow_pd->access_off;
-        UC_PC(uc) -= 4;
-        goto end;
+        goto ret;
     case 0xb0: /* VLD */
         if (no_right(real_guest_addr, 16, PAGE_READ, &siaddr)) {
             info->si_addr = (void *)siaddr;
@@ -4900,6 +4924,7 @@ int shared_private_interpret(siginfo_t *info, ucontext_t *uc)
     }
 end:
     UC_PC(uc) += 4;
+ret:
     return 0;
 }
 

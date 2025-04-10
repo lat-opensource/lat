@@ -57,6 +57,7 @@ ADDR context_switch_bt_to_native;
 ADDR context_switch_native_to_bt_ret_0;
 ADDR context_switch_native_to_bt;
 ADDR ss_match_fail_native;
+void *interpret_glue;
 
 ADDR native_rotate_fpu_by; /* native_rotate_fpu_by(step, return_address) */
 ADDR indirect_jmp_glue;

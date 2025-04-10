@@ -6,6 +6,7 @@
 #include "exec/exec-all.h"
 #include "latx-disassemble-trace.h"
 
+extern void *interpret_glue;
 extern ADDR context_switch_bt_to_native;
 #if defined(CONFIG_LATX_KZT)
 int target_latx_ld_callback(void *code_buf_addr, void (*kzt_tb_callback)(CPUX86State *));
@@ -13,6 +14,7 @@ int target_latx_ld_callback(void *code_buf_addr, void (*kzt_tb_callback)(CPUX86S
 
 int target_latx_host(CPUArchState *env, struct TranslationBlock *tb, int max_insns);
 int target_latx_prologue(void *code_buf_addr);
+void latx_interpret_glue_init(void);
 int target_latx_epilogue(void *code_buf_addr);
 int target_latx_fpu_rotate(void *code_buf_addr);
 void latx_tb_set_jmp_target(struct TranslationBlock *, int, struct TranslationBlock *);

@@ -1782,6 +1782,7 @@ static void tcg_target_qemu_prologue(TCGContext *s)
 
     int inst_nr = 0;
 
+    latx_interpret_glue_init();
 // --------------------------------- prologue ------------------------------- //
     inst_nr = target_latx_prologue(s->code_ptr);
     if (option_dump)

@@ -215,6 +215,16 @@ int target_latx_ld_callback(void *code_buf_addr, void (*kzt_tb_callback)(CPUX86S
 }
 #endif
 
+void latx_interpret_glue_init(void)
+{
+    interpret_glue = mmap(NULL, qemu_host_page_size,
+                            PROT_EXEC | PROT_READ | PROT_WRITE,
+                            MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (interpret_glue == MAP_FAILED) {
+        fprintf(stderr, "[LATX-LOG] alloc interpret_glue error!\n");
+    }
+}
+
 /*
  * prologue <=> bt to native
  */

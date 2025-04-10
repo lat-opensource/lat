@@ -37,6 +37,7 @@
 #define UC_GR(uc) ((uc)->uc_mcontext.__gregs)
 #define UC_PC(uc) ((uc)->uc_mcontext.__pc)
 #ifndef CONFIG_LOONGARCH_NEW_WORLD
+ #define UC_SCR(uc) ((uc)->uc_mcontext.__fpregs->__val64)
  #define UC_FREG(uc) ((uc)->uc_mcontext.__fpregs)
  #define UC_FCSR(uc) ((uc)->uc_mcontext.__fcsr)
 #endif
