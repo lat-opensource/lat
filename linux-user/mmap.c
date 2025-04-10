@@ -680,7 +680,9 @@ abi_long target_mmap(abi_ulong start, abi_ulong len, int target_prot,
      * be atomic with respect to an external process.
      */
     if (flags & MAP_SHARED) {
-        page_flags |= PAGE_MEMSHARE;
+        if (option_monitor_shared_mem) {
+            page_flags |= PAGE_MEMSHARE;
+        }
         CPUState *cpu = thread_cpu;
         if (!(cpu->tcg_cflags & CF_PARALLEL)) {
             cpu->tcg_cflags |= CF_PARALLEL;
@@ -1254,7 +1256,7 @@ abi_long target_mremap(abi_ulong old_addr, abi_ulong old_size,
         new_addr = h2g(host_addr);
         prot = page_get_flags(old_addr);
         page_set_flags(old_addr, old_addr + old_size, 0);
-        if ((flags & MAP_TYPE) == MAP_SHARED) {
+        if (option_monitor_shared_mem && (flags & MAP_TYPE) == MAP_SHARED) {
             prot |= PAGE_MEMSHARE;
         }
         page_set_flags(new_addr, new_addr + new_size,

@@ -1557,7 +1557,7 @@ int tr_ir2_generate(struct TranslationBlock *tb)
     bool reduce_proepo = false;
     int tr_func_idx;
 
-    if (tb->checksum) {
+    if (option_monitor_shared_mem && tb->checksum) {
         tr_check_x86ins_change(tb);
     }
 #ifdef CONFIG_LATX_IMM_REG

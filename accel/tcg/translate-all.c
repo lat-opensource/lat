@@ -2240,7 +2240,9 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
         mprotect((void*)(pc & qemu_host_page_mask), qemu_host_page_size, PROT_READ);
     }
 
-    tb->checksum = p_flags & PAGE_MEMSHARE;
+    if (option_monitor_shared_mem) {
+        tb->checksum = p_flags & PAGE_MEMSHARE;
+    }
     gen_code_size = target_latx_host(env, tb, max_insns);
     if (unlikely(gen_code_size < 0)) {
         /*

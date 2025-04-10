@@ -82,6 +82,7 @@ int option_split_tb;
 int option_anonym;
 int option_mem_test;
 int option_real_maps;
+int option_monitor_shared_mem;
 
 unsigned long long counter_tb_exec;
 unsigned long long counter_tb_tr;
@@ -131,6 +132,7 @@ void options_init(void)
     option_anonym = 0;
     option_mem_test = 0;
     option_real_maps = 0;
+    option_monitor_shared_mem = 0;
 }
 
 #define OPTIONS_IMM_REG 0

@@ -261,7 +261,7 @@ cpu_tb_exec(CPUState *cpu, TranslationBlock *itb, int *tb_exit)
     env->fpu_clobber = false;
     ret = tcg_qemu_tb_exec(env, tb_ptr);
 
-    if (env->checksum_fail_tb) {
+    if (option_monitor_shared_mem && env->checksum_fail_tb) {
         TranslationBlock * tb_fail = (TranslationBlock *)env->checksum_fail_tb;
         lsassert(tb_fail->checksum && tb_fail->pc == env->eip);
         mmap_lock();

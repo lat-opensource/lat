@@ -702,6 +702,11 @@ static void handle_arg_latx_real_maps(const char *arg)
     }
 }
 
+static void handle_arg_latx_monitor_shared_mem(const char *arg)
+{
+    option_monitor_shared_mem = strtol(arg, NULL, 0);
+}
+
 #ifdef CONFIG_LATX_AOT
 static void handle_arg_latx_aot(const char *arg)
 {
@@ -795,6 +800,8 @@ static const struct qemu_argument arg_table[] = {
     "",           "test memory right when memory access"},
     {"latx-real-maps",    "LATX_REAL_MAPS",     true,  handle_arg_latx_real_maps,
     "",           "enable get real self maps"},
+    {"latx-monitor-shared-mem",    "LATX_MONITOR_SHARED_MEM",     true,  handle_arg_latx_monitor_shared_mem,
+    "",           "monitor shared memory, retranslate self modifying page"},
 #ifdef CONFIG_LATX_AOT
     {"latx-aot",    "LATX_AOT",     true,  handle_arg_latx_aot,
     "",           "enable aot"},

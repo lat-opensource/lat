@@ -68,6 +68,7 @@ extern int option_debug_imm_reg;
 extern uint64_t imm_skip_pc;
 extern int option_mem_test;
 extern int option_real_maps;
+extern int option_monitor_shared_mem;
 
 extern unsigned long long counter_tb_exec;
 extern unsigned long long counter_tb_tr;
