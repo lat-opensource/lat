@@ -136,9 +136,7 @@ bool translate_lock_sbb(IR1_INST *pir1)
     generate_eflag_calculation(dest, src0, src1, pir1, true);
 
     /* rebuild dest */
-    if (!GHBR_ON(pir1)) {
-        la_bstrpick_d(dest, dest, opnd0_size - 1, 0);
-    }
+    la_bstrpick_d(dest, dest, opnd0_size - 1, 0);
     la_sll_d(dest, dest, tmp);
     la_or(src0_cpy, src0_cpy, dest);
 
@@ -273,9 +271,7 @@ bool translate_lock_add(IR1_INST *pir1)
     la_add_w(dest, src0, src1);
 
     /* rebuild dest */
-    if (!GHBR_ON(pir1)) {
-        la_bstrpick_d(dest, dest, opnd0_size - 1, 0);
-    }
+    la_bstrpick_d(dest, dest, opnd0_size - 1, 0);
     la_sll_d(dest, dest, tmp);
     la_or(src0_cpy, src0_cpy, dest);
 
@@ -412,9 +408,7 @@ bool translate_lock_adc(IR1_INST *pir1)
     la_adc_w(dest, src0, src1);
 
     /* rebuild dest */
-    if (!GHBR_ON(pir1)) {
-        la_bstrpick_d(dest, dest, opnd0_size - 1, 0);
-    }
+    la_bstrpick_d(dest, dest, opnd0_size - 1, 0);
     la_sll_d(dest, dest, tmp);
     la_or(src0_cpy, src0_cpy, dest);
 
@@ -548,9 +542,7 @@ bool translate_lock_and(IR1_INST *pir1)
     la_and(dest, src0, src1);
 
     /* rebuild dest */
-    if (!GHBR_ON(pir1)) {
-        la_bstrpick_d(dest, dest, opnd0_size - 1, 0);
-    }
+    la_bstrpick_d(dest, dest, opnd0_size - 1, 0);
     la_sll_d(dest, dest, tmp);
     la_or(src0_cpy, src0_cpy, dest);
 
@@ -683,9 +675,7 @@ bool translate_lock_inc(IR1_INST *pir1)
     la_addi_w(dest, src0, 1);
 
     /* rebuild dest */
-    if (!GHBR_ON(pir1)) {
-        la_bstrpick_d(dest, dest, opnd0_size - 1, 0);
-    }
+    la_bstrpick_d(dest, dest, opnd0_size - 1, 0);
     la_sll_d(dest, dest, tmp);
     la_or(src0_cpy, src0_cpy, dest);
 
@@ -819,9 +809,7 @@ bool translate_lock_dec(IR1_INST *pir1)
     la_addi_w(dest, src0, -1);
 
     /* rebuild dest */
-    if (!GHBR_ON(pir1)) {
-        la_bstrpick_d(dest, dest, opnd0_size - 1, 0);
-    }
+    la_bstrpick_d(dest, dest, opnd0_size - 1, 0);
     la_sll_d(dest, dest, tmp);
     la_or(src0_cpy, src0_cpy, dest);
 
@@ -957,9 +945,7 @@ bool translate_lock_sub(IR1_INST *pir1)
     la_sub_w(dest, src0, src1);
 
     /* rebuild dest */
-    if (!GHBR_ON(pir1)) {
-        la_bstrpick_d(dest, dest, opnd0_size - 1, 0);
-    }
+    la_bstrpick_d(dest, dest, opnd0_size - 1, 0);
     la_sll_d(dest, dest, tmp);
     la_or(src0_cpy, src0_cpy, dest);
 
@@ -1099,9 +1085,7 @@ bool translate_lock_neg(IR1_INST *pir1)
     la_sub_w(dest, zero_ir2_opnd, src0);
 
     /* rebuild dest */
-    if (!GHBR_ON(pir1)) {
-        la_bstrpick_d(dest, dest, opnd0_size - 1, 0);
-    }
+    la_bstrpick_d(dest, dest, opnd0_size - 1, 0);
     la_sll_d(dest, dest, tmp);
     la_or(src0_cpy, src0_cpy, dest);
 
@@ -1237,10 +1221,7 @@ bool translate_lock_or(IR1_INST *pir1)
     la_or(dest, src0, src1);
 
     /* rebuild dest */
-
-    if (!GHBR_ON(pir1)) {
-        la_bstrpick_d(dest, dest, opnd0_size - 1, 0);
-    }
+    la_bstrpick_d(dest, dest, opnd0_size - 1, 0);
     la_sll_d(dest, dest, tmp);
     la_or(src0_cpy, src0_cpy, dest);
 
@@ -1372,10 +1353,7 @@ bool translate_lock_not(IR1_INST *pir1)
     la_nor(dest, zero_ir2_opnd, src0);
 
     /* rebuild dest */
-
-    if (!GHBR_ON(pir1)) {
-        la_bstrpick_d(dest, dest, opnd0_size - 1, 0);
-    }
+    la_bstrpick_d(dest, dest, opnd0_size - 1, 0);
     la_sll_d(dest, dest, tmp);
     la_or(src0_cpy, src0_cpy, dest);
 
@@ -1510,10 +1488,7 @@ bool translate_lock_xor(IR1_INST *pir1)
     la_xor(dest, src0, src1);
 
     /* rebuild dest */
-
-    if (!GHBR_ON(pir1)) {
-        la_bstrpick_d(dest, dest, opnd0_size - 1, 0);
-    }
+    la_bstrpick_d(dest, dest, opnd0_size - 1, 0);
     la_sll_d(dest, dest, tmp);
     la_or(src0_cpy, src0_cpy, dest);
 
@@ -1651,10 +1626,7 @@ bool translate_lock_xadd(IR1_INST *pir1)
     la_add_w(dest, src0, src1);
 
     /* rebuild dest */
-
-    if (!GHBR_ON(pir1)) {
-        la_bstrpick_d(dest, dest, opnd0_size - 1, 0);
-    }
+    la_bstrpick_d(dest, dest, opnd0_size - 1, 0);
     la_sll_d(dest, dest, tmp);
     la_or(src0_cpy, src0_cpy, dest);
 
