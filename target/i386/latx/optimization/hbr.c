@@ -563,7 +563,6 @@ static bool xmm_analyse_32(TranslationBlock *tb,
     return false;
 }
 
-/* FIXME! */
 static bool deal_dest_not_xmm_64(TranslationBlock *tb,
         IR1_INST *ir1, uint32_t xmm[XMM_NUM])
 {
@@ -571,7 +570,6 @@ static bool deal_dest_not_xmm_64(TranslationBlock *tb,
     return false;
 }
 
-/* FIX ME! */
 static bool deal_src_not_xmm_64(TranslationBlock *tb,
         IR1_INST *ir1, uint32_t xmm[XMM_NUM])
 {
@@ -580,6 +578,7 @@ static bool deal_src_not_xmm_64(TranslationBlock *tb,
 }
 
 /* analyse 64 ~ 127 bit. */
+/* TODO: analyze more instructions. */
 static bool xmm_analyse_64(TranslationBlock *tb,
         IR1_INST *ir1, uint32_t xmm[XMM_NUM])
 {
@@ -1010,14 +1009,31 @@ static void des_def_gpr(TranslationBlock *tb, IR1_INST *ir1)
     tb->s_data->gpr_def |= 1 << dest_num;
 }
 
-static bool cover_des_gpr(TranslationBlock *tb, IR1_INST *ir1)
+static void deal_hide_opnd_def(TranslationBlock *tb, IR1_INST *ir1)
 {
-    /* return true; */
-    if (ir1_opcode(ir1) == WRAP(CWDE)) {
+    switch (ir1_opcode(ir1)) {
+    case WRAP(CWDE):
         ir1->gpr_def |= 1 << eax_index;
         tb->s_data->gpr_def |= 1 << eax_index;
-        return true;
+        break;
+    case WRAP(CQO):
+        ir1->gpr_def |= 1 << edx_index;
+        tb->s_data->gpr_def |= 1 << edx_index;
+        break;
+    case WRAP(POPAW):
+        ir1->gpr_def |= 0xff & ~esp_index;
+        tb->s_data->gpr_def |= 0xff & ~esp_index;
+        break;
+    default:
+        break;
     }
+}
+
+/* Some ins can update the h32 bits of des opnd
+ * without using the h32 bits of des opnd. */
+static bool def_h32(TranslationBlock *tb, IR1_INST *ir1)
+{
+    deal_hide_opnd_def(tb, ir1);
 
     if (!ir1_get_opnd_num(ir1)) {
         return false;
@@ -1095,16 +1111,123 @@ static void set_use_reg(TranslationBlock *tb, IR1_INST *ir1, int reg_num)
 {
     if (reg_num >= 0 && reg_num < 16) {
         ir1->gpr_use |= 1 << reg_num;
-        /* Use not def reg. */
+        /* Need pre tb provide if curr tb  not def this reg. */
         if (!(tb->s_data->gpr_def & (1 << reg_num))) {
             tb->s_data->gpr_use |= 1 << reg_num;
         }
     }
 }
 
-static void use_gpr(TranslationBlock *tb, IR1_INST *ir1)
+static void deal_hide_opnd_use(TranslationBlock *tb, IR1_INST *ir1)
 {
+    switch (ir1_opcode(ir1)) {
+    case WRAP(CMPXCHG):
+    case WRAP(SALC):
+    case WRAP(CWD):
+    case WRAP(CDQ):
+    case WRAP(CBW):
+    case WRAP(CWDE):
+    case WRAP(CDQE):
+        set_use_reg(tb, ir1, eax_index);
+        break;
+    case WRAP(XLATB):
+        set_use_reg(tb, ir1, ebx_index);
+        break;
+    case WRAP(JRCXZ):
+    case WRAP(JCXZ):
+    case WRAP(JECXZ):
+    case WRAP(LOOPE):
+    case WRAP(LOOPNE):
+    case WRAP(LOOP):
+        set_use_reg(tb, ir1, ecx_index);
+        break;
+    case WRAP(MASKMOVQ):
+    case WRAP(MASKMOVDQU):
+        set_use_reg(tb, ir1, edi_index);
+        break;
+    case WRAP(POPF):
+    case WRAP(POP):
+    case WRAP(PUSHF):
+    case WRAP(PUSH):
+    case WRAP(CALL):
+    case WRAP(RET):
+    case WRAP(RETF):
+    case WRAP(IRET):
+    case WRAP(IRETQ):
+        set_use_reg(tb, ir1, esp_index);
+        break;
+    case WRAP(LODSB):
+    case WRAP(LODSQ):
+    case WRAP(LODSW):
+    case WRAP(LODSD):
+        set_use_reg(tb, ir1, esi_index);
+        set_use_reg(tb, ir1, ecx_index);
+        break;
+    case WRAP(MUL):
+    case WRAP(DIV):
+    case WRAP(IDIV):
+    case WRAP(RDTSC):
+    case WRAP(CQO):
+        set_use_reg(tb, ir1, eax_index);
+        break;
+    case WRAP(IMUL):
+        if (ir1_opnd_num(ir1) == 1) {
+            set_use_reg(tb, ir1, eax_index);
+            set_use_reg(tb, ir1, edx_index);
+        }
+        break;
+    case WRAP(ENTER):
+    case WRAP(LEAVE):
+        set_use_reg(tb, ir1, esp_index);
+        set_use_reg(tb, ir1, ebp_index);
+        break;
+    case WRAP(MOVSD):
+    case WRAP(CMPSD):
+        set_use_reg(tb, ir1, esi_index);
+        set_use_reg(tb, ir1, edi_index);
+        set_use_reg(tb, ir1, ecx_index);
+        break;
+    case WRAP(STOSB):
+    case WRAP(STOSW):
+    case WRAP(STOSD):
+    case WRAP(STOSQ):
+    case WRAP(SCASB):
+    case WRAP(SCASW):
+    case WRAP(SCASD):
+    case WRAP(SCASQ):
+        set_use_reg(tb, ir1, eax_index);
+        set_use_reg(tb, ir1, edi_index);
+        set_use_reg(tb, ir1, ecx_index);
+        break;
+    case WRAP(RDTSCP):
+        set_use_reg(tb, ir1, eax_index);
+        set_use_reg(tb, ir1, ecx_index);
+        set_use_reg(tb, ir1, edx_index);
+        break;
+    case WRAP(CMPXCHG8B):
+    case WRAP(CMPXCHG16B):
+        set_use_reg(tb, ir1, eax_index);
+        set_use_reg(tb, ir1, ebx_index);
+        set_use_reg(tb, ir1, ecx_index);
+        set_use_reg(tb, ir1, edx_index);
+        break;
+    case WRAP(INT3):
+    case WRAP(PUSHAW):
+    case WRAP(PUSHAL):
+        ir1->gpr_use |= GHBR_GPR_ALL;
+        tb->s_data->gpr_use |= ~tb->s_data->gpr_def;
+        break;
+    default:
+        break;
+    }
+}
+
+static void use_h32(TranslationBlock *tb, IR1_INST *ir1)
+{
+    deal_hide_opnd_use(tb, ir1);
     int opnd_num = ir1_get_opnd_num(ir1);
+    /* We roughly assume that the high 32 bit of all gpr in curr ins will be used,
+     * except for updating their own h32 des opnd without using their own h32 bit. */
     int i = 0;
     if (ir1->gpr_def) {
         i = 1;
@@ -1126,6 +1249,10 @@ static void use_gpr(TranslationBlock *tb, IR1_INST *ir1)
     }
 }
 
+/* The current strategy used is relatively conservative, */
+/* only including analysis of a small number of instructions.
+ * If the strategy is changed to analyze more instructions,
+ * better results may be achieved. */
 static void get_gpr_use_def(TranslationBlock *tb)
 {
     tb->s_data->gpr_use = 0;
@@ -1137,8 +1264,8 @@ static void get_gpr_use_def(TranslationBlock *tb)
         ir1 = tb_ir1_inst(tb, i);
         ir1->gpr_def = 0;
         ir1->gpr_use = 0;
-        cover_des_gpr(tb, ir1);
-        use_gpr(tb, ir1);
+        def_h32(tb, ir1);
+        use_h32(tb, ir1);
     }
 }
 
@@ -1157,9 +1284,7 @@ void hbr_opt(TranslationBlock **tb_list, int tb_num_in_tu)
     do_shbr_opt32(tb_list, tb_num_in_tu);
     do_shbr_opt64(tb_list, tb_num_in_tu);
 #ifdef TARGET_X86_64
-    if (1) {
-        do_gpr_opt(tb_list, tb_num_in_tu);
-    }
+    do_gpr_opt(tb_list, tb_num_in_tu);
 #endif
 }
 
@@ -1192,12 +1317,6 @@ bool can_ghbr_opt(IR1_INST *ir1)
     if (!in_pre_translate) {
         return false;
     }
-    IR1_OPND *opnd0 = ir1_get_opnd(ir1, 0);
-    int opnd0_size = ir1_opnd_size(opnd0);
-    if (!(ir1_opnd_is_gpr(opnd0) && opnd0_size == 32)) {
-        return false;
-    }
-
     if (ir1->hbr_flag & GHBR_CAN_OPT) {
         return true;
     }
