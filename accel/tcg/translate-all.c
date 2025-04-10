@@ -3523,9 +3523,6 @@ void page_set_flags(target_ulong start, target_ulong end, int flags)
          len != 0;
          len -= TARGET_PAGE_SIZE, addr += TARGET_PAGE_SIZE) {
         PageFlagsNode *p = pageflags_find(addr, addr);
-        if (p && p->flags & PAGE_MEMSHARE) {
-            p->flags |= PAGE_MEMSHARE;
-        }
 #ifdef CONFIG_LATX_AOT
         if (option_aot && (flags & PAGE_WRITE) && p && !(p->flags & PAGE_WRITE)) {
             if (foreach_tb_first(addr, addr + TARGET_PAGE_SIZE)) {
@@ -3542,7 +3539,7 @@ void page_set_flags(target_ulong start, target_ulong end, int flags)
 
     if (flags) {
         inval_tb |= pageflags_set_clear(start, last, flags,
-            ~(reset ? 0 : PAGE_ANON | PAGE_OVERFLOW));
+            ~(reset ? 0 : PAGE_ANON | PAGE_OVERFLOW | PAGE_MEMSHARE));
     }
 
     if (inval_tb) {
