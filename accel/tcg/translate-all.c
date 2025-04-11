@@ -4314,11 +4314,20 @@ static void set_interpret_glue_code(ucontext_t *uc, unsigned int inst, int rj)
 {
     int cpu_index = current_cpu->cpu_index;
     uint32_t *glue = cpu_index * 4 + interpret_glue;
-
+#ifndef CONFIG_LOONGARCH_NEW_WORLD
     /* save guest addr to scr0 */
     UC_SCR(uc)[0] = UC_GR(uc)[rj];
     /* save epc to scr1 */
     UC_SCR(uc)[1] = UC_PC(uc) + 4;
+#else
+    struct extctx_layout extctx;
+    memset(&extctx, 0, sizeof(extctx));
+    parse_extcontext(uc, &extctx);
+    /* save guest addr to scr0 */
+    UC_LBT(&extctx)->regs[0] = UC_GR(uc)[rj];
+    /* save epc to scr1 */
+    UC_LBT(&extctx)->regs[1] = UC_PC(uc) + 4;
+#endif
     /*
      * glue:
      *     inst
