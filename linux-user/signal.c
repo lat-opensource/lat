@@ -1030,14 +1030,14 @@ static void host_signal_handler(int host_signum, siginfo_t *info,
         TranslationBlock *current_tb = tcg_tb_lookup(UC_PC(uc));
         if (current_tb) {
             /* clear scr0 */
-#ifndef CONFIG_LOONGARCH_NEW_WORLD
-            UC_FREG(uc)[0].__val64[0] = 0;
-#else
-	    struct extctx_layout extctx;
-	    memset(&extctx, 0, sizeof(extctx));
-	    parse_extcontext(uc, &extctx);
-	    UC_LBT(&extctx)->regs[0] = 0;
-#endif
+ #ifndef CONFIG_LOONGARCH_NEW_WORLD
+            UC_SCR(uc)[0] = 0;
+ #else
+	        struct extctx_layout extctx;
+	        memset(&extctx, 0, sizeof(extctx));
+	        parse_extcontext(uc, &extctx);
+	        UC_LBT(&extctx)->regs[0] = 0;
+ #endif
             /* set the next TB and point the epc to the epilogue */
             UC_GR(uc)[reg_statics_map[S_UD1]] = current_tb->pc;
             UC_PC(uc) = context_switch_native_to_bt_ret_0;

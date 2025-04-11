@@ -59,7 +59,7 @@ void unlink_indirect_jmp(CPUArchState *env, TranslationBlock *tb, ucontext_t *uc
 
 #ifndef CONFIG_LOONGARCH_NEW_WORLD
     /* clear scr0 */
-    UC_FREG(uc)[0].__val64[0] = 0;
+    UC_SCR(uc)[0] = 0;
 #else
     struct extctx_layout extctx;
     memset(&extctx, 0, sizeof(extctx));
