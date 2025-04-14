@@ -139,18 +139,36 @@ LATX 基于 QEMU 6 版本开发并进行了深度优化，性能相比原生 QEM
 编译
 ====
 
+STEP1:
+
+
 .. code-block:: bash
 
-    # debian sid
-    apt install -y git ninja-build libssl-dev libc6 gcc g++ pkg-config libglib2.0-dev libdrm-dev lsb-release make python3-setuptools
     git clone --depth=1 --recursive https://github.com/lat-opensource/lat
     cd lat/latxbuild
+
+
+STEP2:
+
+- debian
+
+.. code-block:: bash
+
+    apt install -y git ninja-build libssl-dev libc6 gcc g++ pkg-config libglib2.0-dev libdrm-dev lsb-release make python3-setuptools
+
+- Arch Linux
+
+.. code-block:: bash
+
+    pacman -S --noconfirm ninja gcc pkgconf python3 python-setuptools openssl-static openssl
+
+
+STEP3:
+
+.. code-block:: bash
+
     ./build-release.sh
 
-
-.. code-block:: text
-# Arch Linux
-pacman -S --noconfirm ninja gcc pkgconf python3 python-setuptools openssl-static openssl
 
 未来规划（TODO）
 ===============

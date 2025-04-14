@@ -156,16 +156,36 @@ automation, and testing:
 Build
 =====
 
-.. code-block:: text
-# debian sid
-apt install -y git ninja-build libssl-dev libc6 gcc g++ pkg-config libglib2.0-dev libdrm-dev lsb-release make python3-setuptools
-git clone --depth=1 --recursive https://github.com/lat-opensource/lat
-cd lat/latxbuild
-./build-release.sh
+STEP1:
 
-.. code-block:: text
-# Arch Linux
-pacman -S --noconfirm ninja gcc pkgconf python3 python-setuptools openssl-static openssl
+
+.. code-block:: bash
+
+    git clone --depth=1 --recursive https://github.com/lat-opensource/lat
+    cd lat/latxbuild
+
+
+STEP2:
+
+- debian
+
+.. code-block:: bash
+
+    apt install -y git ninja-build libssl-dev libc6 gcc g++ pkg-config libglib2.0-dev libdrm-dev lsb-release make python3-setuptools
+
+- Arch Linux
+
+.. code-block:: bash
+
+    pacman -S --noconfirm ninja gcc pkgconf python3 python-setuptools openssl-static openssl
+
+
+STEP3:
+
+.. code-block:: bash
+
+    ./build-release.sh
+
 
 Future Plans (TODO)
 ===============
