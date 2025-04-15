@@ -13609,8 +13609,6 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
                 __put_user(st.st_ctim.tv_nsec,
                            &target_st->target_st_ctime_nsec);
 #endif
-                /* workaround for wineserver64 + wine32 */
-                target_st->st_dev = target_st->st_dev & 0xffff;
                 unlock_user_struct(target_st, arg2, 1);
             }
         }

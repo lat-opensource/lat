@@ -1680,8 +1680,8 @@ struct target_stat {
  */
 #define TARGET_HAS_STRUCT_STAT64
 struct target_stat64 {
-	unsigned short	st_dev;
-	unsigned char	__pad0[10];
+    unsigned long long st_dev;
+    unsigned int    __pad1;
 
 #define TARGET_STAT64_HAS_BROKEN_ST_INO	1
 	abi_ulong	__st_ino;
