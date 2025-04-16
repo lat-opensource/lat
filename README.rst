@@ -162,6 +162,12 @@ STEP2:
 
     pacman -S --noconfirm ninja gcc pkgconf python3 python-setuptools openssl-static openssl
 
+- 安同 OS (AOSC OS)
+
+.. code-block:: bash
+
+    apt install -y gcc nettle pcre2 libffi gnutls glib zlib glib-static libgcrypt-static libgpg-error-static libnfs-static pcre-static zlib-static zstd-static openssl-static
+
 
 STEP3:
 
