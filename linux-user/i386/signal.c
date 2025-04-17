@@ -23,7 +23,6 @@
 #ifdef CONFIG_LATX
 #include "latx-options.h"
 #include "reg-map.h"
-#include <lasxintrin.h>
 #endif
 
 /* from the Linux kernel - /arch/x86/include/uapi/asm/sigcontext.h */
