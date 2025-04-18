@@ -1,6 +1,6 @@
 #!/bin/sh
 set -e
-export CFLAGS="-Wno-error=unused-but-set-variable -Wno-error=unused-function  -Wformat -Werror=format-y2k"
+export CFLAGS="-Wno-error=unused-but-set-variable -Wno-error=unused-function -Wformat -Werror=format-y2k"
 make_configure=0
 opt_level=1
 

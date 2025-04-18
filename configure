@@ -1711,7 +1711,7 @@ if test "$latx" = "yes" ; then
   else
     QEMU_LDFLAGS="-export-dynamic $QEMU_LDFLAGS"
   fi
-  QEMU_LDFLAGS="-lcrypto $QEMU_LDFLAGS"
+  QEMU_LDFLAGS="-lcrypto -lz $QEMU_LDFLAGS"
 else
   echo "build for target $target_list"
   if test "$target_list" = "x86_64-linux-user" ; then

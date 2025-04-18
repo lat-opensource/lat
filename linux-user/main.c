@@ -56,7 +56,7 @@ int mydebug = 1;
 #include "latx-options.h"
 #include "aot.h"
 #include "latx-version.h"
-#include <openssl/sha.h>
+#include <openssl/evp.h>
 #endif
 #ifdef CONFIG_LATX_PERF
 #include "latx-perf.h"
@@ -1330,8 +1330,9 @@ int main(int argc, char **argv, char **envp)
     }
 
 #ifdef CONFIG_LATX_AOT
-    SHA_CTX ctx;
-    unsigned char hash[SHA_DIGEST_LENGTH];
+    EVP_MD_CTX *ctx = EVP_MD_CTX_new();
+    unsigned char hash[EVP_MAX_MD_SIZE];
+    unsigned int hash_len;
     char *buf;
     char real[PATH_MAX], *temp;
     char *aot_dir;
@@ -1357,8 +1358,8 @@ int main(int argc, char **argv, char **envp)
     if (temp == NULL) {
         lsassertm(0, "%s error!", __func__);
     }
-    SHA1_Init(&ctx);
-    SHA1_Update(&ctx, real, strlen(real));
+    EVP_DigestInit_ex(ctx, EVP_sha1(), NULL);
+    EVP_DigestUpdate(ctx, real, strlen(real));
     int aotac = 4;
     for (; i < target_argc; i++) {
         target_argv[i] = strdup(argv[optind + i]);
@@ -1374,11 +1375,12 @@ int main(int argc, char **argv, char **envp)
                 aotac = 2;
                 continue;
             }
-            SHA1_Update(&ctx, target_argv[i], arglen);
+            EVP_DigestUpdate(ctx, target_argv[i], arglen);
         }
     }
-    SHA1_Final(hash, &ctx);
-    for (i = 0; i < SHA_DIGEST_LENGTH; i++) {
+    EVP_DigestFinal_ex(ctx, hash, &hash_len);
+    EVP_MD_CTX_free(ctx);
+    for (i = 0; i < hash_len; i++) {
         sprintf(buf, "%02x", hash[i] & 0xff);
         buf += 2;
     }
