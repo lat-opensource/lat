@@ -1530,8 +1530,12 @@ struct target_winsize {
 #include "termbits.h"
 
 #define HUGETLB_FLAG_ENCODE_SHIFT   26
+#ifndef MAP_HUGE_2MB
 #define MAP_HUGE_2MB     (21 << HUGETLB_FLAG_ENCODE_SHIFT)
+#endif
+#ifndef MAP_HUGE_1GB
 #define MAP_HUGE_1GB     (30 << HUGETLB_FLAG_ENCODE_SHIFT)
+#endif
 #define LEGACY_MAP_MASK (TARGET_MAP_SHARED \
         | TARGET_MAP_PRIVATE \
         | TARGET_MAP_FIXED \
