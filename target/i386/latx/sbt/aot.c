@@ -950,7 +950,8 @@ int aot_get_file_init(char *aot_file)
     int count = 0;
     char pathtmp[PATH_MAX] = {0};
     if (access(aot_file, 0) >= 0) {
-        strncpy(pathtmp, aot_file, PATH_MAX);
+        strncpy(pathtmp, aot_file, PATH_MAX - 1);
+        pathtmp[PATH_MAX - 1] = '\0';
         strcat(pathtmp, "A");
         for (int jj = 1; jj < 100; jj++) {
             if (access(pathtmp, 0) < 0) {

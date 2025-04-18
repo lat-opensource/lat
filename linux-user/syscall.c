@@ -126,11 +126,13 @@
 #include <libdrm/i915_drm.h>
 #include <libdrm/radeon_drm.h>
 #include <libdrm/amdgpu_drm.h>
+#include <libdrm/drm_mode.h>
 #elif defined(HAVE_DRM_H)
 #include <drm/drm.h>
 #include <drm/i915_drm.h>
 #include <drm/radeon_drm.h>
 #include <drm/amdgpu_drm.h>
+#include <drm/drm_mode.h>
 #endif
 #include <linux/can/raw.h>
 #include <linux/videodev2.h>
@@ -847,10 +849,12 @@ safe_syscall6(ssize_t, recvfrom, int, fd, void *, buf, size_t, len,
               int, flags, struct sockaddr *, addr, socklen_t *, addrlen)
 safe_syscall3(ssize_t, sendmsg, int, fd, const struct msghdr *, msg, int, flags)
 safe_syscall3(ssize_t, recvmsg, int, fd, struct msghdr *, msg, int, flags)
+#ifdef TARGET_X86_64
 safe_syscall4(ssize_t, sendmmsg, int, fd, struct msghdr *, msgvec, unsigned int, vlen,
               int, flags)
 safe_syscall5(ssize_t, recvmmsg, int, fd, struct msghdr *, msgvec, unsigned int, vlen,
               int, flags, struct timespec *, timeout)
+#endif
 safe_syscall2(int, flock, int, fd, int, operation)
 #if defined(TARGET_NR_rt_sigtimedwait) || defined(TARGET_NR_rt_sigtimedwait_time64)
 safe_syscall4(int, rt_sigtimedwait, const sigset_t *, these, siginfo_t *, uinfo,
@@ -904,8 +908,10 @@ safe_syscall6(ssize_t, copy_file_range, int, infd, loff_t *, pinoff,
               unsigned int, flags)
 #endif
 #ifdef __NR_quotactl
+#ifdef TARGET_X86_64
 safe_syscall4(int, quotactl, int, cmd, const char *, special,
               int, id, caddr_t, addr)
+#endif
 #endif
 
 /* We do ioctl like this rather than via safe_syscall3 to preserve the

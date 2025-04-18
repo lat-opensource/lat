@@ -1255,6 +1255,7 @@ const char* getCpuName(void)
                 while(strchr(tmp, '\n'))
                     *strchr(tmp,'\n') = ' ';
                 strncpy(name, tmp, 199);
+                name[199] = '\0';
             }
             return name;
         }

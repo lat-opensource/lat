@@ -4936,7 +4936,9 @@ int shared_private_interpret(siginfo_t *info, ucontext_t *uc)
     }
 end:
     UC_PC(uc) += 4;
+#ifndef CONFIG_LOONGARCH_NEW_WORLD
 ret:
+#endif
     return 0;
 }
 

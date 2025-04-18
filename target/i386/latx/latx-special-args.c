@@ -26,7 +26,7 @@ static void extract_filename(char* filename, char* buffer,
     } else {
         filename_only = filename;
     }
-    strncpy(buffer, filename_only, buffer_size);
+    strncpy(buffer, filename_only, buffer_size - 1);
     char* extension = strchr(buffer, '.');
     if (extension != NULL) {
         *extension = '\0';

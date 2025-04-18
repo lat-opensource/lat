@@ -84,7 +84,7 @@ extern "C" {
 #define DRM_IOCTL_AMDGPU_VM    \
     DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDGPU_VM, union drm_amdgpu_vm)
 #define DRM_IOCTL_AMDGPU_FENCE_TO_HANDLE \
-    DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDGPU_FENCE_TO_HANDLE,
+    DRM_IOWR(DRM_COMMAND_BASE + DRM_AMDGPU_FENCE_TO_HANDLE, \
              union drm_amdgpu_fence_to_handle)
 #define DRM_IOCTL_AMDGPU_SCHED    \
     DRM_IOW(DRM_COMMAND_BASE + DRM_AMDGPU_SCHED, union drm_amdgpu_sched)

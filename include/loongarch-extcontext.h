@@ -60,29 +60,31 @@ static void *get_ctx_through_ctxinfo(struct sctx_info *info)
 
 #define UC_SET_FPR(_uc, _fp, _val, _type) \
     if (UC_FPU(_uc)) \
-        (*(_type *)(&(UC_FPU(_uc)->regs[_fp])) = *(_type *)(_val)); \
+        (*(_type *)(&(UC_FPU(_uc)->regs[_fp])) = *(_type *)(unsigned long)(_val)); \
     else \
         UC_SET_LSX(_uc, _fp, 0, _val, _type);
 
 #define UC_SET_FCSR(_uc, _val, _type) \
     if (UC_LASX(_uc)) \
-        (*(_type *)(&(UC_LASX(_uc)->fcsr)) = *(_type *)(_val)); \
+        (*(_type *)(&(UC_LASX(_uc)->fcsr)) = *(_type *)(unsigned long)(_val)); \
     else if (UC_LSX(_uc)) \
-        (*(_type *)(&(UC_LSX(_uc)->fcsr)) = *(_type *)(_val)); \
+        (*(_type *)(&(UC_LSX(_uc)->fcsr)) = *(_type *)(unsigned long)(_val)); \
     else if (UC_FPU(_uc)) \
-        (*(_type *)(&(UC_FPU(_uc)->fcsr)) = *(_type *)(_val)); \
+        (*(_type *)(&(UC_FPU(_uc)->fcsr)) = *(_type *)(unsigned long)(_val)); \
     else \
         g_assert_not_reached();
 
 #define UC_SET_LSX(_uc, _fp, _bias, _val, _type) \
     if (UC_LSX(_uc)) \
-        (*(_type *)(&(UC_LSX(_uc)->regs[_fp * 2 + _bias])) = *(_type *)(_val)); \
+        (*(_type *)(&(UC_LSX(_uc)->regs[_fp * 2 + _bias])) = \
+            *(_type *)(unsigned long)(_val)); \
     else \
         UC_SET_LASX(_uc, _fp, _bias, _val, _type);
 
 #define UC_SET_LASX(_uc, _fp, _bias, _val, _type) \
     if (UC_LASX(_uc)) \
-        (*(_type *)(&(UC_LASX(_uc)->regs[_fp * 4 + _bias])) = *(_type *)(_val)); \
+        (*(_type *)(&(UC_LASX(_uc)->regs[_fp * 4 + _bias])) = \
+            *(_type *)(unsigned long)(_val)); \
     else \
         g_assert_not_reached();
 

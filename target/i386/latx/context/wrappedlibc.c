@@ -3523,7 +3523,6 @@ static void Push64(CPUX86State *cpu, uint64_t v)
     *((uint64_t*)cpu->regs[R_ESP]) = v;
 }
 
-extern const char *interp_prefix;
 void kzt_wine_init_x86(void);
 int init_x86dlfun(void);
 int init_x86dlfun(void)

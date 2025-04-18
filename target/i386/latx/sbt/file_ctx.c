@@ -228,7 +228,8 @@ int aot_file_ctx(uint64_t maxSize, uint64_t leftMinSize)
         }
         aot_total_size += statbuf.st_size;
         struct aot_info *my_info = malloc(sizeof(struct aot_info));
-        strncpy(my_info->d_name, subdir, PATH_MAX);
+        strncpy(my_info->d_name, subdir, PATH_MAX - 1);
+        my_info->d_name[PATH_MAX - 1] = '\0';
         my_info->st_actime = statbuf.st_atime;
         if (i_count >= max_aot_file_count) {
             max_aot_file_count += 1000;

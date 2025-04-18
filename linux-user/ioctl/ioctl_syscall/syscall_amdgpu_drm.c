@@ -1,3 +1,5 @@
+#include "linux-user/ioctl/amdgpu_drm.h"
+
 static inline abi_long target_to_host_drm_amdgpu_info
                         (struct drm_amdgpu_info *host_ver,
          struct target_drm_amdgpu_info *target_ver)
