@@ -203,28 +203,8 @@ config_host_data.set('CONFIG_LIBATTR', have_old_libattr)
 config_host_data.set('CONFIG_GETTID', has_gettid)
 config_host_data.set('CONFIG_MALLOC_TRIM', has_malloc_trim)
 
-lsb_release = find_program('lsb_release', required: false)
-if lsb_release.found()
-  lsb_release_output = run_command('lsb_release', '-si').stdout().strip()
-  if lsb_release_output == 'Loongnix'
-    config_host_data.set('HAVE_DRM_H', cc.has_header('libdrm/drm.h'))
-    config_host_data.set('IS_LOONGNIX', 'true')
-  elif lsb_release_output == 'Arch'
-    config_host_data.set('HAVE_DRM_H', cc.has_header('libdrm/drm.h'))
-    config_host_data.set('IS_ARCH', 'true')
-  elif lsb_release_output == 'Kylin'
-    config_host_data.set('HAVE_DRM_H', cc.has_header('drm/drm.h'))
-    config_host_data.set('IS_KYLIN', 'true')
-  elif lsb_release_output == 'Nfsdesktop'
-    #方德
-    config_host_data.set('HAVE_DRM_H', cc.has_header('drm/drm.h'))
-    config_host_data.set('IS_NFS', 'true')
-  else
-    config_host_data.set('HAVE_DRM_H', cc.has_header('drm/drm.h'))
-  endif
-else
-    config_host_data.set('HAVE_DRM_H', cc.has_header('drm/drm.h'))
-endif
+config_host_data.set('HAVE_LIBDRM_H', cc.has_header('libdrm/drm.h'))
+config_host_data.set('HAVE_DRM_H', cc.has_header('drm/drm.h'))
 
 config_host_data.set('CONFIG_PREADV', cc.has_function('preadv', prefix: '#include <sys/uio.h>'))
 

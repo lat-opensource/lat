@@ -121,18 +121,16 @@
 #ifdef HAVE_BTRFS_H
 #include <linux/btrfs.h>
 #endif
-#ifdef HAVE_DRM_H
-#if defined(IS_LOONGNIX) || defined(IS_ARCH)
+#if defined(HAVE_LIBDRM_H)
 #include <libdrm/drm.h>
 #include <libdrm/i915_drm.h>
 #include <libdrm/radeon_drm.h>
 #include <libdrm/amdgpu_drm.h>
-#else
+#elif defined(HAVE_DRM_H)
 #include <drm/drm.h>
 #include <drm/i915_drm.h>
 #include <drm/radeon_drm.h>
 #include <drm/amdgpu_drm.h>
-#endif
 #endif
 #include <linux/can/raw.h>
 #include <linux/videodev2.h>
@@ -6487,20 +6485,16 @@ static inline abi_long target_to_host_ext_ctrls(struct v4l2_ext_controls *host_v
 {
     memset(host_ver, 0, sizeof(*host_ver));
     uint64_t controls;
+    size_t error_idx_offset = offsetof(struct v4l2_ext_controls, error_idx);
+    size_t request_fd_offset = error_idx_offset + sizeof(uint32_t);
+    size_t reserved_offset = request_fd_offset + sizeof(uint32_t);
     __get_user(host_ver->ctrl_class, &target_ver->ctrl_class);
     __get_user(host_ver->count, &target_ver->count);
     __get_user(host_ver->error_idx, &target_ver->error_idx);
-#if defined(IS_KYLIN) || defined(IS_NFS)
-    __get_user(host_ver->request_fd,
-                                    &target_ver->reserved[0]);
-    __get_user(host_ver->reserved[0],
+    __get_user(*(int32_t *)((uint64_t)host_ver + request_fd_offset),
+                &target_ver->reserved[0]);
+    __get_user(*(uint32_t *)((uint64_t)host_ver + reserved_offset),
                                     &target_ver->reserved[1]);
-#else
-    __get_user(host_ver->reserved[0],
-                                    &target_ver->reserved[0]);
-    __get_user(host_ver->reserved[1],
-                                    &target_ver->reserved[1]);
-#endif
     __get_user(controls, &target_ver->controls);
     host_ver->controls = (struct v4l2_ext_control *)controls;
     return 0;
@@ -6511,20 +6505,16 @@ static inline void host_to_target_ext_ctrls(
                   struct v4l2_ext_controls *host_ver)
 {
     uint64_t controls = (uint64_t)host_ver->controls;
+    size_t error_idx_offset = offsetof(struct v4l2_ext_controls, error_idx);
+    size_t request_fd_offset = error_idx_offset + sizeof(uint32_t);
+    size_t reserved_offset = request_fd_offset + sizeof(uint32_t);
     __put_user(host_ver->ctrl_class, &target_ver->ctrl_class);
     __put_user(host_ver->count, &target_ver->count);
     __put_user(host_ver->error_idx, &target_ver->error_idx);
-#if defined(IS_KYLIN) || defined(IS_NFS)
-    __put_user(host_ver->request_fd,
+    __put_user(*(int32_t *)((uint64_t)host_ver + request_fd_offset),
                                     &target_ver->reserved[0]);
-    __put_user(host_ver->reserved[0],
+    __put_user(*(uint32_t *)((uint64_t)host_ver + reserved_offset),
                                     &target_ver->reserved[1]);
-#else
-    __put_user(host_ver->reserved[0],
-                                    &target_ver->reserved[0]);
-    __put_user(host_ver->reserved[1],
-                                    &target_ver->reserved[1]);
-#endif
     __put_user(controls, &target_ver->controls);
 }
 
