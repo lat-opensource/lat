@@ -1877,8 +1877,13 @@ EXPORT int32_t my_epoll_ctl(int32_t epfd, int32_t op, int32_t fd, void* event)
 EXPORT int32_t my_epoll_wait(int32_t epfd, void* events, int32_t maxevents, int32_t timeout)
 {
     struct epoll_event _events[maxevents];
+    int32_t ret = 0;
     //AlignEpollEvent(_events, events, maxevents);
-    int32_t ret = epoll_wait(epfd, events?_events:NULL, maxevents, timeout);
+    if (events) {
+        ret = epoll_wait(epfd, _events, maxevents, timeout);
+    } else {
+        ret = -1;
+    }
     if(ret>0)
         UnalignEpollEvent(events, _events, ret);
     return ret;
@@ -1886,8 +1891,13 @@ EXPORT int32_t my_epoll_wait(int32_t epfd, void* events, int32_t maxevents, int3
 EXPORT int32_t my_epoll_pwait(int32_t epfd, void* events, int32_t maxevents, int32_t timeout, const sigset_t *sigmask)
 {
     struct epoll_event _events[maxevents];
+    int32_t ret = 0;
     //AlignEpollEvent(_events, events, maxevents);
-    int32_t ret = epoll_pwait(epfd, events?_events:NULL, maxevents, timeout, sigmask);
+    if (events) {
+        ret = epoll_pwait(epfd, _events, maxevents, timeout, sigmask);
+    } else {
+        ret = -1;
+    }
     if(ret>0)
         UnalignEpollEvent(events, _events, ret);
     return ret;
