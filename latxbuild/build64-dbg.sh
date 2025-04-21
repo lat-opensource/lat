@@ -78,8 +78,6 @@ make_cmd() {
     else
         ninja
     fi
-
-    cd $(dirname $0)/../
 }
 
 parseArgs "$@"
