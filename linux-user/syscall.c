@@ -8154,13 +8154,21 @@ static abi_long do_ioctl(int fd, int cmd, abi_ulong arg)
     ie += ioctl_cache_val;
 
 #ifdef TARGET_X86_64
-    if (ioctl_cache_unsupported_cmd[hash] == cmd) {
+    if ((uint16_t)ioctl_cache_unsupported_cmd[hash] == (uint16_t)cmd) {
         ret = get_errno(safe_ioctl(fd, cmd, arg));
         return ret;
     }
 #endif
     /* slow path to iterate the ioctl_entries */
-    if (ie->target_cmd != cmd) {
+    if ((uint16_t)ie->target_cmd != (uint16_t)cmd) {
+#ifdef CONFIG_LATX_DEBUG
+        if (ie->target_cmd != cmd) {
+            qemu_log_mask(LAT_LOG_SYSCALL,
+                    "[LATX_SYSCALL] do_ioctl fd " TARGET_FMT_ld
+                    " cmd 0x" TARGET_FMT_lx " ie->target_cmd != cmd\n",
+                    arg1, arg2);
+        }
+#endif
         switch(TARGET_IOC_NR(cmd)) {
             case TARGET_IOC_NR(TARGET_HIDIOCSFEATURE(0)):
             case TARGET_IOC_NR(TARGET_HIDIOCGFEATURE(0)):
@@ -8185,7 +8193,7 @@ static abi_long do_ioctl(int fd, int cmd, abi_ulong arg)
                 return -TARGET_ENOSYS;
 #endif
             }
-            if (ie->target_cmd == cmd) {
+            if ((uint16_t)ie->target_cmd == (uint16_t)cmd) {
                 ioctl_cache[hash] = i;
 #ifdef TARGET_X86_64
                 ioctl_cache_unsupported_cmd[hash] = 0;
