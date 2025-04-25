@@ -35,6 +35,9 @@ static void *get_ctx_through_ctxinfo(struct sctx_info *info)
 #define UC_LSX(_uc)  (((struct lsx_context  *)(get_ctx_through_ctxinfo((_uc)->lsx.addr ))))
 #define UC_LASX(_uc) (((struct lasx_context *)(get_ctx_through_ctxinfo((_uc)->lasx.addr))))
 
+#define UC_GET_FTOP(_uc, _type) \
+    (UC_LBT(_uc) ? (*(_type *)&UC_LBT(_uc)->ftop) : 0)
+
 #define UC_GET_FPR(_uc, _fp, _type) \
     (UC_FPU(_uc) ? *(_type *)&UC_FPU(_uc)->regs[_fp] : \
         UC_GET_LSX(_uc, _fp, 0, _type))
