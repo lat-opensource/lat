@@ -863,6 +863,48 @@ else
     latx_new_world="no"
 fi
 
+########################################
+# Check size of struct drm_amdgpu_gem_va
+########################################
+amdgpu_drm_cflags=""
+amdgpu_drm_include=""
+amdgpu_gem_va_old=no
+
+cat > $TMPC << EOF
+#include <stdio.h>
+#if __has_include(<drm/amdgpu_drm.h>)
+#include <drm/amdgpu_drm.h>
+#elif __has_include(<libdrm/amdgpu_drm.h>)
+#include <libdrm/amdgpu_drm.h>
+#else
+#error "amdgpu_drm.h not found"
+#endif
+
+
+int main(void) {
+    printf("%zu\n", sizeof(struct drm_amdgpu_gem_va));
+    return 0;
+}
+EOF
+
+if $pkg_config --exists libdrm; then
+    amdgpu_drm_cflags="$($pkg_config --cflags libdrm)"
+fi
+
+if compile_prog "$amdgpu_drm_cflags" "" ; then
+    if $cc $amdgpu_drm_cflags -o ./conftest$EXESUF $TMPC ; then
+        struct_size=$(./conftest$EXESUF)
+        echo "Detected drm_amdgpu_gem_va size: $struct_size"
+        if test "$struct_size" -eq 40; then
+            amdgpu_gem_va_old=yes
+        fi
+    else
+        echo "WARNING: Cannot create executable to detect drm_amdgpu_gem_va"
+    fi
+else
+    echo "WARNING: Cannot compile drm_amdgpu_gem_va detection program"
+fi
+
 werror=""
 
 for opt do
@@ -5586,6 +5628,10 @@ echo "GIT_SUBMODULES=$git_submodules" >> $config_host_mak
 echo "GIT_SUBMODULES_ACTION=$git_submodules_action" >> $config_host_mak
 
 echo "ARCH=$ARCH" >> $config_host_mak
+
+if test "$amdgpu_gem_va_old" = "yes"; then
+    echo "CONFIG_AMDGPU_GEN_VA_OLD=y" >> $config_host_mak
+fi
 
 if test "$debug_tcg" = "yes" ; then
   echo "CONFIG_DEBUG_TCG=y" >> $config_host_mak

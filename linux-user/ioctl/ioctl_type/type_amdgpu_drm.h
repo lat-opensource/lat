@@ -41,6 +41,7 @@ STRUCT(drm_amdgpu_gem_wait_idle_in,
     TYPE_INT,
     TYPE_INT,
     TYPE_ULONGLONG)
+#ifdef CONFIG_AMDGPU_GEN_VA_OLD
 STRUCT(drm_amdgpu_gem_va,
     TYPE_INT,
     TYPE_INT,
@@ -49,6 +50,20 @@ STRUCT(drm_amdgpu_gem_va,
     TYPE_ULONGLONG,
     TYPE_ULONGLONG,
     TYPE_ULONGLONG)
+#else
+STRUCT(drm_amdgpu_gem_va,
+    TYPE_INT,
+    TYPE_INT,
+    TYPE_INT,
+    TYPE_INT,
+    TYPE_ULONGLONG,
+    TYPE_ULONGLONG,
+    TYPE_ULONGLONG,
+    TYPE_ULONGLONG,
+    TYPE_INT,
+    TYPE_INT,
+    TYPE_ULONGLONG)
+#endif
 STRUCT(drm_amdgpu_wait_cs_in,
     TYPE_ULONGLONG,
     TYPE_ULONGLONG,
