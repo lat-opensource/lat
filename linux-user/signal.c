@@ -820,14 +820,14 @@ static void Emulate_FTZ(ucontext_t *uc)
      * temporary!
      */
     fd = rd + 1;
-    #define OPND_D_32 UC_FREG(uc)[(inst & 0x1f) + 1].__val32[0]
-    #define OPND_J_32 UC_FREG(uc)[((inst >> 5) & 0x1f ) + 1].__val32[0]
-    #define OPND_K_32 UC_FREG(uc)[((inst >> 10) & 0x1f) + 1].__val32[0]
-    #define OPND_A_32 UC_FREG(uc)[((inst >> 15) & 0x1f) + 1].__val32[0]
-    #define OPND_D_64 UC_FREG(uc)[(inst & 0x1f) + 1].__val64[0]
-    #define OPND_J_64 UC_FREG(uc)[((inst >> 5) & 0x1f) + 1].__val64[0]
-    #define OPND_K_64 UC_FREG(uc)[((inst >> 10) & 0x1f) + 1].__val64[0]
-    #define OPND_A_64 UC_FREG(uc)[((inst >> 15) & 0x1f) + 1].__val64[0]
+    #define OPND_D_32 (UC_FREG(uc)[((inst & 0x1f) + 1)].__val32[0])
+    #define OPND_J_32 (UC_FREG(uc)[(((inst >> 5) & 0x1f) + 1)].__val32[0])
+    #define OPND_K_32 (UC_FREG(uc)[(((inst >> 10) & 0x1f) + 1)].__val32[0])
+    #define OPND_A_32 (UC_FREG(uc)[(((inst >> 15) & 0x1f) + 1)].__val32[0])
+    #define OPND_D_64 (UC_FREG(uc)[((inst & 0x1f) + 1)].__val64[0])
+    #define OPND_J_64 (UC_FREG(uc)[(((inst >> 5) & 0x1f) + 1)].__val64[0])
+    #define OPND_K_64 (UC_FREG(uc)[(((inst >> 10) & 0x1f) + 1)].__val64[0])
+    #define OPND_A_64 (UC_FREG(uc)[(((inst >> 15) & 0x1f) + 1)].__val64[0])
 
     #define OPND_D_32_SET(val) (OPND_D_32 = val)
     #define OPND_J_32_SET(val) (OPND_J_32 = val)
@@ -843,138 +843,157 @@ static void Emulate_FTZ(ucontext_t *uc)
     memset(&extctx, 0, sizeof(extctx));
     /* we need to parse the extcontext data */
     parse_extcontext(uc, &extctx);
-    #define OPND_D_32 UC_GET_FPR(&extctx, (inst & 0x1f), int32_t)
-    #define OPND_J_32 UC_GET_FPR(&extctx, (inst & (0x1f << 5)), int32_t)
-    #define OPND_K_32 UC_GET_FPR(&extctx, (inst & (0x1f << 10)), int32_t)
-    #define OPND_A_32 UC_GET_FPR(&extctx, (inst & (0x1f << 15)), int32_t)
-    #define OPND_D_64 UC_GET_FPR(&extctx, (inst & 0x1f), int64_t)
-    #define OPND_J_64 UC_GET_FPR(&extctx, (inst & (0x1f << 5)), int64_t)
-    #define OPND_K_64 UC_GET_FPR(&extctx, (inst & (0x1f << 10)), int64_t)
-    #define OPND_A_64 UC_GET_FPR(&extctx, (inst & (0x1f << 15)), int64_t)
+    #define OPND_D_32 (UC_GET_FPR(&extctx, (inst & 0x1f), uint32_t))
+    #define OPND_J_32 (UC_GET_FPR(&extctx, ((inst >> 5) & 0x1f), uint32_t))
+    #define OPND_K_32 (UC_GET_FPR(&extctx, ((inst >> 10) & 0x1f), uint32_t))
+    #define OPND_A_32 (UC_GET_FPR(&extctx, ((inst >> 15) & 0x1f), uint32_t))
+    #define OPND_D_64 (UC_GET_FPR(&extctx, (inst & 0x1f), uint64_t))
+    #define OPND_J_64 (UC_GET_FPR(&extctx, ((inst >> 5) & 0x1f), uint64_t))
+    #define OPND_K_64 (UC_GET_FPR(&extctx, ((inst >> 10) & 0x1f), uint64_t))
+    #define OPND_A_64 (UC_GET_FPR(&extctx, ((inst >> 15) & 0x1f), uint64_t))
 
-    #define OPND_D_32_SET(val) UC_SET_FPR(&extctx, (inst & 0x1f), val, int32_t)
-    #define OPND_J_32_SET(val) UC_SET_FPR(&extctx, (inst & (0x1f << 5)), val, int32_t)
-    #define OPND_K_32_SET(val) UC_SET_FPR(&extctx, (inst & (0x1f << 10)), val, int32_t)
-    #define OPND_A_32_SET(val) UC_SET_FPR(&extctx, (inst & (0x1f << 15)), val, int32_t)
-    #define OPND_D_64_SET(val) UC_SET_FPR(&extctx, (inst & 0x1f), val, int64_t)
-    #define OPND_J_64_SET(val) UC_SET_FPR(&extctx, (inst & (0x1f << 5)), val, int64_t)
-    #define OPND_K_64_SET(val) UC_SET_FPR(&extctx, (inst & (0x1f << 10)), val, int64_t)
-    #define OPND_A_64_SET(val) UC_SET_FPR(&extctx, (inst & (0x1f << 15)), val, int64_t)
+    #define OPND_D_32_SET(val) UC_SET_FPR(&extctx, (inst & 0x1f), val, uint32_t)
+    #define OPND_J_32_SET(val) UC_SET_FPR(&extctx, ((inst >> 5) & 0x1f), val, uint32_t)
+    #define OPND_K_32_SET(val) UC_SET_FPR(&extctx, ((inst >> 10) & 0x1f), val, uint32_t)
+    #define OPND_A_32_SET(val) UC_SET_FPR(&extctx, ((inst >> 15) & 0x1f), val, uint32_t)
+    #define OPND_D_64_SET(val) UC_SET_FPR(&extctx, (inst & 0x1f), val, uint64_t)
+    #define OPND_J_64_SET(val) UC_SET_FPR(&extctx, ((inst >> 5) & 0x1f), val, uint64_t)
+    #define OPND_K_64_SET(val) UC_SET_FPR(&extctx, ((inst >> 10) & 0x1f), val, uint64_t)
+    #define OPND_A_64_SET(val) UC_SET_FPR(&extctx, ((inst >> 15) & 0x1f), val, uint64_t)
     /* TODO */
 #endif
 
-    switch(inst & ~0x7fff){
-        case 0x01008000:/*FADD_S*/
-            OPND_D_32_SET(float32_add(OPND_J_32, OPND_K_32, &status_force_soft));
-            opnd_type = 1;
-            break;
-        case 0x01028000:/*FSUB_S*/
-            OPND_D_32_SET(float32_sub(OPND_J_32, OPND_K_32, &status_force_soft));
-            opnd_type = 1;
-            break;
-        case 0x01048000:/*FMUL_S*/
-            OPND_D_32_SET(float32_mul(OPND_J_32, OPND_K_32, &status_force_soft));
-            opnd_type = 1;
-            break;
-        case 0x01068000:/*FDIV_S*/
-            OPND_D_32_SET(float32_div(OPND_J_32, OPND_K_32, &status_force_soft));
-            opnd_type = 1;
-            break;
-        case 0x01108000:/*FSCALEB_S*/
-            OPND_D_32_SET(float32_to_int32(OPND_K_32, &status_force_soft));
-            OPND_D_32_SET(float32_scalbn(OPND_J_32, OPND_D_32, &status_force_soft));
-            opnd_type = 1;
-            break;
-        case 0x01010000:/*FADD_D*/
-            OPND_D_64_SET(float64_add(OPND_J_64, OPND_K_64, &status_force_soft));
-            opnd_type = 2;
-            break;
-        case 0x01030000:/*FSUB_D*/
-            OPND_D_64_SET(float64_sub(OPND_J_64, OPND_K_64, &status_force_soft));
-            opnd_type = 2;
-            break;
-        case 0x01050000:/*FMUL_D*/
-            OPND_D_64_SET(float64_mul(OPND_J_64, OPND_K_64, &status_force_soft));
-            opnd_type = 2;
-            break;
-        case 0x01070000:/*FDIV_D*/
-            OPND_D_64_SET(float64_div(OPND_J_64, OPND_K_64, &status_force_soft));
-            opnd_type = 2;
-            break;
-        case 0x01110000:/*FSCALEB_D*/
-            OPND_D_64_SET(float64_to_int64(OPND_K_64, &status_force_soft));
-            OPND_D_64_SET(float64_scalbn(OPND_J_64, OPND_D_64, &status_force_soft));
-            opnd_type = 2;
-            break;
-        default:
-            break;
+    switch (inst & ~0x7fff) {
+      case 0x01008000: /*FADD_S*/
+        OPND_D_32_SET(float32_add(OPND_J_32, OPND_K_32, &status_force_soft));
+        opnd_type = 1;
+        break;
+      case 0x01028000: /*FSUB_S*/
+        OPND_D_32_SET(float32_sub(OPND_J_32, OPND_K_32, &status_force_soft));
+        opnd_type = 1;
+        break;
+      case 0x01048000: /*FMUL_S*/
+        OPND_D_32_SET(float32_mul(OPND_J_32, OPND_K_32, &status_force_soft));
+        opnd_type = 1;
+        break;
+      case 0x01068000: /*FDIV_S*/
+        OPND_D_32_SET(float32_div(OPND_J_32, OPND_K_32, &status_force_soft));
+        opnd_type = 1;
+        break;
+      case 0x01108000: /*FSCALEB_S*/
+        OPND_D_32_SET(float32_to_int32(OPND_K_32, &status_force_soft));
+        OPND_D_32_SET(float32_scalbn(OPND_J_32, OPND_D_32, &status_force_soft));
+        opnd_type = 1;
+        break;
+      case 0x01010000: /*FADD_D*/
+        OPND_D_64_SET(float64_add(OPND_J_64, OPND_K_64, &status_force_soft));
+        opnd_type = 2;
+        break;
+      case 0x01030000: /*FSUB_D*/
+        OPND_D_64_SET(float64_sub(OPND_J_64, OPND_K_64, &status_force_soft));
+        opnd_type = 2;
+        break;
+      case 0x01050000: /*FMUL_D*/
+        OPND_D_64_SET(float64_mul(OPND_J_64, OPND_K_64, &status_force_soft));
+        opnd_type = 2;
+        break;
+      case 0x01070000: /*FDIV_D*/
+        OPND_D_64_SET(float64_div(OPND_J_64, OPND_K_64, &status_force_soft));
+        opnd_type = 2;
+        break;
+      case 0x01110000: /*FSCALEB_D*/
+        OPND_D_64_SET(float64_to_int64(OPND_K_64, &status_force_soft));
+        OPND_D_64_SET(float64_scalbn(OPND_J_64, OPND_D_64, &status_force_soft));
+        opnd_type = 2;
+        break;
+      default:
+        break;
     }
-    switch(inst & ~0xfffff){
-        case 0x08100000:/*FMADD_S*/
-            OPND_D_32_SET(float32_muladd(OPND_J_32, OPND_K_32, OPND_A_32, 0, &status_force_soft));
-            opnd_type = 1;
-            break;
-        case 0x08500000:/*FMSUB_S*/
-            OPND_D_32_SET(float32_muladd(OPND_J_32, OPND_K_32, OPND_A_32, float_muladd_negate_c, &status_force_soft));
-            opnd_type = 1;
-            break;
-        case 0x08900000:/*FNMADD_S*/
-            OPND_D_32_SET(float32_muladd(OPND_J_32, OPND_K_32, OPND_A_32, float_muladd_negate_result, &status_force_soft));
-            opnd_type = 1;
-            break;
-        case 0x08d00000:/*FNMSUB_S*/
-            OPND_D_32_SET(float32_muladd(OPND_J_32, OPND_K_32, OPND_A_32, float_muladd_negate_c | float_muladd_negate_result, &status_force_soft));
-            opnd_type = 1;
-            break;
-        case 0x08200000:/*FMADD_D*/
-            OPND_D_64_SET(float64_muladd(OPND_J_64, OPND_K_64, OPND_A_64, 0, &status_force_soft));
-            opnd_type = 2;
-            break;
-        case 0x08600000:/*FMSUB_D*/
-            OPND_D_64_SET(float64_muladd(OPND_J_64, OPND_K_64, OPND_A_64, float_muladd_negate_c, &status_force_soft));
-            opnd_type = 2;
-            break;
-        case 0x08a00000:/*FNMADD_D*/
-            OPND_D_64_SET(float64_muladd(OPND_J_64, OPND_K_64, OPND_A_64, float_muladd_negate_result, &status_force_soft));
-            opnd_type = 2;
-            break;
-        case 0x08e00000:/*FNMSUB_D*/
-            OPND_D_64_SET(float64_muladd(OPND_J_64, OPND_K_64, OPND_A_64, float_muladd_negate_c | float_muladd_negate_result, &status_force_soft));
-            opnd_type = 2;
-            break;
-        default:
-            break;
+    switch (inst & ~0xfffff) {
+      case 0x08100000: /*FMADD_S*/
+        OPND_D_32_SET(float32_muladd(OPND_J_32, OPND_K_32, OPND_A_32, 0,
+                                     &status_force_soft));
+        opnd_type = 1;
+        break;
+      case 0x08500000: /*FMSUB_S*/
+        OPND_D_32_SET(float32_muladd(OPND_J_32, OPND_K_32, OPND_A_32,
+                                     float_muladd_negate_c,
+                                     &status_force_soft));
+        opnd_type = 1;
+        break;
+      case 0x08900000: /*FNMADD_S*/
+        OPND_D_32_SET(float32_muladd(OPND_J_32, OPND_K_32, OPND_A_32,
+                                     float_muladd_negate_result,
+                                     &status_force_soft));
+        opnd_type = 1;
+        break;
+      case 0x08d00000: /*FNMSUB_S*/
+        OPND_D_32_SET(
+            float32_muladd(OPND_J_32, OPND_K_32, OPND_A_32,
+                           float_muladd_negate_c | float_muladd_negate_result,
+                           &status_force_soft));
+        opnd_type = 1;
+        break;
+      case 0x08200000: /*FMADD_D*/
+        OPND_D_64_SET(float64_muladd(OPND_J_64, OPND_K_64, OPND_A_64, 0,
+                                     &status_force_soft));
+        opnd_type = 2;
+        break;
+      case 0x08600000: /*FMSUB_D*/
+        OPND_D_64_SET(float64_muladd(OPND_J_64, OPND_K_64, OPND_A_64,
+                                     float_muladd_negate_c,
+                                     &status_force_soft));
+        opnd_type = 2;
+        break;
+      case 0x08a00000: /*FNMADD_D*/
+        OPND_D_64_SET(float64_muladd(OPND_J_64, OPND_K_64, OPND_A_64,
+                                     float_muladd_negate_result,
+                                     &status_force_soft));
+        opnd_type = 2;
+        break;
+      case 0x08e00000: /*FNMSUB_D*/
+        OPND_D_64_SET(
+            float64_muladd(OPND_J_64, OPND_K_64, OPND_A_64,
+                           float_muladd_negate_c | float_muladd_negate_result,
+                           &status_force_soft));
+        opnd_type = 2;
+        break;
+      default:
+        break;
     }
-    switch(inst & ~0x3ff){
-        case 0x01142400:/*FLOGB_S*/
-            OPND_D_32_SET(float32_log2(OPND_J_32, &status_force_soft));
-            opnd_type = 1;
-            break;
-        case 0x01142800:/*FLOGB_D*/
-            OPND_D_64_SET(float64_log2(OPND_J_64, &status_force_soft));
-            opnd_type = 2;
-            break;
-        default:
-            break;
+    switch (inst & ~0x3ff) {
+      case 0x01142400: /*FLOGB_S*/
+        OPND_D_32_SET(float32_log2(OPND_J_32, &status_force_soft));
+        opnd_type = 1;
+        break;
+      case 0x01142800: /*FLOGB_D*/
+        OPND_D_64_SET(float64_log2(OPND_J_64, &status_force_soft));
+        opnd_type = 2;
+        break;
+      default:
+        break;
     }
 
     assert(opnd_type != 0);
 
 #ifndef CONFIG_LOONGARCH_NEW_WORLD
-    if(opnd_type & 0x2) {
-        UC_FREG(uc)[fd].__val64[0] &= 1UL << 63;
-	} else {
-        UC_FREG(uc)[fd].__val32[0] &= 1 << 31;
-	}
+    if (opnd_type & 0x2) {
+      UC_FREG(uc)[fd].__val64[0] &= 1UL << 63;
+    } else {
+      UC_FREG(uc)[fd].__val32[0] &= 1 << 31;
+    }
     /* clear cause bits prevent kernel to raise another SIGFPE */
     UC_FCSR(uc) &= ~(0x1 << 25);
 #else
-    if(opnd_type & 0x2) {
-	    UC_SET_FPR(&extctx, fd, (UC_GET_FPR(&extctx, fd, int64_t) & 1UL << 63), int64_t);
-	} else {
-	    UC_SET_FPR(&extctx, fd, (UC_GET_FPR(&extctx, fd, int32_t) & 1UL << 31), int32_t);
-	}
-	UC_SET_FCSR(&extctx, (UC_GET_FCSR(&extctx, int32_t)) & (~(0x1 << 25)), int32_t);
+    if (opnd_type & 0x2) {
+      UC_SET_FPR(&extctx, fd, (UC_GET_FPR(&extctx, fd, uint64_t) & (1UL << 63)),
+                 uint64_t);
+    } else {
+      UC_SET_FPR(&extctx, fd, (UC_GET_FPR(&extctx, fd, uint32_t) & (1UL << 31)),
+                 uint32_t);
+    }
+    UC_SET_FCSR(&extctx, (UC_GET_FCSR(&extctx, uint32_t)) & (~(0x1 << 25)),
+                uint32_t);
 #endif
     UC_PC(uc) += 4;
 }
