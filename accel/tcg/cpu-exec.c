@@ -299,11 +299,11 @@ cpu_tb_exec(CPUState *cpu, TranslationBlock *itb, int *tb_exit)
 
     trace_exec_tb_exit(last_tb, *tb_exit);
     if (last_tb) {
-        if (last_tb->signal_unlink[0]) {
-            last_tb->signal_unlink[0] = 2;
+        if (tb_is_unlink(last_tb, 0)) {
+            set_tb_relink_flag(last_tb, 0);
         }
-        if (last_tb->signal_unlink[1]) {
-            last_tb->signal_unlink[1] = 2;
+        if (tb_is_unlink(last_tb, 1)) {
+            set_tb_relink_flag(last_tb, 1);
         }
     }
 
@@ -633,8 +633,8 @@ static inline void tb_add_jump(TranslationBlock *tb, int n,
                           (uintptr_t)tb_next);
     if (old) {
         goto out_unlock_next;
-    } else if (tb->signal_unlink[n] == 2) {
-        tb->signal_unlink[n] = 0;
+    } else if (tb_need_relink(tb, n)) {
+        clear_signal_link_flag(tb, n);
         latx_tb_set_jmp_target(tb, n, tb_next);
         goto out_unlock_next;
     }

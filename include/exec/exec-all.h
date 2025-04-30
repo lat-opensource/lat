@@ -52,6 +52,12 @@ bool use_tu_jmp(TranslationBlock *tb);
 void set_use_tu_jmp(TranslationBlock *tb);
 void unset_use_tu_jmp(TranslationBlock *tb);
 bool use_indirect_jmp(TranslationBlock *tb);
+bool tb_is_unlink(TranslationBlock *tb, int index);
+bool tb_need_relink(TranslationBlock *tb, int index);
+void set_tb_unlink_flag(TranslationBlock *tb, int index);
+void set_tb_relink_flag(TranslationBlock *tb, int index);
+void clear_signal_link_flag(TranslationBlock *tb, int index);
+
 void tb_reset_jump(TranslationBlock *tb, int n);
 void restore_state_to_opc(CPUArchState *env, TranslationBlock *tb,
                           target_ulong *data);
@@ -641,7 +647,11 @@ struct TranslationBlock {
 #define IS_TU_TB          0x20
 #define IS_TU_JMP         0x40
 #define IS_INDIRECT_JMP   0x80
-    uint8_t bool_flags;
+#define SIGNAL_UNLINK0    0x100
+#define SIGNAL_RELINK0    0x200
+#define SIGNAL_UNLINK1    0x400
+#define SIGNAL_RELINK1    0x800
+    uint16_t bool_flags;
     uint8_t  eflag_use;
     struct separated_data *s_data;
 #ifdef CONFIG_LATX_INSTS_PATTERN
@@ -655,7 +665,6 @@ struct TranslationBlock {
     uint16_t eflags_target_arg[EFLAG_BACKUP + 1];
     /* bool target1_eliminate; */
 #endif
-    uint8_t signal_unlink[2];
     uint16_t first_jmp_align;
 #ifdef CONFIG_LATX_PROFILER
     TBProfile profile __attribute__((aligned(8)));

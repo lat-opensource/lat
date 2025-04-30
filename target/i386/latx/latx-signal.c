@@ -21,17 +21,66 @@ void unlink_tu_jmp(TranslationBlock *tb)
 }
 #endif
 
+bool tb_is_unlink(TranslationBlock *tb, int index)
+{
+    if (index == 0) {
+        return (tb->bool_flags & SIGNAL_UNLINK0) ? true :false;
+    } else {
+        return (tb->bool_flags & SIGNAL_UNLINK1) ? true :false;
+    }
+}
+
+bool tb_need_relink(TranslationBlock *tb, int index)
+{
+    if (index == 0) {
+        return (tb->bool_flags & SIGNAL_RELINK0) ? true :false;
+    } else {
+        return (tb->bool_flags & SIGNAL_RELINK1) ? true :false;
+    }
+}
+
+void set_tb_unlink_flag(TranslationBlock *tb, int index)
+{
+    if (index == 0) {
+        tb->bool_flags &=  ~SIGNAL_RELINK0;
+        tb->bool_flags |=  SIGNAL_UNLINK0;
+    } else {
+        tb->bool_flags &=  ~SIGNAL_RELINK1;
+        tb->bool_flags |=  SIGNAL_UNLINK1;
+    }
+}
+
+void set_tb_relink_flag(TranslationBlock *tb, int index)
+{
+    if (index == 0) {
+        tb->bool_flags &=  ~SIGNAL_UNLINK0;
+        tb->bool_flags |=  SIGNAL_RELINK0;
+    } else {
+        tb->bool_flags &=  ~SIGNAL_UNLINK1;
+        tb->bool_flags |=  SIGNAL_RELINK1;
+    }
+}
+
+void clear_signal_link_flag(TranslationBlock *tb, int index)
+{
+    if (index == 0) {
+        tb->bool_flags &=  ~(SIGNAL_UNLINK0 | SIGNAL_RELINK0);
+    } else {
+        tb->bool_flags &=  ~(SIGNAL_UNLINK1 | SIGNAL_RELINK1);
+    }
+}
+
 void unlink_direct_jmp(TranslationBlock *tb) /* TODO */
 {
     if (tb->jmp_reset_offset[0] != TB_JMP_RESET_OFFSET_INVALID) {
         tb_reset_jump(tb, 0);
         qatomic_and(&tb->jmp_dest[0], (uintptr_t)NULL);
-        tb->signal_unlink[0] = 1;
+        set_tb_unlink_flag(tb, 0);
     }
     if (tb->jmp_reset_offset[1] != TB_JMP_RESET_OFFSET_INVALID) {
         tb_reset_jump(tb, 1);
         qatomic_and(&tb->jmp_dest[1], (uintptr_t)NULL);
-        tb->signal_unlink[1] = 1;
+        set_tb_unlink_flag(tb, 1);
     }
 }
 

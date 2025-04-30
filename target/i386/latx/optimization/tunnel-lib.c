@@ -411,8 +411,8 @@ static void reset_tb(TranslationBlock *tb)
     tb->eflags_target_arg[2] = TB_JMP_RESET_OFFSET_INVALID;
 #endif
     tb->bool_flags = OPT_BCC | IS_TUNNEL_LIB;
-    tb->signal_unlink[0] = 0;
-    tb->signal_unlink[1] = 0;
+    clear_signal_link_flag(tb, 0);
+    clear_signal_link_flag(tb, 1);
     tb->first_jmp_align = TB_JMP_RESET_OFFSET_INVALID;
     tb_set_page_addr0(tb, -1);
     tb_set_page_addr1(tb, -1);

@@ -2096,8 +2096,8 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
     tb->s_data->tu_tb_mode = TB_GEN_CODE;
 #endif
 #ifdef CONFIG_LATX
-    tb->signal_unlink[0] = 0;
-    tb->signal_unlink[1] = 0;
+    clear_signal_link_flag(tb, 0);
+    clear_signal_link_flag(tb, 1);
     tb->first_jmp_align = TB_JMP_RESET_OFFSET_INVALID;
 #endif
     tcg_ctx->tb_jmp_reset_offset = tb->jmp_reset_offset;
