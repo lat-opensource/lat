@@ -391,7 +391,7 @@ static TranslationBlock* create_static_tb(CPUState *cpu, target_ulong pc,
     }
     tu_reset_tb(tb);
     tb->pc = pc;
-    tb->cs_base = cs_base;
+    /* tb->cs_base = cs_base; */
     tb->flags = flags;
     tb->cflags = cflags;
     tb->trace_vcpu_dstate = *cpu->trace_dstate;
@@ -730,7 +730,8 @@ static void translate_seg(seg_info *seg, CPUState *cpu,
             TranslationBlock *tb = curr_tb_message_vector[i].tb;
             if (tb != NULL) {
                 jrra_pre_translate((void **)&tb, 1, cpu,
-                        tb->cs_base, tb->flags, tb->cflags);
+                        0, tb->flags, tb->cflags);
+                        /* tb->cs_base, tb->flags, tb->cflags); */
             }
         }
     }

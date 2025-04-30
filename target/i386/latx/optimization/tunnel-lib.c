@@ -427,7 +427,7 @@ static void reset_tb(TranslationBlock *tb)
 static void init_tb_by_cpu(struct cpu_state_info *state_info,
     CPUState *cpu, TranslationBlock *tb)
 {
-    tb->cs_base = state_info->cs_base;
+    /* tb->cs_base = state_info->cs_base; */
     tb->flags = state_info->flags;
     tb->cflags = cpu->tcg_cflags;
     tb->trace_vcpu_dstate = *cpu->trace_dstate;

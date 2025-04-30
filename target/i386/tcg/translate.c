@@ -8471,7 +8471,8 @@ static void i386_tr_init_disas_context(DisasContextBase *dcbase, CPUState *cpu)
     DisasContext *dc = container_of(dcbase, DisasContext, base);
     CPUX86State *env = cpu->env_ptr;
     uint32_t flags = dc->base.tb->flags;
-    target_ulong cs_base = dc->base.tb->cs_base;
+    /* target_ulong cs_base = dc->base.tb->cs_base; */
+    target_ulong cs_base = 0;
 
     dc->pe = (flags >> HF_PE_SHIFT) & 1;
     dc->code32 = (flags >> HF_CS32_SHIFT) & 1;
@@ -8744,7 +8745,8 @@ void restore_state_to_opc(CPUX86State *env, TranslationBlock *tb,
 {
     int cc_op = data[1];
 
-    env->eip = data[0] - tb->cs_base;
+    /* env->eip = data[0] - tb->cs_base; */
+    env->eip = data[0];
     if (cc_op != CC_OP_DYNAMIC) {
         env->cc_op = cc_op;
     }

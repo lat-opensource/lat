@@ -64,7 +64,8 @@ static void x86_cpu_synchronize_from_tb(CPUState *cs,
 {
     X86CPU *cpu = X86_CPU(cs);
 
-    cpu->env.eip = tb->pc - tb->cs_base;
+    /* cpu->env.eip = tb->pc - tb->cs_base; */
+    cpu->env.eip = tb->pc;
 }
 
 #include "hw/core/tcg-cpu-ops.h"

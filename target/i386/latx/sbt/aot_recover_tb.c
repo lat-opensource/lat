@@ -43,7 +43,7 @@ inline static TranslationBlock *creat_tb(aot_tb *p_aot_tb, abi_ulong start,
     tb->tc.size = p_aot_tb->tb_cache_size;
     tb->tc.ptr = tc_ptr; 
     tb->pc = start + p_aot_tb->offset_in_segment;
-    tb->cs_base = base;
+    /* tb->cs_base = base; */
     tb->flags = p_aot_tb->flags;
     tb->trace_vcpu_dstate = *thread_cpu->trace_dstate;
     tb->size = p_aot_tb->size;

@@ -198,14 +198,14 @@ cpu_tb_exec(CPUState *cpu, TranslationBlock *itb, int *tb_exit)
                    "%d Trace %d: %p ["
                    TARGET_FMT_lx "/" "%016llx" "/" TARGET_FMT_lx
                    "/%#x] KZT:%s\n", getpid(), cpu->cpu_index, itb->tc.ptr,
-                   itb->cs_base, (unsigned long long)pthread_self(),
+                   0UL, (unsigned long long)pthread_self(),
                    itb->pc, itb->flags, dl_info.dli_sname);
         } else {
             qemu_log_mask_and_addr(CPU_LOG_EXEC, itb->pc,
                    "%d Trace %d: %p ["
                    TARGET_FMT_lx "/" "%016llx" "/" TARGET_FMT_lx
                    "/%#x] %s\n", getpid(), cpu->cpu_index, itb->tc.ptr,
-                   itb->cs_base, (unsigned long long)pthread_self(),
+                   0UL, (unsigned long long)pthread_self(),
                    itb->pc, itb->flags, lookup_symbol(itb->pc));
         }
     }
@@ -429,7 +429,7 @@ static bool tb_lookup_cmp(const void *p, const void *d)
 
     if (tb->pc == desc->pc &&
         tb_page_addr0(tb) == desc->page_addr0 &&
-        tb->cs_base == desc->cs_base &&
+        /* tb->cs_base == desc->cs_base && */
         tb->flags == desc->flags &&
         tb->trace_vcpu_dstate == desc->trace_vcpu_dstate &&
         tb_cflags(tb) == desc->cflags) {

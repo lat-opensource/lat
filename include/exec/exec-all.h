@@ -550,7 +550,7 @@ struct separated_data{
 
 struct TranslationBlock {
     target_ulong pc;   /* simulated PC corresponding to this block (EIP + CS base) */
-    target_ulong cs_base; /* CS base for this block */
+    /* target_ulong cs_base; /1* CS base for this block *1/ */
     uint32_t flags; /* flags defining in which context the code was generated */
     uint32_t cflags;    /* compile flags */
 #define CF_COUNT_MASK  0x00007fff

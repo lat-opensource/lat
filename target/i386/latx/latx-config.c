@@ -135,7 +135,7 @@ void trace_tb_execution(struct TranslationBlock *tb)
         fprintf(stderr, "[trace] PC      = %-18p , target's virtual address\n",
                 (void *)(unsigned long)tb->pc);
         fprintf(stderr, "[trace] csbase  = %-18p , target's CS segment base\n",
-                (void *)(unsigned long)tb->cs_base);
+                (void *)0);
         fprintf(stderr, "[trace] size    = %-18ld , TB's target code size\n",
                 (unsigned long)tb->size);
         fprintf(stderr, "[trace] tc.ptr  = %-18p , TB's host code size\n",

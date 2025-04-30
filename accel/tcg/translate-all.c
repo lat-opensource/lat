@@ -1330,7 +1330,7 @@ static bool tb_cmp(const void *ap, const void *bp)
     const TranslationBlock *b = bp;
 
     return a->pc == b->pc &&
-        a->cs_base == b->cs_base &&
+        /* a->cs_base == b->cs_base && */
         a->flags == b->flags &&
         (tb_cflags(a) & ~CF_INVALID) == (tb_cflags(b) & ~CF_INVALID) &&
         a->trace_vcpu_dstate == b->trace_vcpu_dstate &&
@@ -2033,7 +2033,7 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
     gen_code_buf = tcg_ctx->code_gen_ptr;
     tb->tc.ptr = tcg_splitwx_to_rx(gen_code_buf);
     tb->pc = pc;
-    tb->cs_base = cs_base;
+    /* tb->cs_base = cs_base; */
     tb->flags = flags;
     tb->cflags = cflags;
     tb->jmp_target_arg[0] = TB_JMP_RESET_OFFSET_INVALID;

@@ -40,7 +40,7 @@ static inline TranslationBlock *tb_lookup(CPUState *cpu, target_ulong pc,
 
     if (likely(tb &&
                tb->pc == pc &&
-               tb->cs_base == cs_base &&
+               /* tb->cs_base == cs_base && */
                tb->flags == flags &&
                tb->trace_vcpu_dstate == *cpu->trace_dstate &&
                tb_cflags(tb) == cflags)) {
