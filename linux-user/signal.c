@@ -852,15 +852,52 @@ static void Emulate_FTZ(ucontext_t *uc)
     #define OPND_K_64 (UC_GET_FPR(&extctx, ((inst >> 10) & 0x1f), uint64_t))
     #define OPND_A_64 (UC_GET_FPR(&extctx, ((inst >> 15) & 0x1f), uint64_t))
 
-    #define OPND_D_32_SET(val) UC_SET_FPR(&extctx, (inst & 0x1f), val, uint32_t)
-    #define OPND_J_32_SET(val) UC_SET_FPR(&extctx, ((inst >> 5) & 0x1f), val, uint32_t)
-    #define OPND_K_32_SET(val) UC_SET_FPR(&extctx, ((inst >> 10) & 0x1f), val, uint32_t)
-    #define OPND_A_32_SET(val) UC_SET_FPR(&extctx, ((inst >> 15) & 0x1f), val, uint32_t)
-    #define OPND_D_64_SET(val) UC_SET_FPR(&extctx, (inst & 0x1f), val, uint64_t)
-    #define OPND_J_64_SET(val) UC_SET_FPR(&extctx, ((inst >> 5) & 0x1f), val, uint64_t)
-    #define OPND_K_64_SET(val) UC_SET_FPR(&extctx, ((inst >> 10) & 0x1f), val, uint64_t)
-    #define OPND_A_64_SET(val) UC_SET_FPR(&extctx, ((inst >> 15) & 0x1f), val, uint64_t)
-    /* TODO */
+    #define OPND_D_32_SET(val)                              \
+    do {                                                    \
+      uint32_t _temp = (val);                               \
+      UC_SET_FPR(&extctx, (inst & 0x1f), &_temp, uint32_t); \
+    } while (0)
+    #define OPND_J_32_SET(val)                                     \
+    do {                                                           \
+      uint32_t _temp = (val);                                      \
+      UC_SET_FPR(&extctx, ((inst >> 5) & 0x1f), &_temp, uint32_t); \
+    } while (0)
+
+    #define OPND_K_32_SET(val)                                      \
+    do {                                                            \
+      uint32_t _temp = (val);                                       \
+      UC_SET_FPR(&extctx, ((inst >> 10) & 0x1f), &_temp, uint32_t); \
+    } while (0)
+
+    #define OPND_A_32_SET(val)                                      \
+    do {                                                            \
+      uint32_t _temp = (val);                                       \
+      UC_SET_FPR(&extctx, ((inst >> 15) & 0x1f), &_temp, uint32_t); \
+    } while (0)
+
+    #define OPND_D_64_SET(val)                              \
+    do {                                                    \
+      uint64_t _temp = (val);                               \
+      UC_SET_FPR(&extctx, (inst & 0x1f), &_temp, uint64_t); \
+    } while (0)
+
+    #define OPND_J_64_SET(val)                                     \
+    do {                                                           \
+      uint64_t _temp = (val);                                      \
+      UC_SET_FPR(&extctx, ((inst >> 5) & 0x1f), &_temp, uint64_t); \
+    } while (0)
+
+    #define OPND_K_64_SET(val)                                      \
+    do {                                                            \
+      uint64_t _temp = (val);                                       \
+      UC_SET_FPR(&extctx, ((inst >> 10) & 0x1f), &_temp, uint64_t); \
+    } while (0)
+
+    #define OPND_A_64_SET(val)                                      \
+    do {                                                            \
+      uint64_t _temp = (val);                                       \
+      UC_SET_FPR(&extctx, ((inst >> 15) & 0x1f), &_temp, uint64_t); \
+    } while (0)
 #endif
 
     switch (inst & ~0x7fff) {
