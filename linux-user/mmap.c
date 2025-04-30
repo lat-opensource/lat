@@ -617,6 +617,50 @@ abi_ulong mmap_find_vma_2g(abi_ulong start, abi_ulong size, abi_ulong align)
 }
 #endif
 
+static int create_shadow_file(int fd, uint64 offset, abi_ulong start, abi_ulong len)
+{
+    char *tmp_buf;
+    char file_name[64];
+    snprintf(file_name, sizeof(file_name), "/tmp/lat_%d", getpid());
+    FILE *file = fopen(file_name, "wb");
+    if (file == NULL) {
+        return -1;
+    }
+
+    size_t mov_len = start % qemu_host_page_size;
+    if (mov_len) {
+        /* fprintf(stderr, "mov_len %lx\n", mov_len); */
+        tmp_buf = (char *)malloc(mov_len);
+        if (!tmp_buf || fwrite(tmp_buf, 1, mov_len, file) != mov_len) {
+            free(tmp_buf);
+            fclose(file);
+            unlink(file_name);
+            return -1;
+        }
+        free(tmp_buf);
+    }
+
+    tmp_buf = (char *)malloc(len);
+    if (!tmp_buf) {
+        fclose(file);
+        unlink(file_name);
+        return -1;
+    }
+    ssize_t bytes_read = pread(fd, tmp_buf, len, offset);
+    if (bytes_read != len || fwrite(tmp_buf, 1, len, file) != len) {
+        free(tmp_buf);
+        fclose(file);
+        unlink(file_name);
+        return -1;
+    }
+    free(tmp_buf);
+    /* Reopen the file to refresh it. */
+    fclose(file);
+    fd = open(file_name, O_RDONLY);
+    unlink(file_name);
+    return fd;
+}
+
 /*
  * NOTE: all the constants are the HOST ones
  * Expand offset type from abi_ulong to uint64 to make mmap2 happy.
@@ -633,6 +677,7 @@ abi_long target_mmap(abi_ulong start, abi_ulong len, int target_prot,
     abi_ulong ret, end, real_start, real_end, retaddr, host_len;
     int page_flags, temp_flags, host_prot;
     uint64_t host_offset;
+    int shadow_fd = -1;
 
 #ifndef TARGET_X86_64
     /* Hacking wine user_shared_data mapping to avoid shadow page */
@@ -819,6 +864,15 @@ abi_long target_mmap(abi_ulong start, abi_ulong len, int target_prot,
             goto the_end1;
         }
 #endif
+        if (option_shadow_file && !(flags & MAP_ANONYMOUS) &&
+            (offset & ~qemu_host_page_mask) != (start & ~qemu_host_page_mask)
+            && (len >= 0x4000)) {
+            shadow_fd = create_shadow_file(fd, offset, start, len);
+            if (shadow_fd != -1) {
+                fd = shadow_fd;
+                offset = start % qemu_host_page_size;
+            }
+        }
 
         if (!(flags & MAP_ANONYMOUS) &&
             (offset & ~qemu_host_page_mask) != (start & ~qemu_host_page_mask)) {
@@ -1020,9 +1074,15 @@ abi_long target_mmap(abi_ulong start, abi_ulong len, int target_prot,
     if (option_prlimit && rlimit_as_account && vir_rlimit_as != RLIM_INFINITY) {
         vir_rlimit_as_acc += len;
     }
+    if (shadow_fd != -1) {
+        close(shadow_fd);
+    }
     mmap_unlock();
     return start;
 fail:
+    if (shadow_fd != -1) {
+        close(shadow_fd);
+    }
     mmap_unlock();
     return -1;
 }

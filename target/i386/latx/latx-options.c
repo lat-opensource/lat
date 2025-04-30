@@ -83,6 +83,7 @@ int option_anonym;
 int option_mem_test;
 int option_real_maps;
 int option_monitor_shared_mem;
+int option_shadow_file;
 
 unsigned long long counter_tb_exec;
 unsigned long long counter_tb_tr;
@@ -133,6 +134,7 @@ void options_init(void)
     option_mem_test = 0;
     option_real_maps = 0;
     option_monitor_shared_mem = 0;
+    option_shadow_file = 0;
 }
 
 #define OPTIONS_IMM_REG 0
