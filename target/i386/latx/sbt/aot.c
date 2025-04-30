@@ -284,17 +284,29 @@ static inline int create_aot_tb(aot_tb *curr_aot_tb, TranslationBlock *tb,
 {
 #ifdef CONFIG_LATX_TU
     curr_aot_tb->tu_id = tb->s_data->tu_id;
-    curr_aot_tb->offset_in_tu = tb->tc.offset_in_tu;
-    curr_aot_tb->tu_unlink_stub_offset = tb->tu_unlink_stub_offset;
-    curr_aot_tb->tu_link_ins = tb->tu_link_ins;
-    curr_aot_tb->tu_search_addr_offset = 
-	(uintptr_t)(tb->tu_search_addr - (uintptr_t)(tb->tc.ptr));
-    curr_aot_tb->tu_jmp[0] = tb->tu_jmp[0];
-    curr_aot_tb->tu_jmp[1] = tb->tu_jmp[1];
+    curr_aot_tb->offset_in_tu = tb->s_data->offset_in_tu;
+    if (is_tu_tb(tb)) {
+        curr_aot_tb->tu_search_addr_offset = tb->tu_search_addr_offset;
+    }
 #endif
-    curr_aot_tb->icount = tb->icount;
+    curr_aot_tb->jmp_stub_target_arg[0] = tb->jmp_stub_target_arg[0];
+    curr_aot_tb->jmp_stub_target_arg[1] = tb->jmp_stub_target_arg[1];
+    if (use_tu_jmp(tb)) {
+        curr_aot_tb->tu_jmp[0] = tb->tu_jmp[0];
+        curr_aot_tb->tu_jmp[1] = tb->tu_jmp[1];
+        curr_aot_tb->tu_unlink.ins = tb->tu_unlink.ins;
+        curr_aot_tb->tu_unlink.stub_offset = tb->tu_unlink.stub_offset;
+    } else {
+        curr_aot_tb->jmp_indirect = tb->jmp_indirect;
+        curr_aot_tb->jmp_target_arg[0] = tb->jmp_target_arg[0];
+        curr_aot_tb->jmp_target_arg[1] = tb->jmp_target_arg[1];
+        curr_aot_tb->jmp_reset_offset[0] = tb->jmp_reset_offset[0];
+        curr_aot_tb->jmp_reset_offset[1] = tb->jmp_reset_offset[1];
+        curr_aot_tb->jmp_stub_reset_offset[0] = tb->jmp_stub_reset_offset[0];
+        curr_aot_tb->jmp_stub_reset_offset[1] = tb->jmp_stub_reset_offset[1];
+    }
 
-    curr_aot_tb->jmp_indirect = tb->jmp_indirect;
+    curr_aot_tb->icount = tb->icount;
     curr_aot_tb->tu_size = tb->s_data->tu_size;
     curr_aot_tb->offset_in_segment =
         tb->pc - curr_seg->details.seg_begin;
@@ -305,21 +317,11 @@ static inline int create_aot_tb(aot_tb *curr_aot_tb, TranslationBlock *tb,
     curr_aot_tb->size = tb->size;
     curr_aot_tb->flags = tb->flags;
     curr_aot_tb->cflags = tb->cflags;
-    curr_aot_tb->jmp_reset_offset[0] =
-        tb->jmp_reset_offset[0];
-    curr_aot_tb->jmp_reset_offset[1] =
-        tb->jmp_reset_offset[1];
-    curr_aot_tb->jmp_target_arg[0] = tb->jmp_target_arg[0];
-    curr_aot_tb->jmp_target_arg[1] = tb->jmp_target_arg[1];
     curr_aot_tb->rel_start_index = tb->s_data->rel_start;
     curr_aot_tb->rel_end_index = tb->s_data->rel_end;
     curr_aot_tb->segment_idx = curr_seg - p_segments;
     curr_aot_tb->first_jmp_align = tb->first_jmp_align;
     curr_aot_tb->last_ir1_type = tb->s_data->last_ir1_type;
-    curr_aot_tb->jmp_stub_reset_offset[0] = tb->jmp_stub_reset_offset[0];
-    curr_aot_tb->jmp_stub_reset_offset[1] = tb->jmp_stub_reset_offset[1];
-    curr_aot_tb->jmp_stub_target_arg[0] = tb->jmp_stub_target_arg[0];
-    curr_aot_tb->jmp_stub_target_arg[1] = tb->jmp_stub_target_arg[1];
     curr_aot_tb->bool_flags = tb->bool_flags | IS_AOT_TB;
     curr_aot_tb->eflag_use = tb->eflag_use;
     #ifdef CONFIG_LATX_INSTS_PATTERN
@@ -347,21 +349,21 @@ static inline int create_aot_tb(aot_tb *curr_aot_tb, TranslationBlock *tb,
                 curr_aot_tb->tb_cache_size);
     }
     for (int k = 0; k < 2; k++) {
-        if (curr_aot_tb->jmp_reset_offset[k] !=
-            TB_JMP_RESET_OFFSET_INVALID) {
+        if (!use_tu_jmp(tb) && (curr_aot_tb->jmp_reset_offset[k] !=
+                    TB_JMP_RESET_OFFSET_INVALID)) {
             uint32_t *p_insn =
                 (uint32_t *)(curr_aot_tb->tb_cache_addr +
-                             curr_aot_tb->jmp_target_arg[k]);
+                        curr_aot_tb->jmp_target_arg[k]);
             if (((*p_insn) & 0xfc000000) != 0x50000000 &&
-                !(((*p_insn) & 0xfe000000) == 0x1e000000 &&/* pcaddu18i */
-                    (*(p_insn + 1) & 0xfc000000) == 0x4c000000)) {/* jirl */
+                    !(((*p_insn) & 0xfe000000) == 0x1e000000 &&/* pcaddu18i */
+                        (*(p_insn + 1) & 0xfc000000) == 0x4c000000)) {/* jirl */
                 qemu_log_mask(LAT_LOG_AOT,
                         "Error! jmp_reset_offset is not B or jirl insn\n");
                 return -1;
             }
         }
     }
-   return 0;
+    return 0;
 }
 
 static void init_page_table(struct aot_segment *p_segments, aot_header *p_header) 
@@ -1258,7 +1260,7 @@ void aot_do_tb_reloc(TranslationBlock *tb, struct aot_tb *stb,
             lsassert((seg_begin <= tb->pc) && (seg_end >= tb->pc));
             uintptr_t call_target = aot_rel_table[i].extra_addend +
                 seg_begin;
-            if (((*pinsn) & 0x1f) == 21) {
+            if (!use_tu_jmp(tb) && ((*pinsn) & 0x1f) == 21) {
                 for (int j = 0; j < 2; j++) {
                     if ((tb->jmp_reset_offset[j] != TB_JMP_RESET_OFFSET_INVALID) &&
                             (aot_rel_table[i].tc_offset == 

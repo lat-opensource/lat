@@ -90,10 +90,6 @@ typedef struct aot_tb {
     /*tu_id is the first tb pc in TU */
     uint32_t tu_id;
     uint32_t offset_in_tu;
-    uint16_t tu_jmp[2];
-    uint32_t tu_unlink_stub_offset;
-    uint32_t tu_link_ins;
-    uintptr_t tu_search_addr_offset;
 #endif
     /* Translation Code Cache offset in AOT. */
     void *tb_cache_addr;
@@ -105,16 +101,27 @@ typedef struct aot_tb {
     };
     /* int tb_num; */
     uint16_t icount;
-    uintptr_t jmp_indirect;
     /* qemu TranslationBlock fields which should be recorded. */
     uint32_t size;
     uint32_t flags;
     uint32_t cflags;
-    uint16_t jmp_reset_offset[2];
-    uintptr_t jmp_target_arg[2];
+    union {
+        uint16_t jmp_reset_offset[2];
+        uint16_t tu_jmp[2];
+    };
+    union {
+        uint16_t jmp_stub_reset_offset[2];
+        uint32_t tu_search_addr_offset;
+    };
+    union {
+        uintptr_t jmp_target_arg[2];
+        struct tu_unlink tu_unlink;
+    };
+    union {
+        uintptr_t jmp_stub_target_arg[2];
+        uintptr_t jmp_indirect;
+    };
     uint16_t eflags_target_arg[3];
-    uint16_t jmp_stub_reset_offset[2];
-    uintptr_t jmp_stub_target_arg[2];
     uint8_t  eflag_use;
     uint8_t bool_flags;
     int32_t rel_start_index;

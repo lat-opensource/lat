@@ -366,10 +366,15 @@ static int cpu_restore_state_from_tb(CPUState *cpu, TranslationBlock *tb,
     target_ulong data[TARGET_INSN_START_WORDS] = { tb->pc };
     uintptr_t host_pc = (uintptr_t)tb->tc.ptr;
     CPUArchState *env = cpu->env_ptr;
+    const uint8_t *p;
 #ifdef CONFIG_LATX_TU
-    const uint8_t *p = tb->tu_search_addr;
+    if (is_tu_tb(tb)) {
+        p = tb->tc.ptr + tb->tu_search_addr_offset;
+    } else {
+        p = tb->tc.ptr + tb->tc.size;
+    }
 #else
-    const uint8_t *p = tb->tc.ptr + tb->tc.size;
+    p = tb->tc.ptr + tb->tc.size;
 #endif
     int i, j, num_insns = tb->icount;
 #ifdef CONFIG_PROFILER
@@ -1748,6 +1753,7 @@ static inline void tb_remove_from_jmp_list(TranslationBlock *orig, int n_orig)
    another TB */
 void tb_reset_jump(TranslationBlock *tb, int n)
 {
+    assert(!use_tu_jmp(tb));
     uintptr_t addr = (uintptr_t)(tb->tc.ptr + tb->jmp_reset_offset[n]);
     tb_set_jmp_target(tb, n, addr);
 #ifdef CONFIG_LATX_INSTS_PATTERN
@@ -2301,9 +2307,6 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
         tb->s_data->tu_size = ROUND_UP(gen_code_size + search_size, CODE_GEN_ALIGN);
     }
 #endif
-#ifdef CONFIG_LATX_TU
-    tb->tu_search_addr = (uint8_t *)((uintptr_t)tb->tc.ptr + tb->tc.size);
-#endif
 
 #ifdef CONFIG_PROFILER
     qatomic_set(&prof->code_time, prof->code_time + profile_getclock() - ti);
@@ -2328,6 +2331,7 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
     tb->jmp_dest[0] = (uintptr_t)NULL;
     tb->jmp_dest[1] = (uintptr_t)NULL;
 
+    assert(!use_tu_jmp(tb));
     /* init original jump addresses which have been set during tcg_gen_code() */
     if (tb->jmp_reset_offset[0] != TB_JMP_RESET_OFFSET_INVALID) {
         tb_reset_jump(tb, 0);
@@ -2870,7 +2874,7 @@ static gboolean tb_tree_stats_iter(gpointer key, gpointer value, gpointer data)
     if (tb_page_addr1(tb) != -1) {
         tst->cross_page++;
     }
-    if (tb->jmp_reset_offset[0] != TB_JMP_RESET_OFFSET_INVALID) {
+    if (!use_tu_jmp(tb) && tb->jmp_reset_offset[0] != TB_JMP_RESET_OFFSET_INVALID) {
         tst->direct_jmp_count++;
         if (tb->jmp_reset_offset[1] != TB_JMP_RESET_OFFSET_INVALID) {
             tst->direct_jmp2_count++;
@@ -6660,5 +6664,10 @@ void update_shadow_page_chunk(abi_ulong start, abi_ulong end, int prot,
             offset += TARGET_PAGE_SIZE;
         }
     }
+}
+
+bool use_indirect_jmp(TranslationBlock *tb)
+{
+    return (tb->bool_flags & IS_INDIRECT_JMP) ? true : false;
 }
 #endif

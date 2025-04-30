@@ -197,7 +197,7 @@ void ts_push_back(TranslationBlock *tb)
     assert(tb_num_in_ts < ts_vector_capacity);
 #ifdef CONFIG_LATX_TU
 	if (unlikely(tb->s_data->tu_tb_mode == TB_GEN_CODE)) {
-		tb->tc.offset_in_tu = 0;
+		tb->s_data->offset_in_tu = 0;
 	}
 #endif
     ts_vector[tb_num_in_ts++] = tb;
@@ -314,8 +314,8 @@ static inline void get_static_tb(int begin_id_in_ts,
     for(int i = begin_id_in_ts;
             i < tb_num_in_ts && i < max_num_id ; i++) {
         tb = ts_vector[i];
-        target_ulong ir1_next_pc = tb->next_pc;
-        target_ulong ir1_target_pc = tb->target_pc;
+        target_ulong ir1_next_pc = tb->s_data->next_pc;
+        target_ulong ir1_target_pc = tb->s_data->target_pc;
         lsassert(ir1_next_pc);
         if (translate_static_tb(seg, cpu, cs_base,
                 flags, cflags, ir1_next_pc) == -1) {
@@ -415,7 +415,7 @@ static TranslationBlock* create_static_tb(CPUState *cpu, target_ulong pc,
 static inline void get_next_tb(TranslationBlock *curr_tb, CPUState *cpu,
         target_ulong cs_base, uint32_t flags, int cflags, int max_insns)
 {
-    ADDRX next_tb_pc = curr_tb->next_pc;
+    ADDRX next_tb_pc = curr_tb->s_data->next_pc;
     lsassert(next_tb_pc);
     curr_tb->s_data->next_tb[TU_TB_INDEX_NEXT] = NULL;
     curr_tb->tu_jmp[TU_TB_INDEX_NEXT] = TB_JMP_RESET_OFFSET_INVALID;
@@ -458,7 +458,7 @@ static inline void get_target_tb(TranslationBlock *curr_tb, CPUState *cpu,
 {
     curr_tb->tu_jmp[TU_TB_INDEX_TARGET] = TB_JMP_RESET_OFFSET_INVALID;
     curr_tb->s_data->next_tb[TU_TB_INDEX_TARGET] = NULL;
-    ADDRX target_tb_pc = curr_tb->target_pc;
+    ADDRX target_tb_pc = curr_tb->s_data->target_pc;
     lsassert(target_tb_pc);
     int tb_id = get_tb_id(target_tb_pc, cflags);
     ADDRX curr_page = get_page(curr_tb->pc);
@@ -532,8 +532,8 @@ static inline void get_ts_queue(CPUState *cpu, target_ulong cs_base,
             }
             switch (tb->s_data->last_ir1_type) {
                 case IR1_TYPE_BRANCH:
-                    if (get_tb_id(tb->target_pc, cflags) < 0 ||
-                            get_tb_id(tb->next_pc, cflags) < 0) {
+                    if (get_tb_id(tb->s_data->target_pc, cflags) < 0 ||
+                            get_tb_id(tb->s_data->next_pc, cflags) < 0) {
                         break;
                     }
                     get_next_tb(tb, cpu, cs_base, flags, cflags, max_insns);

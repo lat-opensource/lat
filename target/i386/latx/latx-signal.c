@@ -16,7 +16,7 @@ void unlink_tu_jmp(TranslationBlock *tb)
 {
     uintptr_t jmp_rx = (uintptr_t)tb->tc.ptr + tb->tu_jmp[TU_TB_INDEX_TARGET];
     uintptr_t jmp_rw = jmp_rx - tcg_splitwx_diff;
-    uintptr_t addr = (uintptr_t)tb->tc.ptr + tb->tu_unlink_stub_offset;
+    uintptr_t addr = (uintptr_t)tb->tc.ptr + tb->tu_unlink.stub_offset;
     b_to_addr(jmp_rx, jmp_rw, addr);
 }
 #endif
@@ -144,10 +144,14 @@ bool signal_in_glue(CPUArchState *env, ucontext_t *uc)
     tb = qatomic_rcu_read(&cpu->tb_jmp_cache[hash]);
 
     if (likely(tb && tb->pc == pc)) {
-        if (tb->jmp_indirect != TB_JMP_RESET_OFFSET_INVALID) {
+        if (use_indirect_jmp(tb) && tb->jmp_indirect != TB_JMP_RESET_OFFSET_INVALID) {
             unlink_indirect_jmp(env, tb, uc);
         } else {
-            unlink_direct_jmp(tb);
+            if (use_tu_jmp(tb)) {
+                unlink_tu_jmp(tb);
+            } else {
+                unlink_direct_jmp(tb);
+            }
         }
     }
 
@@ -162,14 +166,17 @@ void tb_exit_to_qemu(CPUArchState *env, ucontext_t *uc)
     current_tb = tcg_tb_lookup(pc);
     if (current_tb) {
 #ifdef CONFIG_LATX_TU
-        if (current_tb->tu_jmp[TU_TB_INDEX_TARGET] != TB_JMP_RESET_OFFSET_INVALID) {
-            if (current_tb->tu_unlink_stub_offset != TU_UNLINK_STUB_INVALID) {
+        if (use_tu_jmp(current_tb)) {
+            assert(current_tb->tu_jmp[TU_TB_INDEX_TARGET] != TB_JMP_RESET_OFFSET_INVALID);
+            assert(current_tb->tu_unlink.stub_offset != TU_UNLINK_STUB_INVALID);
+            if (current_tb->tu_unlink.stub_offset != TU_UNLINK_STUB_INVALID) {
                 unlink_tu_jmp(current_tb);
             }
             return;
         }
 #endif
-        if (current_tb->jmp_indirect != TB_JMP_RESET_OFFSET_INVALID) {
+        if (use_indirect_jmp(current_tb) &&
+                current_tb->jmp_indirect != TB_JMP_RESET_OFFSET_INVALID) {
             unlink_indirect_jmp(env, current_tb, uc);
         } else {
             unlink_direct_jmp(current_tb);

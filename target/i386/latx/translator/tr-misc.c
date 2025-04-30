@@ -832,7 +832,8 @@ bool translate_jmp(IR1_INST *pir1)
 #endif
         IR2_OPND unlink_label_opnd = ra_alloc_label();
         la_label(unlink_label_opnd);
-        tb->tu_unlink_stub_offset = unlink_label_opnd._label_id;
+        tb->tu_unlink.stub_offset = unlink_label_opnd._label_id;
+        set_use_tu_jmp(tb);
         /* return true; */
     } else {
         tb->tu_jmp[TU_TB_INDEX_TARGET] = TB_JMP_RESET_OFFSET_INVALID;
@@ -1343,7 +1344,7 @@ bool translate_loopnz(IR1_INST *pir1)
         /* la_nop(); */
         tu_jcc_nop_gen(tb);
 #endif
-        tb->jmp_target_arg[0] = target_label2._label_id;
+        /* tb->jmp_target_arg[0] = target_label2._label_id; */
 
         /* next_tb[TU_TB_INDEX_NEXT] already be translated */
         if (tb->tu_jmp[TU_TB_INDEX_NEXT] != TB_JMP_RESET_OFFSET_INVALID) {
@@ -1356,7 +1357,8 @@ bool translate_loopnz(IR1_INST *pir1)
         }
         IR2_OPND unlink_label_opnd = ra_alloc_label();
         la_label(unlink_label_opnd);
-        tb->tu_unlink_stub_offset = unlink_label_opnd._label_id;
+        tb->tu_unlink.stub_offset = unlink_label_opnd._label_id;
+        set_use_tu_jmp(tb);
         /* return true; */
     } else {
         tb->tu_jmp[TU_TB_INDEX_TARGET] = TB_JMP_RESET_OFFSET_INVALID;
@@ -1411,7 +1413,7 @@ bool translate_loopz(IR1_INST *pir1)
         /* la_nop(); */
         tu_jcc_nop_gen(tb);
 #endif
-        tb->jmp_target_arg[0] = target_label2._label_id;
+        /* tb->jmp_target_arg[0] = target_label2._label_id; */
 
         /* next_tb[TU_TB_INDEX_NEXT] already be translated */
         if (tb->tu_jmp[TU_TB_INDEX_NEXT] != TB_JMP_RESET_OFFSET_INVALID) {
@@ -1424,7 +1426,8 @@ bool translate_loopz(IR1_INST *pir1)
         }
         IR2_OPND unlink_label_opnd = ra_alloc_label();
         la_label(unlink_label_opnd);
-        tb->tu_unlink_stub_offset = unlink_label_opnd._label_id;
+        tb->tu_unlink.stub_offset = unlink_label_opnd._label_id;
+        set_use_tu_jmp(tb);
         /* return true; */
     } else {
         tb->tu_jmp[TU_TB_INDEX_TARGET] = TB_JMP_RESET_OFFSET_INVALID;
@@ -1473,7 +1476,7 @@ bool translate_loop(IR1_INST *pir1)
         /* la_nop(); */
         tu_jcc_nop_gen(tb);
 #endif
-        tb->jmp_target_arg[0] = target_label2._label_id;
+        /* tb->jmp_target_arg[0] = target_label2._label_id; */
 
         /* next_tb[TU_TB_INDEX_NEXT] already be translated */
         if (tb->tu_jmp[TU_TB_INDEX_NEXT] != TB_JMP_RESET_OFFSET_INVALID) {
@@ -1486,7 +1489,8 @@ bool translate_loop(IR1_INST *pir1)
         }
         IR2_OPND unlink_label_opnd = ra_alloc_label();
         la_label(unlink_label_opnd);
-        tb->tu_unlink_stub_offset = unlink_label_opnd._label_id;
+        tb->tu_unlink.stub_offset = unlink_label_opnd._label_id;
+        set_use_tu_jmp(tb);
         /* return true; */
     } else {
         tb->tu_jmp[TU_TB_INDEX_TARGET] = TB_JMP_RESET_OFFSET_INVALID;

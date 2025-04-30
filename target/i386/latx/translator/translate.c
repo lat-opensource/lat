@@ -228,7 +228,7 @@ IR1_INST *get_ir1_list(struct TranslationBlock *tb, ADDRX pc, int max_insns)
         if (pir1->info == NULL) {
 #if defined(CONFIG_LATX_TU)
             tb->s_data->tu_tb_mode = TU_TB_MODE_BROKEN;
-            tb->next_pc = tb->pc;
+            tb->s_data->next_pc = tb->pc;
 #endif
             break;
         }
@@ -381,29 +381,32 @@ int label_dispose(TranslationBlock *tb, TRANSLATION_DATA *lat_ctx)
     if (tb) {
         /* ctx->jmp_insn_offset point to tb->jmp_target_arg */
         int i, label_id;
-        for (i = 0; i < 2; ++i) {
-            label_id = tb->jmp_reset_offset[i];
+
+        if (use_indirect_jmp(tb)) {
+            /* unlink indirect_jmp for signal */
+            label_id = tb->jmp_indirect;
             if (label_id != TB_JMP_RESET_OFFSET_INVALID) {
-                tb->jmp_reset_offset[i] = ir2_label[label_id] + B_STUB_SIZE;
-                tb->jmp_target_arg[i] = ir2_label[label_id];
+                tb->jmp_indirect = ir2_label[label_id];
             }
+        } else if (!use_tu_jmp(tb)) {
+            for (i = 0; i < 2; ++i) {
+                label_id = tb->jmp_reset_offset[i];
+                if (label_id != TB_JMP_RESET_OFFSET_INVALID) {
+                    tb->jmp_reset_offset[i] = ir2_label[label_id] + B_STUB_SIZE;
+                    tb->jmp_target_arg[i] = ir2_label[label_id];
+                }
 #ifdef CONFIG_LATX_XCOMISX_OPT
-            label_id = tb->jmp_stub_reset_offset[i];
-            if (label_id != TB_JMP_RESET_OFFSET_INVALID) {
-                tb->jmp_stub_reset_offset[i] = ir2_label[label_id] + B_STUB_SIZE;
-                tb->jmp_stub_target_arg[i] = ir2_label[label_id];
-            }
+                label_id = tb->jmp_stub_reset_offset[i];
+                if (label_id != TB_JMP_RESET_OFFSET_INVALID) {
+                    tb->jmp_stub_reset_offset[i] = ir2_label[label_id] + B_STUB_SIZE;
+                    tb->jmp_stub_target_arg[i] = ir2_label[label_id];
+                }
 #endif
-        }
+            }
 
-        /* unlink indirect_jmp for signal */
-        label_id = tb->jmp_indirect;
-        if (label_id != TB_JMP_RESET_OFFSET_INVALID) {
-            tb->jmp_indirect = ir2_label[label_id];
         }
-
 #ifdef CONFIG_LATX_TU
-        if (in_pre_translate && !(tb->bool_flags & IS_TUNNEL_LIB)) {
+        else if (in_pre_translate && !(tb->bool_flags & IS_TUNNEL_LIB)) {
             for (i = 0; i < 2; ++i) {
                 label_id = tb->tu_jmp[i];
                 if (label_id != TB_JMP_RESET_OFFSET_INVALID &&
@@ -415,9 +418,9 @@ int label_dispose(TranslationBlock *tb, TRANSLATION_DATA *lat_ctx)
             /* tu_unlink_stub_offset and target_pc are union, tu_unlink_stub_offset always */
             /* not equal TU_UNLINK_STUB_INVALID in TB_GEN_CODE. */
             if (tb->s_data->tu_tb_mode != TB_GEN_CODE &&
-                    tb->tu_unlink_stub_offset != TU_UNLINK_STUB_INVALID) {
-                label_id = tb->tu_unlink_stub_offset;
-                tb->tu_unlink_stub_offset = ir2_label[label_id];
+                    tb->tu_unlink.stub_offset != TU_UNLINK_STUB_INVALID) {
+                label_id = tb->tu_unlink.stub_offset;
+                tb->tu_unlink.stub_offset = ir2_label[label_id];
             }
         }
 #endif
@@ -2052,38 +2055,41 @@ direct_jmp:
         }
         la_code_align(2, 0x03400000);
 
+        if (!use_tu_jmp(tb)) {
 #ifndef CONFIG_LATX_XCOMISX_OPT
-        la_label(goto_label_opnd);
-        tb->jmp_reset_offset[succ_id] = ir2_opnd_label_id(&goto_label_opnd);
+            la_label(goto_label_opnd);
+            if (!use_tu_jmp(tb)) {
+                tb->jmp_reset_offset[succ_id] = ir2_opnd_label_id(&goto_label_opnd);
+            }
 #endif
-        IR2_OPND ir2_opnd_addr;
-        ir2_opnd_build(&ir2_opnd_addr, IR2_OPND_IMM, 0);
-
+            IR2_OPND ir2_opnd_addr;
+            ir2_opnd_build(&ir2_opnd_addr, IR2_OPND_IMM, 0);
 #ifdef CONFIG_LATX_XCOMISX_OPT
-        /* Add stub for exit recover */
-        if (func) {
-            IR2_OPND stub_label = ra_alloc_label();
-            la_label(stub_label);
-            tb->jmp_stub_reset_offset[succ_id] = ir2_opnd_label_id(&stub_label);
-            /* exit tb_link */
-            la_nop();
+            /* Add stub for exit recover */
+            if (func) {
+                IR2_OPND stub_label = ra_alloc_label();
+                la_label(stub_label);
+                tb->jmp_stub_reset_offset[succ_id] = ir2_opnd_label_id(&stub_label);
+                /* exit tb_link */
+                la_nop();
+#ifdef CONFIG_LATX_LARGE_CC
+                la_nop();
+#endif
+                /* generate stub */
+                ((bool (*)(IR1_INST *))func)(stub);
+
+            }
+
+            la_code_align(2, 0x03400000);
+
+            la_label(goto_label_opnd);
+            tb->jmp_reset_offset[succ_id] = ir2_opnd_label_id(&goto_label_opnd);
+#endif
+            la_b(ir2_opnd_addr);
 #ifdef CONFIG_LATX_LARGE_CC
             la_nop();
 #endif
-            /* generate stub */
-            ((bool (*)(IR1_INST *))func)(stub);
-
         }
-
-        la_code_align(2, 0x03400000);
-
-        la_label(goto_label_opnd);
-        tb->jmp_reset_offset[succ_id] = ir2_opnd_label_id(&goto_label_opnd);
-#endif
-        la_b(ir2_opnd_addr);
-#ifdef CONFIG_LATX_LARGE_CC
-        la_nop();
-#endif
 
 #ifdef CONFIG_LATX_PROFILER
         la_profile_begin();
@@ -2118,6 +2124,7 @@ direct_jmp:
     case dt_X86_INS_IRETD:
     case dt_X86_INS_IRETQ:
 indirect_jmp:
+        tb->bool_flags |= IS_INDIRECT_JMP;
         /*
          * If option_lsfpu is open, LATX do not need to fpu_rotate, therefore
          * do not save the TB pointer.
@@ -2572,6 +2579,9 @@ __attribute__((unused))
 static void eflags_eliminate_debugger(TranslationBlock *tb, int n,
                                       TranslationBlock *next_tb)
 {
+    if (use_tu_jmp(tb)) {
+        return;
+    }
     if (tb->jmp_stub_reset_offset[n] == TB_JMP_RESET_OFFSET_INVALID
 #ifdef CONFIG_LATX_INSTS_PATTERN
         &&tb->eflags_target_arg[n] == TB_JMP_RESET_OFFSET_INVALID
@@ -2621,6 +2631,7 @@ static void eflags_eliminate_debugger(TranslationBlock *tb, int n,
 void latx_tb_set_jmp_target(TranslationBlock *tb, int n,
                                    TranslationBlock *next_tb)
 {
+    assert(!use_tu_jmp(tb));
 #ifdef CONFIG_LATX_INSTS_PATTERN
     if (n) {
         if (next_tb->eflag_use) {

@@ -47,6 +47,11 @@ typedef ram_addr_t tb_page_addr_t;
 
 #include "qemu/log.h"
 
+bool is_tu_tb(TranslationBlock *tb);
+bool use_tu_jmp(TranslationBlock *tb);
+void set_use_tu_jmp(TranslationBlock *tb);
+void unset_use_tu_jmp(TranslationBlock *tb);
+bool use_indirect_jmp(TranslationBlock *tb);
 void tb_reset_jump(TranslationBlock *tb, int n);
 void restore_state_to_opc(CPUArchState *env, TranslationBlock *tb,
                           target_ulong *data);
@@ -447,9 +452,11 @@ int probe_access_flags(CPUArchState *env, target_ulong addr,
 struct tb_tc {
     const void *ptr;    /* pointer to the translated code */
     size_t size;
-#ifdef CONFIG_LATX_TU
-    size_t offset_in_tu;
-#endif
+};
+
+struct tu_unlink {
+    uint32_t stub_offset; /* The offset of the unlink instruction used by TU. */
+    uint32_t ins;
 };
 
 typedef struct TBProfile
@@ -507,7 +514,10 @@ struct separated_data{
         int tu_size;
     };
 #ifdef CONFIG_LATX_TU
+    size_t offset_in_tu;
     target_ulong tu_id;
+    target_ulong next_pc;
+    target_ulong target_pc;
 #endif
 #ifdef CONFIG_LATX_HBR
     union {
@@ -584,11 +594,23 @@ struct TranslationBlock {
      * setting one of the jump targets (or patching the jump instruction). Only
      * two of such jumps are supported.
      */
-    uint16_t jmp_reset_offset[2]; /* offset of original jump target */
-    uint16_t jmp_stub_reset_offset[2];
 #define TB_JMP_RESET_OFFSET_INVALID 0xffff /* indicates no jump generated */
-    uintptr_t jmp_target_arg[2];  /* target address or offset */
-    uintptr_t jmp_stub_target_arg[2];
+    union {
+        uint16_t jmp_reset_offset[2]; /* offset of original jump target */
+        uint16_t tu_jmp[2]; /* The offset of the jump instruction used by TU. */
+    };
+
+    uint16_t jmp_stub_reset_offset[2];
+
+    union {
+        uintptr_t jmp_target_arg[2];  /* target address or offset */
+#define TU_UNLINK_STUB_INVALID 0xffffffff /* TU no unlink stub. */
+        struct tu_unlink tu_unlink;
+    };
+    union {
+        uintptr_t jmp_stub_target_arg[2];
+        uintptr_t jmp_indirect;
+    };
 
     /*
      * Each TB has a NULL-terminated list (jmp_list_head) of incoming jumps.
@@ -611,15 +633,17 @@ struct TranslationBlock {
     uintptr_t jmp_list_next[2];
     uintptr_t jmp_dest[2];
 #ifdef CONFIG_LATX
-    struct separated_data *s_data;
 #define TARGET1_ELIMINATE 0x01
-#define OPT_BCC 0x02
-#define IS_ENABLE_JRRA 0x04
-#define IS_AOT_TB 0x08
-#define IS_TUNNEL_LIB 0x10
+#define OPT_BCC           0x02
+#define IS_ENABLE_JRRA    0x04
+#define IS_AOT_TB         0x08
+#define IS_TUNNEL_LIB     0x10
+#define IS_TU_TB          0x20
+#define IS_TU_JMP         0x40
+#define IS_INDIRECT_JMP   0x80
     uint8_t bool_flags;
     uint8_t  eflag_use;
-    uintptr_t jmp_indirect;
+    struct separated_data *s_data;
 #ifdef CONFIG_LATX_INSTS_PATTERN
     /*
      * [0] : not taken
@@ -639,24 +663,13 @@ struct TranslationBlock {
     /* remember to free these memory when QEMU recycle one TB */
     unsigned long *return_target_ptr;
     unsigned long next_86_pc;
-#if defined(CONFIG_LATX_TU) || defined(CONFIG_LATX_AOT)
-    union {
-        target_ulong target_pc;
-#define TU_UNLINK_STUB_INVALID 0xffffffff /* TU no unlink stub. */
-        uint32_t tu_unlink_stub_offset;
-    };
-    union {
-        target_ulong next_pc;
-        uint32_t tu_link_ins;
-    };
-#endif
-#ifdef CONFIG_LATX_TU
-    uint16_t tu_jmp[2];
-    uint8_t *tu_search_addr;
-#endif
+
     unsigned long checksum;
 #endif
-    uint64_t tbm_reversed;
+
+#ifdef CONFIG_LATX_TU
+        uint64_t tu_search_addr_offset;
+#endif
 };
 
 #define TB_MAGIC 0xbeefUL

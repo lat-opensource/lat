@@ -521,6 +521,7 @@ void tb_stub_bypass(TranslationBlock *tb, int n, uintptr_t addr)
 
 void tb_set_jmp_target(TranslationBlock *tb, int n, uintptr_t addr)
 {
+    assert(!use_tu_jmp(tb));
 #if defined(CONFIG_LATX) && defined(CONFIG_LATX_BNE_B)
 #define B_SHIFT     26
 #define OFF16_BITS  0xfc0003ff
@@ -599,7 +600,7 @@ void tu_relink(TranslationBlock *tb) {
     /* fprintf(stderr, "relink\n"); */
     uint32_t *tu_jmp_addr =
         (uint32_t *)(tb->tc.ptr + tb->tu_jmp[TU_TB_INDEX_TARGET]);
-    *tu_jmp_addr = tb->tu_link_ins;
+    *tu_jmp_addr = tb->tu_unlink.ins;
     flush_idcache_range((uintptr_t)tu_jmp_addr, (uintptr_t)tu_jmp_addr, 4);
 }
 #endif
@@ -619,8 +620,9 @@ static inline void tb_add_jump(TranslationBlock *tb, int n,
     }
 
 #ifdef CONFIG_LATX_TU
-    if (tb->tu_jmp[TU_TB_INDEX_TARGET] != TB_JMP_RESET_OFFSET_INVALID
-            && tb->tu_unlink_stub_offset != TU_UNLINK_STUB_INVALID) {
+    if (use_tu_jmp(tb)) {
+        assert(tb->tu_jmp[TU_TB_INDEX_TARGET] != TB_JMP_RESET_OFFSET_INVALID
+            && tb->tu_unlink.stub_offset != TU_UNLINK_STUB_INVALID);
         tu_relink(tb);
         goto out_unlock_next;
     }

@@ -115,9 +115,9 @@ void tu_reset_tb(TranslationBlock *tb)
     tb->next_86_pc = 0;
     tb->return_target_ptr = NULL;
 #ifdef CONFIG_LATX_TU
-    tb->tc.offset_in_tu = 0;
-    tb->next_pc = 0;
-    tb->target_pc = 0;
+    tb->s_data->offset_in_tu = 0;
+    tb->s_data->next_pc = 0;
+    tb->s_data->target_pc = 0;
     tb->s_data->tu_id = 0;
     tb->s_data->is_first_tb = 0;
     tb->s_data->last_ir1_type = 0;
@@ -128,7 +128,7 @@ void tu_reset_tb(TranslationBlock *tb)
     tb->jmp_target_arg[TU_TB_INDEX_NEXT] = TB_JMP_RESET_OFFSET_INVALID;
     tb->jmp_stub_reset_offset[0] = TB_JMP_RESET_OFFSET_INVALID;
     tb->jmp_stub_reset_offset[1] = TB_JMP_RESET_OFFSET_INVALID;
-    tb->tu_unlink_stub_offset = TU_UNLINK_STUB_INVALID;
+    tb->tu_unlink.stub_offset = TU_UNLINK_STUB_INVALID;
 #endif
 
 #ifdef CONFIG_LATX_AOT
@@ -348,9 +348,10 @@ static bool tu_split_tb(TranslationBlock *pre_tb, TranslationBlock *tb)
         pre_tb->s_data->next_tb[TU_TB_INDEX_TARGET] = NULL;
         pre_tb->size -= tb->size;
         pre_tb->icount -= tb->icount;
-        pre_tb->next_pc = tb->pc;
+        pre_tb->s_data->next_pc = tb->pc;
         pre_tb->tu_jmp[TU_TB_INDEX_TARGET] = TB_JMP_RESET_OFFSET_INVALID;
         pre_tb->tu_jmp[TU_TB_INDEX_NEXT] = TB_JMP_RESET_OFFSET_INVALID;
+        unset_use_tu_jmp(pre_tb);
     } else {
         /*Can't judge pre_tb or tb was broken.*/
         tu_set_tb_to_translate_context(pre_tb);
@@ -369,8 +370,8 @@ static inline void get_tu_queue(CPUState *cpu,
     TranslationBlock *next_tb, *target_tb, *tb;
     for (int i = 0; i <  *tb_num_in_tu && *tb_num_in_tu < MAX_TB_IN_TU; i++) {
         tb = tb_list[i];
-        ir1_next_pc = tb->next_pc;
-        ir1_target_pc = tb->target_pc;
+        ir1_next_pc = tb->s_data->next_pc;
+        ir1_target_pc = tb->s_data->target_pc;
         switch (tb->s_data->last_ir1_type) {
         case IR1_TYPE_BRANCH:
             /* Jcc next tb should be translated without checking */
@@ -497,7 +498,7 @@ void solve_tb_overlap(uint tb_num_in_tu,
          *                pc + 5
          * pre_tb_next--->pc + 6
          */
-        if (tb->pc < pre_tb->next_pc && tb->pc > pre_tb->pc) {
+        if (tb->pc < pre_tb->s_data->next_pc && tb->pc > pre_tb->pc) {
             /* when split prefix ins, translate it two times.
              *
              * pre_tb--------> lock
@@ -799,7 +800,7 @@ static void fix_rel_table(uint32_t tb_num_in_tu, TranslationBlock **tb_list)
         tb = tb_list[i];
         for (int j = tb->s_data->rel_start; j != -1 && j <= tb->s_data->rel_end; j++) {
             if (rel_table[j].tc_offset >= tb->tc.size) {
-                rel_table[j].tc_offset += tb->tu_unlink_stub_offset - tb->tc.size;
+                rel_table[j].tc_offset += tb->tu_unlink.stub_offset - tb->tc.size;
             }
         }
     }
@@ -820,30 +821,25 @@ static void mov_unlink_stub_to_end(uint32_t tb_num_in_tu, TranslationBlock **tb_
     TranslationBlock *tb;
     for (int i = 0; i < tb_num_in_tu; i++) {
         tb = tb_list[i];
-        if (tb->tu_unlink_stub_offset != TU_UNLINK_STUB_INVALID) {
-            tb->jmp_reset_offset[0] = TB_JMP_RESET_OFFSET_INVALID;
-            tb->jmp_reset_offset[1] = TB_JMP_RESET_OFFSET_INVALID;
-            tb->jmp_target_arg[0] = TB_JMP_RESET_OFFSET_INVALID;
-            tb->jmp_target_arg[1] = TB_JMP_RESET_OFFSET_INVALID;
-            tb->jmp_stub_reset_offset[0] = TB_JMP_RESET_OFFSET_INVALID;
-            tb->jmp_stub_reset_offset[1] = TB_JMP_RESET_OFFSET_INVALID;
+        if (use_tu_jmp(tb)) {
+            assert(tb->tu_unlink.stub_offset != TU_UNLINK_STUB_INVALID);
 #ifdef CONFIG_LATX_INSTS_PATTERN
             tb->eflags_target_arg[0] = TB_JMP_RESET_OFFSET_INVALID;
             tb->eflags_target_arg[1] = TB_JMP_RESET_OFFSET_INVALID;
             tb->eflags_target_arg[2] = TB_JMP_RESET_OFFSET_INVALID;
             tb->bool_flags &= ~TARGET1_ELIMINATE;
 #endif
-            curr_pos = (uintptr_t)tb->tc.ptr + tb->tu_unlink_stub_offset;
-            size_t unlink_stub_size = tb->tc.size - tb->tu_unlink_stub_offset;
+            curr_pos = (uintptr_t)tb->tc.ptr + tb->tu_unlink.stub_offset;
+            size_t unlink_stub_size = tb->tc.size - tb->tu_unlink.stub_offset;
             memcpy((void *)((uintptr_t)tmp_buffer + tmp_buffer_size),
                     (void *)curr_pos, unlink_stub_size);
             assert(curr_pos % 4 == 0);
-            if (tb->tu_unlink_stub_offset != tb->tc.size - unlink_stub_size) {
+            if (tb->tu_unlink.stub_offset != tb->tc.size - unlink_stub_size) {
                 qemu_log_mask(LAT_LOG_AOT , " !!!!!! unlink_stub_size error: %x %lx\n",
-                        tb->tu_unlink_stub_offset, tb->tc.size);
+                        tb->tu_unlink.stub_offset, tb->tc.size);
                 assert(0);
             }
-            tb->tu_unlink_stub_offset = tmp_buffer_size;
+            tb->tu_unlink.stub_offset = tmp_buffer_size;
             tmp_buffer_size += unlink_stub_size;
             tb->tc.size -= unlink_stub_size;
         }
@@ -863,7 +859,7 @@ static void mov_unlink_stub_to_end(uint32_t tb_num_in_tu, TranslationBlock **tb_
             }
         }
         tb->tc.ptr = (void *)curr_pos;
-        tb->tc.offset_in_tu = tb->tc.ptr - tb_list[0]->tc.ptr;
+        tb->s_data->offset_in_tu = tb->tc.ptr - tb_list[0]->tc.ptr;
         curr_pos += tb->tc.size;
     }
 
@@ -871,8 +867,8 @@ static void mov_unlink_stub_to_end(uint32_t tb_num_in_tu, TranslationBlock **tb_
 
     for (int i = 0; i < tb_num_in_tu; i++) {
         tb = tb_list[i];
-        if (tb->tu_unlink_stub_offset != TU_UNLINK_STUB_INVALID) {
-            tb->tu_unlink_stub_offset = curr_pos  + tb->tu_unlink_stub_offset
+        if (use_tu_jmp(tb) && tb->tu_unlink.stub_offset != TU_UNLINK_STUB_INVALID) {
+            tb->tu_unlink.stub_offset = curr_pos  + tb->tu_unlink.stub_offset
                 - (uintptr_t)tb->tc.ptr;
         }
     }
@@ -905,20 +901,21 @@ void translate_tu(uint32 tb_num_in_tu, TranslationBlock **tb_list)
 retry:
     for (uint32_t i = 0; i < tb_num_in_tu; i++) {
         tb = tb_list[i];
-        tb->tu_unlink_stub_offset = TU_UNLINK_STUB_INVALID;
+        tb->tu_unlink.stub_offset = TU_UNLINK_STUB_INVALID;
         gen_code_size = translate_tb_in_tu(tb);
         uintptr_t gen_code_buf = (uintptr_t)tcg_ctx->code_gen_ptr + gen_code_size;
         qatomic_set(&tcg_ctx->code_gen_ptr, (void *)gen_code_buf);
         tb->tc.size = gen_code_size;
-        tb->tc.offset_in_tu = tb->tc.ptr - tb_list[0]->tc.ptr;
+        tb->s_data->offset_in_tu = tb->tc.ptr - tb_list[0]->tc.ptr;
         /* init original jump addresses which have been set during tcg_gen_code() */
-        if (tb->jmp_reset_offset[0] != TB_JMP_RESET_OFFSET_INVALID) {
-            tb_reset_jump(tb, 0);
+        if (!use_tu_jmp(tb)) {
+            if (tb->jmp_reset_offset[0] != TB_JMP_RESET_OFFSET_INVALID) {
+                tb_reset_jump(tb, 0);
+            }
+            if (tb->jmp_reset_offset[1] != TB_JMP_RESET_OFFSET_INVALID) {
+                tb_reset_jump(tb, 1);
+            }
         }
-        if (tb->jmp_reset_offset[1] != TB_JMP_RESET_OFFSET_INVALID) {
-            tb_reset_jump(tb, 1);
-        }
-
         search_buff_offset[i] = search_size;
         search_size += encode_search(tb, search_buff + search_buff_offset[i]);
     }
@@ -929,7 +926,7 @@ retry:
 
     for (int i = 0; i < tb_num_in_tu; i++) {
         tb = tb_list[i];
-        if (tb->s_data->last_ir1_type == IR1_TYPE_CALL) {
+        if (!use_tu_jmp(tb) || tb->s_data->last_ir1_type == IR1_TYPE_CALL) {
             continue;
         }
         if ((tb->tu_jmp[TU_TB_INDEX_TARGET] != TB_JMP_RESET_OFFSET_INVALID)) {
@@ -939,7 +936,7 @@ retry:
                 assert(bcc_jmp_fail);
                 goto retry;
             }
-            tb->tu_link_ins = *(uint32_t *)(tb->tc.ptr +
+            tb->tu_unlink.ins = *(uint32_t *)(tb->tc.ptr +
                     tb->tu_jmp[TU_TB_INDEX_TARGET]);
         }
         if (tb->tu_jmp[TU_TB_INDEX_NEXT] != TB_JMP_RESET_OFFSET_INVALID) {
@@ -950,8 +947,9 @@ retry:
     /*search data*/
     for (int i = 0; i < tb_num_in_tu; i++) {
         tb = tb_list[i];
-        tb->tu_search_addr = (uint8_t *)
-            ((uintptr_t)tcg_ctx->code_gen_ptr + search_buff_offset[i]);
+        tb->bool_flags |= IS_TU_TB;
+        tb->tu_search_addr_offset = (uintptr_t)
+            ((uintptr_t)tcg_ctx->code_gen_ptr + search_buff_offset[i] - (uintptr_t)tb->tc.ptr);
     }
     memcpy(tcg_ctx->code_gen_ptr, search_buff, search_size);
     qatomic_set(&tcg_ctx->code_gen_ptr, (void *)
@@ -1114,23 +1112,23 @@ void get_last_info(TranslationBlock *tb, IR1_INST* pir1)
     if (tb->icount == 0) {
         return;
     }
-    tb->next_pc = ir1_addr_next(pir1);
+    tb->s_data->next_pc = ir1_addr_next(pir1);
 
     if (ir1_is_branch(pir1)) {
         if (likely(ir1_opnd_is_imm(ir1_get_opnd(pir1, 0)))) {
             tb->s_data->last_ir1_type = (int8)IR1_TYPE_BRANCH;
-            tb->target_pc = ir1_target_addr(pir1);
+            tb->s_data->target_pc = ir1_target_addr(pir1);
         } else {
             assert(0);
         }
     }
     else if (ir1_is_call(pir1) && !ir1_is_indirect_call(pir1)) {
         tb->s_data->last_ir1_type = (int8)IR1_TYPE_CALL;
-        tb->target_pc = ir1_target_addr(pir1);
+        tb->s_data->target_pc = ir1_target_addr(pir1);
     }
     else if (ir1_is_jump(pir1) && !ir1_is_indirect_jmp(pir1)) {
         tb->s_data->last_ir1_type = (int8)IR1_TYPE_JUMP;
-        tb->target_pc = ir1_target_addr(pir1);
+        tb->s_data->target_pc = ir1_target_addr(pir1);
     }
     else if (ir1_is_return(pir1)) {
         tb->s_data->last_ir1_type = (int8)IR1_TYPE_RET;
@@ -1164,6 +1162,32 @@ bool judge_tu_eflag_gen(void *tb_in_tu) {
     }
     tb->tu_jmp[TU_TB_INDEX_NEXT] = TB_JMP_RESET_OFFSET_INVALID;
     tb->tu_jmp[TU_TB_INDEX_TARGET] = TB_JMP_RESET_OFFSET_INVALID;
+    return false;
+}
+#endif
+#ifdef CONFIG_LATX_TU
+bool is_tu_tb(TranslationBlock *tb)
+{
+    return (tb->bool_flags & IS_TU_TB) ? true : false;
+}
+
+bool use_tu_jmp(TranslationBlock *tb)
+{
+    return (tb->bool_flags & IS_TU_JMP) ? true : false;
+}
+
+void set_use_tu_jmp(TranslationBlock *tb)
+{
+    tb->bool_flags |= IS_TU_JMP;
+}
+
+void unset_use_tu_jmp(TranslationBlock *tb)
+{
+    tb->bool_flags &= ~IS_TU_JMP;
+}
+#else
+bool use_tu_jmp(TranslationBlock *tb)
+{
     return false;
 }
 #endif

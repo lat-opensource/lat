@@ -40,7 +40,6 @@ inline static TranslationBlock *creat_tb(aot_tb *p_aot_tb, abi_ulong start,
     tb->jmp_list_next[1] = (uintptr_t)NULL;
     tb->jmp_list_head = 0;
     tb->icount = p_aot_tb->icount;
-    tb->jmp_indirect = p_aot_tb->jmp_indirect;
     tb->tc.size = p_aot_tb->tb_cache_size;
     tb->tc.ptr = tc_ptr; 
     tb->pc = start + p_aot_tb->offset_in_segment;
@@ -48,14 +47,28 @@ inline static TranslationBlock *creat_tb(aot_tb *p_aot_tb, abi_ulong start,
     tb->flags = p_aot_tb->flags;
     tb->trace_vcpu_dstate = *thread_cpu->trace_dstate;
     tb->size = p_aot_tb->size;
-    tb->jmp_reset_offset[0] = p_aot_tb->jmp_reset_offset[0];
-    tb->jmp_reset_offset[1] = p_aot_tb->jmp_reset_offset[1];
-    tb->jmp_target_arg[0] = p_aot_tb->jmp_target_arg[0];
-    tb->jmp_target_arg[1] = p_aot_tb->jmp_target_arg[1];
     tb->first_jmp_align = p_aot_tb->first_jmp_align;
     tb->bool_flags = p_aot_tb->bool_flags;
     tb->return_target_ptr = NULL;
-
+    tb->jmp_stub_target_arg[0] = p_aot_tb->jmp_stub_target_arg[0];
+    tb->jmp_stub_target_arg[1] = p_aot_tb->jmp_stub_target_arg[1];
+    if (is_tu_tb(tb)) {
+        tb->tu_search_addr_offset = p_aot_tb->tu_search_addr_offset;
+    }
+    if (use_tu_jmp(tb)) {
+        tb->tu_jmp[0] = p_aot_tb->tu_jmp[0];
+        tb->tu_jmp[1] = p_aot_tb->tu_jmp[1];
+        tb->tu_unlink.stub_offset = p_aot_tb->tu_unlink.stub_offset;
+        tb->tu_unlink.ins = p_aot_tb->tu_unlink.ins;
+    } else {
+        tb->jmp_indirect = p_aot_tb->jmp_indirect;
+        tb->jmp_reset_offset[0] = p_aot_tb->jmp_reset_offset[0];
+        tb->jmp_reset_offset[1] = p_aot_tb->jmp_reset_offset[1];
+        tb->jmp_target_arg[0] = p_aot_tb->jmp_target_arg[0];
+        tb->jmp_target_arg[1] = p_aot_tb->jmp_target_arg[1];
+        tb->jmp_stub_reset_offset[0] = p_aot_tb->jmp_stub_reset_offset[0];
+        tb->jmp_stub_reset_offset[1] = p_aot_tb->jmp_stub_reset_offset[1];
+    }
 #if defined(CONFIG_LATX_JRRA) || defined(CONFIG_LATX_JRRA_STACK)
     if (p_aot_tb->return_target_ptr_offset) {
         tb->next_86_pc = start + p_aot_tb->next_86_pc_offset;
@@ -63,25 +76,12 @@ inline static TranslationBlock *creat_tb(aot_tb *p_aot_tb, abi_ulong start,
         tb->next_86_pc = 0;
     }
 #endif
-    tb->jmp_stub_reset_offset[0] = p_aot_tb->jmp_stub_reset_offset[0];
-    tb->jmp_stub_reset_offset[1] = p_aot_tb->jmp_stub_reset_offset[1];
-    tb->jmp_stub_target_arg[0] = p_aot_tb->jmp_stub_target_arg[0];
-    tb->jmp_stub_target_arg[1] = p_aot_tb->jmp_stub_target_arg[1];
-    tb->eflag_use = p_aot_tb->eflag_use;
 #ifdef CONFIG_LATX_INSTS_PATTERN
     tb->eflags_target_arg[0] = p_aot_tb->eflags_target_arg[0];
     tb->eflags_target_arg[1] = p_aot_tb->eflags_target_arg[1];
     tb->eflags_target_arg[2] = p_aot_tb->eflags_target_arg[2];
 #endif
-
-#ifdef CONFIG_LATX_TU
-    tb->tc.offset_in_tu = p_aot_tb->offset_in_tu;
-    tb->s_data->tu_id = p_aot_tb->tu_id;
-    tb->tu_unlink_stub_offset = p_aot_tb->tu_unlink_stub_offset;
-    tb->tu_link_ins = p_aot_tb->tu_link_ins;
-    tb->tu_jmp[0] = p_aot_tb->tu_jmp[0];
-    tb->tu_jmp[1] = p_aot_tb->tu_jmp[1];
-#endif
+    tb->eflag_use = p_aot_tb->eflag_use;
     return tb;
 }
 
@@ -203,13 +203,11 @@ static void recover_tb_range(target_ulong page, struct aot_tb *p_aot_tbs,
                 ROUND_UP(new_buf_ptr, CODE_GEN_ALIGN));
         for (int k = i; k < j; k++) {
             TranslationBlock *tb = tb_in_order[k - i];
-            tb->tc.ptr = tu_begin_ptr + tb->tc.offset_in_tu;
+            tb->tc.ptr = tu_begin_ptr + p_aot_tbs[k].offset_in_tu;
 #if defined(CONFIG_LATX_TBMINI_ENABLE)
             last_tbmini_ptr -= sizeof(struct TBMini);
             aot_tbmini_set_pointer(last_tbmini_ptr, (uint64_t)tb, (uint64_t)tb->tc.size);
 #endif
-            tb->tu_search_addr = 
-                (uint8_t *)((uintptr_t)tb->tc.ptr + p_aot_tbs[k].tu_search_addr_offset);
             assert((tb->pc & TARGET_PAGE_MASK) == page);
             assert((tb->cflags & CF_PARALLEL) == (tcg_ctx->tb_cflags & CF_PARALLEL));
             aot_do_tb_reloc(tb, &p_aot_tbs[k], start, end);
