@@ -64,7 +64,8 @@ void unlink_indirect_jmp(CPUArchState *env, TranslationBlock *tb, ucontext_t *uc
     struct extctx_layout extctx;
     memset(&extctx, 0, sizeof(extctx));
     parse_extcontext(uc, &extctx);
-    UC_LBT(&extctx)->regs[0] = 0;
+    uint64_t zero = 0;
+    UC_SET_SCR(&extctx, 0, &zero, uint64_t);
 #endif
     /*
      *                  scr2gr    itmp0,$scr0

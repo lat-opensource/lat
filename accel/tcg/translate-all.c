@@ -4731,185 +4731,161 @@ int shared_private_interpret(siginfo_t *info, ucontext_t *uc)
     }
 #else /* CONFIG_LOONGARCH_NEW_WORLD */
     case 0xac: /* FLD.S */
-        if (no_right(real_guest_addr, 4, PAGE_READ, &siaddr)) {
-            info->si_addr = (void *)siaddr;
-            return 1;
-        }
-        assert(siaddr == real_guest_addr);
-        fd = fd < 8 ? (fd + UC_GET_FTOP(&extctx, int32_t)) & 7: fd;
-        UC_SET_FPR(&extctx, fd, mem_addr, int32_t);
-        goto end;
+      if (no_right(real_guest_addr, 4, PAGE_READ, &siaddr)) {
+        info->si_addr = (void *)siaddr;
+        return 1;
+      }
+      assert(siaddr == real_guest_addr);
+      fd = fd < 8 ? (fd + UC_GET_FTOP(&extctx, uint32_t)) & 7 : fd;
+      UC_SET_FPR(&extctx, fd, mem_addr, uint32_t);
+      goto end;
     case 0xad: /* FST.S */
-        if (no_right(real_guest_addr, 4, PAGE_WRITE, &siaddr)) {
-            info->si_addr = (void *)siaddr;
-            return 1;
-        }
-        assert(siaddr == real_guest_addr);
-        fd = fd < 8 ? (fd + UC_GET_FTOP(&extctx, int32_t)) & 7: fd;
-        *(int32_t *)mem_addr = UC_GET_FPR(&extctx, fd, int32_t);
-        goto end;
+      if (no_right(real_guest_addr, 4, PAGE_WRITE, &siaddr)) {
+        info->si_addr = (void *)siaddr;
+        return 1;
+      }
+      assert(siaddr == real_guest_addr);
+      fd = fd < 8 ? (fd + UC_GET_FTOP(&extctx, uint32_t)) & 7 : fd;
+      *(uint32_t *)mem_addr = UC_GET_FPR(&extctx, fd, uint32_t);
+      goto end;
     case 0xae: /* FLD.D */
-        if (no_right(real_guest_addr, 8, PAGE_READ, &siaddr)) {
-            info->si_addr = (void *)siaddr;
-            return 1;
-        }
-        assert(siaddr == real_guest_addr);
-        fd = fd < 8 ? (fd + UC_GET_FTOP(&extctx, int32_t)) & 7: fd;
-        UC_SET_FPR(&extctx, fd, mem_addr, int64_t);
-        goto end;
+      if (no_right(real_guest_addr, 8, PAGE_READ, &siaddr)) {
+        info->si_addr = (void *)siaddr;
+        return 1;
+      }
+      assert(siaddr == real_guest_addr);
+      fd = fd < 8 ? (fd + UC_GET_FTOP(&extctx, uint32_t)) & 7 : fd;
+      UC_SET_FPR(&extctx, fd, mem_addr, uint64_t);
+      goto end;
     case 0xaf: /* FST.D */
-        if (no_right(real_guest_addr, 8, PAGE_WRITE, &siaddr)) {
-            info->si_addr = (void *)siaddr;
-            return 1;
-        }
-        assert(siaddr == real_guest_addr);
-        fd = fd < 8 ? (fd + UC_GET_FTOP(&extctx, int32_t)) & 7: fd;
-        *(int64_t *)mem_addr = UC_GET_FPR(&extctx, fd, int64_t);
-        goto end;
+      if (no_right(real_guest_addr, 8, PAGE_WRITE, &siaddr)) {
+        info->si_addr = (void *)siaddr;
+        return 1;
+      }
+      assert(siaddr == real_guest_addr);
+      fd = fd < 8 ? (fd + UC_GET_FTOP(&extctx, uint32_t)) & 7 : fd;
+      *(uint64_t *)mem_addr = UC_GET_FPR(&extctx, fd, uint64_t);
+      goto end;
     case 0xb0: /* VLD */
-        UC_SET_LSX(&extctx, fd, 0, mem_addr + 0, int64_t);
-        UC_SET_LSX(&extctx, fd, 1, mem_addr + 8, int64_t);
-        goto end;
+      UC_SET_LSX(&extctx, fd, 0, mem_addr + 0, uint64_t);
+      UC_SET_LSX(&extctx, fd, 1, mem_addr + 8, uint64_t);
+      goto end;
     case 0xb1: /* VST */
-        *(int64_t *)(mem_addr + 0) = UC_GET_LSX(&extctx, fd, 0, int64_t);
-        *(int64_t *)(mem_addr + 8) = UC_GET_LSX(&extctx, fd, 1, int64_t);
-        goto end;
+      *(uint64_t *)(mem_addr + 0) = UC_GET_LSX(&extctx, fd, 0, uint64_t);
+      *(uint64_t *)(mem_addr + 8) = UC_GET_LSX(&extctx, fd, 1, uint64_t);
+      goto end;
     case 0xb2: /* XVLD */
-        UC_SET_LASX(&extctx, fd, 0, mem_addr +  0, int64_t);
-        UC_SET_LASX(&extctx, fd, 1, mem_addr +  8, int64_t);
-        UC_SET_LASX(&extctx, fd, 2, mem_addr + 16, int64_t);
-        UC_SET_LASX(&extctx, fd, 3, mem_addr + 32, int64_t);
-        goto end;
+      UC_SET_LASX(&extctx, fd, 0, mem_addr + 0, uint64_t);
+      UC_SET_LASX(&extctx, fd, 1, mem_addr + 8, uint64_t);
+      UC_SET_LASX(&extctx, fd, 2, mem_addr + 16, uint64_t);
+      UC_SET_LASX(&extctx, fd, 3, mem_addr + 24, uint64_t);
+      goto end;
     case 0xb3: /* XVST */
-        *(int64_t *)(mem_addr +  0) = UC_GET_LASX(&extctx, fd, 0, int64_t);
-        *(int64_t *)(mem_addr +  8) = UC_GET_LASX(&extctx, fd, 1, int64_t);
-        *(int64_t *)(mem_addr + 16) = UC_GET_LASX(&extctx, fd, 2, int64_t);
-        *(int64_t *)(mem_addr + 24) = UC_GET_LASX(&extctx, fd, 3, int64_t);
-        goto end;
+      *(uint64_t *)(mem_addr + 0) = UC_GET_LASX(&extctx, fd, 0, uint64_t);
+      *(uint64_t *)(mem_addr + 8) = UC_GET_LASX(&extctx, fd, 1, uint64_t);
+      *(uint64_t *)(mem_addr + 16) = UC_GET_LASX(&extctx, fd, 2, uint64_t);
+      *(uint64_t *)(mem_addr + 24) = UC_GET_LASX(&extctx, fd, 3, uint64_t);
+      goto end;
     case 0xc0:
-        if (inst & (1<<21)) {
-            /* VLDREPL.W */
-            int64_t tmp_mem = EXPAND_TO_64BIT(int32_t, mem_addr);
-            for(int i = 0; i < 2; i++) {
-                UC_SET_LSX(&extctx, fd, i, &tmp_mem, int64_t);
-            }
-            goto end;
-        }
-        /*VLDREPL.D*/
-        for(int i = 0; i < 2; i++) {
-	        UC_SET_LSX(&extctx, fd, i, mem_addr, int64_t);
+      if (inst & (1 << 21)) {
+        /* VLDREPL.W */
+        for (int i = 0; i < 4; i++) {
+          UC_SET_LSX(&extctx, fd, i, mem_addr, uint32_t);
         }
         goto end;
-    case 0xc1: /* VLDREPL.H */
-	{
-        int64_t tmp_mem = EXPAND_TO_64BIT(int16_t, mem_addr);
-        for(int i = 0; i < 2; i++) {
-	        UC_SET_LSX(&extctx, fd, i, &tmp_mem, int64_t);
-        }
-        goto end;
-	}
-    case 0xc2: /*VLDREPL.B */
-	{
-        int64_t tmp_mem = EXPAND_TO_64BIT(int8_t, mem_addr);
-        for(int i = 0; i < 2; i++) {
-            UC_SET_LSX(&extctx, fd, i, &tmp_mem, int64_t);
-        }
-        goto end;
-	}
-    case 0xc4:
-        if (inst & (1<<21)) {
-            /* VSTELM.W */
-            int idx = (inst >> 18) & 0x3;
-            int64_t v64 = UC_GET_LSX(&extctx, fd, (idx >> 1), int64_t);
-            int32_t *v32 = (int32_t *)&v64;
-            *(int32_t *)mem_addr = v32[idx & 0x1];
-        } else {
-            /* VSTELM.D */
-            int idx = (inst >> 18) & 0x1;
-            *(int64_t *)mem_addr = UC_GET_LSX(&extctx, fd, idx, int64_t);
-        }
-        goto end;
-    case 0xc5:
-    {
-        /* VSTELM.H */
-        int idx = (inst >> 18) & 0x7;
-        int64_t v64 = UC_GET_LSX(&extctx, fd, (idx >> 2), int64_t);
-        int16_t *v16 = (int16_t *)&v64;
-        *(int16_t *)mem_addr = v16[idx & 0x3];
-        goto end;
+      }
+      /* VLDREPL.D */
+      for (int i = 0; i < 2; i++) {
+        UC_SET_LSX(&extctx, fd, i, mem_addr, uint64_t);
+      }
+      goto end;
+    case 0xc1: {
+      /* VLDREPL.H */
+      for (int i = 0; i < 8; i++) {
+        UC_SET_LSX(&extctx, fd, i, mem_addr, uint16_t);
+      }
+      goto end;
     }
-    case 0xc6:
-    {
-        /* VSTELM.B */
-        int idx = (inst >> 18) & 0xf;
-        int64_t v64 = UC_GET_LSX(&extctx, fd, (idx >> 3), int64_t);
-        int8_t *v8 = (int8_t *)&v64;
-        *(int8_t *)mem_addr = v8[idx & 0x7];
-        goto end;
+    case 0xc2: {
+      /*VLDREPL.B */
+      for (int i = 0; i < 16; i++) {
+        UC_SET_LSX(&extctx, fd, i, mem_addr, uint8_t);
+      }
+      goto end;
+    }
+    case 0xc4:
+      if (inst & (1 << 21)) {
+        /* VSTELM.W */
+        int idx = (inst >> 18) & 0x3;
+        *(uint32_t *)mem_addr = UC_GET_LSX(&extctx, fd, idx, uint32_t);
+      } else {
+        /* VSTELM.D */
+        int idx = (inst >> 18) & 0x1;
+        *(uint64_t *)mem_addr = UC_GET_LSX(&extctx, fd, idx, uint64_t);
+      }
+      goto end;
+    case 0xc5: {
+      /* VSTELM.H */
+      int idx = (inst >> 18) & 0x7;
+      *(uint16_t *)mem_addr = UC_GET_LSX(&extctx, fd, idx, uint16_t);
+      goto end;
+    }
+    case 0xc6: {
+      /* VSTELM.B */
+      int idx = (inst >> 18) & 0xf;
+      *(uint8_t *)mem_addr = UC_GET_LSX(&extctx, fd, idx, uint8_t);
+      goto end;
     }
     case 0xc8:
-        if (inst & (1<<21)) {
-            /* XVLDREPL.W */
-            int64_t tmp_mem = EXPAND_TO_64BIT(int32_t, mem_addr);
-            for(int i = 0; i < 4; i++) {
-                UC_SET_LASX(&extctx, fd, i, &tmp_mem, int64_t);
-            }
-            goto end;
-        }
-        /* XVLDREPL.D */
-        for(int i = 0; i < 4; i++) {
-	        UC_SET_LASX(&extctx, fd, i, mem_addr, int64_t);
+      if (inst & (1 << 21)) {
+        /* XVLDREPL.W */
+        for (int i = 0; i < 8; i++) {
+          UC_SET_LASX(&extctx, fd, i, mem_addr, uint32_t);
         }
         goto end;
-    case 0xc9:
-	{
-        /* XVLDREPL.H */
-        int64_t tmp_mem = EXPAND_TO_64BIT(int16_t, mem_addr);
-        for(int i = 0; i < 4; i++) {
-	        UC_SET_LASX(&extctx, fd, i, &tmp_mem, int64_t);
-        }
-        goto end;
+      }
+      /* XVLDREPL.D */
+      for (int i = 0; i < 4; i++) {
+        UC_SET_LASX(&extctx, fd, i, mem_addr, uint64_t);
+      }
+      goto end;
+    case 0xc9: {
+      /* XVLDREPL.H */
+      for (int i = 0; i < 16; i++) {
+        UC_SET_LASX(&extctx, fd, i, mem_addr, uint16_t);
+      }
+      goto end;
     }
-    case 0xca:
-	{
-        /* XVLDREPL.B */
-        int64_t tmp_mem = EXPAND_TO_64BIT(int8_t, mem_addr);
-        for(int i = 0; i < 4; i++) {
-            UC_SET_LASX(&extctx, fd, i, &tmp_mem, int64_t);
-        }
-        goto end;
-	}
+    case 0xca: {
+      /* XVLDREPL.B */
+      for (int i = 0; i < 32; i++) {
+        UC_SET_LASX(&extctx, fd, i, mem_addr, uint8_t);
+      }
+      goto end;
+    }
     case 0xcc:
-        if (inst & (1<<21)) {
-            /* XVSTELM.W */
-            int idx = (inst >> 18) & 0x7;
-            int64_t v64 = UC_GET_LASX(&extctx, fd, (idx >> 1), int64_t);
-            int32_t *v32 = (int32_t *)&v64;
-            *(int32_t *)mem_addr = v32[idx & 0x1];
-        } else {
-            /* XVSTELM.D */
-            int idx = (inst >> 18) & 0x3;
-            *(int64_t *)mem_addr = UC_GET_LASX(&extctx, fd, idx, int64_t);
-        }
-        goto end;
-    case 0xcd:
-    {
-        /* XVSTELM.H */
-        int idx = (inst >> 18) & 0xf;
-        int64_t v64 = UC_GET_LASX(&extctx, fd, (idx >> 2), int64_t);
-        int16_t *v16 = (int16_t *)&v64;
-        *(int16_t *)mem_addr = v16[idx & 0x3];
-        goto end;
+      if (inst & (1 << 21)) {
+        /* XVSTELM.W */
+        int idx = (inst >> 18) & 0x7;
+        *(uint32_t *)mem_addr = UC_GET_LASX(&extctx, fd, idx, uint32_t);
+      } else {
+        /* XVSTELM.D */
+        int idx = (inst >> 18) & 0x3;
+        *(uint64_t *)mem_addr = UC_GET_LASX(&extctx, fd, idx, uint64_t);
+      }
+      goto end;
+    case 0xcd: {
+      /* XVSTELM.H */
+      int idx = (inst >> 18) & 0xf;
+      *(uint16_t *)mem_addr = UC_GET_LASX(&extctx, fd, idx, uint16_t);
+      goto end;
     }
     case 0xce:
-    case 0xcf:
-    {
-        /* XVSTELM.B */
-        int idx = (inst >> 18) & 0x1f;
-        int64_t v64 = UC_GET_LASX(&extctx, fd, (idx >> 3), int64_t);
-        int8_t *v8 = (int8_t *)&v64;
-        *(int8_t *)mem_addr = v8[idx & 0x7];
-        goto end;
+    case 0xcf: {
+      /* XVSTELM.B */
+      int idx = (inst >> 18) & 0x1f;
+      *(uint8_t *)mem_addr = UC_GET_LASX(&extctx, fd, idx, uint8_t);
+      goto end;
     }
 #endif
     }
@@ -5094,63 +5070,83 @@ int shared_private_interpret(siginfo_t *info, ucontext_t *uc)
         over_page_write(real_guest_addr + 16, UC_FREG(uc)[fd].__val64[2], 8);
         over_page_write(real_guest_addr + 24, UC_FREG(uc)[fd].__val64[3], 8);
         goto end;
-#else
+#else /* CONFIG_LOONGARCH_NEW_WORLD */
     case 0x7060: /* FLDX.S */
-        if (no_right(real_guest_addr, 4, PAGE_READ, &siaddr)) {
-            info->si_addr = (void *)siaddr;
-            return 1;
-        }
-        assert(siaddr == real_guest_addr);
-        fd = fd < 8 ? (fd + UC_GET_FTOP(&extctx, int32_t)) & 7: fd;
-        UC_SET_FPR(&extctx, fd, mem_addr, int32_t);
-        goto end;
+      if (no_right(real_guest_addr, 4, PAGE_READ, &siaddr)) {
+        info->si_addr = (void *)siaddr;
+        return 1;
+      }
+      assert(siaddr == real_guest_addr);
+      fd = fd < 8 ? (fd + UC_GET_FTOP(&extctx, uint32_t)) & 7 : fd;
+      UC_SET_FPR(&extctx, fd, mem_addr, uint32_t);
+      goto end;
     case 0x7068: /* FLDX.D */
-        if (no_right(real_guest_addr, 8, PAGE_READ, &siaddr)) {
-            info->si_addr = (void *)siaddr;
-            return 1;
-        }
-        assert(siaddr == real_guest_addr);
-        fd = fd < 8 ? (fd + UC_GET_FTOP(&extctx, int32_t)) & 7: fd;
-        UC_SET_FPR(&extctx, fd, mem_addr, int64_t);
-        goto end;
+      if (no_right(real_guest_addr, 8, PAGE_READ, &siaddr)) {
+        info->si_addr = (void *)siaddr;
+        return 1;
+      }
+      assert(siaddr == real_guest_addr);
+      fd = fd < 8 ? (fd + UC_GET_FTOP(&extctx, uint32_t)) & 7 : fd;
+      UC_SET_FPR(&extctx, fd, mem_addr, uint64_t);
+      goto end;
     case 0x7070: /* FSTX.S */
-        if (no_right(real_guest_addr, 4, PAGE_WRITE, &siaddr)) {
-            info->si_addr = (void *)siaddr;
-            return 1;
-        }
-        assert(siaddr == real_guest_addr);
-        fd = fd < 8 ? (fd + UC_GET_FTOP(&extctx, int32_t)) & 7: fd;
-        *(int32_t *)mem_addr = UC_GET_FPR(&extctx, fd, int32_t);
-        goto end;
+      if (no_right(real_guest_addr, 4, PAGE_WRITE, &siaddr)) {
+        info->si_addr = (void *)siaddr;
+        return 1;
+      }
+      assert(siaddr == real_guest_addr);
+      fd = fd < 8 ? (fd + UC_GET_FTOP(&extctx, uint32_t)) & 7 : fd;
+      *(int32_t *)mem_addr = UC_GET_FPR(&extctx, fd, uint32_t);
+      goto end;
     case 0x7078: /* FSTX.D */
-        if (no_right(real_guest_addr, 8, PAGE_WRITE, &siaddr)) {
-            info->si_addr = (void *)siaddr;
-            return 1;
-        }
-        assert(siaddr == real_guest_addr);
-        fd = fd < 8 ? (fd + UC_GET_FTOP(&extctx, int32_t)) & 7: fd;
-        *(int64_t *)mem_addr = UC_GET_FPR(&extctx, fd, int64_t);
-        goto end;
+      if (no_right(real_guest_addr, 8, PAGE_WRITE, &siaddr)) {
+        info->si_addr = (void *)siaddr;
+        return 1;
+      }
+      assert(siaddr == real_guest_addr);
+      fd = fd < 8 ? (fd + UC_GET_FTOP(&extctx, uint32_t)) & 7 : fd;
+      *(int64_t *)mem_addr = UC_GET_FPR(&extctx, fd, uint64_t);
+      goto end;
     case 0x7080: /* VLDX */
-        UC_SET_LSX(&extctx, fd, 0, mem_addr + 0, int64_t);
-        UC_SET_LSX(&extctx, fd, 1, mem_addr + 8, int64_t);
-        goto end;
+      if (no_right(real_guest_addr, 16, PAGE_READ, &siaddr)) {
+        info->si_addr = (void *)siaddr;
+        return 1;
+      }
+      for (int i = 0; i < 2; i++) {
+        int64_t v64 = over_page_read(real_guest_addr + (i * 8), 8);
+        UC_SET_LSX(&extctx, fd, i, &v64, int64_t);
+      }
+      goto end;
     case 0x7088: /* VSTX */
-        *(int64_t *)(mem_addr + 0) = UC_GET_LSX(&extctx, fd, 0, int64_t);
-        *(int64_t *)(mem_addr + 8) = UC_GET_LSX(&extctx, fd, 1, int64_t);
-        goto end;
+      if (no_right(real_guest_addr, 16, PAGE_WRITE, &siaddr)) {
+        info->si_addr = (void *)siaddr;
+        return 1;
+      }
+      for (int i = 0; i < 2; i++) {
+        over_page_write(real_guest_addr + (i * 8),
+                        UC_GET_LSX(&extctx, fd, i, int64_t), 8);
+      }
+      goto end;
     case 0x7090: /* XVLDX */
-        UC_SET_LASX(&extctx, fd, 0, mem_addr +  0, int64_t);
-        UC_SET_LASX(&extctx, fd, 1, mem_addr +  8, int64_t);
-        UC_SET_LASX(&extctx, fd, 2, mem_addr + 16, int64_t);
-        UC_SET_LASX(&extctx, fd, 3, mem_addr + 24, int64_t);
-        goto end;
+      if (no_right(real_guest_addr, 32, PAGE_READ, &siaddr)) {
+        info->si_addr = (void *)siaddr;
+        return 1;
+      }
+      for (int i = 0; i < 4; i++) {
+        int64_t v64 = over_page_read(real_guest_addr + (i * 8), 8);
+        UC_SET_LASX(&extctx, fd, i, &v64, int64_t);
+      }
+      goto end;
     case 0x7098: /* XVSTX */
-        *(int64_t *)(mem_addr +  0) = UC_GET_LASX(&extctx, fd, 0, int64_t);
-        *(int64_t *)(mem_addr +  8) = UC_GET_LASX(&extctx, fd, 1, int64_t);
-        *(int64_t *)(mem_addr + 16) = UC_GET_LASX(&extctx, fd, 2, int64_t);
-        *(int64_t *)(mem_addr + 24) = UC_GET_LASX(&extctx, fd, 3, int64_t);
-        goto end;
+      if (no_right(real_guest_addr, 32, PAGE_WRITE, &siaddr)) {
+        info->si_addr = (void *)siaddr;
+        return 1;
+      }
+      for (int i = 0; i < 4; i++) {
+        over_page_write(real_guest_addr + (i * 8),
+                        UC_GET_LASX(&extctx, fd, i, int64_t), 8);
+      }
+      goto end;
 #endif
     case 0x70c0: /* AMSWAP.W */
     case 0x70d2: /* AMSWAP_DB.W */

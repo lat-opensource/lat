@@ -8718,20 +8718,24 @@ static void restore_extcontext(CPUX86State *env, ucontext_t *uc)
 
     /* save fpr */
     for (i = 0; i < 8; i++) {
-        env->fpregs[i].mmx.MMX_Q(0) = UC_GET_FPR(&extctx, reg_fpr_map[i], int64_t);
+      env->fpregs[i].mmx.MMX_Q(0) =
+          UC_GET_FPR(&extctx, reg_fpr_map[i], uint64_t);
     }
 
     /* save sse */
     for (i = 0; i < nb_xmm_regs; i++) {
-        env->xmm_regs[i].ZMM_Q(0) = UC_GET_LSX(&extctx, reg_xmm_map[i], 0, int64_t);
-        env->xmm_regs[i].ZMM_Q(1) = UC_GET_LSX(&extctx, reg_xmm_map[i], 1, int64_t);
-        env->xmm_regs[i].ZMM_Q(2) = UC_GET_LSX(&extctx, reg_xmm_map[i], 2, int64_t);
-        env->xmm_regs[i].ZMM_Q(3) = UC_GET_LSX(&extctx, reg_xmm_map[i], 3, int64_t);
+      env->xmm_regs[i].ZMM_Q(0) =
+          UC_GET_LSX(&extctx, reg_xmm_map[i], 0, uint64_t);
+      env->xmm_regs[i].ZMM_Q(1) =
+          UC_GET_LSX(&extctx, reg_xmm_map[i], 1, uint64_t);
+      env->xmm_regs[i].ZMM_Q(2) =
+          UC_GET_LSX(&extctx, reg_xmm_map[i], 2, uint64_t);
+      env->xmm_regs[i].ZMM_Q(3) =
+          UC_GET_LSX(&extctx, reg_xmm_map[i], 3, uint64_t);
     }
     /* eflags */
-    env->eflags  = UC_LBT(&extctx)->eflags;
+    env->eflags = UC_GET_EFLAGS(&extctx, uint32_t);
     env->eflags |= UC_GR(uc)[reg_statics_map[S_EFLAGS]];
-
 }
 #endif
 

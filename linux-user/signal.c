@@ -1055,7 +1055,8 @@ static void host_signal_handler(int host_signum, siginfo_t *info,
 	        struct extctx_layout extctx;
 	        memset(&extctx, 0, sizeof(extctx));
 	        parse_extcontext(uc, &extctx);
-	        UC_LBT(&extctx)->regs[0] = 0;
+            uint64_t zero = 0;
+            UC_SET_SCR(&extctx, 0, &zero, uint64_t);
  #endif
             /* set the next TB and point the epc to the epilogue */
             UC_GR(uc)[reg_statics_map[S_UD1]] = current_tb->pc;
