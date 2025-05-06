@@ -682,6 +682,11 @@ static void handle_arg_mmap_start(const char *arg)
     mmap_next_start = strtol(arg, NULL, 0);
 }
 
+static void handle_arg_mmap_fixed(const char *arg)
+{
+    option_mmap_fixed = strtol(arg, NULL, 0);
+}
+
 static void handle_arg_latx_mem_test(const char *arg)
 {
     option_mem_test = strtol(arg, NULL, 0);
@@ -817,6 +822,8 @@ static const struct qemu_argument arg_table[] = {
     "",           "anonymize latx for guest"},
     {"latx-mmap_start",    "LATX_MMAP_START",     true,  handle_arg_mmap_start,
     "",           "adjust the initial address of mmap"},
+    {"latx-mmap_fixed",    "LATX_MMAP_FIXED",     true,  handle_arg_mmap_fixed,
+    "",           "force mmap with address to be MAP_FIXED"},
 #endif
 #if defined(CONFIG_LATX_DEBUG) || defined(CONFIG_DEBUG_TCG)
 #ifdef CONFIG_LATX

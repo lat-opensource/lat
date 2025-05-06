@@ -626,6 +626,7 @@ abi_ulong mmap_find_vma_2g(abi_ulong start, abi_ulong size, abi_ulong align)
 extern int latx_wine;
 void kzt_wine_bridge(abi_ulong start, int fd);
 #endif
+abi_ulong option_mmap_fixed;
 abi_long target_mmap(abi_ulong start, abi_ulong len, int target_prot,
                      int flags, int fd, uint64_t offset, int rlimit_as_account)
 {
@@ -640,6 +641,8 @@ abi_long target_mmap(abi_ulong start, abi_ulong len, int target_prot,
         len = 0x4000;
     }
 #endif
+    if (start && option_mmap_fixed)
+        flags |= MAP_FIXED;
 
     mmap_lock();
     trace_target_mmap(start, len, target_prot, flags, fd, offset);
