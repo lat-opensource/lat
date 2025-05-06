@@ -3238,48 +3238,6 @@ static void pageflags_create(target_ulong start, target_ulong last, int flags)
     interval_tree_insert(&p->itree, &pageflags_root);
 }
 
-/* A subroutine of page_set_flags: remove everything in [start,last]. */
-static bool pageflags_unset(target_ulong start, target_ulong last)
-{
-    bool inval_tb = false;
-
-    while (true) {
-        PageFlagsNode *p = pageflags_find(start, last);
-        target_ulong p_last;
-
-        if (!p) {
-            break;
-        }
-
-        if (p->flags & PAGE_EXEC) {
-            inval_tb = true;
-        }
-
-        interval_tree_remove(&p->itree, &pageflags_root);
-        p_last = p->itree.last;
-
-        if (p->itree.start < start) {
-            /* Truncate the node from the end, or split out the middle. */
-            p->itree.last = start - 1;
-            interval_tree_insert(&p->itree, &pageflags_root);
-            if (last < p_last) {
-                pageflags_create(last + 1, p_last, p->flags);
-                break;
-            }
-        } else if (p_last <= last) {
-            /* Range completely covers node -- remove it. */
-            g_free(p);
-        } else {
-            /* Truncate the node from the start. */
-            p->itree.start = last + 1;
-            interval_tree_insert(&p->itree, &pageflags_root);
-            break;
-        }
-    }
-
-    return inval_tb;
-}
-
 /*
  * A subroutine of page_set_flags: nothing overlaps [start,last],
  * but check adjacent mappings and maybe merge into a single range.
@@ -3324,6 +3282,48 @@ static void pageflags_create_merge(target_ulong start, target_ulong last,
     } else {
         pageflags_create(start, last, flags);
     }
+}
+
+/* A subroutine of page_set_flags: remove everything in [start,last]. */
+static bool pageflags_unset(target_ulong start, target_ulong last)
+{
+    bool inval_tb = false;
+
+    while (true) {
+        PageFlagsNode *p = pageflags_find(start, last);
+        target_ulong p_last;
+
+        if (!p) {
+            break;
+        }
+
+        if (p->flags & PAGE_EXEC) {
+            inval_tb = true;
+        }
+
+        interval_tree_remove(&p->itree, &pageflags_root);
+        p_last = p->itree.last;
+
+        if (p->itree.start < start) {
+            /* Truncate the node from the end, or split out the middle. */
+            p->itree.last = start - 1;
+            interval_tree_insert(&p->itree, &pageflags_root);
+            if (last < p_last) {
+                pageflags_create_merge(last + 1, p_last, p->flags);
+                break;
+            }
+        } else if (p_last <= last) {
+            /* Range completely covers node -- remove it. */
+            g_free(p);
+        } else {
+            /* Truncate the node from the start. */
+            p->itree.start = last + 1;
+            interval_tree_insert(&p->itree, &pageflags_root);
+            break;
+        }
+    }
+
+    return inval_tb;
 }
 
 /* A subroutine of page_set_flags: add flags to [start,last]. */
@@ -3386,12 +3386,12 @@ bool pageflags_set_clear(target_ulong start, target_ulong last,
 
             if (last < p_last) {
                 if (merge_flags) {
-                    pageflags_create(start, last, merge_flags);
+                    pageflags_create_merge(start, last, merge_flags);
                 }
-                pageflags_create(last + 1, p_last, p_flags);
+                pageflags_create_merge(last + 1, p_last, p_flags);
             } else {
                 if (merge_flags) {
-                    pageflags_create(start, p_last, merge_flags);
+                    pageflags_create_merge(start, p_last, merge_flags);
                 }
                 if (p_last < last) {
                     start = p_last + 1;
@@ -3400,14 +3400,14 @@ bool pageflags_set_clear(target_ulong start, target_ulong last,
             }
         } else {
             if (start < p_start && set_flags) {
-                pageflags_create(start, p_start - 1, set_flags);
+                pageflags_create_merge(start, p_start - 1, set_flags);
             }
             if (last < p_last) {
                 interval_tree_remove(&p->itree, &pageflags_root);
                 p->itree.start = last + 1;
                 interval_tree_insert(&p->itree, &pageflags_root);
                 if (merge_flags) {
-                    pageflags_create(start, last, merge_flags);
+                    pageflags_create_merge(start, last, merge_flags);
                 }
             } else {
                 if (merge_flags) {
@@ -3449,7 +3449,7 @@ bool pageflags_set_clear(target_ulong start, target_ulong last,
             goto restart;
         }
         if (last < p_last) {
-            pageflags_create(last + 1, p_last, p_flags);
+            pageflags_create_merge(last + 1, p_last, p_flags);
         }
     } else if (last < p_last) {
         p->itree.start = last + 1;
@@ -3459,7 +3459,7 @@ bool pageflags_set_clear(target_ulong start, target_ulong last,
         goto restart;
     }
     if (set_flags) {
-        pageflags_create(start, last, set_flags);
+        pageflags_create_merge(start, last, set_flags);
     }
 
  done:
@@ -3526,23 +3526,25 @@ void page_set_flags(target_ulong start, target_ulong end, int flags)
     }
 #endif
 
-    for (addr = start, len = end - start;
-         len != 0;
-         len -= TARGET_PAGE_SIZE, addr += TARGET_PAGE_SIZE) {
-        PageFlagsNode *p = pageflags_find(addr, addr);
 #ifdef CONFIG_LATX_AOT
-        if (option_aot && (flags & PAGE_WRITE) && p && !(p->flags & PAGE_WRITE)) {
-            if (foreach_tb_first(addr, addr + TARGET_PAGE_SIZE)) {
-                page_set_page_state(addr, PAGE_SMC);
-            } else if ((p->flags & PAGE_EXEC) && p_info) {
-                aot_segment *p_segment = (aot_segment *)(p_info->p_segment);
-                if ((p_info->is_running || (p_segment && !(p_segment->is_pe)))) {
+    if (option_aot && (flags & PAGE_WRITE)) {
+        for (addr = start, len = end - start;
+             len != 0;
+             len -= TARGET_PAGE_SIZE, addr += TARGET_PAGE_SIZE) {
+            PageFlagsNode *p = pageflags_find(addr, addr);
+            if (p && !(p->flags & PAGE_WRITE)) {
+                if (foreach_tb_first(addr, addr + TARGET_PAGE_SIZE)) {
                     page_set_page_state(addr, PAGE_SMC);
+                } else if ((p->flags & PAGE_EXEC) && p_info) {
+                    aot_segment *p_segment = (aot_segment *)(p_info->p_segment);
+                    if ((p_info->is_running || (p_segment && !(p_segment->is_pe)))) {
+                        page_set_page_state(addr, PAGE_SMC);
+                    }
                 }
             }
         }
-#endif
     }
+#endif
 
     if (flags) {
         inval_tb |= pageflags_set_clear(start, last, flags,

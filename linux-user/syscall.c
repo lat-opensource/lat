@@ -15586,13 +15586,7 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
                 }
                 if (real_start < real_end) {
                     mmap_lock();
-                    for (addr = real_start; addr < real_end; addr += TARGET_PAGE_SIZE) {
-                        prot = page_get_flags(addr);
-                        if (prot & PAGE_VALID) {
-                            prot = (prot & (PAGE_BITS | PAGE_WRITE_ORG)) | prot_extra;
-                            page_set_flags(addr, addr + TARGET_PAGE_SIZE, prot);
-                        }
-                    }
+                    pageflags_set_clear(real_start, real_end - 1, prot_extra, 0);
                     mmap_unlock();
                     ret = get_errno(syscall(__NR_madvise, g2h_untagged(real_start),
                                 real_end - real_start, arg3));
@@ -15601,7 +15595,6 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
             }
 
             if ((arg3 == MADV_FREE) && (prot & PAGE_ANON)) {
-                abi_ulong addr;
                 abi_ulong start = arg1;
                 abi_ulong end = start + arg2;
                 abi_ulong real_start = arg1 & qemu_host_page_mask;
@@ -15610,10 +15603,7 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
                 ret = 0;
 
                 mmap_lock();
-                for (addr = real_start; addr < real_end; addr += TARGET_PAGE_SIZE) {
-                    prot = (page_get_flags(addr) & (PAGE_BITS | PAGE_WRITE_ORG)) | prot_extra;
-                    page_set_flags(addr, addr + TARGET_PAGE_SIZE, prot);
-                }
+                pageflags_set_clear(real_start, real_end - 1, prot_extra, 0);
                 mmap_unlock();
                 if (start > real_start) {
                     if (real_end == real_start + qemu_host_page_size) {
