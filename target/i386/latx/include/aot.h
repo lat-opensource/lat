@@ -10,7 +10,6 @@
 #include "qemu/cutils.h"
 #include "qemu/units.h"
 #include "segment.h"
-#include "latx-version.h"
 #include "aot_link_seg.h"
 #include "ts.h"
 #include "aot_lib.h"

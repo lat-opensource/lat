@@ -55,7 +55,6 @@ int mydebug = 1;
 #include "latx-config.h"
 #include "latx-options.h"
 #include "aot.h"
-#include "latx-version.h"
 #include <openssl/evp.h>
 #endif
 #ifdef CONFIG_LATX_PERF

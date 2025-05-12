@@ -16,11 +16,6 @@ sh = find_program('sh')
 cc = meson.get_compiler('c')
 config_host = keyval.load(meson.current_build_dir() / 'config-host.mak')
 enable_static = 'CONFIG_STATIC' in config_host
-
-latx_version_h = vcs_tag(command : ['git', 'describe'],
-                        fallback : 'unknown',
-			input : 'linux-user/latx-version.h.in',
-                        output :'latx-version.h')
 # Allow both shared and static libraries unless --enable-static
 static_kwargs = enable_static ? {'static': true} : {}
 
@@ -97,6 +92,16 @@ endif
 ################
 # Dependencies #
 ################
+
+latx_version = get_option('latx_version')
+if latx_version == ''
+  latx_version = run_command('git', 'describe', '--always', check: false).stdout().strip()
+endif
+if latx_version == ''
+  latx_version = 'unknown'
+endif
+
+add_project_arguments('-DLATX_VERSION="' + latx_version + '"', language: ['c', 'cpp'])
 
 # The path to glib.h is added to all compilation commands.  This was
 # grandfathered in from the QEMU Makefiles.
