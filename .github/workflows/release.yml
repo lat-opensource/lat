@@ -1,0 +1,90 @@
+### Auto build LAT and release its binary with Github Action
+name: Build and Release LAT
+
+on:
+  workflow_dispatch:
+  release:
+  push:
+    paths:
+      - "**/*.c"
+      - "**/*.h"
+      - "**/*.S"
+      - "**/*.py"
+      - "**/meson.build"
+      - "meson.options"
+      - "**/*.inc"
+      - "**/*.yml"
+  pull_request:
+    types: [assigned, opened, synchronize, reopened]
+    paths:
+      - "**/*.c"
+      - "**/*.h"
+      - "**/*.S"
+      - "**/*.py"
+      - "**/meson.build"
+      - "meson.options"
+      - "**/*.inc"
+      - "**/*.yml"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        container: [ 'latx-runner-debian' ]
+        type: [ 'build-release', 'build32', 'build32-dbg', 'build64', 'build64-dbg', 'buildtcg32', 'buildtcg32-dbg', 'buildtcg64', 'buildtcg64-dbg' ]
+        exclude:
+          - container: 'latx-runner-debian'
+            type: 'buildtcg32'
+          - container: 'latx-runner-debian'
+            type: 'buildtcg32-dbg'
+          - container: 'latx-runner-debian'
+            type: 'buildtcg64'
+          - container: 'latx-runner-debian'
+            type: 'buildtcg64-dbg'
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Setup Cache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.cache
+          key: ${{ matrix.container }}-${{ matrix.type }}-${{ github.sha }}
+          restore-keys: ${{ matrix.container }}-${{ matrix.type }}-
+
+      - name: Setup QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: "Build LATX"
+        run: |
+          DOCKER_IMAGE="ghcr.io/${{ github.repository_owner }}/${{ matrix.container }}:loong64"
+          DOCKER_CMD="./latxbuild/${{ matrix.type }}.sh -c"
+          docker run --rm \
+            --platform linux/loong64 \
+            --volume /tmp/.cache:/root/.cache \
+            --volume "$(pwd):/io" \
+            --workdir /io \
+            "$DOCKER_IMAGE" \
+            sh -c "$DOCKER_CMD"
+
+      - name: "Get short Git commit"
+        run: |
+          echo "SHORT_COMMIT=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+
+      - name: "Upload Artifact"
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.container }}-${{ matrix.type }}-${{ env.SHORT_COMMIT }}
+          path: |
+            ${{ matrix.type }}/latx-i386
+            ${{ matrix.type }}/latx-x86_64
+            *.tar.xz
+          retention-days: 7
+
