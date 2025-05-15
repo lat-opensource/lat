@@ -139,7 +139,7 @@ void load_ireg_from_guest_addr(IR2_OPND opnd2, uint64 value)
     int32 lo32 = value & 0xffffffff;
     la_lu12i_w(opnd2, lo32 >> 12);
     la_ori(opnd2, opnd2, lo32 & 0xfff);
-    if (hi32) {
+    if (hi32 || (lo32 & 0x80000000)) {
         la_lu32i_d(opnd2, hi32 & 0xfffff);
     }
     return;

@@ -1283,7 +1283,7 @@ void aot_do_tb_reloc(TranslationBlock *tb, struct aot_tb *stb,
                 *pinsn &= 0xfe00001f;
                 *pinsn |= ((call_target >> 32) & 0xfffff) << 5;
             }else if(aot_rel_table[i].rel_slots_num == 2) {
-               if (call_target >> 32) {
+               if (call_target >> 31) {
                     qemu_log_mask(LAT_LOG_AOT, "call_target %lx h32 no zero, but only have two slot\n",
                             call_target);
                     exit(-1);
@@ -1364,8 +1364,8 @@ static aot_segment *get_segment(char *lib_name, uint64_t aot_offset,
             return NULL;
         }
     }
-    if ((p_segment->details.seg_begin >> 32 == 0) 
-            && (((uint64)(end) >> 32) != 0)
+    if ((p_segment->details.seg_begin >> 31 == 0)
+            && (((uint64)(end) >> 31) != 0)
             && (start > p_segment->details.seg_begin)){
         qemu_log_mask(LAT_LOG_AOT, "seg start h32 not zero\n");
         assert(lib);
