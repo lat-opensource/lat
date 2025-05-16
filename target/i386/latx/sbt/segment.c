@@ -132,6 +132,11 @@ void segment_tree_insert(char *name, target_ulong offset, target_ulong begin,
     seg->buffer = NULL;
     seg->p_segment = NULL;
     seg->is_running = false;
+    seg_info * old_seg_info = segment_tree_lookup2(begin, end);
+    while(old_seg_info) {
+       segment_tree_remove(old_seg_info);
+       old_seg_info = segment_tree_lookup2(begin, end);
+    }
     /* Now insert this new segment into segment_tree */
     g_tree_replace(segment_tree, seg, seg);
 }
