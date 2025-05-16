@@ -59,7 +59,7 @@ make_cmd() {
         elif [ "$opt_level" = "1" ]; then
             ../configure --target-list=i386-linux-user --enable-latx \
                 --enable-guest-base-zero --disable-debug-info --optimize-O1 --static \
-                --extra-ldflags=-ldl --disable-docs --disable-pie --disable-zstd --disable-gcrypt --disable-gnutls
+                --extra-ldflags=-ldl --disable-docs --disable-pie --disable-zstd --disable-gcrypt --disable-gnutls --disable-vhost-crypto
         elif [ "$opt_level" = "2" ]; then
             ../configure --target-list=i386-linux-user --enable-latx \
                 --enable-guest-base-zero --disable-debug-info --optimize-O2 --static \

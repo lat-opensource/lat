@@ -55,7 +55,6 @@ build() {
         --disable-docs
         --disable-werror
         --disable-pie
-        --disable-linux-io-uring
     )
 
     local _configure64_flags=(
