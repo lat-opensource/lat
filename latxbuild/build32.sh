@@ -45,26 +45,26 @@ parseArgs() {
 
 make_cmd() {
     cd $(dirname $0)/../
-    if [ $make_configure -eq 1 ] ; then
+    if [ $make_configure -eq 1 ]; then
         rm -rf build32
     fi
     mkdir -p build32
     cd build32
 
-    if [ $make_configure -eq 1 ] ; then
-        if [ "$opt_level" = "0" ] ; then
+    if [ $make_configure -eq 1 ]; then
+        if [ "$opt_level" = "0" ]; then
             ../configure --target-list=i386-linux-user --enable-latx \
                 --enable-guest-base-zero --disable-debug-info --optimize-O0 --static \
                 --disable-docs --disable-pie --disable-zstd
-        elif [ "$opt_level" = "1" ] ; then
+        elif [ "$opt_level" = "1" ]; then
             ../configure --target-list=i386-linux-user --enable-latx \
                 --enable-guest-base-zero --disable-debug-info --optimize-O1 --static \
-                --extra-ldflags=-ldl --disable-docs --disable-pie --disable-zstd
-        elif [ "$opt_level" = "2" ] ; then
+                --extra-ldflags=-ldl --disable-docs --disable-pie --disable-zstd --disable-gcrypt --disable-gnutls
+        elif [ "$opt_level" = "2" ]; then
             ../configure --target-list=i386-linux-user --enable-latx \
                 --enable-guest-base-zero --disable-debug-info --optimize-O2 --static \
                 --extra-ldflags=-ldl --disable-docs --disable-pie --disable-zstd
-        elif [ "$opt_level" = "3" ] ; then
+        elif [ "$opt_level" = "3" ]; then
             ../configure --target-list=i386-linux-user --enable-latx \
                 --enable-guest-base-zero --disable-debug-info --optimize-O3 --static \
                 --disable-docs --disable-pie --disable-zstd
