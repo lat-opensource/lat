@@ -12,7 +12,6 @@ ARG DEPENDENCIES="         \
         libglib2.0-dev     \
         libkeyutils-dev    \
         libssl-dev         \
-        lsb-release        \
         make               \
         ninja-build        \
         pkg-config         \
