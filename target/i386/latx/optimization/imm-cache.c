@@ -81,6 +81,9 @@ static inline void free_itemp(int itemp_num)
      * x32: [7-10] -> [0-3]
      * x64: [3-6] -> [0-3]
      */
+    if (itemp_num < 0) {
+        return;
+    }
     int index = itemp_reverse_map[itemp_num];
     lsassertm(index != -1, "Invalid itemp_num map to imm_cache reg.");
     itemp_stat[index] = 1;
