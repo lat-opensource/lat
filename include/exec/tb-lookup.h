@@ -42,7 +42,6 @@ static inline TranslationBlock *tb_lookup(CPUState *cpu, target_ulong pc,
                tb->pc == pc &&
                /* tb->cs_base == cs_base && */
                tb->flags == flags &&
-               tb->trace_vcpu_dstate == *cpu->trace_dstate &&
                tb_cflags(tb) == cflags)) {
 #ifdef CONFIG_LATX_PROFILER
         qatomic_inc(&prof->hash_count);

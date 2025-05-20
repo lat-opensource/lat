@@ -563,9 +563,6 @@ struct TranslationBlock {
 #define CF_CLUSTER_MASK 0xff000000 /* Top 8 bits are cluster ID */
 #define CF_CLUSTER_SHIFT 24
 
-    /* Per-vCPU dynamic tracing state used to generate this TB */
-    uint32_t trace_vcpu_dstate;
-
     /*
      * Above fields used for comparing
      */
@@ -640,6 +637,9 @@ struct TranslationBlock {
     uintptr_t jmp_list_next[2];
     uintptr_t jmp_dest[2];
 #ifdef CONFIG_LATX
+#ifdef CONFIG_LATX_TU
+    uint32_t tu_search_addr_offset;
+#endif
 #define TARGET1_ELIMINATE 0x01
 #define OPT_BCC           0x02
 #define IS_ENABLE_JRRA    0x04
@@ -675,12 +675,7 @@ struct TranslationBlock {
     unsigned long *return_target_ptr;
     unsigned long next_86_pc;
 #endif
-
     unsigned long checksum;
-#endif
-
-#ifdef CONFIG_LATX_TU
-        uint64_t tu_search_addr_offset;
 #endif
 };
 

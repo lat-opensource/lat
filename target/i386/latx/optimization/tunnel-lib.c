@@ -432,7 +432,6 @@ static void init_tb_by_cpu(struct cpu_state_info *state_info,
     /* tb->cs_base = state_info->cs_base; */
     tb->flags = state_info->flags;
     tb->cflags = cpu->tcg_cflags;
-    tb->trace_vcpu_dstate = *cpu->trace_dstate;
 }
 
 static void set_tb_pc(TranslationBlock *tb,

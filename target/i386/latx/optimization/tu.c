@@ -208,7 +208,6 @@ TranslationBlock* tb_create(CPUState *cpu, target_ulong pc,
     /* tb->cs_base = cs_base; */
     tb->flags = flags;
     tb->cflags = cflags;
-    tb->trace_vcpu_dstate = *cpu->trace_dstate;
     /* tb->tu_start_mode = mode; */
     tcg_ctx->tb_cflags = cflags;
     tcg_ctx->tb_jmp_reset_offset = tb->jmp_reset_offset;

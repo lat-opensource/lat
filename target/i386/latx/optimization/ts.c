@@ -396,7 +396,6 @@ static TranslationBlock* create_static_tb(CPUState *cpu, target_ulong pc,
     /* tb->cs_base = cs_base; */
     tb->flags = flags;
     tb->cflags = cflags;
-    tb->trace_vcpu_dstate = *cpu->trace_dstate;
     tcg_ctx->tb_cflags = cflags;
     tcg_ctx->tb_jmp_reset_offset = tb->jmp_reset_offset;
     if (TCG_TARGET_HAS_direct_jump) {
