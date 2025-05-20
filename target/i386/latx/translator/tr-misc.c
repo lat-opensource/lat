@@ -429,6 +429,7 @@ bool translate_call(IR1_INST *pir1)
     aot_load_guest_addr(x86_addr_opnd, ir1_addr_next(pir1),
                         LOAD_CALL_TARGET, call_offset);
 
+#ifdef CONFIG_LATX_JRRA
     TranslationBlock *tb = lsenv->tr_data->curr_tb;
     if (option_jr_ra_stack) {
         la_code_align(2, 0x03400000);
@@ -481,6 +482,7 @@ bool translate_call(IR1_INST *pir1)
         la_ori(zero_ir2_opnd, zero_ir2_opnd, 0);
         la_gr2scr(scr0_ir2_opnd, zero_ir2_opnd);
     }
+#endif
 
 #ifndef TARGET_X86_64
     la_bstrpick_d(esp_opnd, esp_opnd, 31, 0);
@@ -571,6 +573,7 @@ bool translate_callin(IR1_INST *pir1)
     aot_load_guest_addr(return_addr_opnd, ir1_addr_next(pir1),
                         LOAD_CALL_TARGET, call_offset);
 
+#ifdef CONFIG_LATX_JRRA
     TranslationBlock *tb = lsenv->tr_data->curr_tb;
     if (option_jr_ra_stack) {
         la_code_align(2, 0x03400000);
@@ -623,6 +626,7 @@ bool translate_callin(IR1_INST *pir1)
         la_ori(zero_ir2_opnd, zero_ir2_opnd, 0);
         la_gr2scr(scr0_ir2_opnd, zero_ir2_opnd);
     }
+#endif
 
 #ifndef TARGET_X86_64
     la_bstrpick_d(esp_opnd, esp_opnd, 31, 0);

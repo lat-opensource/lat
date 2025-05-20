@@ -337,10 +337,9 @@ static inline int create_aot_tb(aot_tb *curr_aot_tb, TranslationBlock *tb,
     } else {
         curr_aot_tb->return_target_ptr_offset = 0;
     }
-#endif
     curr_aot_tb->next_86_pc_offset =
         tb->next_86_pc - curr_seg->details.seg_begin;
-
+#endif
     /* Dump this tb info for debug */
     if (option_debug_aot) {
         qemu_log_mask(LAT_LOG_AOT, "Tb 0x" TARGET_FMT_lx

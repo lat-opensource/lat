@@ -416,8 +416,10 @@ static void reset_tb(TranslationBlock *tb)
     tb->first_jmp_align = TB_JMP_RESET_OFFSET_INVALID;
     tb_set_page_addr0(tb, -1);
     tb_set_page_addr1(tb, -1);
+#ifdef CONFIG_LATX_JRRA
     tb->next_86_pc = 0;
     tb->return_target_ptr = NULL;
+#endif
 #ifdef CONFIG_LATX_AOT
     tb->s_data->rel_start = -1;
     tb->s_data->rel_end = -1;

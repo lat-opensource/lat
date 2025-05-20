@@ -49,7 +49,6 @@ inline static TranslationBlock *creat_tb(aot_tb *p_aot_tb, abi_ulong start,
     tb->size = p_aot_tb->size;
     tb->first_jmp_align = p_aot_tb->first_jmp_align;
     tb->bool_flags = p_aot_tb->bool_flags;
-    tb->return_target_ptr = NULL;
     tb->jmp_stub_target_arg[0] = p_aot_tb->jmp_stub_target_arg[0];
     tb->jmp_stub_target_arg[1] = p_aot_tb->jmp_stub_target_arg[1];
     if (is_tu_tb(tb)) {
@@ -70,6 +69,7 @@ inline static TranslationBlock *creat_tb(aot_tb *p_aot_tb, abi_ulong start,
         tb->jmp_stub_reset_offset[1] = p_aot_tb->jmp_stub_reset_offset[1];
     }
 #if defined(CONFIG_LATX_JRRA) || defined(CONFIG_LATX_JRRA_STACK)
+    tb->return_target_ptr = NULL;
     if (p_aot_tb->return_target_ptr_offset) {
         tb->next_86_pc = start + p_aot_tb->next_86_pc_offset;
     } else {

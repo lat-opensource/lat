@@ -2053,8 +2053,10 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
 #ifdef CONFIG_LATX_PROFILER
     CLN_TB_PROFILE(tb);
 #endif
+#ifdef CONFIG_LATX_JRRA
     tb->next_86_pc = 0;
     tb->return_target_ptr = NULL;
+#endif
 #endif
 
 #ifndef CONFIG_LATX

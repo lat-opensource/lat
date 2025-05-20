@@ -670,8 +670,10 @@ struct TranslationBlock {
     TBProfile profile __attribute__((aligned(8)));
 #endif
     /* remember to free these memory when QEMU recycle one TB */
+#ifdef CONFIG_LATX_JRRA
     unsigned long *return_target_ptr;
     unsigned long next_86_pc;
+#endif
 
     unsigned long checksum;
 #endif
