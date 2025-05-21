@@ -513,18 +513,19 @@ struct separated_data{
     void     *ir1;
     int32_t rel_start;
     int32_t rel_end;
-    tu_tb_mode_type tu_tb_mode;
     uint8_t last_ir1_type;
     union {
         int is_first_tb;
         int tu_size;
     };
 #ifdef CONFIG_LATX_TU
+    tu_tb_mode_type tu_tb_mode;
     size_t offset_in_tu;
     target_ulong tu_id;
+#endif
     target_ulong next_pc;
     target_ulong target_pc;
-#endif
+
 #ifdef CONFIG_LATX_HBR
     union {
         uint32_t xmm_in;
@@ -697,7 +698,6 @@ typedef struct TBMini {
     };
 } TBMini;
 
-#if defined(CONFIG_LATX_TU) || defined(CONFIG_LATX_AOT)
 typedef enum IR1_TYPE {
     IR1_TYPE_NORMAL = 0,
     IR1_TYPE_BRANCH,
@@ -708,7 +708,6 @@ typedef enum IR1_TYPE {
     IR1_TYPE_CALLIN,
     IR1_TYPE_SYSCALL,
 } IR1_TYPE;
-#endif
 
 /* Hide the qatomic_read to make code a little easier on the eyes */
 static inline uint32_t tb_cflags(const TranslationBlock *tb)

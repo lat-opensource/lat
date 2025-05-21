@@ -22,6 +22,7 @@
  * **Also, this function only analysis the information and set IR1_INST!**
  */
 
+#ifdef CONFIG_LATX_TU
 /* static int opt, noopt; */
 static void ir1_optimization_over_tb(TranslationBlock *tb)
 {
@@ -134,6 +135,7 @@ void over_tb_rfd(TranslationBlock **tb_list, int tb_num)
         ir1_optimization_over_tb(tb);
     }
 }
+#endif
 
 void ir1_optimization(TranslationBlock *tb)
 {

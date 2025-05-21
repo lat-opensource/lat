@@ -5,13 +5,12 @@
  */
 #ifndef __TU_H_
 #define __TU_H_
-#if defined(CONFIG_LATX_AOT) || defined(CONFIG_LATX_TU)
 #include <gmodule.h>
 #include "reg-map.h"
 #include "ir1.h"
 
 void get_last_info(TranslationBlock *tb, IR1_INST *pir1);
-#endif
+
 #ifdef CONFIG_LATX_TU
 /*
  * The reason why MAX_TB_IN_CACHE > MAX_TB_IN_TU is

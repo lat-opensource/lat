@@ -10,7 +10,7 @@
 #include "reg-alloc.h"
 #include "latx-options.h"
 
-#ifdef CONFIG_LATX_HBR
+#if defined(CONFIG_LATX_HBR) && defined(CONFIG_LATX_TU)
 
 #define WRAP(ins) (dt_X86_INS_##ins)
 

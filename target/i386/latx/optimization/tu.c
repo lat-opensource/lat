@@ -16,6 +16,44 @@
 #include "latx-options.h"
 #include "aot_page.h"
 
+void get_last_info(TranslationBlock *tb, IR1_INST* pir1)
+{
+    if (tb->icount == 0) {
+        return;
+    }
+    tb->s_data->next_pc = ir1_addr_next(pir1);
+
+    if (ir1_is_branch(pir1)) {
+        if (likely(ir1_opnd_is_imm(ir1_get_opnd(pir1, 0)))) {
+            tb->s_data->last_ir1_type = (int8)IR1_TYPE_BRANCH;
+            tb->s_data->target_pc = ir1_target_addr(pir1);
+        } else {
+            assert(0);
+        }
+    }
+    else if (ir1_is_call(pir1) && !ir1_is_indirect_call(pir1)) {
+        tb->s_data->last_ir1_type = (int8)IR1_TYPE_CALL;
+        tb->s_data->target_pc = ir1_target_addr(pir1);
+    }
+    else if (ir1_is_jump(pir1) && !ir1_is_indirect_jmp(pir1)) {
+        tb->s_data->last_ir1_type = (int8)IR1_TYPE_JUMP;
+        tb->s_data->target_pc = ir1_target_addr(pir1);
+    }
+    else if (ir1_is_return(pir1)) {
+        tb->s_data->last_ir1_type = (int8)IR1_TYPE_RET;
+    }
+    else if (ir1_opcode(pir1) == dt_X86_INS_CALL &&
+        ir1_is_indirect_call(pir1)) {
+        tb->s_data->last_ir1_type = (int8)IR1_TYPE_CALLIN;
+    } else if (ir1_opcode(pir1) == dt_X86_INS_JMP &&
+        ir1_is_indirect_jmp(pir1)) {
+        tb->s_data->last_ir1_type = (int8)IR1_TYPE_JUMPIN;
+    } else {
+        tb->s_data->last_ir1_type = (int8)IR1_TYPE_NORMAL;
+    }
+    return;
+}
+
 #ifdef CONFIG_LATX_TU
 
 static __thread TUControl tu_data_rel;
@@ -795,6 +833,7 @@ void bcc_ins_recover(TranslationBlock *tb) {
 }
 #endif
 
+#ifdef CONFIG_LATX_AOT
 static void fix_rel_table(uint32_t tb_num_in_tu, TranslationBlock **tb_list)
 {
     TranslationBlock *tb;
@@ -1108,45 +1147,10 @@ int translate_tb_in_tu(struct TranslationBlock *tb)
         return tr_translate_tb(tb);
     }
 }
+#endif
 
 #if defined(CONFIG_LATX_TU) || defined(CONFIG_LATX_AOT)
-void get_last_info(TranslationBlock *tb, IR1_INST* pir1)
-{
-    if (tb->icount == 0) {
-        return;
-    }
-    tb->s_data->next_pc = ir1_addr_next(pir1);
 
-    if (ir1_is_branch(pir1)) {
-        if (likely(ir1_opnd_is_imm(ir1_get_opnd(pir1, 0)))) {
-            tb->s_data->last_ir1_type = (int8)IR1_TYPE_BRANCH;
-            tb->s_data->target_pc = ir1_target_addr(pir1);
-        } else {
-            assert(0);
-        }
-    }
-    else if (ir1_is_call(pir1) && !ir1_is_indirect_call(pir1)) {
-        tb->s_data->last_ir1_type = (int8)IR1_TYPE_CALL;
-        tb->s_data->target_pc = ir1_target_addr(pir1);
-    }
-    else if (ir1_is_jump(pir1) && !ir1_is_indirect_jmp(pir1)) {
-        tb->s_data->last_ir1_type = (int8)IR1_TYPE_JUMP;
-        tb->s_data->target_pc = ir1_target_addr(pir1);
-    }
-    else if (ir1_is_return(pir1)) {
-        tb->s_data->last_ir1_type = (int8)IR1_TYPE_RET;
-    }
-    else if (ir1_opcode(pir1) == dt_X86_INS_CALL &&
-        ir1_is_indirect_call(pir1)) {
-        tb->s_data->last_ir1_type = (int8)IR1_TYPE_CALLIN;
-    } else if (ir1_opcode(pir1) == dt_X86_INS_JMP &&
-        ir1_is_indirect_jmp(pir1)) {
-        tb->s_data->last_ir1_type = (int8)IR1_TYPE_JUMPIN;
-    } else {
-        tb->s_data->last_ir1_type = (int8)IR1_TYPE_NORMAL;
-    }
-    return;
-}
 #endif
 #if defined(CONFIG_LATX_TU) && defined(CONFIG_LATX_INSTS_PATTERN)
 bool judge_tu_eflag_gen(void *tb_in_tu) {

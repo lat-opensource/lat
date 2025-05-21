@@ -2020,7 +2020,17 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
     }
 
  buffer_overflow:
+
+#ifdef CONFIG_LATX_AOT
+    if (!in_pre_translate) {
+        tb = tcg_tb_alloc(tcg_ctx);
+    } else {
+        tb = tcg_tb_alloc_full(tcg_ctx);
+    }
+#else
     tb = tcg_tb_alloc(tcg_ctx);
+#endif
+
     if (unlikely(!tb)) {
         /* flush must be done */
         tb_flush(cpu);
@@ -3483,7 +3493,6 @@ void page_set_flags(target_ulong start, target_ulong end, int flags)
 #ifdef CONFIG_LATX_PERF
     latx_timer_start(TIMER_PAGE_FLAGS);
 #endif
-    target_ulong addr, len;
     target_ulong last;
     bool reset = false;
     bool inval_tb = false;
@@ -3533,6 +3542,7 @@ void page_set_flags(target_ulong start, target_ulong end, int flags)
 #endif
 
 #ifdef CONFIG_LATX_AOT
+    target_ulong addr, len;
     if (option_aot && (flags & PAGE_WRITE)) {
         for (addr = start, len = end - start;
              len != 0;

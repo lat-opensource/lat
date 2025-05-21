@@ -879,8 +879,12 @@ static void aot2_merge_tu(char *curr_lib_name, int first_seg_id,
 		get_segment(p_segment2, seg_num2, curr_seg->file_offset);
 #ifdef CONFIG_LATX_DEBUG
 	target_ulong seg_len = curr_seg->seg_end - curr_seg->seg_begin;
-	assert((seg_in_aot1->details.seg_end - seg_in_aot1->details.seg_begin) == seg_len);
-	assert((seg_in_aot2->details.seg_end - seg_in_aot2->details.seg_begin) == seg_len);
+        if (seg_in_aot1) {
+	    assert((seg_in_aot1->details.seg_end - seg_in_aot1->details.seg_begin) == seg_len);
+        }
+        if (seg_in_aot2) {
+	    assert((seg_in_aot2->details.seg_end - seg_in_aot2->details.seg_begin) == seg_len);
+        }
 #endif
 	merge_seg(curr_seg, buffer1, buffer2, seg_in_aot1, seg_in_aot2);
     }

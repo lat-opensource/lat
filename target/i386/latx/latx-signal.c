@@ -196,9 +196,12 @@ bool signal_in_glue(CPUArchState *env, ucontext_t *uc)
         if (use_indirect_jmp(tb) && tb->jmp_indirect != TB_JMP_RESET_OFFSET_INVALID) {
             unlink_indirect_jmp(env, tb, uc);
         } else {
+#ifdef CONFIG_LATX_TU
             if (use_tu_jmp(tb)) {
                 unlink_tu_jmp(tb);
-            } else {
+            } else
+#endif
+            {
                 unlink_direct_jmp(tb);
             }
         }

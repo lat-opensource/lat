@@ -253,10 +253,12 @@ void my_debug_ts1(TranslationBlock *tb)
 char is_bad_tb(TranslationBlock *tb)
 {
     if (tb == NULL
+#ifdef CONFIG_LATX_TU
             || tb->s_data->tu_tb_mode == TU_TB_MODE_BROKEN
+            || tb->s_data->tu_tb_mode == BAD_TB
+#endif
             || tb->icount == 0
-            || (tb->bool_flags & IS_TUNNEL_LIB)
-            || tb->s_data->tu_tb_mode == BAD_TB) {
+            || (tb->bool_flags & IS_TUNNEL_LIB)) {
         return true;
     }
     return false;

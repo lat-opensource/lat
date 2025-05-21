@@ -132,7 +132,7 @@ typedef struct aot_tb {
     int fallthru_segment_idx;
     int target_segment_idx;
     uint16_t first_jmp_align;
-    IR1_TYPE last_ir1_type;
+    uint8_t last_ir1_type;
     uintptr_t return_target_ptr_offset;
     unsigned long next_86_pc_offset;
 

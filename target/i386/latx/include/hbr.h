@@ -8,7 +8,7 @@
 #include "common.h"
 #include "ir1.h"
 
-#ifdef CONFIG_LATX_HBR
+#if defined(CONFIG_LATX_HBR) && defined(CONFIG_LATX_TU)
 #define SHBR_NTYPE    0x1
 #define SHBR_STYPE    0x2
 #define SHBR_PTYPE    0x4

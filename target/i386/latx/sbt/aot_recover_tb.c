@@ -51,9 +51,11 @@ inline static TranslationBlock *creat_tb(aot_tb *p_aot_tb, abi_ulong start,
     tb->bool_flags = p_aot_tb->bool_flags;
     tb->jmp_stub_target_arg[0] = p_aot_tb->jmp_stub_target_arg[0];
     tb->jmp_stub_target_arg[1] = p_aot_tb->jmp_stub_target_arg[1];
+#ifdef CONFIG_LATX_TU
     if (is_tu_tb(tb)) {
         tb->tu_search_addr_offset = p_aot_tb->tu_search_addr_offset;
     }
+#endif
     if (use_tu_jmp(tb)) {
         tb->tu_jmp[0] = p_aot_tb->tu_jmp[0];
         tb->tu_jmp[1] = p_aot_tb->tu_jmp[1];
@@ -116,8 +118,7 @@ static void recover_tb_range(target_ulong page, struct aot_tb *p_aot_tbs,
         TranslationBlock *tb = creat_tb(&p_aot_tbs[i], start, base, tb_buff);
 #if defined(CONFIG_LATX_TBMINI_ENABLE)
         /* set TBMini */
-        uint64_t *tbm;
-        tbm = (uint64_t *)((uintptr_t)tcg_ctx->code_gen_ptr - sizeof(struct TBMini));
+        uintptr_t tbm = (uintptr_t)((uintptr_t)tcg_ctx->code_gen_ptr - sizeof(struct TBMini));
         aot_tbmini_set_pointer(tbm, (uint64_t)tb, TB_MAGIC);
 #endif
         /* Relocate this tb by traverse aot_rel_table. */
