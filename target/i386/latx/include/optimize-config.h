@@ -79,7 +79,8 @@
 #define CONFIG_LATX_SPLIT_TB
 #undef CONFIG_LATX_XCOMISX_OPT
 #define CONFIG_LATX_XCOMISX_OPT
-
+#undef CONFIG_LATX_MONITOR_SHARED_MEM
+#define CONFIG_LATX_MONITOR_SHARED_MEM
 #undef CONFIG_LATX_TU
 #define CONFIG_LATX_TU              /* tu, */
 #undef CONFIG_LATX_IMM_REG
@@ -116,6 +117,36 @@
 #undef CONFIG_LATX_FLAG_REDUCTION_EXTEND
 #define CONFIG_LATX_FLAG_REDUCTION_EXTEND   /* flag reduction, cross TB */
 
+#endif
+
+#ifdef CONFIG_LATX_LOW_MEM_0
+#define LOW_MEM_MODE_0
+#endif
+#ifdef CONFIG_LATX_LOW_MEM_1
+#define LOW_MEM_MODE_0
+#define LOW_MEM_MODE_1
+#endif
+#ifdef CONFIG_LATX_LOW_MEM_2
+#define LOW_MEM_MODE_0
+#define LOW_MEM_MODE_1
+#define LOW_MEM_MODE_2
+#endif
+
+#ifdef LOW_MEM_MODE_0
+#undef CONFIG_LATX_LARGE_CC
+#undef CONFIG_LATX_JRRA
+#undef CONFIG_LATX_MONITOR_SHARED_MEM
+#endif
+
+#ifdef LOW_MEM_MODE_1
+#undef CONFIG_LATX_AOT
+#undef CONFIG_LATX_TU
+#undef CONFIG_LATX_SPLIT_TB
+#endif
+
+#ifdef LOW_MEM_MODE_2
+/* If sizeof(TranslationBlock) > 192, we need to undef CONFIG_LATX_INSTS_PATTERN. */
+/* #undef CONFIG_LATX_INSTS_PATTERN */
 #endif
 
 #endif

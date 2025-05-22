@@ -134,7 +134,9 @@ void options_init(void)
     option_mem_test = 0;
     option_real_maps = 0;
     option_monitor_shared_mem = 0;
-    option_shadow_file = 0;
+#ifdef LOW_MEM_MODE_0
+    option_shadow_file = 1;
+#endif
 }
 
 #define OPTIONS_IMM_REG 0

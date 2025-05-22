@@ -550,72 +550,6 @@ struct separated_data{
 };
 
 struct TranslationBlock {
-    target_ulong pc;   /* simulated PC corresponding to this block (EIP + CS base) */
-    /* target_ulong cs_base; /1* CS base for this block *1/ */
-    uint32_t flags; /* flags defining in which context the code was generated */
-    uint32_t cflags;    /* compile flags */
-#define CF_COUNT_MASK  0x00007fff
-#define CF_LAST_IO     0x00008000 /* Last insn may be an IO access.  */
-#define CF_MEMI_ONLY   0x00010000 /* Only instrument memory ops */
-#define CF_USE_ICOUNT  0x00020000
-#define CF_INVALID     0x00040000 /* TB is stale. Set with @jmp_lock held */
-#define CF_PARALLEL    0x00080000 /* Generate code for a parallel context */
-#define CF_CLUSTER_MASK 0xff000000 /* Top 8 bits are cluster ID */
-#define CF_CLUSTER_SHIFT 24
-
-    /*
-     * Above fields used for comparing
-     */
-
-    /* size of target code for this block (1 <= size <= TARGET_PAGE_SIZE) */
-    uint16_t size;
-    uint16_t icount;
-
-    struct tb_tc tc;
-
-    /*
-     * Track tb_page_addr_t intervals that intersect this TB.
-     * For user-only, the virtual addresses are always contiguous,
-     * and we use a unified interval tree.  For system, we use a
-     * linked list headed in each PageDesc.  Within the list, the lsb
-     * of the previous pointer tells the index of page_next[], and the
-     * list is protected by the PageDesc lock(s).
-     */
-#ifdef CONFIG_USER_ONLY
-    IntervalTreeNode itree;
-#else
-    uintptr_t page_next[2];
-    tb_page_addr_t page_addr[2];
-#endif
-
-    /* jmp_lock placed here to fill a 4-byte hole. Its documentation is below */
-    QemuSpin jmp_lock;
-
-    /* The following data are used to directly call another TB from
-     * the code of this one. This can be done either by emitting direct or
-     * indirect native jump instructions. These jumps are reset so that the TB
-     * just continues its execution. The TB can be linked to another one by
-     * setting one of the jump targets (or patching the jump instruction). Only
-     * two of such jumps are supported.
-     */
-#define TB_JMP_RESET_OFFSET_INVALID 0xffff /* indicates no jump generated */
-    union {
-        uint16_t jmp_reset_offset[2]; /* offset of original jump target */
-        uint16_t tu_jmp[2]; /* The offset of the jump instruction used by TU. */
-    };
-
-    uint16_t jmp_stub_reset_offset[2];
-
-    union {
-        uintptr_t jmp_target_arg[2];  /* target address or offset */
-#define TU_UNLINK_STUB_INVALID 0xffffffff /* TU no unlink stub. */
-        struct tu_unlink tu_unlink;
-    };
-    union {
-        uintptr_t jmp_stub_target_arg[2];
-        uintptr_t jmp_indirect;
-    };
-
     /*
      * Each TB has a NULL-terminated list (jmp_list_head) of incoming jumps.
      * Each TB can have two outgoing jumps, and therefore can participate
@@ -636,6 +570,71 @@ struct TranslationBlock {
     uintptr_t jmp_list_head;
     uintptr_t jmp_list_next[2];
     uintptr_t jmp_dest[2];
+
+    union {
+        uintptr_t jmp_target_arg[2];  /* target address or offset */
+#define TU_UNLINK_STUB_INVALID 0xffffffff /* TU no unlink stub. */
+        struct tu_unlink tu_unlink;
+    };
+
+    union {
+        uintptr_t jmp_stub_target_arg[2];
+        uintptr_t jmp_indirect;
+    };
+
+    struct tb_tc tc;
+
+    /*
+     * Track tb_page_addr_t intervals that intersect this TB.
+     * For user-only, the virtual addresses are always contiguous,
+     * and we use a unified interval tree.  For system, we use a
+     * linked list headed in each PageDesc.  Within the list, the lsb
+     * of the previous pointer tells the index of page_next[], and the
+     * list is protected by the PageDesc lock(s).
+     */
+#ifdef CONFIG_USER_ONLY
+    IntervalTreeNode itree;
+#else
+    uintptr_t page_next[2];
+    tb_page_addr_t page_addr[2];
+#endif
+
+    target_ulong pc;   /* simulated PC corresponding to this block (EIP + CS base) */
+    /* jmp_lock placed here to fill a 4-byte hole. Its documentation is below */
+    QemuSpin jmp_lock;
+
+    uint32_t flags; /* flags defining in which context the code was generated */
+    uint32_t cflags;    /* compile flags */
+#define CF_COUNT_MASK  0x00007fff
+#define CF_LAST_IO     0x00008000 /* Last insn may be an IO access.  */
+#define CF_MEMI_ONLY   0x00010000 /* Only instrument memory ops */
+#define CF_USE_ICOUNT  0x00020000
+#define CF_INVALID     0x00040000 /* TB is stale. Set with @jmp_lock held */
+#define CF_PARALLEL    0x00080000 /* Generate code for a parallel context */
+#define CF_CLUSTER_MASK 0xff000000 /* Top 8 bits are cluster ID */
+#define CF_CLUSTER_SHIFT 24
+
+    /* The following data are used to directly call another TB from
+     * the code of this one. This can be done either by emitting direct or
+     * indirect native jump instructions. These jumps are reset so that the TB
+     * just continues its execution. The TB can be linked to another one by
+     * setting one of the jump targets (or patching the jump instruction). Only
+     * two of such jumps are supported.
+     */
+#define TB_JMP_RESET_OFFSET_INVALID 0xffff /* indicates no jump generated */
+    union {
+        uint16_t jmp_reset_offset[2]; /* offset of original jump target */
+        uint16_t tu_jmp[2]; /* The offset of the jump instruction used by TU. */
+    };
+
+    uint16_t jmp_stub_reset_offset[2];
+
+    uint16_t first_jmp_align;
+
+    /* size of target code for this block (1 <= size <= TARGET_PAGE_SIZE) */
+    uint16_t size;
+    uint16_t icount;
+
 #ifdef CONFIG_LATX
 #ifdef CONFIG_LATX_TU
     uint32_t tu_search_addr_offset;
@@ -654,7 +653,6 @@ struct TranslationBlock {
 #define SIGNAL_RELINK1    0x800
     uint16_t bool_flags;
     uint8_t  eflag_use;
-    struct separated_data *s_data;
 #ifdef CONFIG_LATX_INSTS_PATTERN
     /*
      * [0] : not taken
@@ -664,9 +662,7 @@ struct TranslationBlock {
      */
     #define EFLAG_BACKUP 2
     uint16_t eflags_target_arg[EFLAG_BACKUP + 1];
-    /* bool target1_eliminate; */
 #endif
-    uint16_t first_jmp_align;
 #ifdef CONFIG_LATX_PROFILER
     TBProfile profile __attribute__((aligned(8)));
 #endif
@@ -675,7 +671,10 @@ struct TranslationBlock {
     unsigned long *return_target_ptr;
     unsigned long next_86_pc;
 #endif
+#ifdef CONFIG_LATX_MONITOR_SHARED_MEM
     unsigned long checksum;
+#endif
+    struct separated_data *s_data;
 #endif
 };
 

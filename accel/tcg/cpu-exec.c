@@ -261,6 +261,7 @@ cpu_tb_exec(CPUState *cpu, TranslationBlock *itb, int *tb_exit)
     env->fpu_clobber = false;
     ret = tcg_qemu_tb_exec(env, tb_ptr);
 
+#ifdef CONFIG_LATX_MONITOR_SHARED_MEM
     if (option_monitor_shared_mem && env->checksum_fail_tb) {
         TranslationBlock * tb_fail = (TranslationBlock *)env->checksum_fail_tb;
         lsassert(tb_fail->checksum && tb_fail->pc == env->eip);
@@ -270,6 +271,7 @@ cpu_tb_exec(CPUState *cpu, TranslationBlock *itb, int *tb_exit)
         env->checksum_fail_tb = NULL;
         /*qemu_log("latx checksum fail, retranslate pc=%lx\n", tb_fail->pc);*/
     }
+#endif
 
     if (env->insn_save[0]) {
         link_indirect_jmp(env);

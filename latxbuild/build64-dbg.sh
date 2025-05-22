@@ -13,6 +13,10 @@ help() {
     echo "                  -O 1 : Open stable optimization"
     echo "                  -O 2 : Open unstable optimization, include O1"
     echo "                  -O 3 : Open testing optimization, include O2"
+    echo "  -l              low memory mode"
+    echo "                  -l 0 : Open shadow file, close CONFIG_LATX_LARGE_CC"
+    echo "                  -l 1 : l0 + close CONFIG_LATX_SPLIT_TB, CONFIG_LATX_TU, CONFIG_LATX_JRRA"
+    echo "                  -l 2 : l1 + set 64MB code cache, close CONFIG_LATX_INSTS_PATTERN"
     echo "  -h              help"
 }
 
@@ -24,6 +28,9 @@ parseArgs() {
             ;;
         O)
             opt_level="$OPTARG"
+            ;;
+        l)
+            low_mem_mode=""--low_mem_mode"${OPTARG}"
             ;;
         h)
             help
@@ -55,19 +62,19 @@ make_cmd() {
         if [ "$opt_level" = "0" ] ; then
             ../configure --target-list=x86_64-linux-user --enable-latx \
                 --enable-debug --optimize-O0 --static --extra-ldflags=-ldl \
-                --disable-docs
+                --disable-docs ${low_mem_mode}
         elif [ "$opt_level" = "1" ] ; then
             ../configure --target-list=x86_64-linux-user --enable-latx \
                 --enable-debug --optimize-O1 --extra-ldflags=-ldl --enable-kzt \
-                --disable-docs
+                --disable-docs ${low_mem_mode}
         elif [ "$opt_level" = "2" ] ; then
             ../configure --target-list=x86_64-linux-user --enable-latx \
                 --enable-debug --optimize-O2 --static --extra-ldflags=-ldl \
-                --disable-docs
+                --disable-docs ${low_mem_mode}
         elif [ "$opt_level" = "3" ] ; then
             ../configure --target-list=x86_64-linux-user --enable-latx \
                 --enable-debug --optimize-O3 --static --extra-ldflags=-ldl \
-                --disable-docs
+                --disable-docs ${low_mem_mode}
         else
             echo "invalid options"
         fi

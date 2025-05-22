@@ -948,7 +948,11 @@ static void page_lock_pair(PageDesc **ret_p1, tb_page_addr_t phys1,
 #ifdef CONFIG_LATX_LARGE_CC
 #define DEFAULT_CODE_GEN_BUFFER_SIZE_1 (512 * MiB)
 #else
+#ifdef LOW_MEM_MODE_2
+#define DEFAULT_CODE_GEN_BUFFER_SIZE_1 (64 * MiB)
+#else
 #define DEFAULT_CODE_GEN_BUFFER_SIZE_1 (128 * MiB)
+#endif
 #endif
 #else
 /*
@@ -2259,9 +2263,11 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
         mprotect((void*)(pc & qemu_host_page_mask), qemu_host_page_size, PROT_READ);
     }
 
+#ifdef CONFIG_LATX_MONITOR_SHARED_MEM
     if (option_monitor_shared_mem) {
         tb->checksum = p_flags & PAGE_MEMSHARE;
     }
+#endif
     gen_code_size = target_latx_host(env, tb, max_insns);
     if (unlikely(gen_code_size < 0)) {
         /*

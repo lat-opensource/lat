@@ -401,6 +401,9 @@ latx_opt_O0="no"
 latx_opt_O1="no"
 latx_opt_O2="no"
 latx_opt_O3="no"
+latx_low_mem0="no"
+latx_low_mem1="no"
+latx_low_mem2="no"
 latx_opt_Ofast="no"
 guest_base_zero="no"
 latx_capstone_git="yes"
@@ -1228,6 +1231,12 @@ for opt do
   --optimize-O2) latx_opt_O2="yes"
   ;;
   --optimize-O3) latx_opt_O3="yes"
+  ;;
+  --low_mem_mode0) latx_low_mem0="yes"
+  ;;
+  --low_mem_mode1) latx_low_mem1="yes"
+  ;;
+  --low_mem_mode2) latx_low_mem2="yes"
   ;;
   --optimize-Ofast) latx_opt_Ofast="yes"
   ;;
@@ -5739,6 +5748,15 @@ if test "$latx" = "yes" ; then
     echo "CONFIG_LATX_O3=y" >> $config_host_mak
   elif test "$latx_opt_Ofast" = "yes" ; then
     echo "CONFIG_LATX_OFAST=y" >> $config_host_mak
+  fi
+  if test "$latx_low_mem0" = "yes" ; then
+    echo "CONFIG_LATX_LOW_MEM_0=y" >> $config_host_mak
+  fi
+  if test "$latx_low_mem1" = "yes" ; then
+    echo "CONFIG_LATX_LOW_MEM_1=y" >> $config_host_mak
+  fi
+  if test "$latx_low_mem2" = "yes" ; then
+    echo "CONFIG_LATX_LOW_MEM_2=y" >> $config_host_mak
   fi
   if test "$latx_16k_debug" = "yes" ; then
     echo "CONFIG_LATX_16K_DEBUG=y" >> $config_host_mak

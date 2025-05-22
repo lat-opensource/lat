@@ -1481,6 +1481,8 @@ static inline void tr_init_for_each_ir1_in_tb(IR1_INST *pir1, int nr, int index)
 }
 
 bool need_trace;
+
+#ifdef CONFIG_LATX_MONITOR_SHARED_MEM
 static unsigned long tb_checksum(const uint8_t * start, size_t len)
 {
     unsigned long checksum = 0;
@@ -1489,6 +1491,7 @@ static unsigned long tb_checksum(const uint8_t * start, size_t len)
     }
     return checksum;
 }
+
 static void tr_check_x86ins_change(struct TranslationBlock *tb)
 {
     size_t checksum_len = ir1_addr_next(tb_ir1_inst_last(tb)) - tb->pc;
@@ -1537,6 +1540,7 @@ static void tr_check_x86ins_change(struct TranslationBlock *tb)
     la_label(check_suc);
     ra_free_temp(tb_opnd);
 }
+#endif
 
 int tr_ir2_generate(struct TranslationBlock *tb)
 {
@@ -1560,9 +1564,11 @@ int tr_ir2_generate(struct TranslationBlock *tb)
     bool reduce_proepo = false;
     int tr_func_idx;
 
+#ifdef CONFIG_LATX_MONITOR_SHARED_MEM
     if (option_monitor_shared_mem && tb->checksum) {
         tr_check_x86ins_change(tb);
     }
+#endif
 #ifdef CONFIG_LATX_IMM_REG
     /**
      * 1.precache ir1 list before translate ir2
