@@ -54,19 +54,19 @@ make_cmd() {
     if [ $make_configure -eq 1 ] ; then
         if [ "$opt_level" = "0" ] ; then
             ../configure --target-list=i386-linux-user --enable-latx \
-                --enable-guest-base-zero --disable-debug-info --optimize-O0 --static \
+                --enable-guest-base-zero --disable-debug-info --optimize-O0 \
                 --disable-docs
         elif [ "$opt_level" = "1" ] ; then
             ../configure --target-list=i386-linux-user --enable-latx \
-                --enable-guest-base-zero --disable-debug-info --optimize-O1 --static \
+                --enable-guest-base-zero --disable-debug-info --optimize-O1 \
                 --extra-ldflags=-ldl --disable-docs
         elif [ "$opt_level" = "2" ] ; then
             ../configure --target-list=i386-linux-user --enable-latx \
-                --enable-guest-base-zero --disable-debug-info --optimize-O2 --static \
+                --enable-guest-base-zero --disable-debug-info --optimize-O2 \
                 --extra-ldflags=-ldl --disable-docs
         elif [ "$opt_level" = "3" ] ; then
             ../configure --target-list=i386-linux-user --enable-latx \
-                --enable-guest-base-zero --disable-debug-info --optimize-O3 --static \
+                --enable-guest-base-zero --disable-debug-info --optimize-O3 \
                 --disable-docs
         else
             echo "invalid options"
