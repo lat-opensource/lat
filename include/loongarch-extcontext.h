@@ -70,22 +70,28 @@ static void *get_ctx_through_ctxinfo(struct sctx_info *info)
    UC_LBT(_uc) ? (*(_type *)&UC_LBT(_uc)->regs[_fp]) : 0)
 
 #define UC_GET_EFLAGS(_uc, _type)                                    \
-  (QEMU_BUILD_BUG_MSG(sizeof(_type) > sizeof(uint32_t),              \
-                      "UC_GET_EFLAGS: _type size exceeds uint32_t"), \
-   UC_LBT(_uc) ? (*(_type *)&UC_LBT(_uc)->eflags) : 0)
+  ({                                                                 \
+    QEMU_BUILD_BUG_MSG(sizeof(_type) > sizeof(uint32_t),             \
+                      "UC_GET_EFLAGS: _type size exceeds uint32_t"); \
+    UC_LBT(_uc) ? (*(_type *)&UC_LBT(_uc)->eflags) : 0;              \
+  })
 
 #define UC_GET_FTOP(_uc, _type)                                    \
-  (QEMU_BUILD_BUG_MSG(sizeof(_type) > sizeof(uint32_t),            \
-                      "UC_GET_FTOP: _type size exceeds uint32_t"), \
-   UC_LBT(_uc) ? (*(_type *)&UC_LBT(_uc)->ftop) : 0)
+  ({                                                               \
+    QEMU_BUILD_BUG_MSG(sizeof(_type) > sizeof(uint32_t),           \
+                      "UC_GET_FTOP: _type size exceeds uint32_t"); \
+    UC_LBT(_uc) ? (*(_type *)&UC_LBT(_uc)->ftop) : 0;              \
+  })
 
 #define UC_GET_FCSR(_uc, _type)                                    \
-  (QEMU_BUILD_BUG_MSG(sizeof(_type) > sizeof(uint32_t),            \
-                      "UC_GET_FCSR: _type size exceeds uint32_t"), \
-   UC_LASX(_uc)  ? (*(_type *)&UC_LASX(_uc)->fcsr)                 \
-   : UC_LSX(_uc) ? (*(_type *)&UC_LSX(_uc)->fcsr)                  \
-   : UC_FPU(_uc) ? (*(_type *)&UC_FPU(_uc)->fcsr)                  \
-                 : 0)
+  ({                                                               \
+    QEMU_BUILD_BUG_MSG(sizeof(_type) > sizeof(uint32_t),           \
+                      "UC_GET_FCSR: _type size exceeds uint32_t"); \
+    UC_LASX(_uc)  ? (*(_type *)&UC_LASX(_uc)->fcsr)                \
+      : UC_LSX(_uc) ? (*(_type *)&UC_LSX(_uc)->fcsr)               \
+        : UC_FPU(_uc) ? (*(_type *)&UC_FPU(_uc)->fcsr)             \
+          : 0;                                                     \
+  })
 
 #define UC_GET_LASX(_uc, _fp, _bias, _type)                      \
   (UC_LASX(_uc) ? *(_type *)(((uint8_t *)UC_LASX(_uc)->regs) +   \
