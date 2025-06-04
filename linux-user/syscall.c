@@ -11680,8 +11680,12 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
             }
 
             char* pname = strrchr(p, '/');
-            if (argp[0] && p && pname && strcmp(p, argp[0]) && strcmp(pname + 1, argp[0])
-                    && is_x86_file(p)) {
+            bool x86_file;
+            if (p) {
+                x86_file = is_x86_file(p);
+            }
+            if (argp[0] && p && pname && strcmp(p, argp[0]) &&
+                    strcmp(pname + 1, argp[0]) && x86_file) {
                 argc = argc + 3;
                 char **new_argp = g_new0(char *, argc + 1);
                 long long hash = 0;
@@ -11698,6 +11702,28 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
                 new_argp[argc] = NULL;
                 g_free(argp);
                 argp = new_argp;
+            }
+
+            if (!x86_file) {
+                for (int i = 0; i < argc; ++i) {
+                    char *found = strstr(argp[i], "pidof");
+                    if (found != NULL) {
+                        size_t old_sub_len = strlen("pidof");
+                        size_t new_sub_len = strlen("pidof -x");
+                        size_t prefix_len = found - argp[i];
+                        size_t suffix_len = strlen(found + old_sub_len);
+
+                        /* Allocate new string: prefix + "pidof -x" + suffix */
+                        char *new_arg = g_malloc(prefix_len + new_sub_len + suffix_len + 1);
+
+                        /* Build the new string */
+                        strncpy(new_arg, argp[i], prefix_len);
+                        strcpy(new_arg + prefix_len, "pidof -x");
+                        strcpy(new_arg + prefix_len + new_sub_len, found + strlen("pidof"));
+                        argp[i] = new_arg;
+                        break;
+                    }
+                }
             }
 
             if (is_proc_myself((const char *)p, "exe")) {
@@ -11812,8 +11838,12 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
                 goto execve_efault;
 
             char* pname = strrchr(p, '/');
-            if (argp[0] && p && pname && strcmp(p, argp[0]) && strcmp(pname + 1, argp[0])
-                    && is_x86_file(p)) {
+            bool x86_file;
+            if (p) {
+                x86_file = is_x86_file(p);
+            }
+            if (argp[0] && p && pname && strcmp(p, argp[0]) &&
+                    strcmp(pname + 1, argp[0]) && x86_file) {
                 argc = argc + 3;
                 char **new_argp = g_new0(char *, argc + 1);
                 long long hash = 0;
@@ -11830,6 +11860,28 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
                 new_argp[argc] = NULL;
                 g_free(argp);
                 argp = new_argp;
+            }
+
+            if (!x86_file) {
+                for (int i = 0; i < argc; ++i) {
+                    char *found = strstr(argp[i], "pidof");
+                    if (found != NULL) {
+                        size_t old_sub_len = strlen("pidof");
+                        size_t new_sub_len = strlen("pidof -x");
+                        size_t prefix_len = found - argp[i];
+                        size_t suffix_len = strlen(found + old_sub_len);
+
+                        /* Allocate new string: prefix + "pidof -x" + suffix */
+                        char *new_arg = g_malloc(prefix_len + new_sub_len + suffix_len + 1);
+
+                        /* Build the new string */
+                        strncpy(new_arg, argp[i], prefix_len);
+                        strcpy(new_arg + prefix_len, "pidof -x");
+                        strcpy(new_arg + prefix_len + new_sub_len, found + strlen("pidof"));
+                        argp[i] = new_arg;
+                        break;
+                    }
+                }
             }
 
             if (is_proc_myself((const char *)p, "exe")) {
