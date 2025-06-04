@@ -1409,9 +1409,7 @@ int main(int argc, char **argv, char **envp)
             prog = target_argv[1];
         }
         //printf("prog %s\n", prog);
-        if(!strcmp(prog, "wine64")
-         || !strcmp(prog, "wine64-development")
-         || (strrchr(prog, '/') && !strcmp(strrchr(prog,'/'), "/wine64"))) {
+        if(strstr(prog, "wine")) {
             latx_wine = 1;
         }
     }
