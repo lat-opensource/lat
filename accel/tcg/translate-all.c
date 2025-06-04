@@ -1130,7 +1130,11 @@ static bool alloc_code_gen_buffer_anon(size_t size, int prot,
 #endif
 
     /* Request large pages for the buffer.  */
+#ifdef LOW_MEM_MODE_0
+    qemu_madvise(buf, size, QEMU_MADV_NOHUGEPAGE);
+#else
     qemu_madvise(buf, size, QEMU_MADV_HUGEPAGE);
+#endif
 
     tcg_ctx->code_gen_buffer = buf;
     return true;
@@ -1147,7 +1151,11 @@ static bool alloc_tb_gen_buffer(size_t size)
     }
 
     /* Request large pages for the buffer.  */
+#ifdef LOW_MEM_MODE_0
+    qemu_madvise(buf, size, QEMU_MADV_NOHUGEPAGE);
+#else
     qemu_madvise(buf, size, QEMU_MADV_HUGEPAGE);
+#endif
 
     tcg_ctx->tb_gen_buffer = buf;
     tcg_ctx->tb_gen_highwater = buf + size - 1024;

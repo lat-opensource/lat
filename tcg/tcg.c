@@ -36,6 +36,7 @@
 #include "qemu/qemu-print.h"
 #include "qemu/timer.h"
 #include "qemu/cacheflush.h"
+#include "qemu/units.h"
 
 /* Note: the long term plan is to reduce the dependencies on the QEMU
    CPU definitions. Currently they are used for qemu_ld/st
@@ -742,6 +743,15 @@ static void tcg_region_assign(TCGContext *s, size_t curr_region)
     s->code_gen_ptr = start;
     s->code_gen_buffer_size = end - start;
     s->code_gen_highwater = end - TCG_HIGHWATER;
+
+#ifdef LOW_MEM_MODE_0
+    static size_t curr_code_buffer_size = 32 * MiB;
+    if (start + curr_code_buffer_size < end - TCG_HIGHWATER) {
+        s->code_gen_highwater = start + curr_code_buffer_size;
+        curr_code_buffer_size += 32 * MiB;
+    }
+#endif
+
     s->tb_gen_ptr = s->tb_gen_buffer;
 #if defined(CONFIG_LATX_TBMINI_ENABLE)
     /* leave space for TBMini for the 1st TB */
