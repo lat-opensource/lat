@@ -369,7 +369,8 @@ static int mmap_frag(abi_ulong real_start,
 #ifdef TARGET_AARCH64
 # define TASK_UNMAPPED_BASE  0x5500000000
 #else
-# define TASK_UNMAPPED_BASE  (1ul << 38)
+//# define TASK_UNMAPPED_BASE  (1ul << 38)
+# define TASK_UNMAPPED_BASE  (0x5500000000)
 #endif
 #else
 # define TASK_UNMAPPED_BASE  0x40000000
