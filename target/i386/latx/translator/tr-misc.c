@@ -692,11 +692,11 @@ bool translate_retf(IR1_INST *pir1)
 #else
     if (CODEIS64) {
         /* pop rip */
-        la_ld_d(return_addr_opnd, esp_opnd, 0);
+        la_ld_wu(return_addr_opnd, esp_opnd, 0);
         /* pop cs */
-        la_ld_d(cs_opnd, esp_opnd, 4);
+        la_ld_w(cs_opnd, esp_opnd, 4);
         /* 2. adjust esp */
-        la_addi_addrx(esp_opnd, esp_opnd, 16);
+        la_addi_addrx(esp_opnd, esp_opnd, 8);
     } else {
         la_bstrpick_d(esp_opnd, esp_opnd, 31, 0);
         /* pop rip */
