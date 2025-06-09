@@ -1858,6 +1858,7 @@ static inline void cpu_x86_load_seg_cache(CPUX86State *env,
                 /* long mode */
                 env->hflags |= HF_CS32_MASK | HF_SS32_MASK | HF_CS64_MASK;
                 env->hflags &= ~(HF_ADDSEG_MASK);
+                env->sys.codemode = 1;
             } else
 #endif
             {
@@ -1866,6 +1867,7 @@ static inline void cpu_x86_load_seg_cache(CPUX86State *env,
                     >> (DESC_B_SHIFT - HF_CS32_SHIFT);
                 env->hflags = (env->hflags & ~(HF_CS32_MASK | HF_CS64_MASK)) |
                     new_hflags;
+                env->sys.codemode = 0;
             }
         }
         if (seg_reg == R_SS) {

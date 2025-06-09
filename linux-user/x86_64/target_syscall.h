@@ -1,6 +1,7 @@
 #ifndef X86_64_TARGET_SYSCALL_H
 #define X86_64_TARGET_SYSCALL_H
 
+#define __USER32_CS	(0x23)
 #define __USER_CS	(0x33)
 #define __USER_DS	(0x2B)
 

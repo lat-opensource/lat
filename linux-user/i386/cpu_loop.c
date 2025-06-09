@@ -462,6 +462,10 @@ void target_cpu_copy_regs(CPUArchState *env, struct target_pt_regs *regs)
                  DESC_G_MASK | DESC_B_MASK | DESC_P_MASK | DESC_S_MASK |
                  (3 << DESC_DPL_SHIFT) | (0xa << DESC_TYPE_SHIFT));
 #else
+        /* 32 bit code segment */
+        write_dt(&gdt_table[__USER32_CS >> 3], 0, 0xfffff,
+                 DESC_G_MASK | DESC_B_MASK | DESC_P_MASK | DESC_S_MASK |
+                 (3 << DESC_DPL_SHIFT) | (0xa << DESC_TYPE_SHIFT));
         /* 64 bit code segment */
         write_dt(&gdt_table[__USER_CS >> 3], 0, 0xfffff,
                  DESC_G_MASK | DESC_B_MASK | DESC_P_MASK | DESC_S_MASK |
