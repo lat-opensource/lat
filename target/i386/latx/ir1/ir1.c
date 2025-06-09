@@ -338,18 +338,6 @@ ADDRX ir1_disasm(IR1_INST *ir1, uint8_t *addr, ADDRX t_pc, int ir1_num, void *pi
      * there should be a performance improvement if we increase the number, but
      * for now there are some problems if we change it. It will be settled later.
      */
-#ifdef TARGET_X86_64
-    if (!CODEIS64) {
-        GPR_USEDEF_TO_SAVE = 0x7;
-        FPR_USEDEF_TO_SAVE = 0xff;
-        XMM_USEDEF_TO_SAVE = 0xff;
-    }else{
-        GPR_USEDEF_TO_SAVE = 0xff07;
-        FPR_USEDEF_TO_SAVE = 0xff;
-        XMM_USEDEF_TO_SAVE = 0xffff;
-    }
-
-#endif
     int count = la_disa_v1(addr, 15, (uint64_t)t_pc,
         1, &info, ir1_num, pir1_base, CODEIS64);
 

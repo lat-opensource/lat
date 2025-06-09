@@ -630,9 +630,7 @@ bool translate_fsin(IR1_INST *pir1)
     tr_save_registers_to_env(0, FPR_USEDEF_TO_SAVE, XMM_USEDEF_TO_SAVE,
                              options_to_save());
 #ifdef TARGET_X86_64
-    if (CODEIS64) {
-        tr_save_x64_8_registers_to_env(GPR_USEDEF_TO_SAVE >> 8, XMM_USEDEF_TO_SAVE >> 8);
-    }
+    tr_save_x64_8_registers_to_env(GPR_USEDEF_TO_SAVE >> 8, XMM_USEDEF_TO_SAVE >> 8);
 #endif
 
     la_fmov_d(param_0, param_8);
@@ -650,9 +648,7 @@ bool translate_fsin(IR1_INST *pir1)
 
     /* restore regs after native call*/
 #ifdef TARGET_X86_64
-    if (CODEIS64) {
-        tr_load_x64_8_registers_from_env(GPR_USEDEF_TO_SAVE >> 8, XMM_USEDEF_TO_SAVE >> 8);
-    }
+    tr_load_x64_8_registers_from_env(GPR_USEDEF_TO_SAVE >> 8, XMM_USEDEF_TO_SAVE >> 8);
 #endif
     tr_load_registers_from_env(0, FPR_USEDEF_TO_SAVE, XMM_USEDEF_TO_SAVE,
                                options_to_save());
@@ -692,9 +688,7 @@ bool translate_fcos(IR1_INST *pir1)
     tr_save_registers_to_env(0, FPR_USEDEF_TO_SAVE, XMM_USEDEF_TO_SAVE,
                              options_to_save());
 #ifdef TARGET_X86_64
-    if (CODEIS64) {
-        tr_save_x64_8_registers_to_env(GPR_USEDEF_TO_SAVE >> 8, XMM_USEDEF_TO_SAVE >> 8);
-    }
+    tr_save_x64_8_registers_to_env(GPR_USEDEF_TO_SAVE >> 8, XMM_USEDEF_TO_SAVE >> 8);
 #endif
     la_fmov_d(param_0, param_8);
 
@@ -711,9 +705,7 @@ bool translate_fcos(IR1_INST *pir1)
 
     /* restore regs after native call*/
 #ifdef TARGET_X86_64
-    if (CODEIS64) {
-        tr_load_x64_8_registers_from_env(GPR_USEDEF_TO_SAVE >> 8, XMM_USEDEF_TO_SAVE >> 8);
-    }
+    tr_load_x64_8_registers_from_env(GPR_USEDEF_TO_SAVE >> 8, XMM_USEDEF_TO_SAVE >> 8);
 #endif
     tr_load_registers_from_env(0, FPR_USEDEF_TO_SAVE, XMM_USEDEF_TO_SAVE,
                                options_to_save());
@@ -758,9 +750,7 @@ bool translate_fpatan(IR1_INST *pir1)
     tr_save_registers_to_env(0, FPR_USEDEF_TO_SAVE, XMM_USEDEF_TO_SAVE,
                              options_to_save());
 #ifdef TARGET_X86_64
-    if (CODEIS64) {
-        tr_save_x64_8_registers_to_env(GPR_USEDEF_TO_SAVE >> 8, XMM_USEDEF_TO_SAVE >> 8);
-    }
+    tr_save_x64_8_registers_to_env(GPR_USEDEF_TO_SAVE >> 8, XMM_USEDEF_TO_SAVE >> 8);
 #endif
     la_fmov_d(param_1, param_8);
     la_fmov_d(param_0, param_9);
@@ -775,9 +765,7 @@ bool translate_fpatan(IR1_INST *pir1)
 
     /* restore regs after native call*/
 #ifdef TARGET_X86_64
-    if (CODEIS64) {
-        tr_load_x64_8_registers_from_env(GPR_USEDEF_TO_SAVE >> 8, XMM_USEDEF_TO_SAVE >> 8);
-    }
+    tr_load_x64_8_registers_from_env(GPR_USEDEF_TO_SAVE >> 8, XMM_USEDEF_TO_SAVE >> 8);
 #endif
     tr_load_registers_from_env(0, FPR_USEDEF_TO_SAVE, XMM_USEDEF_TO_SAVE,
                                options_to_save());
@@ -948,9 +936,7 @@ bool translate_f2xm1(IR1_INST *pir1)
     tr_save_registers_to_env(0, FPR_USEDEF_TO_SAVE,
                              XMM_USEDEF_TO_SAVE, options_to_save());
 #ifdef TARGET_X86_64
-    if (CODEIS64) {
-        tr_save_x64_8_registers_to_env(GPR_USEDEF_TO_SAVE >> 8, XMM_USEDEF_TO_SAVE >> 8);
-    }
+    tr_save_x64_8_registers_to_env(GPR_USEDEF_TO_SAVE >> 8, XMM_USEDEF_TO_SAVE >> 8);
 #endif
     la_fmov_d(param_1, param_8);
     la_fmov_d(param_0, param_9);
@@ -965,9 +951,7 @@ bool translate_f2xm1(IR1_INST *pir1)
 
     /* restore regs after native call*/
 #ifdef TARGET_X86_64
-    if (CODEIS64) {
-        tr_load_x64_8_registers_from_env(GPR_USEDEF_TO_SAVE >> 8, XMM_USEDEF_TO_SAVE >> 8);
-    }
+    tr_load_x64_8_registers_from_env(GPR_USEDEF_TO_SAVE >> 8, XMM_USEDEF_TO_SAVE >> 8);
 #endif
     tr_load_registers_from_env(0, FPR_USEDEF_TO_SAVE,
                                XMM_USEDEF_TO_SAVE, options_to_save());
@@ -1041,9 +1025,7 @@ bool translate_fxtract(IR1_INST *pir1)
     tr_save_registers_to_env(0, FPR_USEDEF_TO_SAVE, XMM_USEDEF_TO_SAVE,
                              options_to_save());
 #ifdef TARGET_X86_64
-    if (CODEIS64) {
-        tr_save_x64_8_registers_to_env(GPR_USEDEF_TO_SAVE >> 8, XMM_USEDEF_TO_SAVE >> 8);
-    }
+    tr_save_x64_8_registers_to_env(GPR_USEDEF_TO_SAVE >> 8, XMM_USEDEF_TO_SAVE >> 8);
 #endif
 
     la_fmov_d(param_0, param_8);
@@ -1084,9 +1066,7 @@ bool translate_fxtract(IR1_INST *pir1)
 
     /* restore regs after native call*/
 #ifdef TARGET_X86_64
-    if (CODEIS64) {
-        tr_load_x64_8_registers_from_env(GPR_USEDEF_TO_SAVE >> 8, XMM_USEDEF_TO_SAVE >> 8);
-    }
+    tr_load_x64_8_registers_from_env(GPR_USEDEF_TO_SAVE >> 8, XMM_USEDEF_TO_SAVE >> 8);
 #endif
     tr_load_registers_from_env(0, FPR_USEDEF_TO_SAVE, XMM_USEDEF_TO_SAVE,
                                options_to_save());
@@ -1162,9 +1142,7 @@ bool translate_fyl2x(IR1_INST *pir1)
     tr_save_registers_to_env(0, FPR_USEDEF_TO_SAVE, XMM_USEDEF_TO_SAVE,
                              options_to_save());
 #ifdef TARGET_X86_64
-    if (CODEIS64) {
-        tr_save_x64_8_registers_to_env(GPR_USEDEF_TO_SAVE >> 8, XMM_USEDEF_TO_SAVE >> 8);
-    }
+    tr_save_x64_8_registers_to_env(GPR_USEDEF_TO_SAVE >> 8, XMM_USEDEF_TO_SAVE >> 8);
 #endif
     la_fmov_d(param_0, param_8);
     /* Call the function  */
@@ -1177,9 +1155,7 @@ bool translate_fyl2x(IR1_INST *pir1)
 
     /* restore regs after native call*/
 #ifdef TARGET_X86_64
-    if (CODEIS64) {
-        tr_load_x64_8_registers_from_env(GPR_USEDEF_TO_SAVE >> 8, XMM_USEDEF_TO_SAVE >> 8);
-    }
+    tr_load_x64_8_registers_from_env(GPR_USEDEF_TO_SAVE >> 8, XMM_USEDEF_TO_SAVE >> 8);
 #endif
     tr_load_registers_from_env(0, FPR_USEDEF_TO_SAVE, XMM_USEDEF_TO_SAVE,
                                options_to_save());
@@ -1222,9 +1198,7 @@ bool translate_fyl2xp1(IR1_INST *pir1)
     tr_save_registers_to_env(0, FPR_USEDEF_TO_SAVE, XMM_USEDEF_TO_SAVE,
                              options_to_save());
 #ifdef TARGET_X86_64
-    if (CODEIS64) {
-        tr_save_x64_8_registers_to_env(GPR_USEDEF_TO_SAVE >> 8, XMM_USEDEF_TO_SAVE >> 8);
-    }
+    tr_save_x64_8_registers_to_env(GPR_USEDEF_TO_SAVE >> 8, XMM_USEDEF_TO_SAVE >> 8);
 #endif
 
     la_fmov_d(param_0, param_8);
@@ -1238,9 +1212,7 @@ bool translate_fyl2xp1(IR1_INST *pir1)
 
     /* restore regs after native call*/
 #ifdef TARGET_X86_64
-    if (CODEIS64) {
-        tr_load_x64_8_registers_from_env(GPR_USEDEF_TO_SAVE >> 8, XMM_USEDEF_TO_SAVE >> 8);
-    }
+    tr_load_x64_8_registers_from_env(GPR_USEDEF_TO_SAVE >> 8, XMM_USEDEF_TO_SAVE >> 8);
 #endif
     tr_load_registers_from_env(0, FPR_USEDEF_TO_SAVE, XMM_USEDEF_TO_SAVE,
                                options_to_save());
@@ -1288,9 +1260,7 @@ bool translate_fsincos(IR1_INST *pir1)
     tr_save_registers_to_env(0, FPR_USEDEF_TO_SAVE, XMM_USEDEF_TO_SAVE,
                              options_to_save());
 #ifdef TARGET_X86_64
-    if (CODEIS64) {
-        tr_save_x64_8_registers_to_env(GPR_USEDEF_TO_SAVE >> 8, XMM_USEDEF_TO_SAVE >> 8);
-    }
+    tr_save_x64_8_registers_to_env(GPR_USEDEF_TO_SAVE >> 8, XMM_USEDEF_TO_SAVE >> 8);
 #endif
     la_fmov_d(param_1, param_8);
 
@@ -1328,9 +1298,7 @@ bool translate_fsincos(IR1_INST *pir1)
 
     /* restore regs after helper call */
 #ifdef TARGET_X86_64
-    if (CODEIS64) {
-        tr_load_x64_8_registers_from_env(GPR_USEDEF_TO_SAVE >> 8, XMM_USEDEF_TO_SAVE >> 8);
-    }
+    tr_load_x64_8_registers_from_env(GPR_USEDEF_TO_SAVE >> 8, XMM_USEDEF_TO_SAVE >> 8);
 #endif
     tr_load_registers_from_env(0, FPR_USEDEF_TO_SAVE, XMM_USEDEF_TO_SAVE,
                                options_to_save());

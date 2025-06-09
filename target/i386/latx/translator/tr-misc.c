@@ -1325,9 +1325,7 @@ bool translate_cpuid(IR1_INST *pir1)
     tr_save_registers_to_env(EAX_USEDEF_BIT | ECX_USEDEF_BIT, 0, 0, options_to_save());
 #ifdef TARGET_X86_64
     /* R9/R12/R13/R14/R10/R11 need save */
-     if (CODEIS64) {
-         tr_save_x64_8_registers_to_env(GPR_USEDEF_TO_SAVE >> 8, 0);
-     }
+     tr_save_x64_8_registers_to_env(GPR_USEDEF_TO_SAVE >> 8, 0);
 #endif
     /* 2. call helper */
     IR2_OPND helper_addr_opnd = ra_alloc_dbt_arg2();
@@ -1346,9 +1344,7 @@ bool translate_cpuid(IR1_INST *pir1)
         0, options_to_save());
 #ifdef TARGET_X86_64
     /* R9/R12/R13/R14 need load */
-    if (CODEIS64) {
-        tr_load_x64_8_registers_from_env(GPR_USEDEF_TO_SAVE >> 8, 0);
-    }
+    tr_load_x64_8_registers_from_env(GPR_USEDEF_TO_SAVE >> 8, 0);
 #endif
     return true;
 }
