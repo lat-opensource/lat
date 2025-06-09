@@ -488,7 +488,9 @@ cs->previous_exception_index = -1;
     __put_user(env->regs[14], &sc->r14);
     __put_user(env->regs[15], &sc->r15);
 
-    __put_user(cs->exception_index, &sc->trapno);
+    __put_user(cs->previous_exception_index, &sc->trapno);
+    cs->previous_exception_index = -1;
+
     __put_user(env->error_code, &sc->err);
     __put_user(env->eip, &sc->rip);
 
