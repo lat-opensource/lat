@@ -2748,8 +2748,8 @@ static void do_xsave_fpu(CPUX86State *env, target_ulong ptr, uintptr_t ra)
 
 static void do_xsave_mxcsr(CPUX86State *env, target_ulong ptr, uintptr_t ra)
 {
-    /*update_mxcsr_from_sse_status(env);*/
-    /*cpu_stl_data_ra(env, ptr + XO(legacy.mxcsr), env->mxcsr, ra);*/
+    update_mxcsr_from_sse_status(env);
+    cpu_stl_data_ra(env, ptr + XO(legacy.mxcsr), env->mxcsr, ra);
     cpu_stl_data_ra(env, ptr + XO(legacy.mxcsr_mask), 0x0000ffff, ra);
 }
 
@@ -2834,7 +2834,28 @@ static void do_fxsave(CPUX86State *env, target_ulong ptr, uintptr_t ra)
 
 void helper_fxsave(CPUX86State *env, target_ulong ptr)
 {
+#ifdef CONFIG_LATX
+    uintptr_t ra = GETPC();
+    /* The operand must be 16 byte aligned */
+    if (ptr & 0xf) {
+        raise_exception_ra(env, EXCP0D_GPF, ra);
+    }
+
+    do_xsave_fpu(env, ptr, ra);
+
+    if (env->cr[4] & CR4_OSFXSR_MASK) {
+        cpu_stl_data_ra(env, ptr + XO(legacy.mxcsr_mask), 0x0000ffff, ra);
+        /* Fast FXSAVE leaves out the XMM registers */
+        if (!(env->efer & MSR_EFER_FFXSR)
+            || (env->hflags & HF_CPL_MASK)
+            || !(env->hflags & HF_LMA_MASK)) {
+            do_xsave_sse(env, ptr, ra);
+        }
+    }
+
+#else
     do_fxsave(env, ptr, GETPC());
+#endif
 }
 
 static uint64_t get_xinuse(CPUX86State *env)
