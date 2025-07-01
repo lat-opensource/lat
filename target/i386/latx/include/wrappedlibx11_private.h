@@ -666,7 +666,7 @@ GO(XkbLookupKeySym, iFpCupp)
 //GO(XkbNoteDeviceChanges
 //GO(XkbNoteMapChanges
 //GO(XkbNoteNameChanges
-GO(XkbOpenDisplay, pFppppp)
+GO(XkbOpenDisplay, pFpppppp)
 // _XkbPeekAtReadBuffer
 GO(XkbQueryExtension, iFpppppp)
 // _XkbReadBufferCopyKeySyms
