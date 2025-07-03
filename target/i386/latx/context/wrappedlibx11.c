@@ -822,6 +822,29 @@ static void* findXQueryPointerAsyncHandlerFct(void* fct)
     return NULL;
 }
 
+// ResourceAlloc
+#define GO(A)   \
+static uintptr_t my_ResourceAlloc_fct_##A = 0;                          \
+static XID my_ResourceAlloc_##A(void* dpy)                              \
+{                                                                       \
+    return (XID)RunFunctionWithState(my_ResourceAlloc_fct_##A, 1, dpy); \
+}
+SUPER()
+#undef GO
+static void* findResourceAllocFct(void* fct)
+{
+    if(!fct) return fct;
+    if(GetNativeFnc((uintptr_t)fct))  return GetNativeFnc((uintptr_t)fct);
+    #define GO(A) if(my_ResourceAlloc_fct_##A == (uintptr_t)fct) return my_ResourceAlloc_##A;
+    SUPER()
+    #undef GO
+    #define GO(A) if(my_ResourceAlloc_fct_##A == 0) {my_ResourceAlloc_fct_##A = (uintptr_t)fct; return my_ResourceAlloc_##A; }
+    SUPER()
+    #undef GO
+    printf_log(LOG_NONE, "Warning, no more slot for libX11 ResourceAlloc callback\n");
+    return NULL;
+}
+
 #undef SUPER
 
 void* my_XCreateImage(void* disp, void* vis, uint32_t depth, int32_t fmt, int32_t off
@@ -1340,6 +1363,22 @@ EXPORT void* my_XSynchronize(void* display, int onoff)
     return reverse_XSynchronizeProcFct(my_lib, ret);
 }
 
+static void* kzt_resource_alloc = NULL;
+static XID kzt_resource_allocPre(my_XDisplay_t* dpy)
+{
+    return ((XID (*)(void*))kzt_resource_alloc)(dpy);
+}
+
+#define GO(A)   \
+static void* kzt_my_ResourceAlloc_##A = NULL;               \
+static XID kzt_my_ResourceAllocPre_##A(my_XDisplay_t* dpy)  \
+{                                                           \
+    return ((XID (*)(void*))kzt_my_ResourceAlloc_##A)(dpy); \
+}
+GO(0)
+GO(1)
+#undef GO
+
 EXPORT void* my_XOpenDisplay(void* d);
 EXPORT void* my_XOpenDisplay(void* d)
 {
@@ -1351,6 +1390,15 @@ EXPORT void* my_XOpenDisplay(void* d)
     my_XDisplay_t* dpy = (my_XDisplay_t*)ret;
     if(!ret)
         return ret;
+
+    kzt_resource_alloc = dpy->resource_alloc;
+    kzt_tbbridge_insert((uintptr_t)kzt_resource_alloc, (ADDR)kzt_resource_allocPre, LFp);
+    #define GO(A)   \
+    kzt_my_ResourceAlloc_##A = my_ResourceAlloc_##A;                                                  \
+    kzt_tbbridge_insert((uintptr_t)kzt_my_ResourceAlloc_##A, (ADDR)kzt_my_ResourceAllocPre_##A, LFp);
+    GO(0)
+    GO(1)
+    #undef GO
 
     bridge_t* system = my_context->system;
 
@@ -1484,6 +1532,7 @@ EXPORT int32_t my_XGetWindowProperty(my_XDisplay_t* dpy, void* v2, void* v3, int
 EXPORT void* my_XCreateWindow(my_XDisplay_t* dpy, void* v2, int32_t v3, int32_t v4, uint32_t v5, uint32_t v6, uint32_t v7, int32_t v8, uint32_t v9, void* v10, uintptr_t v11, void* v12);
 EXPORT void* my_XCreateWindow(my_XDisplay_t* dpy, void* v2, int32_t v3, int32_t v4, uint32_t v5, uint32_t v6, uint32_t v7, int32_t v8, uint32_t v9, void* v10, uintptr_t v11, void* v12)
 {
+    dpy->resource_alloc = findResourceAllocFct(dpy->resource_alloc);
     void * ret = my->XCreateWindow(dpy, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12);
     latx_dpy_xcb_sync(dpy);
     return ret;
