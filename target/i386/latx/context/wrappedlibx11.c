@@ -1562,6 +1562,32 @@ EXPORT int32_t my_XChangeGC(my_XDisplay_t* dpy, void* v2, uintptr_t v3, void* v4
     return ret;
 }
 
+EXPORT void* my_XOpenIM(my_XDisplay_t* dpy, void* v2, void* v3, void* v4);
+EXPORT void* my_XOpenIM(my_XDisplay_t* dpy, void* v2, void* v3, void* v4)
+{
+    void* ret = my->XOpenIM(dpy, v2, v3, v4);
+    printf_log(LOG_DEBUG, "DEBUG: %s:%d dpy->resource_alloc: %p\n", __func__, __LINE__, dpy->resource_alloc);
+    kzt_resource_alloc = dpy->resource_alloc;
+    kzt_tbbridge_insert((uintptr_t)kzt_resource_alloc, (ADDR)kzt_resource_allocPre, LFp);
+    #define GO(A)   \
+    kzt_my_ResourceAlloc_##A = my_ResourceAlloc_##A;                                                  \
+    kzt_tbbridge_insert((uintptr_t)kzt_my_ResourceAlloc_##A, (ADDR)kzt_my_ResourceAllocPre_##A, LFp);
+    GO(0)
+    GO(1)
+    #undef GO
+
+    bridge_t* system = my_context->system;
+
+    #define GO(A, W)\
+    if(dpy->A)      \
+        if(!CheckBridged(system, dpy->A)) \
+            AddAutomaticBridge(system, W, dpy->A, 0); \
+
+    GO(resource_alloc, LFp)
+    #undef GO
+
+    return ret;
+}
 
 #define CUSTOM_INIT                 \
     getMy(lib);                     \

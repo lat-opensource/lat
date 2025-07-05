@@ -34,6 +34,7 @@ typedef int32_t (*iFpppllipppppp_t)(void*, void*, void*, intptr_t, intptr_t, int
 typedef void* (*pFppiiuuuiupLp_t)(void*, void*, int32_t, int32_t, uint32_t, uint32_t, uint32_t, int32_t, uint32_t, void*, uintptr_t, void*);
 typedef void* (*pFppLp_t)(void*, void*, uintptr_t, void*);
 typedef int32_t (*iFppLp_t)(void*, void*, uintptr_t, void*);
+typedef void* (*pFpppp_t)(void*, void*, void*, void*);
 
 #define SUPER() ADDED_FUNCTIONS() \
         GO(XDestroyImage, iFp_t) \
@@ -75,7 +76,8 @@ typedef int32_t (*iFppLp_t)(void*, void*, uintptr_t, void*);
         GO(XCreateWindow, pFppiiuuuiupLp_t) \
         GO(XFreeColormap, iFpp_t) \
         GO(XCreateGC, pFppLp_t) \
-        GO(XChangeGC, iFppLp_t)
+        GO(XChangeGC, iFppLp_t) \
+        GO(XOpenIM, pFpppp_t)
 /*
 #define SUPER() ADDED_FUNCTIONS() \
         GO(XOpenDisplay, pFp_t)
