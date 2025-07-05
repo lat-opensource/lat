@@ -1566,7 +1566,6 @@ EXPORT void* my_XOpenIM(my_XDisplay_t* dpy, void* v2, void* v3, void* v4);
 EXPORT void* my_XOpenIM(my_XDisplay_t* dpy, void* v2, void* v3, void* v4)
 {
     void* ret = my->XOpenIM(dpy, v2, v3, v4);
-    printf_log(LOG_DEBUG, "DEBUG: %s:%d dpy->resource_alloc: %p\n", __func__, __LINE__, dpy->resource_alloc);
     kzt_resource_alloc = dpy->resource_alloc;
     kzt_tbbridge_insert((uintptr_t)kzt_resource_alloc, (ADDR)kzt_resource_allocPre, LFp);
     #define GO(A)   \
