@@ -573,7 +573,6 @@ struct TranslationBlock {
 
     union {
         uintptr_t jmp_target_arg[2];  /* target address or offset */
-#define TU_UNLINK_STUB_INVALID 0xffffffff /* TU no unlink stub. */
         struct tu_unlink tu_unlink;
     };
 

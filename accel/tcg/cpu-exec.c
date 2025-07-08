@@ -622,8 +622,7 @@ static inline void tb_add_jump(TranslationBlock *tb, int n,
 
 #ifdef CONFIG_LATX_TU
     if (use_tu_jmp(tb)) {
-        assert(tb->tu_jmp[TU_TB_INDEX_TARGET] != TB_JMP_RESET_OFFSET_INVALID
-            && tb->tu_unlink.stub_offset != TU_UNLINK_STUB_INVALID);
+        assert(tb->tu_jmp[TU_TB_INDEX_TARGET] != TB_JMP_RESET_OFFSET_INVALID);
         tu_relink(tb);
         goto out_unlock_next;
     }

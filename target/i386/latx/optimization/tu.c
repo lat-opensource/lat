@@ -168,7 +168,6 @@ void tu_reset_tb(TranslationBlock *tb)
     tb->jmp_target_arg[TU_TB_INDEX_NEXT] = TB_JMP_RESET_OFFSET_INVALID;
     tb->jmp_stub_reset_offset[0] = TB_JMP_RESET_OFFSET_INVALID;
     tb->jmp_stub_reset_offset[1] = TB_JMP_RESET_OFFSET_INVALID;
-    tb->tu_unlink.stub_offset = TU_UNLINK_STUB_INVALID;
 #endif
 
 #ifdef CONFIG_LATX_AOT
@@ -862,7 +861,6 @@ static void mov_unlink_stub_to_end(uint32_t tb_num_in_tu, TranslationBlock **tb_
     for (int i = 0; i < tb_num_in_tu; i++) {
         tb = tb_list[i];
         if (use_tu_jmp(tb)) {
-            assert(tb->tu_unlink.stub_offset != TU_UNLINK_STUB_INVALID);
 #ifdef CONFIG_LATX_INSTS_PATTERN
             tb->eflags_target_arg[0] = TB_JMP_RESET_OFFSET_INVALID;
             tb->eflags_target_arg[1] = TB_JMP_RESET_OFFSET_INVALID;
@@ -908,7 +906,7 @@ static void mov_unlink_stub_to_end(uint32_t tb_num_in_tu, TranslationBlock **tb_
 
     for (int i = 0; i < tb_num_in_tu; i++) {
         tb = tb_list[i];
-        if (use_tu_jmp(tb) && tb->tu_unlink.stub_offset != TU_UNLINK_STUB_INVALID) {
+        if (use_tu_jmp(tb)) {
             tb->tu_unlink.stub_offset = curr_pos  + tb->tu_unlink.stub_offset
                 - (uintptr_t)tb->tc.ptr;
         }
@@ -942,7 +940,6 @@ void translate_tu(uint32 tb_num_in_tu, TranslationBlock **tb_list)
 retry:
     for (uint32_t i = 0; i < tb_num_in_tu; i++) {
         tb = tb_list[i];
-        tb->tu_unlink.stub_offset = TU_UNLINK_STUB_INVALID;
         gen_code_size = translate_tb_in_tu(tb);
         uintptr_t gen_code_buf = (uintptr_t)tcg_ctx->code_gen_ptr + gen_code_size;
         qatomic_set(&tcg_ctx->code_gen_ptr, (void *)gen_code_buf);

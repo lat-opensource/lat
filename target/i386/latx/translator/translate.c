@@ -415,10 +415,7 @@ int label_dispose(TranslationBlock *tb, TRANSLATION_DATA *lat_ctx)
                     tb->tu_jmp[i] = ir2_label[label_id];
                 }
             }
-            /* tu_unlink_stub_offset and target_pc are union, tu_unlink_stub_offset always */
-            /* not equal TU_UNLINK_STUB_INVALID in TB_GEN_CODE. */
-            if (tb->s_data->tu_tb_mode != TB_GEN_CODE &&
-                    tb->tu_unlink.stub_offset != TU_UNLINK_STUB_INVALID) {
+            if (use_tu_jmp(tb)) {
                 label_id = tb->tu_unlink.stub_offset;
                 tb->tu_unlink.stub_offset = ir2_label[label_id];
             }

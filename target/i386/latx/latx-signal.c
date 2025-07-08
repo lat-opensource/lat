@@ -220,10 +220,7 @@ void tb_exit_to_qemu(CPUArchState *env, ucontext_t *uc)
 #ifdef CONFIG_LATX_TU
         if (use_tu_jmp(current_tb)) {
             assert(current_tb->tu_jmp[TU_TB_INDEX_TARGET] != TB_JMP_RESET_OFFSET_INVALID);
-            assert(current_tb->tu_unlink.stub_offset != TU_UNLINK_STUB_INVALID);
-            if (current_tb->tu_unlink.stub_offset != TU_UNLINK_STUB_INVALID) {
-                unlink_tu_jmp(current_tb);
-            }
+            unlink_tu_jmp(current_tb);
             return;
         }
 #endif
