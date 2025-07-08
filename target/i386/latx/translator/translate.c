@@ -2454,7 +2454,7 @@ static void generate_indirect_goto(void *code_buf, bool parallel)
         la_ldx_d(next_tb, next_tb, jmp_cache_addr);
         la_beq(next_tb, zero_ir2_opnd, label_miss);
 
-        la_ld_d(jmp_entry, next_tb, 0);
+        la_ld_d(jmp_entry, next_tb, offsetof(TranslationBlock, pc));
         la_bne(jmp_entry, next_x86_addr, label_miss);
 
         /*
