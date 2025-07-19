@@ -166,7 +166,7 @@ STEP2:
 
 .. code-block:: bash
 
-    oma install -y gcc nettle pcre2 libffi gnutls glib zlib glib-static libgcrypt-static libgpg-error-static libnfs-static pcre-static zlib-static zstd-static openssl-static
+    oma install -y gcc nettle pcre2 libffi gnutls glib zlib glib-static libgcrypt-static libgpg-error-static libnfs-static pcre-static zlib-static zstd-static openssl-static pkg-config ninja
 
 
 STEP3:
