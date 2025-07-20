@@ -2512,6 +2512,27 @@ static struct x86_ld_info * find_ld_part(char * start, int len)
                 K_LEA(6),
             },
             .part_offset = MY_PARTY_OFFSET_UBUNTU//for Ubuntu 21.04
+        },
+        {   // AOSC 25.05.16 GNU C Library (GNU libc) stable release version 2.40.
+            .ins = {
+                K_OR(0),          // 0x41 0x80 0x8e 0x54 0x03 0x00 0x00 0x08    (orb $0x8,0x354(%r14))
+                K_CMP_48(8),      // 0x48 0x83 0xbd 0x10 0xff 0xff 0xff 0x00    (cmpq   $0x0,-0xf0(%rbp)
+                K_JNE(8),         // 0x0f 0x85 0xe0 0x17 0x00 0x00              (jne)
+                K_CMP_49(6),      // 0x49 0x83 0xbe 0xa8 0x04 0x00 0x00 0x00    (cmpq   $0x0,0x4a8(%r14))
+                K_JNE(8),         // 0x0f 0x85 0xea 0x0b 0x00 0x00              (jne)
+                K_LEA(6),         // 0x48 0x8d 0x65 0xd8                        (lea    -0x28(%rbp),%rsp)
+                K_SKIP(0),
+            },
+            .part_offset = 0x33
+        },
+        {   // debian sid GNU C Library (Debian GLIBC 2.41-7) stable release version 2.41.
+            .ins = {
+                K_OR(0),          // 0x41 0x80 0x8e 0x54 0x03 0x00 0x00 0x08    (orb $0x8,0x354(%r14))
+                K_TEST(8),        // 0x48 0x85 0xdb                             (test %rbx,%rbx)
+                K_JNE(3),         // 0x0f 0x85 0xbd 0x14 0x00 0x00              (jne)
+                K_LEA(6),         // 0x48 0x8d 0x64 0xd8                        (lea -0x28(%rbp),%rsp)
+            },
+            .part_offset = 0x20
         }
     };
     while((_dl_relocate_object_end = memmem(start, len - (start - old_start), searchpopret_part,
@@ -2580,6 +2601,24 @@ static struct x86_ld_info *find_ld_bridge(void* info)
         return ret;
     }
     fix_addr = (uint8_t *)(ld_start+ 0xe7cd);
+    if ((*(uint64_t *)fix_addr & 0xffffffffff00ffff) == 0x0800000354008041) {
+        ret = malloc(sizeof(struct x86_ld_info));
+        ret->addr = (uintptr_t) fix_addr;
+        ret->reg = (*(fix_addr+ 2)) & 0xf;
+        printf_log(LOG_DEBUG, "debug find ld so 0x%lx reg = %d\n", ret->addr, ret->reg);
+        return ret;
+    }
+    // AOSC 25.05.16 GNU C Library ( GLIBC 2.40)
+    fix_addr = (uint8_t *)(ld_start+ 0xdb72);
+    if ((*(uint64_t *)fix_addr & 0xffffffffff00ffff) == 0x0800000354008041) {
+        ret = malloc(sizeof(struct x86_ld_info));
+        ret->addr = (uintptr_t) fix_addr;
+        ret->reg = (*(fix_addr+ 2)) & 0xf;
+        printf_log(LOG_DEBUG, "debug find ld so 0x%lx reg = %d\n", ret->addr, ret->reg);
+        return ret;
+    }
+    // debian sid GNU C Library (Debian GLIBC 2.41-7) stable release version 2.41. addr 0x4008403ffe
+    fix_addr = (uint8_t *)(ld_start+ 0xdffe);
     if ((*(uint64_t *)fix_addr & 0xffffffffff00ffff) == 0x0800000354008041) {
         ret = malloc(sizeof(struct x86_ld_info));
         ret->addr = (uintptr_t) fix_addr;
