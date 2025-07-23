@@ -158,19 +158,10 @@ bool translate_maskmovq(IR1_INST *pir1)
     IR2_OPND mask = ra_alloc_ftemp();
     load_freg_from_ir1_2(src, ir1_get_opnd(pir1, 0), IS_INTEGER);
     load_freg_from_ir1_2(mask, ir1_get_opnd(pir1, 1), IS_INTEGER);
-    IR2_OPND zero = ra_alloc_ftemp();
-    la_vxor_v(zero, zero, zero);
     /*
      * Mapping to LA 23 -> 30
      */
     IR2_OPND base_opnd = ra_alloc_gpr(edi_index);
-    IR2_OPND temp_mask = ra_alloc_ftemp();
-    la_vandi_b(temp_mask, mask, 0x80);
-    IR2_OPND mem_mask = ra_alloc_ftemp();
-    la_vseq_b(mem_mask, temp_mask, zero);
-    la_vnor_v(temp_mask, mem_mask, zero);
-    IR2_OPND mem_data = ra_alloc_ftemp();
-    IR2_OPND xmm_data = ra_alloc_ftemp();
 #ifndef TARGET_X86_64
        la_bstrpick_d(base_opnd, base_opnd, 31, 0);
 #else
@@ -178,10 +169,11 @@ bool translate_maskmovq(IR1_INST *pir1)
         la_bstrpick_d(base_opnd, base_opnd, 31, 0);
     }
 #endif
+    IR2_OPND mem_data = ra_alloc_ftemp();
+    IR2_OPND mem_mask = ra_alloc_ftemp();
+    la_vslti_b(mem_mask, mask, 0);
     la_fld_d(mem_data, base_opnd, 0);
-    la_vand_v(xmm_data, src, temp_mask);
-    la_vand_v(mem_data, mem_data, mem_mask);
-    la_vor_v(mem_data, mem_data, xmm_data);
+    la_vbitsel_v(mem_data, mem_data, src, mem_mask);
     la_fst_d(mem_data, base_opnd, 0);
     return true;
 }
@@ -203,17 +195,11 @@ bool translate_maskmovdqu(IR1_INST *pir1)
         la_bstrpick_d(base_opnd, base_opnd, 31, 0);
     }
 #endif
-    IR2_OPND temp_mask = ra_alloc_ftemp();
-    la_vandi_b(temp_mask, mask, 0x80);
-    IR2_OPND mem_mask = ra_alloc_ftemp();
-    la_vseq_b(mem_mask, temp_mask, zero);
-    la_vnor_v(temp_mask, mem_mask, zero);
     IR2_OPND mem_data = ra_alloc_ftemp();
-    IR2_OPND xmm_data = ra_alloc_ftemp();
+    IR2_OPND mem_mask = ra_alloc_ftemp();
+    la_vslti_b(mem_mask, mask, 0);
     la_vld(mem_data, base_opnd, 0);
-    la_vand_v(xmm_data, src, temp_mask);
-    la_vand_v(mem_data, mem_data, mem_mask);
-    la_vor_v(mem_data, mem_data, xmm_data);
+    la_vbitsel_v(mem_data, mem_data, src, mem_mask);
     la_vst(mem_data, base_opnd, 0);
     return true;
 }
