@@ -520,14 +520,13 @@ bool translate_vmovmskps(IR1_INST * pir1) {
         la_movfr2gr_d(dest, temp);
     } else {
         IR2_OPND temp1 = ra_alloc_ftemp();
-        IR2_OPND temp2 = ra_alloc_ftemp();
+        IR2_OPND dest_hi = ra_alloc_itemp();
 
         la_xvmskltz_w(temp1,
             ra_alloc_xmm(ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 1))));
-        la_xvpermi_q(temp2, temp1, VEXTRINS_IMM_4_0(1, 1));
-        la_vslli_b(temp2, temp2, 4);
-        la_vor_v(temp1, temp1, temp2);
-        la_movfr2gr_d(dest, temp1);
+        la_vpickve2gr_du(dest, temp1, 0);
+        la_vpickve2gr_du(dest_hi, temp1, 2);
+        la_bstrins_d(dest, dest_hi, 7, 4);
     }
     return true;
 }
@@ -544,14 +543,13 @@ bool translate_vmovmskpd(IR1_INST * pir1) {
         la_movfr2gr_d(dest, temp);
     } else {
         IR2_OPND temp1 = ra_alloc_ftemp();
-        IR2_OPND temp2 = ra_alloc_ftemp();
+        IR2_OPND dest_hi = ra_alloc_itemp();
 
         la_xvmskltz_d(temp1,
             ra_alloc_xmm(ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 1))));
-        la_xvpermi_q(temp2, temp1, VEXTRINS_IMM_4_0(1, 1));
-        la_vslli_b(temp2, temp2, 2);
-        la_vor_v(temp1, temp1, temp2);
-        la_movfr2gr_d(dest, temp1);
+        la_vpickve2gr_du(dest, temp1, 0);
+        la_vpickve2gr_du(dest_hi, temp1, 2);
+        la_bstrins_d(dest, dest_hi, 3, 2);
     }
     return true;
 }
