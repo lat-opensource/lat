@@ -7073,20 +7073,16 @@ bool translate_vpmaskmovx(IR1_INST * pir1) {
     IR1_OPND * opnd0 = ir1_get_opnd(pir1, 0);
     IR1_OPND * opnd1 = ir1_get_opnd(pir1, 1);
     IR1_OPND * opnd2 = ir1_get_opnd(pir1, 2);
-    IR2_INST * ( * tr_inst1)(IR2_OPND, IR2_OPND);
-    IR2_INST * ( * tr_inst2)(IR2_OPND, IR2_OPND, int);
+    IR2_INST * ( * tr_inst1)(IR2_OPND, IR2_OPND, int);
     tr_inst1 = NULL;
-    tr_inst2 = NULL;
     IR1_OPCODE op = ir1_opcode(pir1);
     if (ir1_opnd_is_xmm(opnd1)) {
         switch (op) {
             case dt_X86_INS_VPMASKMOVD:
-                tr_inst1 = la_vclz_w;
-                tr_inst2 = la_vseqi_w;
+                tr_inst1 = la_vslti_w;
                 break;
             case dt_X86_INS_VPMASKMOVQ:
-                tr_inst1 = la_vclz_d;
-                tr_inst2 = la_vseqi_d;
+                tr_inst1 = la_vslti_d;
                 break;
             default:
                 break;
@@ -7095,31 +7091,23 @@ bool translate_vpmaskmovx(IR1_INST * pir1) {
         IR2_OPND dest = load_freg128_from_ir1(opnd0);
         IR2_OPND src1 = load_freg128_from_ir1(opnd1);
         IR2_OPND src2 = load_freg128_from_ir1(opnd2);
-        IR2_OPND temp1 = ra_alloc_ftemp();
-        IR2_OPND dest_temp = ra_alloc_ftemp();
-        la_xvori_b(dest_temp, dest, 0x0);
-
-        tr_inst1(temp1, src1);
-        tr_inst2(temp1, temp1, 0x0);
-        la_vand_v(dest, temp1, src2);
+        IR2_OPND zero = ra_alloc_ftemp();
+        IR2_OPND mask = ra_alloc_ftemp();
+        la_vxor_v(zero, zero, zero);
+        tr_inst1(mask, src1, 0);
+        la_vbitsel_v(dest, zero, src2, mask);
         if (ir1_opnd_is_mem(opnd0)) {
-
-            la_vandn_v(temp1, temp1, dest_temp);
-            la_vxor_v(dest, dest, temp1);
             store_freg128_to_ir1_mem(dest, opnd0);
         } else {
             set_high128_xreg_to_zero(dest);
         }
-
     } else if (ir1_opnd_is_ymm(opnd1)) {
         switch (op) {
             case dt_X86_INS_VPMASKMOVD:
-                tr_inst1 = la_xvclz_w;
-                tr_inst2 = la_xvseqi_w;
+                tr_inst1 = la_xvslti_w;
                 break;
             case dt_X86_INS_VPMASKMOVQ:
-                tr_inst1 = la_xvclz_d;
-                tr_inst2 = la_xvseqi_d;
+                tr_inst1 = la_xvslti_d;
                 break;
             default:
                 break;
@@ -7128,16 +7116,12 @@ bool translate_vpmaskmovx(IR1_INST * pir1) {
         IR2_OPND dest = load_freg256_from_ir1(opnd0);
         IR2_OPND src1 = load_freg256_from_ir1(opnd1);
         IR2_OPND src2 = load_freg256_from_ir1(opnd2);
-        IR2_OPND temp1 = ra_alloc_ftemp();
-        IR2_OPND dest_temp = ra_alloc_ftemp();
-        la_xvori_b(dest_temp, dest, 0x0);
-
-        tr_inst1(temp1, src1);
-        tr_inst2(temp1, temp1, 0x0);
-        la_xvand_v(dest, temp1, src2);
+        IR2_OPND zero = ra_alloc_ftemp();
+        IR2_OPND mask = ra_alloc_ftemp();
+        la_xvxor_v(zero, zero, zero);
+        tr_inst1(mask, src1, 0);
+        la_xvbitsel_v(dest, zero, src2, mask);
         if (ir1_opnd_is_ymm(opnd2)) {
-            la_xvandn_v(temp1, temp1, dest_temp);
-            la_xvxor_v(dest, dest, temp1);
             store_freg256_to_ir1_mem(dest, opnd0);
         }
     }
