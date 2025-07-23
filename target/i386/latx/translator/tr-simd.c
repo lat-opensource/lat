@@ -4816,40 +4816,48 @@ bool translate_vpackusxx(IR1_INST * pir1) {
     IR2_OPND src1 = load_freg256_from_ir1(opnd1);
     IR2_OPND src2 = load_freg256_from_ir1(opnd2);
     IR2_OPND temp1 = ra_alloc_ftemp();
-    IR2_OPND temp2;
+    IR2_OPND temp2 = ra_alloc_ftemp();
+    IR2_OPND temp3;
     IR1_OPCODE op = ir1_opcode(pir1);
-    IR2_INST * ( * cmp_inst)(IR2_OPND, IR2_OPND, int);
-    IR2_INST * ( * cvt_inst)(IR2_OPND, IR2_OPND, int);
+    IR2_INST * ( * maxi_inst)(IR2_OPND, IR2_OPND, int);
+    IR2_INST * ( * min_inst)(IR2_OPND, IR2_OPND, IR2_OPND);
+    IR2_INST * ( * pick_inst)(IR2_OPND, IR2_OPND, IR2_OPND);
     switch (op) {
         case dt_X86_INS_VPACKUSDW:
-            cmp_inst = la_xvslti_w;
-            cvt_inst = la_xvssrani_hu_w;
+            maxi_inst = la_xvmaxi_w;
+            min_inst = la_xvmin_w;
+            pick_inst = la_xvpickev_h;
+            la_xvldi(temp1, 0b1100100110011); // Broadcast 0xffff as 32bits to all lane
             break;
         case dt_X86_INS_VPACKUSWB:
-            cmp_inst = la_xvslti_h;
-            cvt_inst = la_xvssrani_bu_h;
+            maxi_inst = la_xvmaxi_h;
+            min_inst = la_xvmin_h;
+            pick_inst = la_xvpickev_b;
+            la_xvldi(temp1, 0b1100101010101); // Broadcast 0xff as 16bits to all lane
             break;
         default:
-            cmp_inst = NULL;
-            cvt_inst = NULL;
+            maxi_inst = NULL;
+            min_inst = NULL;
+            pick_inst = NULL;
             lsassert(0);
             break;
     }
-    cmp_inst(temp1, src1, 0);
-    la_xvandn_v(temp1, temp1, src1);
     if ((ir1_opnd_is_xmm(opnd2) || ir1_opnd_is_ymm(opnd2)) &&
         ir1_opnd_base_reg_num(opnd1) == ir1_opnd_base_reg_num(opnd2)) {
-        temp2 = temp1;
+        maxi_inst(temp2, src1, 0);
+        min_inst(temp2, temp2, temp1);
+        pick_inst(dest, temp2, temp2);
     } else {
-        temp2 = ra_alloc_ftemp();
-        cmp_inst(temp2, src2, 0);
-        la_xvandn_v(temp2, temp2, src2);
+        IR2_OPND temp3 = ra_alloc_ftemp();
+        maxi_inst(temp2, src1, 0);
+        maxi_inst(temp3, src2, 0);
+        min_inst(temp2, temp2, temp1);
+        min_inst(temp3, temp3, temp1);
+        pick_inst(dest, temp3, temp2);
     }
-    cvt_inst(temp2, temp1, 0);
     if (ir1_opnd_is_xmm(opnd0)) {
-        set_high128_xreg_to_zero(temp2);
+        set_high128_xreg_to_zero(dest);
     }
-    la_xvori_b(dest, temp2, 0);
     return true;
 }
 
