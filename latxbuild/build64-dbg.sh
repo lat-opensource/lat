@@ -21,7 +21,7 @@ help() {
 }
 
 parseArgs() {
-    while getopts "cO:h" opt; do
+    while getopts "cO:l:h" opt; do
         case ${opt} in
         c)
             make_configure=1
