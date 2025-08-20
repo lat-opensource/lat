@@ -8813,7 +8813,7 @@ abi_long do_arch_prctl(CPUX86State *env, int code, abi_ulong addr)
 
 #endif /* defined(TARGET_I386) */
 
-#define NEW_STACK_SIZE 0x40000
+#define NEW_STACK_SIZE 0x200000
 
 
 static pthread_mutex_t clone_lock = PTHREAD_MUTEX_INITIALIZER;
