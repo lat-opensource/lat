@@ -32,17 +32,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        container: [ 'latx-runner-debian' ]
-        type: [ 'build-release', 'build32', 'build32-dbg', 'build64', 'build64-dbg', 'buildtcg32', 'buildtcg32-dbg', 'buildtcg64', 'buildtcg64-dbg' ]
-        exclude:
-          - container: 'latx-runner-debian'
-            type: 'buildtcg32'
-          - container: 'latx-runner-debian'
-            type: 'buildtcg32-dbg'
-          - container: 'latx-runner-debian'
-            type: 'buildtcg64'
-          - container: 'latx-runner-debian'
-            type: 'buildtcg64-dbg'
+        container: [ 'latx-runner-aosc', 'latx-runner-debian' ]
+        type: [ 'build-release', 'build32', 'build32-dbg', 'build64', 'build64-dbg' ]
 
     steps:
       - uses: actions/checkout@v5
