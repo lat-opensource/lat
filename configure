@@ -411,6 +411,8 @@ latx_atomic="no"
 latx_xcomisx_opt="no"
 latx_avx_opt="no"
 capstone_diet="yes"
+bddisasm_no_mnemonic="yes"
+latx_decode_debug="no"
 latx_syscall_tunnel="no"
 latx_tbmini_enable="yes"
 cocoa="auto"
@@ -1095,6 +1097,7 @@ for opt do
       strip_opt="no"
       fortify_source="no"
       capstone_diet="no"
+      bddisasm_no_mnemonic="no"
   ;;
   --enable-sanitizers) sanitizers="yes"
   ;;
@@ -1258,6 +1261,10 @@ for opt do
   --enable-latx-avx-opt) latx_avx_opt="yes"
   ;;
   --disable-capstone-diet) capstone_diet="no"
+  ;;
+  --enable-decode-debug) latx_decode_debug="yes"
+  ;;
+  --disable-bddisasm-no-mnemonic) bddisasm_no_mnemonic="no"
   ;;
   --enable-latx-syscall-tunnel) latx_syscall_tunnel="yes"
   ;;
@@ -5788,6 +5795,12 @@ if test "$latx" = "yes" ; then
   fi
   if test "$capstone_diet" = "yes" ; then
     echo "CONFIG_CAPSTONE_DIET=y" >> $config_host_mak
+  fi
+  if test "$bddisasm_no_mnemonic" = "yes" ; then
+    echo "CONFIG_BDDISASM_NO_MNEMONIC=y" >> $config_host_mak
+  fi
+  if test "$latx_decode_debug" = "yes" ; then
+    echo "CONFIG_LATX_DECODE_DEBUG=y" >> $config_host_mak
   fi
 fi
 if test "$ptrace_debug" = "yes" ; then

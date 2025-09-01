@@ -8,7 +8,7 @@
 
 extern int option_em_debug;
 #ifdef CONFIG_LATX_INSTS_PATTERN
-extern int option_insts_pattern;
+extern int option_instptn;
 #endif
 #ifdef CONFIG_LATX_FLAG_REDUCTION
 extern int option_flag_reduction;

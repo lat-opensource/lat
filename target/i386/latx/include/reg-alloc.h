@@ -151,12 +151,18 @@ RA_ALLOC_FUNC_DEF(trace);
 RA_ALLOC_FUNC_DEF(scr);
 /* allocate and free temp register */
 IR2_OPND ra_alloc_itemp(void);
+#ifdef CONFIG_LATX_INSTS_PATTERN
+IR2_OPND ra_alloc_ptn_itemp(void);
+#endif
 IR2_OPND ra_alloc_ftemp(void);
 IR2_OPND ra_alloc_imm_reg(int itemp_num);
 bool ld_imm_to_imm_reg(uint64);
 #define ra_free_itemp(phy_id)   RA_FREE_CODE(itemp, phy_id)
 #define ra_free_ftemp(phy_id)   RA_FREE_CODE(ftemp, phy_id)
 void ra_free_all(void);
+#ifdef CONFIG_LATX_INSTS_PATTERN
+void ra_free_ptn(void);
+#endif
 bool itemp_is_free(int itemp_num);
 IR2_OPND ra_alloc_num_4095(void);
 void ra_free_num_4095(IR2_OPND);

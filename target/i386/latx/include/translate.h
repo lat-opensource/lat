@@ -10,7 +10,7 @@
 #include "macro-inst.h"
 
 #include "aot.h"
-
+#ifdef CONFIG_LATX_DECODE_DEBUG
 //#define LATX_DEBUG_SOFTFPU
 
 #define TRANS_FUNC(name) glue(translate_, name)
@@ -1141,25 +1141,25 @@ TRANS_FUNC_DEF(crc32);
 TRANS_FUNC_DEF(salc);
 TRANS_FUNC_DEF(pclmulqdq);
 
-void tr_init(void *tb);
-void tr_fini(bool check_the_extension); /* default TRUE */
+// void tr_init(void *tb);
+// void tr_fini(bool check_the_extension); /* default TRUE */
 
-void tr_disasm(struct TranslationBlock *tb, int max_insns);
-void etb_add_succ(void* etb,int depth);
-int tr_translate_tb(struct TranslationBlock *tb);
-int tr_ir2_generate(struct TranslationBlock *tb);
-int label_dispose(TranslationBlock *tb, TRANSLATION_DATA *lat_ctx);
-int tr_ir2_assemble(const void *code_start_addr, const IR2_INST *pir2);
+// void tr_disasm(struct TranslationBlock *tb, int max_insns);
+// void etb_add_succ(void* etb,int depth);
+// int tr_translate_tb(struct TranslationBlock *tb);
+// int tr_ir2_generate(struct TranslationBlock *tb);
+// int label_dispose(TranslationBlock *tb, TRANSLATION_DATA *lat_ctx);
+// int tr_ir2_assemble(const void *code_start_addr, const IR2_INST *pir2);
 #if defined(CONFIG_LATX_FLAG_REDUCTION) && \
     defined(CONFIG_LATX_FLAG_REDUCTION_EXTEND)
 int8 get_etb_type(IR1_INST *pir1);
 #endif
 
-IR1_INST *get_ir1_list(struct TranslationBlock *tb, ADDRX pc, int max_insns);
+// IR1_INST *get_ir1_list(struct TranslationBlock *tb, ADDRX pc, int max_insns);
 
-extern ADDR context_switch_native_to_bt_ret_0;
-extern ADDR context_switch_native_to_bt;
-extern ADDR ss_match_fail_native;
+// extern ADDR context_switch_native_to_bt_ret_0;
+// extern ADDR context_switch_native_to_bt;
+// extern ADDR ss_match_fail_native;
 
 /* target_latx_host()
  * ---------------------------------------
@@ -1181,52 +1181,52 @@ extern ADDR ss_match_fail_native;
  * |  -----------------------------------
  * --------------------------------------- */
 
-void tr_skip_eflag_calculation(int usedef_bits);
-void tr_fpu_push(void);
-void tr_fpu_pop(void);
-void tr_fpu_inc(void);
-void tr_fpu_dec(void);
-void tr_fpu_enable_top_mode(void);
-void tr_fpu_disable_top_mode(void);
+// void tr_skip_eflag_calculation(int usedef_bits);
+// void tr_fpu_push(void);
+// void tr_fpu_pop(void);
+// void tr_fpu_inc(void);
+// void tr_fpu_dec(void);
+// void tr_fpu_enable_top_mode(void);
+// void tr_fpu_disable_top_mode(void);
 
 void tr_fpu_load_tag_to_env(IR2_OPND fpu_tag);
 void tr_fpu_store_tag_to_mem(IR2_OPND mem_opnd, int mem_imm);
 
-extern int GPR_USEDEF_TO_SAVE;
-extern int FPR_USEDEF_TO_SAVE;
-extern int XMM_USEDEF_TO_SAVE;
+// extern int GPR_USEDEF_TO_SAVE;
+// extern int FPR_USEDEF_TO_SAVE;
+// extern int XMM_USEDEF_TO_SAVE;
 
-struct lat_lock{
-	int lock;
-} __attribute__ ((aligned (64)));;
-extern struct lat_lock lat_lock[16];
+// struct lat_lock{
+// 	int lock;
+// } __attribute__ ((aligned (64)));;
+// extern struct lat_lock lat_lock[16];
 
-void tr_set_running_of_cs(bool value);
-void tr_save_gpr_to_env(uint8 gpr_to_save);
-void tr_load_gpr_from_env(uint8 gpr_to_load);
-void tr_save_xmm_to_env(uint8 xmm_to_save);
-void tr_load_xmm_from_env(uint8 xmm_to_load);
-void tr_save_registers_to_env(uint8 gpr_to_save, uint8 fpr_to_save,
-                              uint8 xmm_to_save, uint8 vreg_to_save);
-void tr_load_registers_from_env(uint8 gpr_to_load, uint8 fpr_to_load,
-                                uint8 xmm_to_load, uint8 vreg_to_load);
-#ifdef TARGET_X86_64
-void tr_save_xmm64_to_env(uint8 xmm_to_save);
-void tr_load_xmm64_from_env(uint8 xmm_to_load);
-void tr_save_x64_8_registers_to_env(uint8 gpr_to_save, uint8 xmm_to_save);
-void tr_load_x64_8_registers_from_env(uint8 gpr_to_load, uint8 xmm_to_load);
-#endif
-void tr_save_fcsr_to_env(void);
-void tr_load_fcsr_from_env(void);
+// void tr_set_running_of_cs(bool value);
+// void tr_save_gpr_to_env(uint8 gpr_to_save);
+// void tr_load_gpr_from_env(uint8 gpr_to_load);
+// void tr_save_xmm_to_env(uint8 xmm_to_save);
+// void tr_load_xmm_from_env(uint8 xmm_to_load);
+// void tr_save_registers_to_env(uint8 gpr_to_save, uint8 fpr_to_save,
+//                               uint8 xmm_to_save, uint8 vreg_to_save);
+// void tr_load_registers_from_env(uint8 gpr_to_load, uint8 fpr_to_load,
+//                                 uint8 xmm_to_load, uint8 vreg_to_load);
+// #ifdef TARGET_X86_64
+// void tr_save_xmm64_to_env(uint8 xmm_to_save);
+// void tr_load_xmm64_from_env(uint8 xmm_to_load);
+// void tr_save_x64_8_registers_to_env(uint8 gpr_to_save, uint8 xmm_to_save);
+// void tr_load_x64_8_registers_from_env(uint8 gpr_to_load, uint8 xmm_to_load);
+// #endif
+// void tr_save_fcsr_to_env(void);
+// void tr_load_fcsr_from_env(void);
 void update_fcsr_by_sw(IR2_OPND sw);
 
-void tr_gen_call_to_helper(ADDR, enum aot_rel_kind);
-void convert_fpregs_64_to_x80(void);
-void convert_fpregs_x80_to_64(void);
+// void tr_gen_call_to_helper(ADDR, enum aot_rel_kind);
+// void convert_fpregs_64_to_x80(void);
+// void convert_fpregs_x80_to_64(void);
 void helper_raise_int(void);
 void helper_raise_syscall(void);
 
-bool si12_overflow(long si12);
+// bool si12_overflow(long si12);
 
 /* Loongarch V1.1 */
 int have_scq(void);
@@ -1245,11 +1245,11 @@ void set_high128_xreg_to_zero(IR2_OPND opnd);
 void store_freg256_to_ir1_mem(IR2_OPND opnd2,IR1_OPND *opnd1);
 void load_freg256_from_ir1_mem(IR2_OPND opnd2,IR1_OPND *opnd1);
 
-#ifdef CONFIG_LATX_AOT
+// #ifdef CONFIG_LATX_AOT
 /* TODO */
-void load_ireg_from_host_addr(IR2_OPND opnd2, uint64 value);
-void load_ireg_from_guest_addr(IR2_OPND opnd2, uint64 value);
-#endif
+// void load_ireg_from_host_addr(IR2_OPND opnd2, uint64 value);
+// void load_ireg_from_guest_addr(IR2_OPND opnd2, uint64 value);
+// #endif
 
 void load_ireg_from_ir1_mem(IR2_OPND opnd2, IR1_OPND *opnd1,
                                    EXTENSION_MODE em, bool is_xmm_hi);
@@ -1292,9 +1292,9 @@ void update_fcsr_by_cw(IR2_OPND cw);
 IR2_OPND set_fpu_fcsr_rounding_field_by_x86(void);
 void set_fpu_rounding_mode(IR2_OPND rm);
 
-int generate_native_rotate_fpu_by(void *code_buf);
-void generate_context_switch_bt_to_native(void *code_buf);
-void generate_context_switch_native_to_bt(void);
+// int generate_native_rotate_fpu_by(void *code_buf);
+// void generate_context_switch_bt_to_native(void *code_buf);
+// void generate_context_switch_native_to_bt(void);
 
 void generate_eflag_calculation(IR2_OPND, IR2_OPND, IR2_OPND, IR1_INST *, bool);
 
@@ -1308,30 +1308,30 @@ void tr_generate_exit_tb(IR1_INST *branch, int succ_id);
 #ifdef CONFIG_LATX_XCOMISX_OPT
 void tr_generate_exit_stub_tb(IR1_INST *branch, int succ_id, void *func, IR1_INST *stub);
 #endif
-void tr_generate_goto_tb(void);                          /* TODO */
+// void tr_generate_goto_tb(void);                          /* TODO */
 
 /* rotate fpu */
 /* native_rotate_fpu_by(step, return_address) */
-extern ADDR native_rotate_fpu_by;
-extern ADDR indirect_jmp_glue;
-extern ADDR parallel_indirect_jmp_glue;
-void rotate_fpu_to_top(int top);
-void rotate_fpu_by(int step);
-void rotate_fpu_to_bias(int bias);
+// extern ADDR native_rotate_fpu_by;
+// extern ADDR indirect_jmp_glue;
+// extern ADDR parallel_indirect_jmp_glue;
+// void rotate_fpu_to_top(int top);
+// void rotate_fpu_by(int step);
+// void rotate_fpu_to_bias(int bias);
 
-void tr_gen_call_to_helper1(ADDR func, int use_fp, enum aot_rel_kind);
-void tr_gen_call_to_helper2(ADDR, IR2_OPND, int, enum aot_rel_kind);
-void tr_gen_call_to_helper_xgetbv(void);
-void tr_gen_call_to_helper_vfll(ADDR, IR2_OPND, IR2_OPND, int);
-void tr_gen_call_to_helper_pcmpxstrx(ADDR, int, int, int);
-void tr_gen_call_to_helper_cvttpd2pi(ADDR, int, int);
-void tr_gen_call_to_helper_pclmulqdq(ADDR, int, int, int, int ,int );
-void tr_gen_call_to_helper_aes(ADDR, int, int, int);
-void tr_load_top_from_env(void);
-void tr_gen_top_mode_init(void);
+// void tr_gen_call_to_helper1(ADDR func, int use_fp, enum aot_rel_kind);
+// void tr_gen_call_to_helper2(ADDR, IR2_OPND, int, enum aot_rel_kind);
+// void tr_gen_call_to_helper_xgetbv(void);
+// void tr_gen_call_to_helper_vfll(ADDR, IR2_OPND, IR2_OPND, int);
+// void tr_gen_call_to_helper_pcmpxstrx(ADDR, int, int, int);
+// void tr_gen_call_to_helper_cvttpd2pi(ADDR, int, int);
+// void tr_gen_call_to_helper_pclmulqdq(ADDR, int, int, int, int ,int );
+// void tr_gen_call_to_helper_aes(ADDR, int, int, int);
+// void tr_load_top_from_env(void);
+// void tr_gen_top_mode_init(void);
 
-IR2_OPND tr_lat_spin_lock(IR2_OPND mem_addr, int imm);
-void tr_lat_spin_unlock(IR2_OPND lat_lock_addr);
+// IR2_OPND tr_lat_spin_lock(IR2_OPND mem_addr, int imm);
+// void tr_lat_spin_unlock(IR2_OPND lat_lock_addr);
 
 void gen_softfpu_helper_prologue(IR1_INST *pir1);
 void gen_softfpu_helper_epilogue(IR1_INST *pir1);
@@ -1340,7 +1340,7 @@ void update_fcsr_rm(IR2_OPND control_word, IR2_OPND fcsr);
 bool ir1_need_reserve_h128(IR1_INST *ir1);
 IR2_OPND save_h128_of_ymm(IR1_INST *ir1);
 void restore_h128_of_ymm(IR1_INST *ir1, IR2_OPND temp);
-void gen_test_page_flag(IR2_OPND mem_opnd, int mem_imm, uint32_t flag);
+// void gen_test_page_flag(IR2_OPND mem_opnd, int mem_imm, uint32_t flag);
 
 void clear_h32(IR2_OPND *opnd);
 
@@ -1351,4 +1351,6 @@ void clear_h32(IR2_OPND *opnd);
 #define IS_XMM_HI       (1 << 2)
 #define IS_INTEGER      (1 << 3)
 
+#endif
+#include "translate-bd.h"
 #endif

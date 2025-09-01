@@ -131,36 +131,36 @@ static void kzt_helper_pFpL(ADDR func, IR2_OPND ptr, IR2_OPND L)
 }
 
 void kzt_native_to_wrapper(void);
-void kzt_native_to_wrapper(void)
-{
-    tr_save_registers_to_env(0xff, 0xff, option_save_xmm, options_to_save());
-    tr_save_x64_8_registers_to_env(0xff, option_save_xmm);
-    /* restore dbt FCSR (#31) */
-    IR2_OPND fcsr_value_opnd = ra_alloc_itemp();
-    /* save fcsr for native */
-    la_movfcsr2gr(fcsr_value_opnd, fcsr_ir2_opnd);
-    la_st_w(fcsr_value_opnd, env_ir2_opnd,
-                          lsenv_offset_of_fcsr(lsenv));
+// void kzt_native_to_wrapper(void)
+// {
+//     tr_save_registers_to_env(0xff, 0xff, option_save_xmm, options_to_save());
+//     tr_save_x64_8_registers_to_env(0xff, option_save_xmm);
+//     /* restore dbt FCSR (#31) */
+//     IR2_OPND fcsr_value_opnd = ra_alloc_itemp();
+//     /* save fcsr for native */
+//     la_movfcsr2gr(fcsr_value_opnd, fcsr_ir2_opnd);
+//     la_st_w(fcsr_value_opnd, env_ir2_opnd,
+//                           lsenv_offset_of_fcsr(lsenv));
 
-}
+// }
 void kzt_wrapper_to_native(void);
-void kzt_wrapper_to_native(void)
-{
-    /* save dbt FCSR */
-    IR2_OPND fcsr_value_opnd = ra_alloc_itemp();
+// void kzt_wrapper_to_native(void)
+// {
+//     /* save dbt FCSR */
+//     IR2_OPND fcsr_value_opnd = ra_alloc_itemp();
 
-    la_ld_w(fcsr_value_opnd, env_ir2_opnd,
-                          lsenv_offset_of_fcsr(lsenv));
-    la_movgr2fcsr(fcsr_ir2_opnd, fcsr_value_opnd);
-    ra_free_temp(fcsr_value_opnd);
+//     la_ld_w(fcsr_value_opnd, env_ir2_opnd,
+//                           lsenv_offset_of_fcsr(lsenv));
+//     la_movgr2fcsr(fcsr_ir2_opnd, fcsr_value_opnd);
+//     ra_free_temp(fcsr_value_opnd);
 
-    /* load x86 registers from env. top, eflags, and ss */
-    tr_load_registers_from_env(0xff, 0xff, option_save_xmm, options_to_save());
-    tr_load_x64_8_registers_from_env(0xff, option_save_xmm);
-    /* load &HASH_JMP_CACHE[0] */
-    IR2_OPND jmp_cache_addr = ra_alloc_static0();
-    la_ld_d(jmp_cache_addr, env_ir2_opnd, lsenv_offset_of_tb_jmp_cache_ptr(lsenv));
-}
+//     /* load x86 registers from env. top, eflags, and ss */
+//     tr_load_registers_from_env(0xff, 0xff, option_save_xmm, options_to_save());
+//     tr_load_x64_8_registers_from_env(0xff, option_save_xmm);
+//     /* load &HASH_JMP_CACHE[0] */
+//     IR2_OPND jmp_cache_addr = ra_alloc_static0();
+//     la_ld_d(jmp_cache_addr, env_ir2_opnd, lsenv_offset_of_tb_jmp_cache_ptr(lsenv));
+// }
 
 static void do_translate_realloc_brick_tb(void)
 {

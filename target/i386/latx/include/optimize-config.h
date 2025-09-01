@@ -83,8 +83,8 @@
 #define CONFIG_LATX_MONITOR_SHARED_MEM
 #undef CONFIG_LATX_TU
 #define CONFIG_LATX_TU              /* tu, */
-#undef CONFIG_LATX_IMM_REG
-#define CONFIG_LATX_IMM_REG         /* imm-reg optimization */
+// #undef CONFIG_LATX_IMM_REG
+// #define CONFIG_LATX_IMM_REG         /* imm-reg optimization */
 #undef CONFIG_LATX_HBR
 #define CONFIG_LATX_HBR
 #endif

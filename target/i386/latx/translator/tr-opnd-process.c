@@ -11,13 +11,13 @@ int have_scq(void)
     return (__cpucfg(0x2) & (1 << 30));
 }
 
-bool si12_overflow(long si12)
-{
-    if (si12 >= -2048 && si12 <= 2047) {
-        return false;
-    }
-    return true;
-}
+// bool si12_overflow(long si12)
+// {
+//     if (si12 >= -2048 && si12 <= 2047) {
+//         return false;
+//     }
+//     return true;
+// }
 
 /**
 @convert an ir1 register operand to an ir2 register operand.
@@ -117,34 +117,34 @@ IR2_OPND convert_gpr_opnd(IR1_OPND *opnd1, EXTENSION_MODE em)
     }
 }
 
-#ifdef CONFIG_LATX_AOT
-void load_ireg_from_host_addr(IR2_OPND opnd2, uint64 value)
-{
-    lsassert(ir2_opnd_is_ireg(&opnd2));
+// #ifdef CONFIG_LATX_AOT
+// void load_ireg_from_host_addr(IR2_OPND opnd2, uint64 value)
+// {
+//     lsassert(ir2_opnd_is_ireg(&opnd2));
 
-    int32 hi32 = value >> 32;
-    int32 lo32 = value & 0xffffffff;
+//     int32 hi32 = value >> 32;
+//     int32 lo32 = value & 0xffffffff;
 
-    la_lu12i_w(opnd2, lo32 >> 12);
-    la_ori(opnd2, opnd2, lo32 & 0xfff);
-    la_lu32i_d(opnd2, hi32 & 0xfffff);
-    return;
-}
+//     la_lu12i_w(opnd2, lo32 >> 12);
+//     la_ori(opnd2, opnd2, lo32 & 0xfff);
+//     la_lu32i_d(opnd2, hi32 & 0xfffff);
+//     return;
+// }
 
-void load_ireg_from_guest_addr(IR2_OPND opnd2, uint64 value)
-{
-    lsassert(ir2_opnd_is_ireg(&opnd2));
+// void load_ireg_from_guest_addr(IR2_OPND opnd2, uint64 value)
+// {
+//     lsassert(ir2_opnd_is_ireg(&opnd2));
 
-    int32 hi32 = value >> 32;
-    int32 lo32 = value & 0xffffffff;
-    la_lu12i_w(opnd2, lo32 >> 12);
-    la_ori(opnd2, opnd2, lo32 & 0xfff);
-    if (hi32 || (lo32 & 0x80000000)) {
-        la_lu32i_d(opnd2, hi32 & 0xfffff);
-    }
-    return;
-}
-#endif
+//     int32 hi32 = value >> 32;
+//     int32 lo32 = value & 0xffffffff;
+//     la_lu12i_w(opnd2, lo32 >> 12);
+//     la_ori(opnd2, opnd2, lo32 & 0xfff);
+//     if (hi32 || (lo32 & 0x80000000)) {
+//         la_lu32i_d(opnd2, hi32 & 0xfffff);
+//     }
+//     return;
+// }
+// #endif
 
 /**
 @load an ir1 immediate operand to a specific ir2 register operand

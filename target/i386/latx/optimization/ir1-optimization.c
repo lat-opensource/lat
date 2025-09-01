@@ -6,7 +6,7 @@
 #include "flag-reduction.h"
 #include "insts-pattern.h"
 #include "tu.h"
-
+#include "translate.h"
 /**
  * @brief ir1 optimization, which can get global
  * tb-ir1 information and store into IR1_INST
@@ -37,12 +37,12 @@ static void ir1_optimization_over_tb(TranslationBlock *tb)
     CHK_FLAG_RDTN(rdtn, tb);
     rdtn_pending_use &= tb->s_data->eflag_out;
     /* scanning instructions in reverse order */
-    for (int i = tb_ir1_num(tb) - 1; i >= 0; --i) {
-        ir1 = tb_ir1_inst(tb, i);
+    for (int i = tb_ir1_num_bd(tb) - 1; i >= 0; --i) {
+        ir1 = tb_ir1_inst_bd(tb, i);
         /* do core optimize */
         OPT_FLAG_RDTN(rdtn, ir1);
         /* TODO: TU */
-        OPT_INSTS_PTN(ptn, ir1);
+        OPT_INSTS_PTN(tb, ir1, i, ptn);
     }
     SAVE_FLAG_TO_TB(rdtn, tb);
 }
@@ -105,10 +105,10 @@ void over_tb_rfd(TranslationBlock **tb_list, int tb_num)
         }
         eflag_def[i] = __NONE;
         uint8 rdtn_pending_use = __ALL_EFLAGS;
-        for (int j = tb_ir1_num(tb) - 1; j >= 0; --j) {
-            ir1 = tb_ir1_inst(tb, j);
+        for (int j = tb_ir1_num_bd(tb) - 1; j >= 0; --j) {
+            ir1 = tb_ir1_inst_bd(tb, j);
             OPT_FLAG_RDTN(rdtn, ir1);
-            eflag_def[i] |= ir1_get_eflag_def(ir1);
+            eflag_def[i] |= ir1_get_eflag_def_bd(ir1);
         }
         SAVE_FLAG_TO_TB(rdtn, tb);
     }
@@ -149,12 +149,12 @@ void ir1_optimization(TranslationBlock *tb)
     /* check if need cross tb analyze */
     CHK_FLAG_RDTN(rdtn, tb);
     /* scanning instructions in reverse order */
-    for (int i = tb_ir1_num(tb) - 1; i >= 0; --i) {
-        ir1 = tb_ir1_inst(tb, i);
+    for (int i = tb_ir1_num_bd(tb) - 1; i >= 0; --i) {
+        ir1 = tb_ir1_inst_bd(tb, i);
         /* do core optimize */
         OPT_FLAG_RDTN(rdtn, ir1);
         /* TODO: TU */
-        OPT_INSTS_PTN(ptn, ir1);
+        OPT_INSTS_PTN(tb, ir1, i, ptn);
     }
     SAVE_FLAG_TO_TB(rdtn, tb);
 }

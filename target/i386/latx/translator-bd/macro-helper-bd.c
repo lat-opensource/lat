@@ -3,7 +3,7 @@
  * @author Hanlu Li <heuleehanlu@gmail.com>
  * @brief Add some macro-inst helper functions
  */
-#include "translate.h"
+#include "translate-bd.h"
 #include "reg-alloc.h"
 
 /**

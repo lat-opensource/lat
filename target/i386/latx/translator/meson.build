@@ -1,5 +1,4 @@
 i386_ss.add(when: 'CONFIG_LATX', if_true: files(
-  'reg-alloc.c',
   'tr-arith.c',
   'tr-eflag.c',
   'tr-eflag-process.c',
@@ -28,7 +27,6 @@ i386_ss.add(when: 'CONFIG_LATX', if_true: files(
   'tr-softfpu.c',
   'tr-pattern.c',
   'translate.c',
-  'runtime-trace.c',
   'mem-interface.c',
-  'macro-helper.c'
+  'runtime-trace.c'
 ))

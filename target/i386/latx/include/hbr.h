@@ -14,7 +14,9 @@
 #define SHBR_PTYPE    0x4
 #define SHBR_SSE      0x8
 
+#ifdef CONFIG_LATX_DECODE_DEBUG
 void hbr_opt(TranslationBlock **tb_list, int tb_num_in_tu);
+#endif
 /* void tb_xmm_analyse(TranslationBlock *tb); */
 uint8_t get_inst_type(IR1_INST *ir1);
 bool can_shbr_opt64(IR1_INST *ir1);

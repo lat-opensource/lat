@@ -12,81 +12,109 @@
 #ifdef CONFIG_LATX_INSTS_PATTERN
 
 #define WRAP(ins) (dt_X86_INS_##ins)
-#define BUF_OP(buf, i) (ir1_opcode(buf[i]))
-#define BUF_CHK(buf, i, ret) \
-    do {                     \
-        if (!buf[i])         \
-            return ret;      \
-    } while (0)
+#define SCAN_CHECK(buf, i) do { \
+    if (buf[i] == -1) return false; \
+} while (0)
+#define SCAN_IDX(buf, i)        (buf[i])
+#define SCAN_IR1(tb, buf, i)    (tb_ir1_inst(tb, SCAN_IDX(buf, i)))
 
-static inline bool in_pattern_list(IR1_INST *ir1)
+// static inline void pattern_invalid(IR1_INST *scan_buf[PTN_BUF_SIZE], int num)
+// {
+//     assert(num < PTN_BUF_SIZE);
+//     for (int i = 0; i <= num; ++i) {
+//         scan_buf[i]->cflag |= IR1_INVALID_MASK | IR1_PATTERN_MASK;
+//     }
+// }
+
+// static inline void pattern_modify(IR1_INST *ir1, IR1_OPCODE opcode)
+// {
+//     ir1->info->id = opcode;
+//     ir1->cflag |= IR1_PATTERN_MASK;
+// }
+
+static inline bool ir1_can_pattern(IR1_INST *pir1)
 {
-    IR1_OPCODE opcode = ir1_opcode(ir1);
-    switch (opcode) {
-#define PATTERN_TAIL
-#define PATTERN_HEADER
-#include "insts_pattern_table.h"
-#undef PATTERN_HEADER
-#undef PATTERN_TAIL
+    switch (ir1_opcode(pir1)) {
+    /*head*/
+    case WRAP(CMP):
+    case WRAP(CQO):
+    case WRAP(XOR):
+    case WRAP(CDQ):
+    case WRAP(TEST):
+    case WRAP(UCOMISD):
+    /*tail*/
+    case WRAP(SBB):
+    case WRAP(IDIV):
+    case WRAP(DIV):
+    case WRAP(SETB):
+    case WRAP(SETAE):
+    case WRAP(SETE):
+    case WRAP(SETNE):
+    case WRAP(SETBE):
+    case WRAP(SETA):
+    case WRAP(SETL):
+    case WRAP(SETGE):
+    case WRAP(SETLE):
+    case WRAP(SETG):
+    case WRAP(SETS):
+    case WRAP(SETNS):
+    case WRAP(SETNO):
+    case WRAP(SETO):
+    case WRAP(CMOVE):
+    case WRAP(CMOVNE):
+    case WRAP(CMOVS):
+    case WRAP(CMOVNS):
+    case WRAP(CMOVLE):
+    case WRAP(CMOVG):
+    case WRAP(CMOVNO):
+    case WRAP(CMOVO):
+    case WRAP(CMOVB):
+    case WRAP(CMOVBE):
+    case WRAP(CMOVA):
+    case WRAP(CMOVAE):
+    case WRAP(CMOVL):
+    case WRAP(CMOVGE):
         return true;
-        break;
+     default:
+        return false;
+     }
+ }
 
-    default:
-        break;
-    }
-    return false;
-}
-
-static inline bool in_pattern_header(IR1_INST *ir1)
+static inline bool ir1_is_pattern_head(IR1_INST *pir1)
 {
-    IR1_OPCODE opcode = ir1_opcode(ir1);
-    switch (opcode) {
-#define PATTERN_HEADER
-#include "insts_pattern_table.h"
-#undef PATTERN_HEADER
+    switch (ir1_opcode(pir1)) {
+    case WRAP(CMP):
+    case WRAP(CQO):
+    case WRAP(XOR):
+    case WRAP(CDQ):
+    case WRAP(TEST):
+    case WRAP(UCOMISD):
         return true;
-        break;
-
     default:
-        break;
+        return false;
     }
-    return false;
+ }
+
+static inline void scan_clear(scan_elem_t *scan)
+{
+    if (scan[0] == -1) return;
+    memset(scan, -1, sizeof(scan_elem_t) * INSTPTN_BUF_SIZE);
 }
 
-static inline void pattern_push(IR1_INST *ir1, IR1_INST *scan_buf[PTN_BUF_SIZE])
+static inline void scan_push(scan_elem_t *scan, int pir1_index)
 {
-    /* shift right, drop the last one */
-    for (int i = PTN_BUF_SIZE - 1; i > 0; --i) {
-        scan_buf[i] = scan_buf[i - 1];
+    for(int i = INSTPTN_BUF_SIZE - 1; i > 0; --i) {
+        scan[i] = scan[i-1];
     }
-    scan_buf[0] = ir1;
-}
-
-static inline void pattern_clear(IR1_INST *scan_buf[PTN_BUF_SIZE])
-{
-    memset(scan_buf, 0, sizeof(IR1_INST *) * PTN_BUF_SIZE);
-}
-
-static inline void pattern_invalid(IR1_INST *scan_buf[PTN_BUF_SIZE], int num)
-{
-    assert(num < PTN_BUF_SIZE);
-    for (int i = 0; i <= num; ++i) {
-        scan_buf[i]->cflag |= IR1_INVALID_MASK | IR1_PATTERN_MASK;
-    }
-}
-
-static inline void pattern_modify(IR1_INST *ir1, IR1_OPCODE opcode)
-{
-    ir1->info->id = opcode;
-    ir1->cflag |= IR1_PATTERN_MASK;
+    scan[0] = pir1_index;
 }
 
 static bool is_contain_edx(IR1_OPND *opnd)
 {
     if (ir1_opnd_is_gpr(opnd)) {
         switch (opnd->reg) {
-        case dt_X86_REG_DL:    case dt_X86_REG_DH:
-        case dt_X86_REG_DX:    case dt_X86_REG_EDX:
+        case dt_X86_REG_DL: case dt_X86_REG_DH:
+        case dt_X86_REG_DX: case dt_X86_REG_EDX:
         case dt_X86_REG_RDX:
             return true;
         default:
@@ -94,16 +122,16 @@ static bool is_contain_edx(IR1_OPND *opnd)
         }
     } else if (ir1_opnd_is_mem(opnd)) {
         switch (opnd->mem.base) {
-        case dt_X86_REG_DL:    case dt_X86_REG_DH:
-        case dt_X86_REG_DX:    case dt_X86_REG_EDX:
+        case dt_X86_REG_DL: case dt_X86_REG_DH:
+        case dt_X86_REG_DX: case dt_X86_REG_EDX:
         case dt_X86_REG_RDX:
             return true;
         default:
             break;
         }
         switch (opnd->mem.index) {
-        case dt_X86_REG_DL:    case dt_X86_REG_DH:
-        case dt_X86_REG_DX:    case dt_X86_REG_EDX:
+        case dt_X86_REG_DL: case dt_X86_REG_DH:
+        case dt_X86_REG_DX: case dt_X86_REG_EDX:
         case dt_X86_REG_RDX:
             return true;
         default:
@@ -113,278 +141,536 @@ static bool is_contain_edx(IR1_OPND *opnd)
     return false;
 }
 
-static inline bool get_pattern_list(IR1_INST *ir1,
-                                    IR1_INST *scan_buf[PTN_BUF_SIZE], int *ptr,
-                                    IR1_OPCODE *opcode)
+static int inst_pattern(TranslationBlock *tb,
+        IR1_INST *pir1, scan_elem_t *scan)
 {
-    assert(PTN_BUF_SIZE > 0);
-    IR1_OPND *opnd0;
-    IR1_OPND *opnd1;
-    switch (ir1_opcode(ir1)) {
-    case WRAP(CMP):
-        BUF_CHK(scan_buf, 0, false);
-        switch (BUF_OP(scan_buf, 0)) {
-        case WRAP(JB):
-        case WRAP(JAE):
-        case WRAP(JE):
-        case WRAP(JNE):
-        case WRAP(JBE):
-        case WRAP(JA):
-        case WRAP(JL):
-        case WRAP(JGE):
-        case WRAP(JLE):
-        case WRAP(JG):
-            *ptr = 0;
-            *opcode = WRAP(CMP_JCC);
-            return true;
-            break;
-        case WRAP(SBB):
-            opnd0 = ir1_get_opnd(scan_buf[0], 0);
-            opnd1 = ir1_get_opnd(scan_buf[0], 1);
-            /* sbb check */
-            if (!ir1_opnd_is_same_reg(opnd0, opnd1)) {
-                break;
-            }
-            *ptr = 0;
-            *opcode = WRAP(CMP_SBB);
-            return true;
-            break;
-        default:
-            break;
-        }
-        break;
-    case WRAP(SUB):
-        BUF_CHK(scan_buf, 0, false);
-        switch (BUF_OP(scan_buf, 0)) {
-        case WRAP(JB):
-        case WRAP(JAE):
-        case WRAP(JE):
-        case WRAP(JNE):
-        case WRAP(JBE):
-        case WRAP(JA):
-        case WRAP(JL):
-        case WRAP(JGE):
-        case WRAP(JLE):
-        case WRAP(JG):
-            *ptr = 0;
-            *opcode = WRAP(SUB_JCC);
-            return true;
-            break;
-        default:
-            break;
-        }
-        break;
-    case WRAP(TEST):
-        BUF_CHK(scan_buf, 0, false);
-        opnd0 = ir1_get_opnd(ir1, 0);
-        opnd1 = ir1_get_opnd(ir1, 1);
-        if (ir1_opnd_is_same_reg(opnd0, opnd1)) {
-            switch (BUF_OP(scan_buf, 0)) {
-            case WRAP(JE):
-            case WRAP(JNE):
-            case WRAP(JS):
-            case WRAP(JNS):
-            case WRAP(JLE):
-            case WRAP(JG):
-            case WRAP(JNO):
-            case WRAP(JO):
-            case WRAP(JB):
-            case WRAP(JBE):
-            case WRAP(JA):
-            case WRAP(JAE):
-                *ptr = 0;
-                *opcode = WRAP(TEST_JCC);
-                return true;
-                break;
+    IR1_INST *ir1 = NULL;
+    IR1_OPND *opnd0 = NULL;
+    IR1_OPND *opnd1 = NULL;
 
-            default:
+    /*
+     * pir1 is pattern head
+     * scan[] contains ir1 following the head
+     */
+    switch (ir1_opcode(pir1)) {
+    case WRAP(CMP): {
+        SCAN_CHECK(scan, 0);
+        ir1 = SCAN_IR1(tb, scan, 0);
+        if(ir1_opcode(ir1) == WRAP(SBB)) {
+            instptn_check_cmp_sbb_0();
+
+            opnd0 = ir1_get_opnd(ir1, 0);
+            opnd1 = ir1_get_opnd(ir1, 1);
+            if (!ir1_opnd_is_same_reg(opnd0, opnd1)) {
+                return 0;
+            }
+            pir1->instptn.opc  = INSTPTN_OPC_CMP_SBB;
+            pir1->instptn.next = ir1;
+            ir1->instptn.opc  = INSTPTN_OPC_NOP;
+            // ir1->instptn.next = NULL;
+            return 1;
+        }
+        instptn_check_cmp_xxcc_con_0();
+        IR1_INST *curr = ir1;
+        IR1_INST *prev = pir1;
+        for (int index = 0; index < INSTPTN_BUF_SIZE && scan[index] >=0; index++) {
+            curr = SCAN_IR1(tb, scan, index);
+            switch (ir1_opcode(curr)) {
+            case WRAP(SETB):
+            case WRAP(SETAE):
+            case WRAP(SETE):
+            case WRAP(SETNE):
+            case WRAP(SETBE):
+            case WRAP(SETA):
+            case WRAP(SETL):
+            case WRAP(SETGE):
+            case WRAP(SETLE):
+            case WRAP(SETG):
+            case WRAP(CMOVB):
+            case WRAP(CMOVAE):
+            case WRAP(CMOVE):
+            case WRAP(CMOVNE):
+            case WRAP(CMOVBE):
+            case WRAP(CMOVA):
+            case WRAP(CMOVL):
+            case WRAP(CMOVGE):
+            case WRAP(CMOVLE):
+            case WRAP(CMOVG):
+                if (index == 0) {
+                    prev->instptn.opc  = INSTPTN_OPC_CMP_XXCC_CON;
+                } else {
+                    prev->instptn.opc  = INSTPTN_OPC_NOP_FOR_EXP;
+                }
+                prev->instptn.next = curr;
+                curr->instptn.opc  = INSTPTN_OPC_NOP_FOR_EXP;
+                // curr->instptn.next = NULL;
+                prev = curr;
                 break;
+            default:
+                return 1;
             }
         }
-        break;
-#ifdef CONFIG_LATX_XCOMISX_OPT
-    case WRAP(COMISD):
-        BUF_CHK(scan_buf, 0, false);
-        switch (BUF_OP(scan_buf, 0)) {
-        case WRAP(JA):
-        case WRAP(JAE):
-        case WRAP(JB):
-        case WRAP(JBE):
-        case WRAP(JNE):
-        case WRAP(JE):
-        case WRAP(JL):
-        case WRAP(JGE):
-        case WRAP(JLE):
-        case WRAP(JG):
-            *ptr = 0;
-            *opcode = WRAP(COMISD_JCC);
-            return true;
-            break;
-        default:
-            break;
+        return 1;
+    }
+    case WRAP(TEST): {
+        SCAN_CHECK(scan, 0);
+        instptn_check_test_xxcc_con_0();
+        IR1_INST *curr = ir1;
+        IR1_INST *prev = pir1;
+        for (int index = 0; index < INSTPTN_BUF_SIZE && scan[index] >=0; index++) {
+            curr = SCAN_IR1(tb, scan, index);
+            switch (ir1_opcode(curr)) {
+            case WRAP(SETS):
+            case WRAP(SETNS):
+            case WRAP(SETLE):
+            case WRAP(SETG):
+            case WRAP(CMOVS):
+            case WRAP(CMOVNS):
+            case WRAP(CMOVLE):
+            case WRAP(CMOVG):
+                opnd0 = ir1_get_opnd(pir1, 0);
+                opnd1 = ir1_get_opnd(pir1, 1);
+                if (!ir1_opnd_is_same_reg(opnd0, opnd1)) {
+                    return 1;
+                }
+                __attribute__((fallthrough));
+            case WRAP(SETE):
+            case WRAP(SETNE):
+            case WRAP(SETNO):
+            case WRAP(SETO):
+            case WRAP(SETB):
+            case WRAP(SETBE):
+            case WRAP(SETA):
+            case WRAP(SETAE):
+            case WRAP(CMOVE):
+            case WRAP(CMOVNE):
+            case WRAP(CMOVNO):
+            case WRAP(CMOVO):
+            case WRAP(CMOVB):
+            case WRAP(CMOVBE):
+            case WRAP(CMOVA):
+            case WRAP(CMOVAE):
+                if (index == 0) {
+                    prev->instptn.opc  = INSTPTN_OPC_TEST_XXCC_CON;
+                } else {
+                    prev->instptn.opc  = INSTPTN_OPC_NOP_FOR_EXP;
+                }
+                prev->instptn.next = curr;
+                curr->instptn.opc  = INSTPTN_OPC_NOP_FOR_EXP;
+                // curr->instptn.next = NULL;
+                prev = curr;
+                break;
+            default:
+                return 1;
+            }
         }
-        break;
-    case WRAP(COMISS):
-        BUF_CHK(scan_buf, 0, false);
-        switch (BUF_OP(scan_buf, 0)) {
-        case WRAP(JA):
-        case WRAP(JAE):
-        case WRAP(JB):
-        case WRAP(JE):
-        case WRAP(JNE):
-        case WRAP(JBE):
-        case WRAP(JL):
-        case WRAP(JGE):
-        case WRAP(JLE):
-        case WRAP(JG):
-            *ptr = 0;
-            *opcode = WRAP(COMISS_JCC);
-            return true;
-            break;
-        default:
-            break;
-        }
-        break;
-    case WRAP(UCOMISD):
-        BUF_CHK(scan_buf, 0, false);
-        switch (BUF_OP(scan_buf, 0)) {
-        case WRAP(JA):
-        case WRAP(JAE):
-        case WRAP(JB):
-        case WRAP(JE):
-        case WRAP(JNE):
-        case WRAP(JBE):
-        case WRAP(JL):
-        case WRAP(JGE):
-        case WRAP(JLE):
-        case WRAP(JG):
-            *ptr = 0;
-            *opcode = WRAP(UCOMISD_JCC);
-            return true;
-            break;
-        default:
-            break;
-        }
-        break;
-    case WRAP(UCOMISS):
-        BUF_CHK(scan_buf, 0, false);
-        switch (BUF_OP(scan_buf, 0)) {
-        case WRAP(JA):
-        case WRAP(JAE):
-        case WRAP(JB):
-        case WRAP(JE):
-        case WRAP(JNE):
-        case WRAP(JBE):
-        case WRAP(JL):
-        case WRAP(JGE):
-        case WRAP(JLE):
-        case WRAP(JG):
-            *ptr = 0;
-            *opcode = WRAP(UCOMISS_JCC);
-            return true;
-            break;
-        default:
-            break;
-        }
-        break;
-#endif
-    case WRAP(BT):
-        BUF_CHK(scan_buf, 0, false);
-        switch (BUF_OP(scan_buf, 0)) {
-        case WRAP(JB):
-        case WRAP(JAE):
-            *ptr = 0;
-            *opcode = WRAP(BT_JCC);
-            return true;
-            break;
-        default:
-            break;
-        }
-        break;
+        return 1;
+    }
     case WRAP(CQO):
-        BUF_CHK(scan_buf, 0, false);
-        switch (BUF_OP(scan_buf, 0)) {
+        SCAN_CHECK(scan, 0);
+        instptn_check_cqo_idiv_0();
+
+        ir1 = SCAN_IR1(tb, scan, 0);
+        switch (ir1_opcode(ir1)) {
         case WRAP(IDIV):
-            opnd0 = ir1_get_opnd(scan_buf[0], 0);
+            opnd0 = ir1_get_opnd(ir1, 0);
             if (!ir1_opnd_is_gpr(opnd0))
-                return false;
+                return 0;
             if (ir1_opnd_size(opnd0) != 64)
-                return false;
+                return 0;
             if (is_contain_edx(opnd0))
-                return false;
-            *ptr = 0;
-            *opcode = WRAP(CQO_IDIV);
-            return true;
-            break;
+                return 0;
+            pir1->instptn.opc  = INSTPTN_OPC_CQO_IDIV;
+            pir1->instptn.next = ir1;
+            ir1->instptn.opc  = INSTPTN_OPC_NOP;
+            // ir1->instptn.next = NULL;
+            return 1;
         default:
-            break;
+            return 0;
         }
-        break;
     case WRAP(XOR):
-        BUF_CHK(scan_buf, 0, false);
-        opnd0 = ir1_get_opnd(ir1, 0);
-        opnd1 = ir1_get_opnd(ir1, 1);
-        if (BUF_OP(scan_buf, 0) == WRAP(DIV)) {
-            if ((opnd0->reg == dt_X86_REG_EDX && opnd1->reg == dt_X86_REG_EDX &&
-                ir1_opnd_size(ir1_get_opnd(scan_buf[0], 0)) == 32 &&
-                ir1_opnd_is_gpr(ir1_get_opnd(scan_buf[0], 0))) ||
+        SCAN_CHECK(scan, 0);
+        instptn_check_xor_div_0();
+
+        opnd0 = ir1_get_opnd(pir1, 0);
+        opnd1 = ir1_get_opnd(pir1, 1);
+
+        ir1 = SCAN_IR1(tb, scan, 0);
+        if (ir1_opcode(ir1) == WRAP(DIV)) {
+            if (ir1_opnd_is_gpr(opnd0) && ir1_opnd_is_gpr(opnd1) &&
+                ((opnd0->reg == dt_X86_REG_EDX && opnd1->reg == dt_X86_REG_EDX &&
+                ir1_opnd_size(ir1_get_opnd(ir1, 0)) == 32 &&
+                ir1_opnd_is_gpr(ir1_get_opnd(ir1, 0))) ||
                 (opnd0->reg == dt_X86_REG_RDX && opnd1->reg == dt_X86_REG_RDX &&
-                ir1_opnd_size(ir1_get_opnd(scan_buf[0], 0)) == 64 &&
-                ir1_opnd_is_gpr(ir1_get_opnd(scan_buf[0], 0)))) {
-                    if (is_contain_edx(ir1_get_opnd(scan_buf[0], 0)))
-                        return false;
-                    *ptr = 0;
-                    *opcode = WRAP(XOR_DIV);
-                    return true;
+                ir1_opnd_size(ir1_get_opnd(ir1, 0)) == 64 &&
+                ir1_opnd_is_gpr(ir1_get_opnd(ir1, 0))))) {
+                    if (is_contain_edx(opnd0))
+                        return 0;
+                    pir1->instptn.opc  = INSTPTN_OPC_XOR_DIV;
+                    pir1->instptn.next = ir1;
+                    ir1->instptn.opc  = INSTPTN_OPC_NOP;
+                    // ir1->instptn.next = NULL;
+                    return 1;
                 }
         }
-        break;
+        return 0;
     case WRAP(CDQ):
-        BUF_CHK(scan_buf, 0, false);
-        switch (BUF_OP(scan_buf, 0)) {
+        SCAN_CHECK(scan, 0);
+        instptn_check_cdq_idiv_0();
+
+        ir1 = SCAN_IR1(tb, scan, 0);
+        switch (ir1_opcode(ir1)) {
         case WRAP(IDIV):
-            opnd0 = ir1_get_opnd(scan_buf[0], 0);
+            opnd0 = ir1_get_opnd(ir1, 0);
             if (!ir1_opnd_is_gpr(opnd0))
-                return false;
+                return 0;
             if (ir1_opnd_size(opnd0) != 32)
-                return false;
+                return 0;
             if (is_contain_edx(opnd0))
-                return false;
-            *ptr = 0;
-            *opcode = WRAP(CDQ_IDIV);
-            return true;
-            break;
+                return 0;
+            pir1->instptn.opc  = INSTPTN_OPC_CDQ_IDIV;
+            pir1->instptn.next = ir1;
+            ir1->instptn.opc  = INSTPTN_OPC_NOP;
+            // ir1->instptn.next = NULL;
+            return 1;
         default:
-            break;
+            return 0;
         }
-        break;
+    case WRAP(UCOMISD):
+        SCAN_CHECK(scan, 0);
+        instptn_check_ucomisd_seta_0();
+
+        ir1 = SCAN_IR1(tb, scan, 0);
+        switch (ir1_opcode(ir1)) {
+        case WRAP(SETA):
+            pir1->instptn.opc  = INSTPTN_OPC_UCOMISD_SETA;
+            pir1->instptn.next = ir1;
+            ir1->instptn.opc  = INSTPTN_OPC_NOP_FOR_EXP;
+            // ir1->instptn.next = NULL;
+            return 1;
+        default:
+            return 0;
+        }
     default:
-        break;
+        return 0;
     }
-    return false;
 }
 
-void insts_pattern_combine(IR1_INST *ir1, IR1_INST *scan_buf[PTN_BUF_SIZE])
+void insts_pattern_scan_con(TranslationBlock *tb, IR1_INST *ir1, int index, scan_elem_t *scan_buf)
 {
-    /* check current is in list */
-    if (!in_pattern_list(ir1)) {
-        pattern_clear(scan_buf);
+    if (!ir1_can_pattern(ir1)) {
+        scan_clear(scan_buf);
         return;
     }
-    /* if current is not the header */
-    if (!in_pattern_header(ir1)) {
-        pattern_push(ir1, scan_buf);
+    if (!ir1_is_pattern_head(ir1)) {
+        scan_push(scan_buf, index);
         return;
     }
-    /* if current is in list, check the pattern */
-    int i = 0;
-    IR1_OPCODE opcode = dt_X86_INS_INVALID;
-    if (get_pattern_list(ir1, scan_buf, &i, &opcode)) {
-        pattern_invalid(scan_buf, i);
-        pattern_modify(ir1, opcode);
-        pattern_clear(scan_buf);
+
+    if (inst_pattern(tb, ir1, scan_buf)) {
+        scan_clear(scan_buf);
     } else {
-        pattern_push(ir1, scan_buf);
+        scan_push(scan_buf, index);
+    }
+}
+
+bool insts_pattern_scan_jcc_end(TranslationBlock *tb, IR1_INST *pir1, int pir1_index, scan_elem_t *scan)
+{
+
+    if (pir1_index == tb_ir1_num(tb) - 1) {
+        if (!pir1_index) return false; /* tb->icount > 1*/
+        switch (ir1_opcode(pir1)) {
+        case WRAP(JA):
+        case WRAP(JAE):
+        case WRAP(JB):
+        case WRAP(JE):
+        case WRAP(JNE):
+        case WRAP(JBE):
+        case WRAP(JL):
+        case WRAP(JGE):
+        case WRAP(JLE):
+        case WRAP(JG):
+        case WRAP(JNO):
+        case WRAP(JO):
+        case WRAP(JS):
+        case WRAP(JNS):
+            scan[0] = pir1_index;
+            return true;
+        default:
+            return false;
+        }
+    }
+
+    IR1_INST *ir1_jcc = NULL;
+    IR1_OPND *opnd0 = NULL;
+    IR1_OPND *opnd1 = NULL;
+    switch (ir1_opcode(pir1)) {
+        case WRAP(CMP):
+        SCAN_CHECK(scan, 0);
+        ir1_jcc = SCAN_IR1(tb, scan, 0);
+        switch (ir1_opcode(ir1_jcc)) {
+        case WRAP(JB):
+        case WRAP(JAE):
+        case WRAP(JE):
+        case WRAP(JNE):
+        case WRAP(JBE):
+        case WRAP(JA):
+        case WRAP(JL):
+        case WRAP(JGE):
+        case WRAP(JLE):
+        case WRAP(JG):
+            if (pir1_index + 1 == SCAN_IDX(scan, 0)) {
+                instptn_check_cmp_jcc_0();
+                pir1->instptn.opc  = INSTPTN_OPC_CMP_JCC;
+                pir1->instptn.next = ir1_jcc;
+                ir1_jcc->instptn.opc  = INSTPTN_OPC_NOP;
+                // ir1_jcc->instptn.next = NULL;
+            } else {
+                instptn_check_cmp_xx_jcc_0();
+                pir1->instptn.opc  = INSTPTN_OPC_CMP_XX_JCC;
+                pir1->instptn.next = ir1_jcc;
+                ir1_jcc->instptn.opc  = INSTPTN_OPC_CMP_XX_JCC;
+                ir1_jcc->instptn.next = tb_ir1_inst(tb, pir1_index);
+            }
+            return false;
+        default:
+            return false;
+        }
+    case WRAP(TEST):
+        SCAN_CHECK(scan, 0);
+        ir1_jcc = SCAN_IR1(tb, scan, 0);
+        switch (ir1_opcode(ir1_jcc)) {
+        case WRAP(JS):
+        case WRAP(JNS):
+        case WRAP(JLE):
+        case WRAP(JG):
+            opnd0 = ir1_get_opnd(pir1, 0);
+            opnd1 = ir1_get_opnd(pir1, 1);
+            if (!ir1_opnd_is_same_reg(opnd0, opnd1)) {
+                return false;
+            }
+            __attribute__((fallthrough));
+        case WRAP(JE):
+        case WRAP(JNE):
+        case WRAP(JNO):
+        case WRAP(JO):
+        case WRAP(JB):
+        case WRAP(JBE):
+        case WRAP(JA):
+        case WRAP(JAE):
+            if (pir1_index + 1 == SCAN_IDX(scan, 0)) {
+                instptn_check_test_jcc_0();
+                pir1->instptn.opc  = INSTPTN_OPC_TEST_JCC;
+                pir1->instptn.next = ir1_jcc;
+                ir1_jcc->instptn.opc  = INSTPTN_OPC_NOP;
+                // ir1_jcc->instptn.next = NULL;
+            } else {
+                instptn_check_test_xx_jcc_0();
+                pir1->instptn.opc  = INSTPTN_OPC_TEST_XX_JCC;
+                pir1->instptn.next = ir1_jcc;
+                ir1_jcc->instptn.opc  = INSTPTN_OPC_TEST_XX_JCC;
+                ir1_jcc->instptn.next = tb_ir1_inst(tb, pir1_index);
+            }
+            return false;
+        default:
+            return false;
+        }
+    case WRAP(BT):
+        SCAN_CHECK(scan, 0);
+        ir1_jcc = SCAN_IR1(tb, scan, 0);
+        switch (ir1_opcode(ir1_jcc)) {
+        case WRAP(JB):
+        case WRAP(JAE):
+            if (pir1_index + 1 == SCAN_IDX(scan, 0)) {
+                instptn_check_bt_jcc_0();
+                pir1->instptn.opc  = INSTPTN_OPC_BT_JCC;
+                pir1->instptn.next = ir1_jcc;
+                ir1_jcc->instptn.opc  = INSTPTN_OPC_NOP;
+                // ir1_jcc->instptn.next = NULL;
+            } else {
+                instptn_check_bt_xx_jcc_0();
+                pir1->instptn.opc  = INSTPTN_OPC_BT_XX_JCC;
+                pir1->instptn.next = ir1_jcc;
+                ir1_jcc->instptn.opc  = INSTPTN_OPC_BT_XX_JCC;
+                ir1_jcc->instptn.next = tb_ir1_inst(tb, pir1_index);
+            }
+            return false;
+        default:
+            return false;
+        }
+    case WRAP(SUB):
+        SCAN_CHECK(scan, 0);
+        ir1_jcc = SCAN_IR1(tb, scan, 0);
+        switch (ir1_opcode(ir1_jcc)) {
+        case WRAP(JB):
+        case WRAP(JAE):
+        case WRAP(JE):
+        case WRAP(JNE):
+        case WRAP(JBE):
+        case WRAP(JA):
+        case WRAP(JL):
+        case WRAP(JGE):
+        case WRAP(JLE):
+        case WRAP(JG):
+            if (pir1_index + 1 == SCAN_IDX(scan, 0)) {
+                instptn_check_sub_jcc_0();
+                pir1->instptn.opc  = INSTPTN_OPC_SUB_JCC;
+                pir1->instptn.next = ir1_jcc;
+                ir1_jcc->instptn.opc  = INSTPTN_OPC_NOP;
+                // ir1_jcc->instptn.next = NULL;
+            }
+            return false;
+        default:
+            return false;
+        }
+#ifdef CONFIG_LATX_XCOMISX_OPT
+    case WRAP(COMISD):
+        SCAN_CHECK(scan, 0);
+        ir1_jcc = SCAN_IR1(tb, scan, 0);
+        switch (ir1_opcode(ir1_jcc)) {
+        case WRAP(JA):
+        case WRAP(JAE):
+        case WRAP(JB):
+        case WRAP(JBE):
+        case WRAP(JNE):
+        case WRAP(JE):
+        case WRAP(JL):
+        case WRAP(JGE):
+        case WRAP(JLE):
+        case WRAP(JG):
+            if (pir1_index + 1 == SCAN_IDX(scan, 0)) {
+                instptn_check_comisd_jcc_0();
+                pir1->instptn.opc  = INSTPTN_OPC_COMISD_JCC;
+                pir1->instptn.next = ir1_jcc;
+                ir1_jcc->instptn.opc  = INSTPTN_OPC_NOP;
+                // ir1_jcc->instptn.next = NULL;
+            } else {
+                instptn_check_comisd_xx_jcc_0();
+                pir1->instptn.opc  = INSTPTN_OPC_COMISD_XX_JCC;
+                pir1->instptn.next = ir1_jcc;
+                ir1_jcc->instptn.opc  = INSTPTN_OPC_COMISD_XX_JCC;
+                ir1_jcc->instptn.next = tb_ir1_inst(tb, pir1_index);
+            }
+            return false;
+        default:
+            return false;
+        }
+    case WRAP(COMISS):
+        SCAN_CHECK(scan, 0);
+        ir1_jcc = SCAN_IR1(tb, scan, 0);
+        switch (ir1_opcode(ir1_jcc)) {
+        case WRAP(JA):
+        case WRAP(JAE):
+        case WRAP(JB):
+        case WRAP(JE):
+        case WRAP(JNE):
+        case WRAP(JBE):
+        case WRAP(JL):
+        case WRAP(JGE):
+        case WRAP(JLE):
+        case WRAP(JG):
+            if (pir1_index + 1 == SCAN_IDX(scan, 0)) {
+                instptn_check_comiss_jcc_0();
+                pir1->instptn.opc  = INSTPTN_OPC_COMISS_JCC;
+                pir1->instptn.next = ir1_jcc;
+                ir1_jcc->instptn.opc  = INSTPTN_OPC_NOP;
+                // ir1_jcc->instptn.next = NULL;
+            } else {
+                instptn_check_comiss_xx_jcc_0();
+                pir1->instptn.opc  = INSTPTN_OPC_COMISS_XX_JCC;
+                pir1->instptn.next = ir1_jcc;
+                ir1_jcc->instptn.opc  = INSTPTN_OPC_COMISS_XX_JCC;
+                ir1_jcc->instptn.next = tb_ir1_inst(tb, pir1_index);
+            }
+            return false;
+        default:
+            return false;
+        }
+    case WRAP(UCOMISD):
+        SCAN_CHECK(scan, 0);
+        ir1_jcc = SCAN_IR1(tb, scan, 0);
+        switch (ir1_opcode(ir1_jcc)) {
+        case WRAP(JA):
+        case WRAP(JAE):
+        case WRAP(JB):
+        case WRAP(JE):
+        case WRAP(JNE):
+        case WRAP(JBE):
+        case WRAP(JL):
+        case WRAP(JGE):
+        case WRAP(JLE):
+        case WRAP(JG):
+            if (pir1_index + 1 == SCAN_IDX(scan, 0)) {
+                instptn_check_ucomisd_jcc_0();
+                pir1->instptn.opc  = INSTPTN_OPC_UCOMISD_JCC;
+                pir1->instptn.next = ir1_jcc;
+                ir1_jcc->instptn.opc  = INSTPTN_OPC_NOP;
+                // ir1_jcc->instptn.next = NULL;
+            } else {
+                instptn_check_ucomisd_xx_jcc_0();
+                pir1->instptn.opc  = INSTPTN_OPC_UCOMISD_XX_JCC;
+                pir1->instptn.next = ir1_jcc;
+                ir1_jcc->instptn.opc  = INSTPTN_OPC_UCOMISD_XX_JCC;
+                ir1_jcc->instptn.next = tb_ir1_inst(tb, pir1_index);
+            }
+            return false;
+        default:
+            return false;
+        }
+    case WRAP(UCOMISS):
+        SCAN_CHECK(scan, 0);
+        ir1_jcc = SCAN_IR1(tb, scan, 0);
+        switch (ir1_opcode(ir1_jcc)) {
+        case WRAP(JA):
+        case WRAP(JAE):
+        case WRAP(JB):
+        case WRAP(JE):
+        case WRAP(JNE):
+        case WRAP(JBE):
+        case WRAP(JL):
+        case WRAP(JGE):
+        case WRAP(JLE):
+        case WRAP(JG):
+            if (pir1_index + 1 == SCAN_IDX(scan, 0)) {
+                instptn_check_ucomiss_jcc_0();
+                pir1->instptn.opc  = INSTPTN_OPC_UCOMISS_JCC;
+                pir1->instptn.next = ir1_jcc;
+                ir1_jcc->instptn.opc  = INSTPTN_OPC_NOP;
+                ir1_jcc->instptn.next = NULL;
+            } else {
+                instptn_check_ucomiss_xx_jcc_0();
+                pir1->instptn.opc  = INSTPTN_OPC_UCOMISS_XX_JCC;
+                pir1->instptn.next = ir1_jcc;
+                ir1_jcc->instptn.opc  = INSTPTN_OPC_UCOMISS_XX_JCC;
+                ir1_jcc->instptn.next = tb_ir1_inst(tb, pir1_index);
+            }
+            return false;
+        default:
+            return false;
+        }
+#endif
+    case WRAP(ADDSD):
+    case WRAP(ADDSS):
+    case WRAP(LEA):
+    case WRAP(MOV):
+    case WRAP(MOVAPD):
+    case WRAP(MOVHPS):
+    case WRAP(MOVLPS):
+    case WRAP(MOVSD):
+    case WRAP(MOVSS):
+    case WRAP(MOVSX):
+    case WRAP(MOVSXD):
+    case WRAP(MOVZX):
+    case WRAP(MULPS):
+    case WRAP(MULSD):
+    case WRAP(MULSS):
+    case WRAP(NOP):
+    case WRAP(PSHUFD):
+    case WRAP(PUNPCKLWD):
+    case WRAP(PUSH):
+        return true;
+    default:
+        return false;
     }
 }
 

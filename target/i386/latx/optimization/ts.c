@@ -11,6 +11,7 @@
 #include "latx-config.h"
 #include "ir1.h"
 #include "hbr.h"
+#include "hbr-bd.h"
 #ifdef CONFIG_LATX_TU
 #include "tu.h"
 #endif

@@ -1171,9 +1171,9 @@ static void* relkind_to_fixup_addr[] = {
     [LOAD_HELPER_CONVERT_FPREGS_64_TO_X80] = convert_fpregs_64_to_x80,
     [LOAD_HELPER_CONVERT_FPREGS_X80_TO_64] = convert_fpregs_x80_to_64,
     [LOAD_HELPER_CPUID] = helper_cpuid,
-    [LOAD_HELPER_RAISE_INT] = helper_raise_int,
+    [LOAD_HELPER_RAISE_INT] = helper_raise_int_bd,
 #ifdef TARGET_X86_64
-    [LOAD_HELPER_RAISE_SYSCALL] = helper_raise_syscall,
+    [LOAD_HELPER_RAISE_SYSCALL] = helper_raise_syscall_bd,
 #endif
 
     [LOAD_HOST_POW] = pow,

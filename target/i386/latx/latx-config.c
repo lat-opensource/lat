@@ -2,6 +2,7 @@
 #include "common.h"
 #include "diStorm/distorm.h"
 #include "ir1.h"
+#include "ir1-bd.h"
 #include "ir2.h"
 #include "lsenv.h"
 #include "reg-alloc.h"
@@ -44,7 +45,12 @@ void target_disasm(struct TranslationBlock *tb, int max_insns)
     lsenv->tr_data->curr_ir1_inst = NULL;
 #if defined(CONFIG_LATX_FLAG_REDUCTION) && \
     defined(CONFIG_LATX_FLAG_REDUCTION_EXTEND)
-    tb->_tb_type = get_etb_type(ir1_list + ir1_num - 1);
+#ifdef CONFIG_LATX_DECODE_DEBUG
+    if ((ir1_list + ir1_num - 1).decode_engine == OPT_DECODE_BY_CAPSTONE)
+        tb->_tb_type = get_etb_type(ir1_list + ir1_num - 1);
+    else
+#endif
+        tb->_tb_type = get_etb_type_bd(ir1_list + ir1_num - 1);
 
     if (option_flag_reduction) {
         tb_add_succ(etb, 2);
@@ -147,7 +153,7 @@ void trace_tb_execution(struct TranslationBlock *tb)
     }
 
 
-    IR1_INST *ir1_list = tb_ir1_inst(tb, 0);
+    IR1_INST *ir1_list = tb_ir1_inst_bd(tb, 0);
     IR1_INST *pir1 = NULL;
     int ir1_nr = tb->icount;
 
@@ -160,7 +166,15 @@ void trace_tb_execution(struct TranslationBlock *tb)
         for (i = 0; i < ir1_nr; ++i) {
             pir1 = ir1_list + i;
             fprintf(stderr, "[trace] ");
-            ir1_dump(pir1);
+#ifdef CONFIG_LATX_DECODE_DEBUG
+        if(pir1->decode_engine == OPT_DECODE_BY_CAPSTONE) {
+           ir1_dump(pir1);
+        } else
+#else
+        {
+            ir1_dump_bd(pir1);
+        }
+#endif
             fprintf(stderr, "\n");
         }
     }
@@ -491,6 +505,7 @@ void latx_guest_stack_init(CPUArchState *env)
 #endif
 void latx_dt_init(void)
 {
+#ifdef CONFIG_LATX_DECODE_DEBUG
 #ifdef CONFIG_LATX_DEBUG
     disassemble_trace_init(TARGET_ABI_BITS, option_latx_disassemble_trace_cmp);
 #else
@@ -498,6 +513,7 @@ void latx_dt_init(void)
     gitcapstone_init(TARGET_ABI_BITS);
 #else
     lacapstone_init(TARGET_ABI_BITS);
+#endif
 #endif
 #endif
 }

@@ -2,7 +2,7 @@
 #include "reg-alloc.h"
 #include "flag-lbt.h"
 #include "latx-options.h"
-#include "translate.h"
+#include "translate-bd.h"
 #include "runtime-trace.h"
 #include "linux-user/qemu.h"
 #include <string.h>
@@ -12,7 +12,7 @@
 
 #define TRACE_REG_STACK_OFFSET 0x10
 
-size_t trace_save_regs[] = {
+static size_t trace_save_regs[] = {
    /* helper inside could destroy a0-a7
     * and t0-t8, don't save s0-s8, because they are callee save*/
    la_a0, la_a1, la_a2, la_a3,
@@ -23,8 +23,8 @@ size_t trace_save_regs[] = {
    la_s5, la_s6, la_s7, la_s8,
 };
 
-__thread size_t last_x86_info_size;
-__thread struct store_x86_infos last_x86_info;
+extern __thread size_t last_x86_info_size;
+extern __thread struct store_x86_infos last_x86_info;
 
 static void diff_printf(const char *format, uint64_t current, uint64_t last)
 {
@@ -252,10 +252,22 @@ static void gen_trace_helper(ADDR helper_method, IR1_INST *pir1)
     }
 
     uint64_t mem_access_count = 0;
-    for (int j = 0; j < pir1->info->x86.op_count; j++) {
-        IR1_OPND *opnd = ir1_get_opnd(pir1, j);
-        if (ir1_opnd_is_mem(opnd)) {
-            mem_access_count++;
+#ifdef CONFIG_LATX_DECODE_DEBUG
+    if(pir1->decode_engine == OPT_DECODE_BY_CAPSTONE) {
+        for (int j = 0; j < pir1->info->x86.op_count; j++) {
+            IR1_OPND *opnd = ir1_get_opnd(pir1, j);
+            if (ir1_opnd_is_mem(opnd)) {
+                mem_access_count++;
+            }
+        }
+    } else
+#endif
+    {
+        for (int j = 0; j < ir1_get_opnd_num_bd(pir1); j++) {
+            IR1_OPND_BD *opnd = ir1_get_opnd_bd(pir1, j);
+            if (ir1_opnd_is_mem_bd(opnd)) {
+                mem_access_count++;
+            }
         }
     }
     /* store eflags as last reg */
@@ -271,9 +283,16 @@ static void gen_trace_helper(ADDR helper_method, IR1_INST *pir1)
 
     /* this is ins */
     {
-       IR2_OPND tmp_opnd1 = ir2_opnd_new(IR2_OPND_GPR, 11);
-       li_d(tmp_opnd1, (ADDR)pir1->info->x86.opcode);
-       la_st_d(tmp_opnd1, sp_ir2_opnd,
+        IR2_OPND tmp_opnd1 = ir2_opnd_new(IR2_OPND_GPR, 11);
+#ifdef CONFIG_LATX_DECODE_DEBUG
+        if(pir1->decode_engine == OPT_DECODE_BY_CAPSTONE) {
+            li_d(tmp_opnd1, (ADDR)pir1->info->x86.opcode);
+        } else
+#endif
+        {
+            li_d(tmp_opnd1, (ADDR)((INSTRUX *)(pir1->info))->OpCodeBytes);
+        }
+        la_st_d(tmp_opnd1, sp_ir2_opnd,
                             TRACE_REG_STACK_OFFSET + i * 8);
        i += 1;
     }
@@ -288,11 +307,25 @@ static void gen_trace_helper(ADDR helper_method, IR1_INST *pir1)
     IR2_OPND a2_opnd = ir2_opnd_new(IR2_OPND_GPR, la_a2);
     IR2_OPND a3_opnd = ir2_opnd_new(IR2_OPND_GPR, la_a3);
     la_andi(a0_opnd, a0_opnd, 0);
-    la_ori(a0_opnd, a0_opnd, pir1->info->size);
+#ifdef CONFIG_LATX_DECODE_DEBUG
+    if(pir1->decode_engine == OPT_DECODE_BY_CAPSTONE) {
+        la_ori(a0_opnd, a0_opnd, pir1->info->size);
+    } else
+#endif
+    {
+        la_ori(a0_opnd, a0_opnd, ((INSTRUX *)(pir1->info))->Length);
+    }
     la_andi(a1_opnd, a1_opnd, 0);
     la_or(a1_opnd, a1_opnd, sp_ir2_opnd);
     la_andi(a2_opnd, a2_opnd, 0);
-    li_d(a2_opnd, (ADDR)pir1->info->address);
+#ifdef CONFIG_LATX_DECODE_DEBUG
+    if(pir1->decode_engine == OPT_DECODE_BY_CAPSTONE) {
+        li_d(a2_opnd, (ADDR)pir1->info->address);
+    } else 
+#endif
+    {
+        li_d(a2_opnd, (ADDR)pir1->address);
+    }
     li_d(a3_opnd, (ADDR)mem_access_count);
 
     tr_gen_call_to_helper(helper_method, LOAD_HELPER_TRACE_SESSION_BEGIN);
@@ -315,6 +348,9 @@ static void gen_trace_helper(ADDR helper_method, IR1_INST *pir1)
     }
     la_addi_d(sp_ir2_opnd, sp_ir2_opnd, 0x300);
     ra_free_all();
+#ifdef CONFIG_LATX_INSTS_PATTERN
+    ra_free_ptn();
+#endif
 #ifdef TARGET_X86_64
     if(CODEIS64) {
         lsenv->tr_data->curr_ir1_inst->info->x86.addr_size = org_x86_addr_size;

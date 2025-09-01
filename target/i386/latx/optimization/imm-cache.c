@@ -216,6 +216,7 @@ void imm_cache_fill_bucket(IMM_CACHE *cache, int cache_id, int base, int index,
 /**
  * TODO: some instructions will change gpr indirectly
  */
+#ifdef CONFIG_LATX_DECODE_DEBUG
 void imm_cache_update_ir1_usage(IMM_CACHE *cache, IR1_INST *pir1,
                                 int curr_ir1_index)
 {
@@ -270,17 +271,87 @@ void imm_cache_update_ir1_usage(IMM_CACHE *cache, IR1_INST *pir1,
         }
     }
 }
+#endif
+
+void imm_cache_update_ir1_usage_bd(IMM_CACHE *cache, IR1_INST *pir1,
+                                int curr_ir1_index)
+{
+    /* trace x86_reg latest define value */
+    if (ir1_get_opnd_num_bd(pir1) > 0) {
+        IR1_OPCODE_BD opcode = ir1_opcode_bd(pir1);
+        int *ir1_updated_index = cache->ir1_reg_last_updated_index;
+        switch (opcode) {
+        case ND_INS_PUSH:
+        case ND_INS_PUSHF:
+        case ND_INS_PUSHAD:
+        case ND_INS_PUSHA:
+
+        case ND_INS_POP:
+        case ND_INS_POPF:
+            ir1_updated_index[esp_index] = curr_ir1_index;
+            break;
+        case ND_INS_MUL:
+        case ND_INS_IMUL:
+        case ND_INS_DIV:
+        case ND_INS_IDIV:
+            ir1_updated_index[eax_index] = curr_ir1_index;
+            ir1_updated_index[edx_index] = curr_ir1_index;
+            break;
+        // both src and dest will change
+        case ND_INS_XCHG:
+        case ND_INS_XADD:
+            for (int i = 0; i < 2; i++) {
+                IR1_OPND_BD *opnd0 = ir1_get_opnd_bd(pir1, i);
+                if (ir1_opnd_is_gpr_bd(opnd0)) {
+                    int reg_num = ir1_opnd_base_reg_num_bd(opnd0);
+                    ir1_updated_index[reg_num] = curr_ir1_index;
+                }
+                return;
+            }
+            break;
+        // all reg changes
+        case ND_INS_POPAD:
+        case ND_INS_POPA:
+            for (int i = 0; i < 16; i++) {
+                ir1_updated_index[i] = curr_ir1_index;
+            }
+            break;
+        default:
+            break;
+        }
+        IR1_OPND_BD *opnd0 = ir1_get_opnd_bd(pir1, 0);
+        if (ir1_opnd_is_gpr_bd(opnd0)) {
+            int reg_num = ir1_opnd_base_reg_num_bd(opnd0);
+            ir1_updated_index[reg_num] = curr_ir1_index;
+        }
+    }
+}
+
 
 void imm_cache_check_ir1_should_skip(bool *bool_skip_ptr)
 {
-    /* skip ir1 whose translation uses too much itemp */
-    IR1_OPCODE cur_ir1_op = ir1_opcode(lsenv->tr_data->curr_ir1_inst);
-    switch (cur_ir1_op) {
-    case dt_X86_INS_FNSTENV:
-        *bool_skip_ptr = true;
-        break;
-    default:
-        break;
+#ifdef CONFIG_LATX_DECODE_DEBUG
+    if(lsenv->tr_data->curr_ir1_inst->decode_engine == OPT_DECODE_BY_CAPSTONE) {
+        /* skip ir1 whose translation uses too much itemp */
+        IR1_OPCODE cur_ir1_op = ir1_opcode(lsenv->tr_data->curr_ir1_inst);
+        switch (cur_ir1_op) {
+        case dt_X86_INS_FNSTENV:
+            *bool_skip_ptr = true;
+            break;
+        default:
+            break;
+        }
+    } else 
+#endif
+    {
+        IR1_OPCODE_BD cur_ir1_op = ir1_opcode_bd(lsenv->tr_data->curr_ir1_inst);
+        switch (cur_ir1_op) {
+        case ND_INS_FNSTENV:
+            *bool_skip_ptr = true;
+            break;
+        default:
+            break;
+        }
     }
 }
 
@@ -718,13 +789,32 @@ void imm_cache_print_ir1(IR1_INST *pir1)
 #endif
 }
 
+void imm_cache_print_ir1_bd(IR1_INST *pir1)
+{
+#ifdef LATX_DISASSEMBLE_TRACE_DEBUG
+    imm_log("IR1: %s\t%s\n", ((INSTRUX *)(pir1->info))->Mnemonic, ir1_get_op_str_bd(pir1));
+#endif
+}
+
 void imm_cache_print_tb_ir1(TranslationBlock *tb)
 {
 #ifdef LATX_DISASSEMBLE_TRACE_DEBUG
-    IR1_INST *pir1 = tb_ir1_inst(tb, 0);
+    IR1_INST *pir1 = tb_ir1_inst_bd(tb, 0);
     for (int i = 0; i < tb->icount; ++i) {
         imm_log("IR1[%d]\t: %s\t%s\n", i, pir1->info->mnemonic,
                 pir1->info->op_str);
+        pir1++;
+    }
+#endif
+}
+
+void imm_cache_print_tb_ir1_bd(TranslationBlock *tb)
+{
+#ifdef LATX_DISASSEMBLE_TRACE_DEBUG
+    IR1_INST *pir1 = tb_ir1_inst_bd(tb, 0);
+    for (int i = 0; i < tb->icount; ++i) {
+        imm_log("IR1[%d]\t: %s\t%s\n", i, ((INSTRUX *)(pir1->info))->Mnemonic,
+                ((INSTRUX *)(pir1->info))->OpCodeBytes);
         pir1++;
     }
 #endif

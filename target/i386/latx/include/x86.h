@@ -1903,10 +1903,6 @@ typedef enum dt_x86_insn {
 	dt_X86_INS_ENDBR32,
 	dt_X86_INS_ENDBR64,
 
-#define ADDITION_INSTS
-    #include "insts_pattern_table.h"
-#undef ADDITION_INSTS
-
 	dt_X86_INS_ENDING, // mark the end of the list of insn
 } dt_x86_insn;
 

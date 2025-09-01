@@ -10,7 +10,7 @@
 #include "ir1.h"
 
 void get_last_info(TranslationBlock *tb, IR1_INST *pir1);
-
+void get_last_info_bd(TranslationBlock *tb, IR1_INST *pir1);
 #ifdef CONFIG_LATX_TU
 /*
  * The reason why MAX_TB_IN_CACHE > MAX_TB_IN_TU is
@@ -91,9 +91,9 @@ TranslationBlock* tb_create(CPUState *cpu, target_ulong pc,
         target_ulong cs_base, uint32_t flags, int cflags,
         int max_insns, bool is_first_tb, TU_TB_START_TYPE mode);
 void tu_push_back(TranslationBlock *tb);
-TranslationBlock *tu_gen_code(CPUState *cpu, target_ulong pc,
-                              target_ulong cs_base, uint32_t flags,
-                              int cflags);
+// TranslationBlock *tu_gen_code(CPUState *cpu, target_ulong pc,
+//                               target_ulong cs_base, uint32_t flags,
+//                               int cflags);
 void translate_tu(uint32 tb_num_in_tu, TranslationBlock **tb_list);
 void solve_tb_overlap(uint32 tb_num_in_tu,
 		TranslationBlock **tb_list, int max_insns);

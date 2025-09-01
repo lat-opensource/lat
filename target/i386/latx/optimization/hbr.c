@@ -6,6 +6,7 @@
 #include "lsenv.h"
 #include "ir1.h"
 #include "hbr.h"
+#include "hbr-bd.h"
 #include "translate.h"
 #include "reg-alloc.h"
 #include "latx-options.h"
@@ -753,14 +754,28 @@ static void tb_xmm_analyse(TranslationBlock *tb,
         ir1 = tb_ir1_inst(tb, i);
         ir1->xmm_def = 0;
         ir1->xmm_use = 0;
-        uint8_t curr = get_inst_type(ir1);
+        uint8_t curr;
+        if(ir1->decode_engine == OPT_DECODE_BY_CAPSTONE) {
+            curr = get_inst_type(ir1);
+        } else {
+            curr = get_inst_type_bd(ir1);
+        }
         if (curr == SHBR_NTYPE) {
             continue;
         } else if (tb->s_data->shbr_type == SHBR_NTYPE) {
             tb->s_data->shbr_type = SHBR_SSE;
         }
-        if (!analyse_func(tb, ir1, xmm)) {
-            /* fprintf (stderr, "%d\n ", i); */
+        if(ir1->decode_engine == OPT_DECODE_BY_CAPSTONE) {
+            if (!analyse_func(tb, ir1, xmm)) {
+                /* fprintf (stderr, "%d\n ", i); */
+            }
+        } else {
+            if (analyse_func == xmm_analyse_32)
+                xmm_analyse_32_bd(tb, ir1, xmm);
+            else if (analyse_func == xmm_analyse_64)
+                xmm_analyse_64_bd(tb, ir1, xmm);
+            else
+                lsassert(0);
         }
         /* tb->s_data->xmm_def |= ir1->xmm_def; */
         tb->s_data->xmm_use |= ir1->xmm_use;
@@ -843,39 +858,73 @@ static void over_tb_shbr_opt(TranslationBlock **tb_list, int tb_num_in_tu,
             for (int j = tb_ir1_num(tb) - 1; j >= 0; j--) {
                 /* fprintf(stderr, "%x\n", tb->s_data->xmm_out); */
                 ir1 = tb_ir1_inst(tb, j);
-                uint8_t curr = get_inst_type(ir1);
-                if (curr == SHBR_NTYPE) {
-                    continue;
-                }
-                IR1_OPND *opnd0 = ir1_get_opnd(ir1, 0);
-                IR1_OPND *opnd1 = ir1_get_opnd(ir1, 1);
-                if (ir1_opnd_is_xmm(opnd0)) {
-                    dest_num = ir1_opnd_base_reg_num(opnd0);
-                    /* have no_opt_xmm. */
-                    if (no_opt_xmm & (1 << dest_num)) {
-                        /* reverse transmission. */
-                        if ((ir1->xmm_def & SHBR_UPDATE_DES) && !(ir1->xmm_use & SHBR_NEED_DES)) {
-                            no_opt_xmm &= ~(1 << dest_num);
+                if(ir1->decode_engine == OPT_DECODE_BY_CAPSTONE) {
+                    uint8_t curr = get_inst_type(ir1);
+                    if (curr == SHBR_NTYPE) {
+                        continue;
+                    }
+                    IR1_OPND *opnd0 = ir1_get_opnd(ir1, 0);
+                    IR1_OPND *opnd1 = ir1_get_opnd(ir1, 1);
+                    if (ir1_opnd_is_xmm(opnd0)) {
+                        dest_num = ir1_opnd_base_reg_num(opnd0);
+                        /* have no_opt_xmm. */
+                        if (no_opt_xmm & (1 << dest_num)) {
+                            /* reverse transmission. */
+                            if ((ir1->xmm_def & SHBR_UPDATE_DES) && !(ir1->xmm_use & SHBR_NEED_DES)) {
+                                no_opt_xmm &= ~(1 << dest_num);
+                            }
+                            if ((ir1->xmm_use & SHBR_NEED_SRC) && ir1_opnd_is_xmm(opnd1)) {
+                                src_num = ir1_opnd_base_reg_num(opnd1);
+                                no_opt_xmm |= (1 << src_num);
+                            }
+                        } else if (ir1->xmm_use & SHBR_NO_OPT_DES) {
+                            assert(ir1_opnd_is_xmm(opnd0));
+                            no_opt_xmm |= (1 << dest_num);
+                        } else {
+                            /* can opt. */
+                            ir1->hbr_flag |= opt_flag;
                         }
-                        if ((ir1->xmm_use & SHBR_NEED_SRC) && ir1_opnd_is_xmm(opnd1)) {
-                            src_num = ir1_opnd_base_reg_num(opnd1);
-                            no_opt_xmm |= (1 << src_num);
+                    }
+
+                    if (ir1->xmm_use & SHBR_NO_OPT_SRC) {
+                        assert(ir1_opnd_is_xmm(opnd1));
+                        src_num = ir1_opnd_base_reg_num(opnd1);
+                        no_opt_xmm |= (1 << src_num);
+                    }
+                } else {
+                    uint8_t curr = get_inst_type_bd(ir1);
+                    if (curr == SHBR_NTYPE) {
+                        continue;
+                    }
+                    IR1_OPND_BD *opnd0 = ir1_get_opnd_bd(ir1, 0);
+                    IR1_OPND_BD *opnd1 = ir1_get_opnd_bd(ir1, 1);
+                    if (ir1_opnd_is_xmm_bd(opnd0)) {
+                        dest_num = ir1_opnd_base_reg_num_bd(opnd0);
+                        /* have no_opt_xmm. */
+                        if (no_opt_xmm & (1 << dest_num)) {
+                            /* reverse transmission. */
+                            if ((ir1->xmm_def & SHBR_UPDATE_DES) && !(ir1->xmm_use & SHBR_NEED_DES)) {
+                                no_opt_xmm &= ~(1 << dest_num);
+                            }
+                            if ((ir1->xmm_use & SHBR_NEED_SRC) && ir1_opnd_is_xmm_bd(opnd1)) {
+                                src_num = ir1_opnd_base_reg_num_bd(opnd1);
+                                no_opt_xmm |= (1 << src_num);
+                            }
+                        } else if (ir1->xmm_use & SHBR_NO_OPT_DES) {
+                            assert(ir1_opnd_is_xmm_bd(opnd0));
+                            no_opt_xmm |= (1 << dest_num);
+                        } else {
+                            /* can opt. */
+                            ir1->hbr_flag |= opt_flag;
                         }
-                    } else if (ir1->xmm_use & SHBR_NO_OPT_DES) {
-                        assert(ir1_opnd_is_xmm(opnd0));
-                        no_opt_xmm |= (1 << dest_num);
-                    } else {
-                        /* can opt. */
-                        ir1->hbr_flag |= opt_flag;
+                    }
+
+                    if (ir1->xmm_use & SHBR_NO_OPT_SRC) {
+                        assert(ir1_opnd_is_xmm_bd(opnd1));
+                        src_num = ir1_opnd_base_reg_num_bd(opnd1);
+                        no_opt_xmm |= (1 << src_num);
                     }
                 }
-
-                if (ir1->xmm_use & SHBR_NO_OPT_SRC) {
-                    assert(ir1_opnd_is_xmm(opnd1));
-                    src_num = ir1_opnd_base_reg_num(opnd1);
-                    no_opt_xmm |= (1 << src_num);
-                }
-
             }
         }
 
@@ -1264,8 +1313,13 @@ static void get_gpr_use_def(TranslationBlock *tb)
         ir1 = tb_ir1_inst(tb, i);
         ir1->gpr_def = 0;
         ir1->gpr_use = 0;
-        def_h32(tb, ir1);
-        use_h32(tb, ir1);
+        if(ir1->decode_engine == OPT_DECODE_BY_CAPSTONE) {
+            def_h32(tb, ir1);
+            use_h32(tb, ir1);
+        } else {
+            def_h32_bd(tb, ir1);
+            use_h32_bd(tb, ir1);
+        }
     }
 }
 
