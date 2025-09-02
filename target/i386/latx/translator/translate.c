@@ -2275,6 +2275,9 @@ static int kzt_tr_bridge(struct TranslationBlock *tb)
 #endif
 int tr_translate_tb(struct TranslationBlock *tb)
 {
+    if (CODEIS64) {
+        tb->bool_flags |= IS_CODE64;
+    }
     TRANSLATION_DATA *lat_ctx = lsenv->tr_data;
     if (option_dump)
         qemu_log("[LATX] start translation.\n");

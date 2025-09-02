@@ -109,6 +109,7 @@ void get_dynamic_message(TranslationBlock **tb_list, int tb_num,
         }
         dynamic_tb_message_vector[dynamic_tb_num].pc = tb_list[i]->pc;
         dynamic_tb_message_vector[dynamic_tb_num].cflags = tb_list[i]->cflags;
+        dynamic_tb_message_vector[dynamic_tb_num].bool_flags = tb_list[i]->bool_flags;
         while (j < *seg_info_num &&
                 seg_info_vector[j]->seg_end <= tb_list[i]->pc) {
 #ifdef CONFIG_LATX_DEBUG
@@ -429,9 +430,10 @@ static inline void get_next_tb(TranslationBlock *curr_tb, CPUState *cpu,
     if (tb_id >= 0) {
         /* Get dynamic tb. */
         next_tb = aot_tb_lookup(next_tb_pc, cflags);
+        bool tb_is_code64 = !!(curr_tb_message_vector[tb_id].bool_flags & IS_CODE64);
         if (!next_tb) {
             next_tb = tb_create(cpu, next_tb_pc, cs_base, flags,
-                    cflags, max_insns, 0, TU_TB_START_NORMAL);
+                    cflags, max_insns, tb_is_code64, TU_TB_START_NORMAL);
             if (is_bad_tb(next_tb)) {
                 next_tb = NULL;
             }
@@ -448,7 +450,10 @@ static inline void get_next_tb(TranslationBlock *curr_tb, CPUState *cpu,
         if (!next_tb) {
             next_tb = create_static_tb(cpu, next_tb_pc,
                     cs_base, flags, cflags, max_insns);
-            tu_push_back(next_tb);
+            if (next_tb) {
+                next_tb->bool_flags |= (curr_tb->bool_flags & IS_CODE64);
+                tu_push_back(next_tb);
+            }
         }
     }
     curr_tb->s_data->next_tb[TU_TB_INDEX_NEXT] = next_tb;
@@ -470,9 +475,10 @@ static inline void get_target_tb(TranslationBlock *curr_tb, CPUState *cpu,
     if (tb_id >= 0) {
         /* Get dynamic tb. */
         target_tb = aot_tb_lookup(target_tb_pc, cflags);
+        bool tb_is_code64 = !!(curr_tb_message_vector[tb_id].bool_flags & IS_CODE64);
         if (!target_tb) {
             target_tb = tb_create(cpu, target_tb_pc, cs_base, flags,
-                    cflags, max_insns, 0, TU_TB_START_NORMAL);
+                    cflags, max_insns, tb_is_code64, TU_TB_START_NORMAL);
             if (is_bad_tb(target_tb)) {
                 target_tb = NULL;
             }
@@ -489,7 +495,10 @@ static inline void get_target_tb(TranslationBlock *curr_tb, CPUState *cpu,
         if (!target_tb) {
             target_tb = create_static_tb(cpu, target_tb_pc,
                     cs_base, flags, cflags, max_insns);
-            tu_push_back(target_tb);
+            if (target_tb) {
+                target_tb->bool_flags |= (curr_tb->bool_flags & IS_CODE64);
+                tu_push_back(target_tb);
+            }
         }
     }
     curr_tb->s_data->next_tb[TU_TB_INDEX_TARGET] = target_tb;
@@ -511,12 +520,14 @@ static inline void get_ts_queue(CPUState *cpu, target_ulong cs_base,
         if (get_page(curr_tb_pc) != curr_page || curr_tb_cflags != cflags) {
             break;
         }
-	if(curr_tb_message_vector[untr_tb_id++].tb) {
+	if(curr_tb_message_vector[untr_tb_id].tb) {
             continue;
         }
+        bool tb_is_code64 = !!(curr_tb_message_vector[untr_tb_id].bool_flags & IS_CODE64);
         tb = tb_create(cpu, curr_tb_pc, cs_base, flags,
-                curr_tb_cflags, max_insns, true , TU_TB_START_ENTRY);
+                curr_tb_cflags, max_insns, tb_is_code64 , TU_TB_START_ENTRY);
         tu_push_back(tb);
+        untr_tb_id++;
         for (; tb_id <  *tb_num_in_tu && *tb_num_in_tu < MAX_TB_IN_TS;  tb_id++) {
 #ifdef CONFIG_LATX_DEBUG
             if (get_tb_id(tb->pc, tb->cflags) < 0) {

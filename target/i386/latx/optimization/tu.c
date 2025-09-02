@@ -187,7 +187,7 @@ static __thread uint32_t search_buff_offset[MAX_TB_IN_CACHE];
 #include<sys/syscall.h>
 TranslationBlock* tb_create(CPUState *cpu, target_ulong pc,
         target_ulong cs_base, uint32_t flags, int cflags,
-        int max_insns, bool is_first_tb, TU_TB_START_TYPE mode)
+        int max_insns, bool tb_is_code64, TU_TB_START_TYPE mode)
 {
     TranslationBlock* tb;
     if (unlikely(pc == 0)) {
@@ -216,6 +216,25 @@ TranslationBlock* tb_create(CPUState *cpu, target_ulong pc,
     } else {
         tcg_ctx->tb_jmp_insn_offset = NULL;
         tcg_ctx->tb_jmp_target_addr = tb->jmp_target_arg;
+    }
+
+    if (in_pre_translate) {
+        X86CPU *x86cpu = X86_CPU(cpu);
+        CPUX86State *env = &x86cpu->env;
+        if (tb_is_code64 && !CODEIS64) {
+            env->hflags |= HF_LMA_MASK;
+            cpu_x86_load_seg_cache(env, R_CS, 0xf000, 0xffff0000, 0xffff,
+                    DESC_P_MASK | DESC_S_MASK | DESC_CS_MASK |
+                    DESC_R_MASK | DESC_A_MASK | DESC_L_MASK);
+        } else if (!tb_is_code64 && CODEIS64) {
+            env->hflags &= ~HF_LMA_MASK;
+            cpu_x86_load_seg_cache(env, R_CS, 0xf000, 0xffff0000, 0xffff,
+                    DESC_P_MASK | DESC_S_MASK | DESC_CS_MASK |
+                    DESC_R_MASK | DESC_A_MASK);
+        }
+        if (tb_is_code64) {
+            tb->bool_flags |= IS_CODE64;
+        }
     }
 
     target_disasm(tb, max_insns);
@@ -422,7 +441,7 @@ static inline void get_tu_queue(CPUState *cpu,
                 }
                 if (!next_tb) {
                     next_tb = tb_create(cpu, ir1_next_pc, cs_base, flags,
-                                   cflags, max_insns, 0, TU_TB_START_NORMAL);
+                                   cflags, max_insns, CODEIS64, TU_TB_START_NORMAL);
                     tu_push_back(next_tb);
                 }
                 if (next_tb && next_tb->tc.ptr != NULL) {
@@ -446,7 +465,7 @@ static inline void get_tu_queue(CPUState *cpu,
                 }
                 if (!target_tb) {
                     target_tb = tb_create(cpu, ir1_target_pc, cs_base, flags,
-                                     cflags, max_insns, 0, TU_TB_START_JMP);
+                                     cflags, max_insns, CODEIS64, TU_TB_START_JMP);
                     tu_push_back(target_tb);
                 }
                 if (target_tb && target_tb->tc.ptr != NULL) {
@@ -471,7 +490,7 @@ static inline void get_tu_queue(CPUState *cpu,
                 }
                 if (get_page(tb->pc) == get_page(ir1_target_pc) && !target_tb) {
                     target_tb = tb_create(cpu, ir1_target_pc, cs_base, flags,
-                                     cflags, max_insns, 0, TU_TB_START_JMP);
+                                     cflags, max_insns, CODEIS64, TU_TB_START_JMP);
                     tu_push_back(target_tb);
                 }
                 tb->s_data->next_tb[TU_TB_INDEX_TARGET] = target_tb;
@@ -492,7 +511,7 @@ static inline void get_tu_queue(CPUState *cpu,
                 }
                 if (!next_tb) {
                     next_tb = tb_create(cpu, ir1_next_pc, cs_base, flags,
-                                   cflags, max_insns, 0, TU_TB_START_NORMAL);
+                                   cflags, max_insns, CODEIS64, TU_TB_START_NORMAL);
                     tu_push_back(next_tb);
                 }
                 tb->s_data->next_tb[TU_TB_INDEX_NEXT] = next_tb;
@@ -611,7 +630,7 @@ static TranslationBlock *tb_explore(CPUState *cpu,
 
     /* the entry used as return value*/
     TranslationBlock *entry = tb_create(cpu, pc, cs_base,
-            flags, cflags, max_insns, true , TU_TB_START_ENTRY);
+            flags, cflags, max_insns, CODEIS64 , TU_TB_START_ENTRY);
     tu_push_back(entry);
 
     /* search all tbs we can get */
@@ -940,6 +959,11 @@ void translate_tu(uint32 tb_num_in_tu, TranslationBlock **tb_list)
 retry:
     for (uint32_t i = 0; i < tb_num_in_tu; i++) {
         tb = tb_list[i];
+        if (tb->bool_flags & IS_CODE64) {
+            CODEIS64 = 1;
+        } else {
+            CODEIS64 = 0;
+        }
         gen_code_size = translate_tb_in_tu(tb);
         uintptr_t gen_code_buf = (uintptr_t)tcg_ctx->code_gen_ptr + gen_code_size;
         qatomic_set(&tcg_ctx->code_gen_ptr, (void *)gen_code_buf);

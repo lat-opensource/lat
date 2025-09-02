@@ -89,7 +89,7 @@ TranslationBlock *tu_tree_lookup(target_ulong pc);
 void tu_control_init(void);
 TranslationBlock* tb_create(CPUState *cpu, target_ulong pc,
         target_ulong cs_base, uint32_t flags, int cflags,
-        int max_insns, bool is_first_tb, TU_TB_START_TYPE mode);
+        int max_insns, bool tb_is_code64, TU_TB_START_TYPE mode);
 void tu_push_back(TranslationBlock *tb);
 TranslationBlock *tu_gen_code(CPUState *cpu, target_ulong pc,
                               target_ulong cs_base, uint32_t flags,

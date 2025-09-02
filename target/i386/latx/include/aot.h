@@ -123,7 +123,7 @@ typedef struct aot_tb {
     };
     uint16_t eflags_target_arg[3];
     uint8_t  eflag_use;
-    uint8_t bool_flags;
+    uint16_t bool_flags;
     int32_t rel_start_index;
     int32_t rel_end_index;
 

@@ -10,6 +10,7 @@
 struct tb_tmp_message{
     target_ulong pc;
     uint32_t cflags;
+    uint16_t bool_flags;
     TranslationBlock *tb;
 };
 typedef struct tb_tmp_message tb_tmp_message;

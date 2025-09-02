@@ -761,6 +761,7 @@ static void merge_seg(seg_info *curr_seg, void *buffer1, void *buffer2,
 		tb_message_vector[curr_tb_num].pc = 
 			p_aot_tbs1[i].offset_in_segment + curr_seg->seg_begin;	
 		assert(tb_message_vector[curr_tb_num].pc < curr_seg->seg_end);
+                tb_message_vector[curr_tb_num].bool_flags = p_aot_tbs1[i].bool_flags;
 		tb_message_vector[curr_tb_num++].cflags = p_aot_tbs1[i].cflags;
 	}
 	for (int i = 0; i < tb_num2; i++) {
@@ -772,6 +773,7 @@ static void merge_seg(seg_info *curr_seg, void *buffer1, void *buffer2,
 #endif
 		tb_message_vector[curr_tb_num].pc = 
 			p_aot_tbs2[i].offset_in_segment + curr_seg->seg_begin;	
+                tb_message_vector[curr_tb_num].bool_flags = p_aot_tbs2[i].bool_flags;
 		tb_message_vector[curr_tb_num++].cflags = p_aot_tbs2[i].cflags;	
 	}
 }
@@ -789,6 +791,7 @@ static void get_seg_tb(int first_seg_id, int last_seg_id)
     				!= (tb_message_vector[i].cflags & CF_PARALLEL))) {
     		tb_message_vector[++end_id].pc = tb_message_vector[i].pc;		
     		tb_message_vector[end_id].cflags = tb_message_vector[i].cflags;		
+                tb_message_vector[end_id].bool_flags = tb_message_vector[i].bool_flags;
         }
     }
     curr_tb_num = end_id + 1;

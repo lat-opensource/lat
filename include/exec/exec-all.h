@@ -650,6 +650,7 @@ struct TranslationBlock {
 #define SIGNAL_RELINK0    0x200
 #define SIGNAL_UNLINK1    0x400
 #define SIGNAL_RELINK1    0x800
+#define IS_CODE64        0x1000
     uint16_t bool_flags;
     uint8_t  eflag_use;
 #ifdef CONFIG_LATX_INSTS_PATTERN
