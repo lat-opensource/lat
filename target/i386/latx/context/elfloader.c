@@ -1102,7 +1102,6 @@ elfheader_t* FindElfAddress(box64context_t *context, uintptr_t addr)
     for (int i=0; i<context->elfsize; ++i)
         if(IsAddressInElfSpace(context->elfs[i], addr))
             return context->elfs[i];
-    if(context->elfsize >0) return elf_header;  
     return NULL;
 }
 
