@@ -2535,7 +2535,7 @@ static struct x86_ld_info * find_ld_part(char * start, int len)
                 K_LEA(6),         // 0x48 0x8d 0x65 0xd8                        (lea    -0x28(%rbp),%rsp)
                 K_SKIP(0),
             },
-            .part_offset = 0x33
+            .part_offset = 0x2e
         },
         {   // debian sid GNU C Library (Debian GLIBC 2.41-7) stable release version 2.41.
             .ins = {
