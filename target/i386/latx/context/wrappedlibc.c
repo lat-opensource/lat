@@ -3528,6 +3528,12 @@ int init_x86dlfun(void);
 int init_x86dlfun(void)
 {
     elfheader_t* h = NULL;
+#ifdef CONFIG_LOONGARCH_NEW_WORLD
+    char buf[PATH_MAX] = {0};
+    snprintf(buf, PATH_MAX, "%s%s", interp_prefix,
+             "/usr/lib/glibc-hwcaps/x86-64-v2" /* AOSC OS (Core 12.2.2), glibc 2.40 (EmuKit 20250909~pre20250911T080911Z) */);
+    PrependList(&my_context->box64_ld_lib, buf, 1);
+#endif
     char *tmp = ResolveFile("libc.so.6", &my_context->box64_ld_lib);
     if(FileExist(tmp, IS_FILE)) {
         FILE *f = fopen(tmp, "rb");
