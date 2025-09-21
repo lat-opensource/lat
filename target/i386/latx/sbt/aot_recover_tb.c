@@ -271,12 +271,18 @@ int load_page(target_ulong pc, uint32_t cflags)
     }
     info->is_running = true;
     page_set_page_state(pc, PAGE_LOADED);
-
     aot_buffer = info->buffer;
     aot_segment *p_segment = (aot_segment *)info->p_segment;
     page_table_info *pt = (page_table_info *)
         (p_segment->page_table_offset + (uintptr_t)aot_buffer);
+
     int pt_id = (pc - info->seg_begin) / TARGET_PAGE_SIZE;
+    int max_pt_id =
+        (p_segment->details.seg_end - p_segment->details.seg_begin) / TARGET_PAGE_SIZE;
+    if (pt_id >= max_pt_id) {
+        return 0;
+    }
+
     int tb_num_in_page;
     struct aot_tb *p_aot_tbs;
     if (cflags & CF_PARALLEL) {

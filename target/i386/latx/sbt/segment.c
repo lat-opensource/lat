@@ -67,21 +67,29 @@ static gboolean dump_segment_tree_node(gpointer key, gpointer val,
     return 0;
 }
 
+static void wine_sec_tree_remove(wine_sec_info *sec)
+{
+    g_tree_remove(wine_sec_tree, sec);
+}
+
 uint64_t deal_seg(wine_sec_info *wine_sec, uint64_t aot_offset, char *buf,
         int fd, int target_prot, abi_long len, abi_long start)
 {
     char path[PATH_MAX];
     int pathname_len;
+
+    sprintf(path, "/proc/self/fd/%d", fd);
+    pathname_len = readlink(path, buf, PATH_MAX);
+    assert(pathname_len >= 0 && pathname_len + 1 <= PATH_MAX);
+    buf[pathname_len] = '\0';
+
     if (wine_sec) {
-        aot_offset = wine_sec->offset;
-        strncpy(buf, wine_sec->file_name, PATH_MAX);
-        pathname_len = strlen(buf);
-        assert(pathname_len >= 0 && pathname_len + 1 <= PATH_MAX);
-    } else {
-        sprintf(path, "/proc/self/fd/%d", fd);
-        pathname_len = readlink(path, buf, PATH_MAX);
-        assert(pathname_len >= 0 && pathname_len + 1 <= PATH_MAX);
-        buf[pathname_len] = '\0';
+	if (strcmp(buf, wine_sec->file_name)) {
+	    wine_sec_tree_remove(wine_sec);
+	} else {
+	    aot_offset = wine_sec->offset;
+	}
+	assert(pathname_len >= 0 && pathname_len + 1 <= PATH_MAX);
     }
     if (pathname_len > 5) {
         segment_tree_insert(buf, aot_offset, start, start + len);
