@@ -230,6 +230,12 @@ IR1_INST *get_ir1_list(struct TranslationBlock *tb, ADDRX pc, int max_insns)
             tb->s_data->tu_tb_mode = TU_TB_MODE_BROKEN;
             tb->s_data->next_pc = tb->pc;
 #endif
+            IR1_INST *pre = &ir1_list[ir1_num - 1];
+            pir1->info = (void *)((uint64_t)pir1_base +
+                    (ir1_num * sizeof(struct la_dt_insn)));
+            pir1->info->id = dt_X86_INS_INVALID;
+            pir1->info->address = pre->info->address + pre->info->size;
+            ir1_num++;
             break;
         }
         ir1_num++;
@@ -678,7 +684,7 @@ void restore_h128_of_ymm(IR1_INST *ir1, IR2_OPND temp)
 }
 
 static bool (*translate_functions[])(IR1_INST *) = {
-    TRANS_FUNC_GEN_REAL(INVALID, NULL),
+    TRANS_FUNC_GEN(INVALID, invalid),
 
     TRANS_FUNC_GEN(AAA, aaa),
     TRANS_FUNC_GEN(AAD, aad),

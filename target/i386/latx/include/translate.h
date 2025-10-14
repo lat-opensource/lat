@@ -67,6 +67,7 @@ bool translate_##function##_wrap(IR1_INST *pir1)    \
 
 #include "insts-pattern.h"
 
+TRANS_FUNC_DEF(invalid);
 TRANS_FUNC_DEF(add);
 TRANS_FUNC_DEF(lock_add);
 TRANS_FUNC_DEF(push);
@@ -1224,6 +1225,7 @@ void tr_gen_call_to_helper(ADDR, enum aot_rel_kind);
 void convert_fpregs_64_to_x80(void);
 void convert_fpregs_x80_to_64(void);
 void helper_raise_int(void);
+void helper_raise_illop(void);
 void helper_raise_syscall(void);
 
 bool si12_overflow(long si12);

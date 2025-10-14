@@ -392,6 +392,33 @@ void helper_raise_int(void)
     siglongjmp_cpu_jmp_env();
 }
 
+void helper_raise_illop(void)
+{
+    CPUX86State *env = (CPUX86State *)lsenv->cpu_state;
+    CPUState *cs = env_cpu(env);
+
+    cs->exception_index = EXCP06_ILLOP;
+    env->error_code = 0;
+    env->exception_is_int = 0;
+    env->exception_next_eip = env->eip;
+    cpu_loop_exit(cs);
+}
+
+bool translate_invalid(IR1_INST *pir1)
+{
+    IR2_OPND tmp_opnd = ra_alloc_itemp();
+    IR2_OPND eip_opnd = ra_alloc_dbt_arg2();
+    li_d(eip_opnd, ir1_addr(pir1));
+    la_store_addrx(eip_opnd, env_ir2_opnd,
+                    lsenv_offset_of_eip(lsenv));
+    tr_save_registers_to_env(0xff, 0xff, option_save_xmm, options_to_save());
+    aot_load_host_addr(tmp_opnd, (ADDR)helper_raise_illop,
+        LOAD_HELPER_RAISE_ILLOP, 0);
+    la_jirl(zero_ir2_opnd, tmp_opnd, 0);
+    ra_free_temp(tmp_opnd);
+    return true;
+}
+
 #ifdef TARGET_X86_64
 #if defined(CONFIG_USER_ONLY)
 void helper_raise_syscall(void)
