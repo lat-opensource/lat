@@ -175,6 +175,21 @@ STEP3:
 
     ./latxbuild/build-release.sh
 
+AVX指令支持
+==============
+编译支持AVX指令的版本需要在编译时添加参数
+例如：
+
+.. code-block:: bash
+
+    ./latxbuild/build64.sh -c -a
+
+为满足软件兼容性相关需求，LATX上报AVX指令相关CPUID信息需要单独设置：
+
+.. code-block:: bash
+
+    export LATX_AVX_CPUID=1
+
 
 未来规划（TODO）
 ===============

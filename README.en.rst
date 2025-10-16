@@ -192,6 +192,19 @@ STEP3:
 
     ./latxbuild/build-release.sh
 
+AVX Instruction Support
+==============
+To build a version that supports AVX instructions, you need to add parameters during compilation:
+
+.. code-block:: bash
+
+    ./latxbuild/build-release.sh -a
+
+To meet software compatibility requirements, enabling the reporting of AVX-related CPUID information in LATX requires a separate setting:
+
+.. code-block:: bash
+
+    export LATX_AVX_CPUID=1
 
 Future Plans (TODO)
 ===============

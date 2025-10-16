@@ -4,6 +4,7 @@ export CFLAGS="-Wno-error=unused-but-set-variable -Wno-error=unused-function  -W
 make_configure=0
 opt_level=1
 low_mem_mode=""
+avx_support=""
 
 help() {
     echo "Usage:"
@@ -18,11 +19,12 @@ help() {
     echo "                  -l 0 : Open shadow file, close CONFIG_LATX_LARGE_CC"
     echo "                  -l 1 : l0 + close CONFIG_LATX_SPLIT_TB, CONFIG_LATX_TU, CONFIG_LATX_JRRA"
     echo "                  -l 2 : l1 + set 64MB code cache, close CONFIG_LATX_INSTS_PATTERN"
+    echo "  -a              AVX Instruction Translation Support"
     echo "  -h              help"
 }
 
 parseArgs() {
-    while getopts "cO:l:h" opt; do
+    while getopts "cO:l:h,a" opt; do
         case ${opt} in
         c)
             make_configure=1
@@ -32,6 +34,9 @@ parseArgs() {
             ;;
         l)
             low_mem_mode=""--low_mem_mode"${OPTARG}"
+            ;;
+        a)
+            avx_support="--enable-latx-avx-opt"
             ;;
         h)
             help
@@ -63,19 +68,19 @@ make_cmd() {
         if [ "$opt_level" = "0" ] ; then
             ../configure --target-list=x86_64-linux-user --enable-latx \
                 --disable-debug-info --optimize-O0 --static --extra-ldflags=-ldl \
-                --disable-docs ${low_mem_mode}
+                --disable-docs ${low_mem_mode} ${avx_support}
         elif [ "$opt_level" = "1" ] ; then
             ../configure --target-list=x86_64-linux-user --enable-latx \
                 --disable-debug-info --optimize-O1 --extra-ldflags=-ldl --enable-kzt \
-                --disable-docs ${low_mem_mode}
+                --disable-docs ${low_mem_mode} ${avx_support}
         elif [ "$opt_level" = "2" ] ; then
             ../configure --target-list=x86_64-linux-user --enable-latx \
                 --disable-debug-info --optimize-O2 --static --extra-ldflags=-ldl \
-                --disable-docs ${low_mem_mode}
+                --disable-docs ${low_mem_mode} ${avx_support}
         elif [ "$opt_level" = "3" ] ; then
             ../configure --target-list=x86_64-linux-user --enable-latx \
                 --disable-debug-info --optimize-O3 --static --extra-ldflags=-ldl \
-                --disable-docs ${low_mem_mode}
+                --disable-docs ${low_mem_mode} ${avx_support}
         else
             echo "invalid options"
         fi
