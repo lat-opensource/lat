@@ -1749,7 +1749,7 @@ static void LoadEnvVars(box64context_t *context)
     char tmp[PATH_MAX] = {0};
 #ifdef CONFIG_LOONGARCH_NEW_WORLD
     snprintf(tmp, PATH_MAX, "%s%s:%s%s:%s%s:%s%s:%s%s", interp_prefix, "/lib64", interp_prefix,
-            "/usr/lib",  interp_prefix, "/lib/x86_64-linux-gnu",  interp_prefix,
+            "/lib/x86_64-linux-gnu", interp_prefix, "/usr/lib", interp_prefix,
             "/usr/lib/x86_64-linux-gnu",  interp_prefix, "/usr/x86_64-linux-gnu/lib");
     AppendList(&context->box64_ld_lib, tmp, 1);
     AppendList(&context->box64_ld_lib, "/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu", 1);

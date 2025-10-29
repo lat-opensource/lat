@@ -3523,6 +3523,27 @@ static void Push64(CPUX86State *cpu, uint64_t v)
     *((uint64_t*)cpu->regs[R_ESP]) = v;
 }
 
+static elfheader_t* loadElfFromFile(const char* name)
+{
+    elfheader_t* h = NULL;
+    char *tmp = ResolveFile(name, &my_context->box64_ld_lib);
+    if (FileExist(tmp, IS_FILE)) {
+        FILE *f = fopen(tmp, "rb");
+        if (!f) {
+            printf_log(LOG_NONE, "Error: Cannot open %s\n", tmp);
+            return NULL;
+        }
+        h = LoadAndCheckElfHeader(f, tmp, 0);
+        ElfHeadReFix(h, loadSoaddrFromMap(tmp));
+        if ((uintptr_t)h->VerSym > (uintptr_t)h->delta) {
+            h->delta = 0;
+        }
+    } else {
+        lsassertm(0, "cannot find %s\n", tmp);
+    }
+    return h;
+}
+
 void kzt_wine_init_x86(void);
 int init_x86dlfun(void);
 int init_x86dlfun(void)
@@ -3534,26 +3555,18 @@ int init_x86dlfun(void)
              "/usr/lib/glibc-hwcaps/x86-64-v2" /* AOSC OS (Core 12.2.2), glibc 2.40 (EmuKit 20250909~pre20250911T080911Z) */);
     PrependList(&my_context->box64_ld_lib, buf, 1);
 #endif
-    char *tmp = ResolveFile("libc.so.6", &my_context->box64_ld_lib);
-    if(FileExist(tmp, IS_FILE)) {
-        FILE *f = fopen(tmp, "rb");
-        if(!f) {
-            printf_log(LOG_NONE, "Error: Cannot open %s\n", tmp);
-            return -1;
-        }
-        h = LoadAndCheckElfHeader(f, tmp, 0);
-        ElfHeadReFix(h, loadSoaddrFromMap(tmp));
-        if ((uintptr_t)h->VerSym > (uintptr_t)h->delta) {
-            h->delta = 0;
-        }
-    } else {
-        lsassertm(0, "cannot find %s\n", tmp);
-    }
+    h = loadElfFromFile("libc.so.6");
     lsassert(h);
     const char* syms[] = {"dlopen", "dlsym", "dlclose", "dladdr", "dladdr1"};
     void *rsyms[5] = {0};
     int rrsyms = 0;
     ResetSpecialCaseElf(h, syms, 5, rsyms, &rrsyms);
+#ifdef CONFIG_LOONGARCH_NEW_WORLD
+    if (rrsyms != 5) {
+        h = loadElfFromFile("libdl.so.2");
+        ResetSpecialCaseElf(h, syms, 5, rsyms, &rrsyms);
+    }
+#endif
     lsassert(rrsyms == 5);
     my_context->dlprivate->x86dlopen = rsyms[0];
     my_context->dlprivate->x86dlsym = rsyms[1];
