@@ -7,7 +7,7 @@ OUTPUT_FORMAT("elf64-loongarch", "elf64-loongarch",
               "elf64-loongarch")
 OUTPUT_ARCH(loongarch)
 ENTRY(_start)
-SEARCH_DIR("/usr/loongarch64-unknown-linux-gnu/lib64"); SEARCH_DIR("/usr/lib"); SEARCH_DIR("/usr/local/lib"); SEARCH_DIR("/usr/loongarch64-unknown-linux-gnu/lib");
+SEARCH_DIR("/usr/loongarch64-unknown-linux-gnu/lib64"); SEARCH_DIR("/usr/lib"); SEARCH_DIR("/usr/local/lib"); SEARCH_DIR("/usr/loongarch64-unknown-linux-gnu/lib"); SEARCH_DIR("/usr/lib64");
 SECTIONS
 {
   /* Read-only sections, merged into text segment: */
