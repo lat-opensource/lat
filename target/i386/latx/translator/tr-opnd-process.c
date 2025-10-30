@@ -1308,6 +1308,8 @@ IR2_OPND load_freg256_from_ir1(IR1_OPND * opnd1) {
 
 void set_high128_xreg_to_zero(IR2_OPND opnd2) {
     lsassert(ir2_opnd_is_freg( & opnd2));
-    la_xvinsgr2vr_d(opnd2, zero_ir2_opnd, 2);
-    la_xvinsgr2vr_d(opnd2, zero_ir2_opnd, 3);
+    if (option_enable_lasx) {
+        la_xvinsgr2vr_d(opnd2, zero_ir2_opnd, 2);
+        la_xvinsgr2vr_d(opnd2, zero_ir2_opnd, 3);
+    }
 }
