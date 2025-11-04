@@ -3208,7 +3208,11 @@ bool translate_pmovsxbw(IR1_INST *pir1)
     IR2_OPND dest = load_freg128_from_ir1(opnd0);
     IR2_OPND src = load_freg128_from_ir1(opnd1);
 
-    la_vext2xv_h_b(dest, src);
+    if (option_enable_lasx) {
+        la_vext2xv_h_b(dest, src);
+    } else {
+        la_vsllwil_h_b(dest, src, 0);
+    }
     return true;
 }
 
@@ -3220,7 +3224,11 @@ bool translate_pmovzxbw(IR1_INST *pir1)
     IR2_OPND dest = load_freg128_from_ir1(opnd0);
     IR2_OPND src = load_freg128_from_ir1(opnd1);
 
-    la_vext2xv_hu_bu(dest, src);
+    if (option_enable_lasx) {
+        la_vext2xv_hu_bu(dest, src);
+    } else {
+        la_vsllwil_hu_bu(dest, src, 0);
+    }
     return true;
 }
 
@@ -3232,7 +3240,12 @@ bool translate_pmovsxbd(IR1_INST *pir1)
     IR2_OPND dest = load_freg128_from_ir1(opnd0);
     IR2_OPND src = load_freg128_from_ir1(opnd1);
 
-    la_vext2xv_w_b(dest, src);
+    if (option_enable_lasx) {
+        la_vext2xv_w_b(dest, src);
+    } else {
+        la_vsllwil_h_b(dest, src, 0);
+        la_vsllwil_w_h(dest, dest, 0);
+    }
     return true;
 }
 
@@ -3244,7 +3257,12 @@ bool translate_pmovzxbd(IR1_INST *pir1)
     IR2_OPND dest = load_freg128_from_ir1(opnd0);
     IR2_OPND src = load_freg128_from_ir1(opnd1);
 
-    la_vext2xv_wu_bu(dest, src);
+    if (option_enable_lasx) {
+        la_vext2xv_wu_bu(dest, src);
+    } else {
+        la_vsllwil_hu_bu(dest, src, 0);
+        la_vsllwil_wu_hu(dest, dest, 0);
+    }
     return true;
 }
 
@@ -3256,7 +3274,13 @@ bool translate_pmovsxbq(IR1_INST *pir1)
     IR2_OPND dest = load_freg128_from_ir1(opnd0);
     IR2_OPND src = load_freg128_from_ir1(opnd1);
 
-    la_vext2xv_d_b(dest, src);
+    if (option_enable_lasx) {
+        la_vext2xv_d_b(dest, src);
+    } else {
+        la_vsllwil_h_b(dest, src, 0);
+        la_vsllwil_w_h(dest, dest, 0);
+        la_vsllwil_d_w(dest, dest, 0);
+    }
     return true;
 }
 
@@ -3268,7 +3292,13 @@ bool translate_pmovzxbq(IR1_INST *pir1)
     IR2_OPND dest = load_freg128_from_ir1(opnd0);
     IR2_OPND src = load_freg128_from_ir1(opnd1);
 
-    la_vext2xv_du_bu(dest, src);
+    if (option_enable_lasx) {
+        la_vext2xv_du_bu(dest, src);
+    } else {
+        la_vsllwil_hu_bu(dest, src, 0);
+        la_vsllwil_wu_hu(dest, dest, 0);
+        la_vsllwil_du_wu(dest, dest, 0);
+    }
     return true;
 }
 
@@ -3280,7 +3310,11 @@ bool translate_pmovsxwd(IR1_INST *pir1)
     IR2_OPND dest = load_freg128_from_ir1(opnd0);
     IR2_OPND src = load_freg128_from_ir1(opnd1);
 
-    la_vext2xv_w_h(dest, src);
+    if (option_enable_lasx) {
+        la_vext2xv_w_h(dest, src);
+    } else {
+        la_vsllwil_w_h(dest, src, 0);
+    }
     return true;
 }
 
@@ -3292,7 +3326,11 @@ bool translate_pmovzxwd(IR1_INST *pir1)
     IR2_OPND dest = load_freg128_from_ir1(opnd0);
     IR2_OPND src = load_freg128_from_ir1(opnd1);
 
-    la_vext2xv_wu_hu(dest, src);
+    if (option_enable_lasx) {
+        la_vext2xv_wu_hu(dest, src);
+    } else {
+        la_vsllwil_wu_hu(dest, src, 0);
+    }
     return true;
 }
 
@@ -3304,7 +3342,12 @@ bool translate_pmovsxwq(IR1_INST *pir1)
     IR2_OPND dest = load_freg128_from_ir1(opnd0);
     IR2_OPND src = load_freg128_from_ir1(opnd1);
 
-    la_vext2xv_d_h(dest, src);
+    if (option_enable_lasx) {
+        la_vext2xv_d_h(dest, src);
+    } else {
+        la_vsllwil_w_h(dest, src, 0);
+        la_vsllwil_d_w(dest, dest, 0);
+    }
     return true;
 }
 
@@ -3316,7 +3359,12 @@ bool translate_pmovzxwq(IR1_INST *pir1)
     IR2_OPND dest = load_freg128_from_ir1(opnd0);
     IR2_OPND src = load_freg128_from_ir1(opnd1);
 
-    la_vext2xv_du_hu(dest, src);
+    if (option_enable_lasx) {
+        la_vext2xv_du_hu(dest, src);
+    } else {
+        la_vsllwil_wu_hu(dest, src, 0);
+        la_vsllwil_du_wu(dest, dest, 0);
+    }
     return true;
 }
 
@@ -3328,7 +3376,11 @@ bool translate_pmovsxdq(IR1_INST *pir1)
     IR2_OPND dest = load_freg128_from_ir1(opnd0);
     IR2_OPND src = load_freg128_from_ir1(opnd1);
 
-    la_vext2xv_d_w(dest, src);
+    if (option_enable_lasx) {
+        la_vext2xv_d_w(dest, src);
+    } else {
+        la_vsllwil_d_w(dest, src, 0);
+    }
     return true;
 }
 
@@ -3340,7 +3392,11 @@ bool translate_pmovzxdq(IR1_INST *pir1)
     IR2_OPND dest = load_freg128_from_ir1(opnd0);
     IR2_OPND src = load_freg128_from_ir1(opnd1);
 
-    la_vext2xv_du_wu(dest, src);
+    if (option_enable_lasx) {
+        la_vext2xv_du_wu(dest, src);
+    } else {
+        la_vsllwil_du_wu(dest, src, 0);
+    }
     return true;
 }
 
@@ -8708,7 +8764,6 @@ bool translate_pclmulqdq(IR1_INST * pir1) {
         }
         load_freg128_from_ir1_mem(src, opnd1);
         tr_gen_call_to_helper_pcmpxstrx((ADDR)helper_pclmulqdq_xmm, s0, s1, ctrl);
-        la_xvor_v(src, temp_mem, temp_mem);
         if (option_enable_lasx) {
             la_xvor_v(src, temp_mem, temp_mem);
         } else {
