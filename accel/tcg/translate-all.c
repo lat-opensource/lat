@@ -5668,6 +5668,7 @@ static int interpret_add(ucontext_t *uc, uint32_t* inst)
     abi_ulong page_addr;
     uint64_t siaddr, newaddr;
     void *newpage;
+    int page_num;
 
     rd0 = inst[0] & 0x1f;
     rj0 = (inst[0] >> 5) & 0x1f;
@@ -5679,7 +5680,15 @@ static int interpret_add(ucontext_t *uc, uint32_t* inst)
     siaddr = UC_GR(uc)[rj0];
     page_addr = siaddr & qemu_host_page_mask;
 
-    newpage = set_interpret_newpage(page_addr, 1);
+    int opnd0_size = (inst[-2] & 0xffc003ff) == 0x03400000 ?
+                ((inst[-2] << 10)) >> 20 : 64;
+    if (page_addr != ((siaddr + (opnd0_size >> 3)) & qemu_host_page_mask)) {
+        page_num = 2;
+    } else {
+        page_num = 1;
+    }
+
+    newpage = set_interpret_newpage(page_addr, page_num);
     if (newpage == NULL) {
         return 1;
     }
@@ -5716,7 +5725,7 @@ static int interpret_add(ucontext_t *uc, uint32_t* inst)
                 " *new mem = 0x%lx\n", __func__, UC_GR(uc)[rd0],
                 UC_GR(uc)[rj0], UC_GR(uc)[rk0], *(int64_t *)newaddr);
 
-    return recover_interpret_oldpage(page_addr, newpage, 1);
+    return recover_interpret_oldpage(page_addr, newpage, page_num);
 }
 
 static int interpret_and(ucontext_t *uc, uint32_t* inst)
@@ -5725,6 +5734,7 @@ static int interpret_and(ucontext_t *uc, uint32_t* inst)
     abi_ulong page_addr;
     uint64_t siaddr, newaddr;
     void *newpage;
+    int page_num;
 
     rd0 = inst[0] & 0x1f;
     rj0 = (inst[0] >> 5) & 0x1f;
@@ -5736,7 +5746,15 @@ static int interpret_and(ucontext_t *uc, uint32_t* inst)
     siaddr = UC_GR(uc)[rj0];
     page_addr = siaddr & qemu_host_page_mask;
 
-    newpage = set_interpret_newpage(page_addr, 1);
+    int opnd0_size = (inst[-1] & 0xffc003ff) == 0x03400000 ?
+                ((inst[-1] << 10)) >> 20 : 64;
+    if (page_addr != ((siaddr + (opnd0_size >> 3)) & qemu_host_page_mask)) {
+        page_num = 2;
+    } else {
+        page_num = 1;
+    }
+
+    newpage = set_interpret_newpage(page_addr, page_num);
     if (newpage == NULL) {
         return 1;
     }
@@ -5773,7 +5791,7 @@ static int interpret_and(ucontext_t *uc, uint32_t* inst)
                 " *new mem = 0x%lx\n", __func__, UC_GR(uc)[rd0],
                 UC_GR(uc)[rj0], UC_GR(uc)[rk0], *(int64_t *)newaddr);
 
-    return recover_interpret_oldpage(page_addr, newpage, 1);
+    return recover_interpret_oldpage(page_addr, newpage, page_num);
 }
 
 static int interpret_or(ucontext_t *uc, uint32_t* inst)
@@ -5782,6 +5800,7 @@ static int interpret_or(ucontext_t *uc, uint32_t* inst)
     abi_ulong page_addr;
     uint64_t siaddr, newaddr;
     void *newpage;
+    int page_num;
 
     rd0 = inst[0] & 0x1f;
     rj0 = (inst[0] >> 5) & 0x1f;
@@ -5793,7 +5812,15 @@ static int interpret_or(ucontext_t *uc, uint32_t* inst)
     siaddr = UC_GR(uc)[rj0];
     page_addr = siaddr & qemu_host_page_mask;
 
-    newpage = set_interpret_newpage(page_addr, 1);
+    int opnd0_size = (inst[-1] & 0xffc003ff) == 0x03400000 ?
+                ((inst[-1] << 10)) >> 20 : 64;
+    if (page_addr != ((siaddr + (opnd0_size >> 3)) & qemu_host_page_mask)) {
+        page_num = 2;
+    } else {
+        page_num = 1;
+    }
+
+    newpage = set_interpret_newpage(page_addr, page_num);
     if (newpage == NULL) {
         return 1;
     }
@@ -5830,7 +5857,7 @@ static int interpret_or(ucontext_t *uc, uint32_t* inst)
                 " *new mem = 0x%lx\n", __func__, UC_GR(uc)[rd0],
                 UC_GR(uc)[rj0], UC_GR(uc)[rk0], *(int64_t *)newaddr);
 
-    return recover_interpret_oldpage(page_addr, newpage, 1);
+    return recover_interpret_oldpage(page_addr, newpage, page_num);
 }
 
 static int interpret_xor(ucontext_t *uc, uint32_t* inst)
@@ -5839,6 +5866,7 @@ static int interpret_xor(ucontext_t *uc, uint32_t* inst)
     abi_ulong page_addr;
     uint64_t siaddr, newaddr;
     void *newpage;
+    int page_num;
 
     rd0 = inst[0] & 0x1f;
     rj0 = (inst[0] >> 5) & 0x1f;
@@ -5850,7 +5878,15 @@ static int interpret_xor(ucontext_t *uc, uint32_t* inst)
     siaddr = UC_GR(uc)[rj0];
     page_addr = siaddr & qemu_host_page_mask;
 
-    newpage = set_interpret_newpage(page_addr, 1);
+    int opnd0_size = (inst[-2] & 0xffc003ff) == 0x03400000 ?
+                ((inst[-2] << 10)) >> 20 : 64;
+    if (page_addr != ((siaddr + (opnd0_size >> 3)) & qemu_host_page_mask)) {
+        page_num = 2;
+    } else {
+        page_num = 1;
+    }
+
+    newpage = set_interpret_newpage(page_addr, page_num);
     if (newpage == NULL) {
         return 1;
     }
@@ -5887,7 +5923,7 @@ static int interpret_xor(ucontext_t *uc, uint32_t* inst)
                 " *new mem = 0x%lx\n", __func__, UC_GR(uc)[rd0],
                 UC_GR(uc)[rj0], UC_GR(uc)[rk0], *(int64_t *)newaddr);
 
-    return recover_interpret_oldpage(page_addr, newpage, 1);
+    return recover_interpret_oldpage(page_addr, newpage, page_num);
 }
 
 static int interpret_sub(ucontext_t *uc, uint32_t* inst)
@@ -5896,6 +5932,7 @@ static int interpret_sub(ucontext_t *uc, uint32_t* inst)
     abi_ulong page_addr;
     uint64_t siaddr, newaddr;
     void *newpage;
+    int page_num;
 
     rd0 = inst[0] & 0x1f;
     rj0 = (inst[0] >> 5) & 0x1f;
@@ -5910,7 +5947,15 @@ static int interpret_sub(ucontext_t *uc, uint32_t* inst)
     siaddr = UC_GR(uc)[rj0];
     page_addr = siaddr & qemu_host_page_mask;
 
-    newpage = set_interpret_newpage(page_addr, 1);
+    int opnd0_size = (inst[-1] & 0xffc003ff) == 0x03400000 ?
+                ((inst[-1] << 10)) >> 20 : 64;
+    if (page_addr != ((siaddr + (opnd0_size >> 3)) & qemu_host_page_mask)) {
+        page_num = 2;
+    } else {
+        page_num = 1;
+    }
+
+    newpage = set_interpret_newpage(page_addr, page_num);
     if (newpage == NULL) {
         return 1;
     }
@@ -5951,7 +5996,7 @@ static int interpret_sub(ucontext_t *uc, uint32_t* inst)
                 __func__, UC_GR(uc)[rd1], UC_GR(uc)[rj1], UC_GR(uc)[rk1]);
 
 
-    return recover_interpret_oldpage(page_addr, newpage, 1);
+    return recover_interpret_oldpage(page_addr, newpage, page_num);
 }
 
 static int interpret_xchg(ucontext_t *uc, uint32_t* inst)
@@ -5960,6 +6005,7 @@ static int interpret_xchg(ucontext_t *uc, uint32_t* inst)
     abi_ulong page_addr;
     uint64_t siaddr, newaddr;
     void *newpage;
+    int page_num;
 
     rd0 = inst[0] & 0x1f;
     rj0 = (inst[0] >> 5) & 0x1f;
@@ -5971,7 +6017,15 @@ static int interpret_xchg(ucontext_t *uc, uint32_t* inst)
     siaddr = UC_GR(uc)[rj0];
     page_addr = siaddr & qemu_host_page_mask;
 
-    newpage = set_interpret_newpage(page_addr, 1);
+    int opnd0_size = (inst[-1] & 0xffc003ff) == 0x03400000 ?
+                ((inst[-1] << 10)) >> 20 : 64;
+    if (page_addr != ((siaddr + (opnd0_size >> 3)) & qemu_host_page_mask)) {
+        page_num = 2;
+    } else {
+        page_num = 1;
+    }
+
+    newpage = set_interpret_newpage(page_addr, page_num);
     if (newpage == NULL) {
         return 1;
     }
@@ -6008,7 +6062,7 @@ static int interpret_xchg(ucontext_t *uc, uint32_t* inst)
                 " *new mem = 0x%lx\n", __func__, UC_GR(uc)[rd0],
                 UC_GR(uc)[rj0], UC_GR(uc)[rk0], *(int64_t *)newaddr);
 
-    return recover_interpret_oldpage(page_addr, newpage, 1);
+    return recover_interpret_oldpage(page_addr, newpage, page_num);
 }
 
 #ifdef CONFIG_LATX
@@ -6018,6 +6072,7 @@ static int interpret_cmpxchg16b(ucontext_t *uc, uint32_t* inst)
     abi_ulong page_addr;
     uint64_t siaddr, newaddr, mem_old_hi, mem_old_lo;
     void *newpage;
+    int page_num;
 
     /*
      * cmpxchg16b:
@@ -6031,7 +6086,13 @@ static int interpret_cmpxchg16b(ucontext_t *uc, uint32_t* inst)
     siaddr = UC_GR(uc)[rj];
     page_addr = siaddr & qemu_host_page_mask;
 
-    newpage = set_interpret_newpage(page_addr, 1);
+    if (page_addr != ((siaddr + 16) & qemu_host_page_mask)) {
+        page_num = 2;
+    } else {
+        page_num = 1;
+    }
+
+    newpage = set_interpret_newpage(page_addr, page_num);
     if (newpage == NULL) {
         return 1;
     }
@@ -6054,7 +6115,7 @@ static int interpret_cmpxchg16b(ucontext_t *uc, uint32_t* inst)
     }
     UC_PC(uc) += 8;
 
-    return recover_interpret_oldpage(page_addr, newpage, 1);
+    return recover_interpret_oldpage(page_addr, newpage, page_num);
 }
 #else
 static int interpret_cmpxchg16b(ucontext_t *uc, uint32_t* inst)
