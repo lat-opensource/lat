@@ -36,6 +36,7 @@
 #define TARGET_SO_SNDLOWAT     19
 #define TARGET_SO_RCVTIMEO     20
 #define TARGET_SO_SNDTIMEO     21
+#define TARGET_SO_MARK         36
 
 /* Security levels - as per NRL IPv6 - don't actually do anything */
 #define TARGET_SO_SECURITY_AUTHENTICATION              22
