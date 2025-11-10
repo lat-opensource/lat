@@ -3737,6 +3737,7 @@ static abi_long do_socket(int domain, int type, int protocol)
 #endif
          protocol == NETLINK_KOBJECT_UEVENT ||
          protocol == NETLINK_AUDIT ||
+         protocol == NETLINK_NETFILTER ||
          protocol == NETLINK_CRYPTO)) {
         return -TARGET_EPROTONOSUPPORT;
     }
@@ -3769,6 +3770,8 @@ static abi_long do_socket(int domain, int type, int protocol)
                 break;
             case NETLINK_CRYPTO:
                 fd_trans_register(ret, &target_netlink_crypto_trans);
+                break;
+            case NETLINK_NETFILTER:
                 break;
             default:
                 g_assert_not_reached();
