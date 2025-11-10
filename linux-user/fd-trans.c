@@ -688,6 +688,49 @@ static abi_long host_to_target_data_sit_nlattr(struct nlattr *nlattr,
     return 0;
 }
 
+static abi_long host_to_target_data_ip6tnl_nlattr(struct nlattr *nlattr,
+                                                  void *context)
+{
+    uint16_t *u16;
+    uint32_t *u32;
+
+    switch (nlattr->nla_type) {
+    /* no data */
+    case QEMU_IFLA_IPTUN_COLLECT_METADATA:
+        break;
+    /* uint8_t */
+    case QEMU_IFLA_IPTUN_TTL:
+    case QEMU_IFLA_IPTUN_ENCAP_LIMIT:
+    case QEMU_IFLA_IPTUN_PROTO:
+        break;
+    /* uint16_t */
+    case QEMU_IFLA_IPTUN_ENCAP_TYPE:
+    case QEMU_IFLA_IPTUN_ENCAP_FLAGS:
+    case QEMU_IFLA_IPTUN_ENCAP_SPORT:
+    case QEMU_IFLA_IPTUN_ENCAP_DPORT:
+        u16 = NLA_DATA(nlattr);
+        *u16 = tswap16(*u16);
+        break;
+    /* uint32_t */
+    case QEMU_IFLA_IPTUN_LINK:
+    case QEMU_IFLA_IPTUN_FLOWINFO:
+    case QEMU_IFLA_IPTUN_FLAGS:
+    case QEMU_IFLA_IPTUN_FWMARK:
+        u32 = NLA_DATA(nlattr);
+        *u32 = tswap32(*u32);
+        break;
+    /* ifla_bridge_id: uint8_t[] */
+    case QEMU_IFLA_IPTUN_LOCAL:
+    case QEMU_IFLA_IPTUN_REMOTE:
+        break;
+    default:
+        qemu_log_mask(LOG_UNIMP, "Unknown QEMU_IFLA_BR type %d\n",
+                      nlattr->nla_type);
+        break;
+    }
+    return 0;
+}
+
 struct linkinfo_context {
     int len;
     char *name;
@@ -734,6 +777,12 @@ static abi_long host_to_target_data_linkinfo_nlattr(struct nlattr *nlattr,
                                                   nlattr->nla_len,
                                                   NULL,
                                                 host_to_target_data_sit_nlattr);
+        } else if (strncmp(li_context->name, "ip6tnl",
+                    li_context->len) == 0) {
+            return host_to_target_for_each_nlattr(NLA_DATA(nlattr),
+                                                  nlattr->nla_len,
+                                                  NULL,
+                                                host_to_target_data_ip6tnl_nlattr);
         } else {
             qemu_log_mask(LOG_UNIMP, "Unknown QEMU_IFLA_INFO_KIND %s\n",
                           li_context->name);
