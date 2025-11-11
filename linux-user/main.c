@@ -694,6 +694,12 @@ static void handle_arg_mmap_fixed(const char *arg)
     option_mmap_fixed = strtol(arg, NULL, 0);
 }
 
+static void handle_arg_latx_unimp_dump(const char *arg)
+{
+    last_log_mask = LOG_UNIMP;
+    qemu_set_log_filename(arg, &error_fatal);
+}
+
 static void handle_arg_latx_mem_test(const char *arg)
 {
     option_mem_test = strtol(arg, NULL, 0);
@@ -835,6 +841,8 @@ static const struct qemu_argument arg_table[] = {
     "",           "adjust the initial address of mmap"},
     {"latx-mmap_fixed",    "LATX_MMAP_FIXED",     true,  handle_arg_mmap_fixed,
     "",           "force mmap with address to be MAP_FIXED"},
+    {"latx-unimp-dump",     "LATX_UNIMP_DUMP", false, handle_arg_latx_unimp_dump,
+    "",                 "LATX dump unsupport syscall"},
 #endif
 #if defined(CONFIG_LATX_DEBUG) || defined(CONFIG_DEBUG_TCG)
 #ifdef CONFIG_LATX

@@ -3739,6 +3739,7 @@ static abi_long do_socket(int domain, int type, int protocol)
          protocol == NETLINK_AUDIT ||
          protocol == NETLINK_NETFILTER ||
          protocol == NETLINK_CRYPTO)) {
+        qemu_log_mask(LOG_UNIMP, "Unsupported socket, protocol = %d\n", protocol);
         return -TARGET_EPROTONOSUPPORT;
     }
 
