@@ -457,6 +457,36 @@ static void page_init(void)
 
 }
 
+
+unsigned long shadow_page_map_start = -1;
+unsigned long shadow_page_map_end = 0;
+
+static inline void spm_set(uint64_t addr, uint64_t len)
+{
+    if (shadow_page_map_start > addr)
+        shadow_page_map_start = addr;
+    if (shadow_page_map_end < addr + len)
+        shadow_page_map_end = addr + len;
+}
+
+static inline void spm_clear(uint64_t addr, uint64_t len)
+{
+    if (shadow_page_map_start == addr)
+        shadow_page_map_start = addr + len;
+
+    if (shadow_page_map_end == addr + len)
+        shadow_page_map_end = addr;
+}
+
+static inline bool spm_exist(uint64_t addr, uint64_t len)
+{
+    if (!(addr >= shadow_page_map_end || (addr + len) <= shadow_page_map_start)) {
+        return true;
+    } else {
+        return false;
+    }
+}
+
 static bool is_shadow_page(target_ulong address)
 {
     return page_get_target_data(address);
@@ -3602,6 +3632,9 @@ void page_reset_target_data(target_ulong start, target_ulong end)
     start = start & TARGET_PAGE_MASK;
     last = TARGET_PAGE_ALIGN(end) - 1;
 
+    if (!spm_exist(start, last-start))
+        return;
+
     for (n = interval_tree_iter_first(&targetdata_root, start, last),
          next = n ? interval_tree_iter_next(n, start, last) : NULL;
          n != NULL;
@@ -3615,6 +3648,12 @@ void page_reset_target_data(target_ulong start, target_ulong end)
             if (shadow_pd) {
                 munmap(shadow_pd->p_addr, qemu_host_page_size);
             }
+            if ((n->last - n->start) != TARGET_PAGE_SIZE -1) {
+                printf("%s interval_tree_node start %lx end %lx size %lx not TARGET_PAGE_SIZE!!!!\n",
+                    __func__, n->start, n->last, n->last - n->start + 1);
+                assert(0);
+            }
+            spm_clear(n->start, n->last - n->start + 1);
             g_free(t->target_data);
             t->target_data = NULL;
             interval_tree_remove(n, &targetdata_root);
@@ -3633,6 +3672,9 @@ void *page_get_target_data(target_ulong address)
     target_ulong page;
 
     page = address & TARGET_PAGE_MASK;
+
+    if (!spm_exist(page, TARGET_PAGE_SIZE))
+        return NULL;
 
     n = interval_tree_iter_first(&targetdata_root, page, page);
     if (!n) {
@@ -3673,6 +3715,12 @@ void *page_alloc_target_data(target_ulong address, size_t size)
             interval_tree_insert(n, &targetdata_root);
         }
         mmap_unlock();
+    }
+
+    if ((n->last- n->start) != TARGET_PAGE_SIZE -1) {
+        printf("%s interval_tree_node start %lx end %lx size %lx not TARGET_PAGE_SIZE!!!!\n",
+            __func__, n->start, n->last, n->last - n->start + 1);
+        assert(0);
     }
 
     t = container_of(n, TargetPageDataNode, itree);
@@ -4198,6 +4246,7 @@ void set_shadow_page(target_ulong orig_page, void *shadow_p, int64_t access_off)
             qemu_log_mask(LAT_LOG_MEM, "[LATX_16K] %s orig_p 0x"
                     TARGET_FMT_lx " shadow_p %p access_off 0x%lx\n",
                     __func__, orig_page, shadow_p, access_off);
+        spm_set(orig_page, TARGET_PAGE_SIZE);
     } else {
         /* this page has been managed, shadow page needs to be released first */
         mmap_lock();
@@ -4208,6 +4257,7 @@ void set_shadow_page(target_ulong orig_page, void *shadow_p, int64_t access_off)
                 TARGET_FMT_lx " shadow_p %p access_off 0x%lx "
                 "(this page has been managed)\n",
                 __func__, orig_page, shadow_p, access_off);
+        spm_clear(orig_page, TARGET_PAGE_SIZE);
         mmap_unlock();
     }
 }
@@ -6474,6 +6524,9 @@ int hostpage_exist_shadow_page(uint64_t host_addr)
     real_end = real_start + qemu_host_page_size;
     ret = 0;
 
+    if (!spm_exist(real_start, qemu_host_page_size))
+        return 0;
+
     for (addr = real_start, i = 0; addr < real_end; addr += TARGET_PAGE_SIZE, i++) {
         if (page_get_target_data(addr)) {
             qemu_log_mask(LAT_LOG_MEM, "[LATX_16K] %s %lx target_data %p\n",
@@ -6505,9 +6558,10 @@ int mprotect_one_shadow_page(abi_ulong addr, int prot)
 
 int mprotect_shadow_page_range_if_exist(abi_ulong start, abi_ulong end, int prot)
 {
-    int shadow_page_count = 0;
+    int shadow_page_count;
 
     uint64_t addr, real_start, real_end;
+    uint64_t host_mprotect_start, host_mprotect_end;
     int i;
 
     real_start = start & TARGET_PAGE_MASK;
@@ -6515,28 +6569,71 @@ int mprotect_shadow_page_range_if_exist(abi_ulong start, abi_ulong end, int prot
     int ret = 0;
     assert(real_start <= real_end);
 
-    for (addr = real_start, i = 0; addr < real_end; addr += TARGET_PAGE_SIZE, i++) {
+    //fast path
+    if (!spm_exist(start, end - start)) {
+        /* no shadow page in the host page, mprotect directly. */
+        ret = mprotect(g2h_untagged(start), end - start, prot);
+        if (ret != 0) {
+            qemu_log_mask(LAT_LOG_MEM, "[LATX_16K] %s host mprotect addr %lx size%lx prot 0x%x failed\n",
+                    __func__, start, end - start, prot);
+            return -1;
+        }
+        return 0;
+    }
 
-        ShadowPageDesc *shadow_pd = page_get_target_data(addr);
-        if (shadow_pd) {
-            shadow_page_count ++;
-            /* fast path */
-            if ((page_get_flags(addr) & PAGE_BITS) == prot) {
-                continue;
+    host_mprotect_start = real_start;
+    host_mprotect_end = real_start;
+
+    for (addr = start; addr < end; addr += qemu_host_page_size) {
+        shadow_page_count = 0;
+        for (i = 0; i < qemu_host_page_size; i += TARGET_PAGE_SIZE) {
+
+            ShadowPageDesc *shadow_pd = page_get_target_data(addr + i);
+            if (shadow_pd) {
+                shadow_page_count ++;
+                /* fast path */
+                if ((page_get_flags(addr + i) & PAGE_BITS) == prot) {
+                    continue;
+                }
+                ret = mprotect(shadow_pd->p_addr, qemu_host_page_size, prot);
+                if (ret != 0) {
+                    qemu_log_mask(LAT_LOG_MEM, "[LATX_16K] %s %lx shadow_p %p prot 0x%x mprotect failed\n",
+                            __func__, addr + i, shadow_pd->p_addr, prot);
+                    return -1;
+                }
+                qemu_log_mask(LAT_LOG_MEM, "[LATX_16K] %s %lx shadow_p %p prot 0x%x\n",
+                        __func__, addr + i, shadow_pd->p_addr, prot);
             }
-            ret = mprotect(shadow_pd->p_addr, qemu_host_page_size, prot);
-            if (ret != 0) {
-                qemu_log_mask(LAT_LOG_MEM, "[LATX_16K] %s %lx shadow_p %p prot 0x%x mprotect failed\n",
-                        __func__, addr, shadow_pd->p_addr, prot);
-                return -1;
+        }
+        if (shadow_page_count == 0) {
+            host_mprotect_end = addr + qemu_host_page_size;
+        } else {
+            /* no shadow page in the host page range, mprotect directly. */
+            if (host_mprotect_end != host_mprotect_start) {
+                ret = mprotect(g2h_untagged(host_mprotect_start), host_mprotect_end - host_mprotect_start, prot);
+                if (ret != 0) {
+                    qemu_log_mask(LAT_LOG_MEM, "[LATX_16K] %s host mprotect addr %lx size%lx prot 0x%x failed\n",
+                            __func__, host_mprotect_start, host_mprotect_end - host_mprotect_start, prot);
+                    return -1;
+                }
             }
-            qemu_log_mask(LAT_LOG_MEM, "[LATX_16K] %s %lx shadow_p %p prot 0x%x\n",
-                    __func__, addr, shadow_pd->p_addr, prot);
+            host_mprotect_start = host_mprotect_end = addr + qemu_host_page_size;
         }
     }
 
-    return shadow_page_count;
+    /* no shadow page in the host page range, mprotect directly. */
+    if (host_mprotect_end != host_mprotect_start) {
+        ret = mprotect(g2h_untagged(host_mprotect_start), host_mprotect_end - host_mprotect_start, prot);
+        if (ret != 0) {
+            qemu_log_mask(LAT_LOG_MEM, "[LATX_16K] %s host mprotect addr %lx size%lx prot 0x%x failed\n",
+                    __func__, host_mprotect_start, host_mprotect_end - host_mprotect_start, prot);
+            return -1;
+        }
+    }
+
+    return 0;
 }
+
 /*
  * shadow_page_mprotect:
  *      return zero means "hit shadow pages"
@@ -6670,6 +6767,7 @@ void shadow_page_munmap(abi_ulong start, abi_ulong end)
         if (shadow_pd) {
             ret = munmap(shadow_pd->p_addr, qemu_host_page_size);
             assert(ret == 0);
+            spm_clear(addr, TARGET_PAGE_SIZE);
             qemu_log_mask(LAT_LOG_MEM, "[LATX_16K] %s addr 0x"
                     TARGET_FMT_lx " shadow_p %p\n",
                     __func__, addr, shadow_pd->p_addr);
