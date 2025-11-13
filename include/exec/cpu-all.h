@@ -360,6 +360,7 @@ int elf_data_interpret(siginfo_t *info, ucontext_t *uc);
 #endif
 int hostpage_exist_shadow_page(uint64_t host_addr);
 int mprotect_one_shadow_page(abi_ulong addr, int prot);
+int mprotect_shadow_page_range_if_exist(abi_ulong start, abi_ulong end, int prot);
 int shadow_page_mprotect(abi_ulong *old_start, abi_ulong *old_end, int host_prot);
 void shadow_page_munmap(abi_ulong start, abi_ulong end);
 void create_shadow_page_chunk(abi_ulong start, abi_ulong end,

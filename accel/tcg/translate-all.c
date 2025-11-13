@@ -6502,6 +6502,41 @@ int mprotect_one_shadow_page(abi_ulong addr, int prot)
     return ret;
 }
 
+
+int mprotect_shadow_page_range_if_exist(abi_ulong start, abi_ulong end, int prot)
+{
+    int shadow_page_count = 0;
+
+    uint64_t addr, real_start, real_end;
+    int i;
+
+    real_start = start & TARGET_PAGE_MASK;
+    real_end = end & TARGET_PAGE_MASK;
+    int ret = 0;
+    assert(real_start <= real_end);
+
+    for (addr = real_start, i = 0; addr < real_end; addr += TARGET_PAGE_SIZE, i++) {
+
+        ShadowPageDesc *shadow_pd = page_get_target_data(addr);
+        if (shadow_pd) {
+            shadow_page_count ++;
+            /* fast path */
+            if ((page_get_flags(addr) & PAGE_BITS) == prot) {
+                continue;
+            }
+            ret = mprotect(shadow_pd->p_addr, qemu_host_page_size, prot);
+            if (ret != 0) {
+                qemu_log_mask(LAT_LOG_MEM, "[LATX_16K] %s %lx shadow_p %p prot 0x%x mprotect failed\n",
+                        __func__, addr, shadow_pd->p_addr, prot);
+                return -1;
+            }
+            qemu_log_mask(LAT_LOG_MEM, "[LATX_16K] %s %lx shadow_p %p prot 0x%x\n",
+                    __func__, addr, shadow_pd->p_addr, prot);
+        }
+    }
+
+    return shadow_page_count;
+}
 /*
  * shadow_page_mprotect:
  *      return zero means "hit shadow pages"

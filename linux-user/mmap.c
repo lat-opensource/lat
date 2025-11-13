@@ -251,11 +251,20 @@ int target_mprotect(abi_ulong start, abi_ulong len, int target_prot)
 
     /* handle the pages in the middle */
     if (host_start < host_end) {
-        ret = mprotect(g2h_untagged(host_start),
-                       host_end - host_start, host_prot);
-        if (ret != 0) {
-            goto error;
+        for (addr = host_start; addr < host_end; addr += qemu_host_page_size) {
+            ret = mprotect_shadow_page_range_if_exist(host_start, host_end, host_prot);
+            /* no shadow page in the host page, mprotect directly. */
+            if (ret == 0) {
+                ret = mprotect(g2h_untagged(addr),
+                               qemu_host_page_size, host_prot);
+                if (ret != 0) {
+                    goto error;
+                }
+            } else if (ret == -1) {
+                    goto error;
+            }
         }
+
     }
     page_set_flags(start, start + len, page_flags);
     if(target_prot == PROT_NONE) {
