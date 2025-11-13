@@ -189,8 +189,8 @@ cpu_tb_exec(CPUState *cpu, TranslationBlock *itb, int *tb_exit)
     uintptr_t ret;
     TranslationBlock *last_tb;
     const void *tb_ptr = itb->tc.ptr;
-#ifdef CONFIG_LATX_KZT
     if (qemu_loglevel_mask(CPU_LOG_EXEC)) {
+#ifdef CONFIG_LATX_KZT
         Dl_info dl_info;
         if (option_kzt && itb->pc > reserved_va &&
             dladdr ((const void *)((onebridge_t *)itb->pc)->f, &dl_info)) {
@@ -205,11 +205,18 @@ cpu_tb_exec(CPUState *cpu, TranslationBlock *itb, int *tb_exit)
                    "%d Trace %d: %p ["
                    TARGET_FMT_lx "/" "%016llx" "/" TARGET_FMT_lx
                    "/%#x] %s\n", getpid(), cpu->cpu_index, itb->tc.ptr,
-                   0UL, (unsigned long long)pthread_self(),
+                   (unsigned long)0, (unsigned long long)pthread_self(),
                    itb->pc, itb->flags, lookup_symbol(itb->pc));
         }
-    }
+#else
+        qemu_log_mask_and_addr(CPU_LOG_EXEC, itb->pc,
+               "%d Trace %d: %p ["
+               TARGET_FMT_lx "/" "%016llx" "/" TARGET_FMT_lx
+               "/%#x] %s\n", getpid(), cpu->cpu_index, itb->tc.ptr,
+               (unsigned long)0, (unsigned long long)pthread_self(),
+               itb->pc, itb->flags, lookup_symbol(itb->pc));
 #endif
+    }
 #ifdef CONFIG_LATX_DEBUG
     if (strlen(lookup_symbol(itb->pc)) > 0) {
         if (env->last_func_index == -1) {
