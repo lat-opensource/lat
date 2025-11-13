@@ -226,6 +226,7 @@ IR1_INST *get_ir1_list(struct TranslationBlock *tb, ADDRX pc, int max_insns)
         pc = ir1_disasm(pir1, inst_cache, pc, ir1_num, pir1_base);
 #endif
         if (pir1->info == NULL) {
+            fprintf(stderr, "invalid assembly pc: %lx\n", pc);
 #if defined(CONFIG_LATX_TU)
             tb->s_data->tu_tb_mode = TU_TB_MODE_BROKEN;
             tb->s_data->next_pc = tb->pc;
