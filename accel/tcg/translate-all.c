@@ -4250,7 +4250,7 @@ static int64_t over_page_read(int64_t mem_addr, int deal_byte_count)
         return *(int64_t *)mem_addr;
     }
 
-    int value = read_by_byte(mem_addr, 0, page1_byte_count, 0);
+    int64_t value = read_by_byte(mem_addr, 0, page1_byte_count, 0);
     if (page1_byte_count < deal_byte_count) {
         spd = page_get_target_data(page2_addr);
         if (spd) {
@@ -4313,7 +4313,7 @@ static void over_page_write(int64_t mem_addr, int64_t value, int deal_byte_count
     /* Write page2. */
     if (page1_byte_count < deal_byte_count) {
         deal_byte_count -= page1_byte_count;
-        value >>= (deal_byte_count << 3);
+        value >>= (page1_byte_count << 3);
         spd = page_get_target_data(page2_addr);
         if (spd) {
             page2_addr += spd->access_off;
@@ -4330,7 +4330,6 @@ static bool is_over_page(int64_t addr1, int64_t addr2)
 static bool no_right(int64_t addr, int bit_count,
         uint32_t test_flags, int64_t *siaddr)
 {
-    return false;
     int page_flags = page_get_flags(addr);
     if (!(page_flags & test_flags)) {
         *siaddr = addr;
