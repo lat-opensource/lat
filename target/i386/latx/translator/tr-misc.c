@@ -29,12 +29,20 @@ bool translate_nop(IR1_INST *pir1)
     if (option_anonym) {
         IR2_OPND eflags_opnd = ra_alloc_eflags();
         IR2_OPND eflags_temp_opnd = ra_alloc_itemp();
+        IR2_OPND tmp_opnd = ra_alloc_itemp();
+        IR2_OPND eip_opnd = ra_alloc_dbt_arg2();
         IR2_OPND label_TF = ra_alloc_label();
 
-        la_andi(eflags_temp_opnd, eflags_opnd, 0x100);
+        la_andi(eflags_temp_opnd, eflags_opnd, TF_MASK);
         la_beqz(eflags_temp_opnd, label_TF);
-        la_break(0x5);
-
+        li_d(eip_opnd, ir1_addr(pir1));
+        la_store_addrx(eip_opnd, env_ir2_opnd,
+                        lsenv_offset_of_eip(lsenv));
+        tr_save_registers_to_env(0xff, 0xff, option_save_xmm, options_to_save());
+        aot_load_host_addr(tmp_opnd, (ADDR)helper_raise_trapop,
+            LOAD_HELPER_RAISE_TRAPOP, 0);
+        la_jirl(zero_ir2_opnd, tmp_opnd, 0);
+        ra_free_temp(tmp_opnd);
         la_label(label_TF);
     }
 
@@ -430,6 +438,18 @@ void helper_raise_illop(void)
     CPUState *cs = env_cpu(env);
 
     cs->exception_index = EXCP06_ILLOP;
+    env->error_code = 0;
+    env->exception_is_int = 0;
+    env->exception_next_eip = env->eip;
+    cpu_loop_exit(cs);
+}
+
+void helper_raise_trapop(void)
+{
+    CPUX86State *env = (CPUX86State *)lsenv->cpu_state;
+    CPUState *cs = env_cpu(env);
+
+    cs->exception_index = EXCP01_DB;
     env->error_code = 0;
     env->exception_is_int = 0;
     env->exception_next_eip = env->eip;

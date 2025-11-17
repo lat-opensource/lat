@@ -1226,6 +1226,7 @@ void convert_fpregs_64_to_x80(void);
 void convert_fpregs_x80_to_64(void);
 void helper_raise_int(void);
 void helper_raise_illop(void);
+void helper_raise_trapop(void);
 void helper_raise_gpf(void);
 void helper_raise_syscall(void);
 

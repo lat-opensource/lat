@@ -1173,6 +1173,7 @@ static void* relkind_to_fixup_addr[] = {
     [LOAD_HELPER_CPUID] = helper_cpuid,
     [LOAD_HELPER_RAISE_INT] = helper_raise_int,
     [LOAD_HELPER_RAISE_ILLOP] = helper_raise_illop,
+    [LOAD_HELPER_RAISE_TRAPOP] = helper_raise_trapop,
     [LOAD_HELPER_RAISE_GPF] = helper_raise_gpf,
 #ifdef TARGET_X86_64
     [LOAD_HELPER_RAISE_SYSCALL] = helper_raise_syscall,

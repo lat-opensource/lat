@@ -32,7 +32,7 @@ bool translate_popf(IR1_INST *pir1)
     }
 #endif
 
-    la_andi(eflags_temp_opnd, eflags_opnd, 0x100);
+    la_andi(eflags_temp_opnd, eflags_opnd, TF_MASK);
     la_beqz(eflags_temp_opnd, label_miss);
     tr_gen_call_to_helper1((ADDR)helper_eflagtf, 1, LOAD_HELPER_EFLAGTF);
 
