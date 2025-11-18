@@ -9005,6 +9005,7 @@ bool translate_aeskeygenassist(IR1_INST *pir1)
     return true;
 }
 
+#ifdef CONFIG_LATX_AVX_OPT
 static void adjust_vsib_index(IR2_OPND dest, IR2_OPND base,
                     IR2_OPND index, int scale)
 {
@@ -9032,7 +9033,6 @@ static void adjust_vsib_index(IR2_OPND dest, IR2_OPND base,
     }
 }
 
-#ifdef CONFIG_LATX_AVX_OPT
 bool translate_vaesdec(IR1_INST *pir1)
 {
     IR1_OPND *opnd0 = ir1_get_opnd(pir1, 0);
