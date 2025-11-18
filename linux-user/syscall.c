@@ -12214,10 +12214,12 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
         return get_errno(syncfs(arg1));
 #endif
     case TARGET_NR_kill:
+#ifdef CONFIG_LATX_AOT
         if (arg1 == getpid())
         {
             aot_exit_entry(cpu, true);
         }
+#endif
         return get_errno(safe_kill(arg1, target_to_host_signal(arg2)));
 #ifdef TARGET_NR_rename
     case TARGET_NR_rename:
@@ -16126,10 +16128,12 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
         return get_errno(safe_tkill((int)arg1, target_to_host_signal(arg2)));
 
     case TARGET_NR_tgkill:
+#ifdef CONFIG_LATX_AOT
         if (arg2 == syscall(SYS_gettid))
         {
             aot_exit_entry(cpu, true);
         }
+#endif
         return get_errno(safe_tgkill((int)arg1, (int)arg2,
                          target_to_host_signal(arg3)));
 
