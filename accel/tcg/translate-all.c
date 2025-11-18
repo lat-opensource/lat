@@ -6560,21 +6560,21 @@ int mprotect_shadow_page_range_if_exist(abi_ulong start, abi_ulong end, int prot
 {
     int shadow_page_count;
 
-    uint64_t addr, real_start, real_end;
+    uint64_t addr, real_start;
     uint64_t host_mprotect_start, host_mprotect_end;
     int i;
 
     real_start = start & TARGET_PAGE_MASK;
-    real_end = end & TARGET_PAGE_MASK;
     int ret = 0;
-    assert(real_start <= real_end);
+    assert(real_start <= (end & TARGET_PAGE_MASK));
 
     //fast path
     if (!spm_exist(start, end - start)) {
         /* no shadow page in the host page, mprotect directly. */
         ret = mprotect(g2h_untagged(start), end - start, prot);
         if (ret != 0) {
-            qemu_log_mask(LAT_LOG_MEM, "[LATX_16K] %s host mprotect addr %lx size%lx prot 0x%x failed\n",
+            qemu_log_mask(LAT_LOG_MEM, "[LATX_16K] %s host mprotect addr "
+                    TARGET_FMT_lx " size " TARGET_FMT_lx " prot 0x%x failed\n",
                     __func__, start, end - start, prot);
             return -1;
         }
