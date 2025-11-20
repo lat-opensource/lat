@@ -12,9 +12,9 @@
 #include "translate.h"
 #include "latx-config.h"
 #include "syscall-tunnel.h"
+
 #ifdef CONFIG_LATX_TU
 #include "tu.h"
-
 void target_disasm(struct TranslationBlock *tb, int max_insns)
 {
     /* max_insns = 100; */
@@ -450,48 +450,46 @@ static __thread TRANSLATION_DATA tr_data_real;
 
 /* global lsenv defined here */
 __thread ENV *lsenv;
-FastTB *fast_jmp_cache;
 
-
-
-void latx_fast_jmp_cache_add(int hash, struct TranslationBlock *tb)
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+void latx_fast_jmp_cache_add(CPUState *cs, int h, struct TranslationBlock *tb)
 {
-    fast_jmp_cache[hash].pc = tb->pc;
-    fast_jmp_cache[hash].ptr = tb->tc.ptr;
+    X86CPU *cpu = X86_CPU(cs);
+    CPUX86State *env = &cpu->env;
+    FastTB *fast_jmp_cache = (FastTB *)env->tb_jmp_cache_ptr;
+    qatomic_set(&fast_jmp_cache[h].ptr, tb->tc.ptr);
+    qatomic_set(&fast_jmp_cache[h].pc, tb->pc);
 }
 
-void latx_fast_jmp_cache_clear(int hash)
+void latx_fast_jmp_cache_clear(CPUState *cs, int h)
 {
-    fast_jmp_cache[hash].pc = 0;
+    X86CPU *cpu = X86_CPU(cs);
+    CPUX86State *env = &cpu->env;
+    FastTB *fast_jmp_cache = (FastTB *)env->tb_jmp_cache_ptr;
+    qatomic_set(&fast_jmp_cache[h].pc, 0);
 }
 
-void latx_fast_jmp_cache_clear_all(void)
+void latx_fast_jmp_cache_clear_all(CPUState *cs)
 {
-    for (int i = 0; i < TB_JMP_CACHE_SIZE; i++) {
-        fast_jmp_cache[i].pc = 0;
-    }
+    X86CPU *cpu = X86_CPU(cs);
+    CPUX86State *env = &cpu->env;
+    memset(env->tb_jmp_cache_ptr, 0, sizeof(struct FastTB) * TB_JMP_CACHE_SIZE);
 }
 
-void latx_fast_jmp_cache_free(CPUX86State *env)
+bool latx_fast_jmp_cache_init(void *env)
 {
-    CPUState *cpu = env_cpu(env);
-    if (fast_jmp_cache) {
-        free(fast_jmp_cache);
-    }
-    env->tb_jmp_cache_ptr = cpu->tb_jmp_cache;
-}
+    FastTB *fast_jmp_cache;
+    CPUX86State *x86env = env;
 
-void latx_fast_jmp_cache_init(CPUX86State *env)
-{
-    size_t malloc_size;
-    malloc_size = sizeof(struct FastTB) * TB_JMP_CACHE_SIZE;
-    fast_jmp_cache = malloc(malloc_size);
+    fast_jmp_cache = calloc(TB_JMP_CACHE_SIZE, sizeof(struct FastTB));
     if (!fast_jmp_cache) {
-        lsassertm(0, "fast_jmp_cache malloc error!\n");
+        return false;
     }
-    env->tb_jmp_cache_ptr = fast_jmp_cache;
-}
+    x86env->tb_jmp_cache_ptr = fast_jmp_cache;
 
+    return true;
+}
+#endif
 
 #ifdef CONFIG_LATX_DEBUG
 __thread char *func_stack[FUNC_DEPTH];

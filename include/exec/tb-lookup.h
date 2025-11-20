@@ -17,6 +17,10 @@
 #include "exec/tb-hash.h"
 #include "latx-options.h"
 
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+#include "exec/fasttb.h"
+#endif
+
 /* Might cause an exception, so have a longjmp destination ready */
 static inline TranslationBlock *tb_lookup(CPUState *cpu, target_ulong pc,
                                           target_ulong cs_base,
@@ -54,12 +58,10 @@ static inline TranslationBlock *tb_lookup(CPUState *cpu, target_ulong pc,
         mmap_unlock();
         return NULL;
     }
-    qatomic_set(&cpu->tb_jmp_cache[hash], tb);
-#ifdef CONFIG_LATX
-    if (!close_latx_parallel && !(cpu->tcg_cflags & CF_PARALLEL)) {
-        latx_fast_jmp_cache_add(hash, tb);
-    }
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+    latx_fast_jmp_cache_add(cpu, hash, tb);
 #endif
+    qatomic_set(&cpu->tb_jmp_cache[hash], tb);
     mmap_unlock();
 #ifdef CONFIG_LATX_PROFILER
     qatomic_inc(&prof->qht_count);

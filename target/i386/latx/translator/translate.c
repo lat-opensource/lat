@@ -2451,7 +2451,7 @@ int tr_translate_tb(struct TranslationBlock *tb)
  * ra_alloc_dbt_arg2: next x86 ip
  */
 
-static void generate_indirect_goto(void *code_buf, bool parallel)
+static void generate_indirect_goto(void *code_buf)
 {
     /*
      * WARNING!!!
@@ -2481,32 +2481,32 @@ static void generate_indirect_goto(void *code_buf, bool parallel)
     la_xor(next_tb, next_x86_addr, next_tb);
     la_bstrpick_d(next_tb, next_tb, TB_JMP_CACHE_BITS - 1, 0);
 
-    if (!close_latx_parallel && !parallel) {
-        la_alsl_d(next_tb, next_tb, jmp_cache_addr, 3);
-        la_ld_d(jmp_entry, next_tb, 0);
-        la_bne(jmp_entry, next_x86_addr, label_miss);
-        la_ld_d(jmp_entry, next_tb, 8);
-    } else {
-        la_slli_d(next_tb, next_tb, 3);
-        la_ldx_d(next_tb, next_tb, jmp_cache_addr);
-        la_beq(next_tb, zero_ir2_opnd, label_miss);
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+    la_alsl_d(next_tb, next_tb, jmp_cache_addr, 3);
+    la_ld_d(jmp_entry, next_tb, 0);
+    la_bne(jmp_entry, next_x86_addr, label_miss);
+    la_ld_d(jmp_entry, next_tb, 8);
+#else
+    la_slli_d(next_tb, next_tb, 3);
+    la_ldx_d(next_tb, next_tb, jmp_cache_addr);
+    la_beq(next_tb, zero_ir2_opnd, label_miss);
 
-        la_ld_d(jmp_entry, next_tb, offsetof(TranslationBlock, pc));
-        la_bne(jmp_entry, next_x86_addr, label_miss);
+    la_ld_d(jmp_entry, next_tb, offsetof(TranslationBlock, pc));
+    la_bne(jmp_entry, next_x86_addr, label_miss);
 
-        /*
-         * if jmp_lock set, goto miss, else see if CF_INVALID is set.
-         * This method is faster than spin-lock/unlock because the
-         * locked case is rare.
-         */
-        la_ld_d(jmp_entry, next_tb, offsetof(TranslationBlock, cflags));
-        /* CF_INVALID */
-        la_bstrpick_w(jmp_entry, jmp_entry, 18, 18);
-        la_bne(jmp_entry, zero_ir2_opnd, label_miss);
-        la_ld_d(jmp_entry, next_tb,
-                offsetof(TranslationBlock, tc) +
-                offsetof(struct tb_tc, ptr));
-    }
+    /*
+     * if jmp_lock set, goto miss, else see if CF_INVALID is set.
+     * This method is faster than spin-lock/unlock because the
+     * locked case is rare.
+     */
+    la_ld_d(jmp_entry, next_tb, offsetof(TranslationBlock, cflags));
+    /* CF_INVALID */
+    la_bstrpick_w(jmp_entry, jmp_entry, 18, 18);
+    la_bne(jmp_entry, zero_ir2_opnd, label_miss);
+    la_ld_d(jmp_entry, next_tb,
+            offsetof(TranslationBlock, tc) +
+            offsetof(struct tb_tc, ptr));
+#endif
 
 /* hit: */
     la_jirl(zero_ir2_opnd, jmp_entry, 0);
@@ -2726,25 +2726,10 @@ indirect_jmp:
          * If using tb_link, LATX will jmp to jmp_glue finding the next TB.
          */
         if (!qemu_loglevel_mask(CPU_LOG_TB_NOCHAIN)) {
-            CPUArchState* env = (CPUArchState*)(lsenv->cpu_state);
-            CPUState *cpu = env_cpu(env);
-            uint32_t parallel = cpu->tcg_cflags & CF_PARALLEL;
-            if (!close_latx_parallel && !parallel) {
-                IR2_OPND old_jmp_label = ra_alloc_label();
-                la_label(old_jmp_label);
-                tb->jmp_indirect = ir2_opnd_label_id(&old_jmp_label);
-                generate_indirect_goto((void *)tb->tc.ptr, false);
-                la_data_li(target, context_switch_native_to_bt_ret_0);
-                aot_la_append_ir2_jmp_far(target, base, B_EPILOGUE_RET_0, 0);
-            } else {
-                la_data_li(target, parallel_indirect_jmp_glue);
-                IR2_OPND old_jmp_label = ra_alloc_label();
-                la_label(old_jmp_label);
-                tb->jmp_indirect = ir2_opnd_label_id(&old_jmp_label);
-                aot_la_append_ir2_jmp_far(target, base, B_NATIVE_JMP_GLUE2, 0);
-                la_data_li(target, context_switch_native_to_bt_ret_0);
-                aot_la_append_ir2_jmp_far(target, base, B_EPILOGUE_RET_0, 0);
-            }
+            IR2_OPND old_jmp_label = ra_alloc_label();
+            la_label(old_jmp_label);
+            tb->jmp_indirect = ir2_opnd_label_id(&old_jmp_label);
+            generate_indirect_goto((void *)tb->tc.ptr);
         } else {
             la_data_li(target, context_switch_native_to_bt_ret_0);
             aot_la_append_ir2_jmp_far(target, base, B_EPILOGUE_RET_0, 0);
@@ -2899,12 +2884,12 @@ void generate_context_switch_native_to_bt(void)
  * ra_alloc_dbt_arg1: current tb (last tb)
  * ra_alloc_dbt_arg2: next x86 ip
  */
-static int generate_indirect_jmp_glue(void *code_buf, bool parallel)
+static int generate_indirect_jmp_glue(void *code_buf)
 {
     int ins_num;
     tr_init(NULL);
 
-    generate_indirect_goto(code_buf, parallel);
+    generate_indirect_goto(code_buf);
 
     TRANSLATION_DATA *lat_ctx = lsenv->tr_data;
     label_dispose(NULL, lat_ctx);
@@ -3128,17 +3113,9 @@ int generate_native_rotate_fpu_by(void *code_buf_addr)
      * args pass in: $24: tb, $25: eip(which is also stored in env->eip),
      */
     indirect_jmp_glue = (ADDR)code_buf;
-    insts_num = generate_indirect_jmp_glue(code_buf, false);
+    insts_num = generate_indirect_jmp_glue(code_buf);
     if (option_dump)
         qemu_log("[glue] indirect jump dispatch at %p. size = %d\n",
-                code_buf, insts_num);
-    total_insts_num += insts_num;
-    code_buf += insts_num * 4;
-
-    parallel_indirect_jmp_glue = (ADDR)code_buf;
-    insts_num = generate_indirect_jmp_glue(code_buf, true);
-    if (option_dump)
-        qemu_log("[glue] parallel indirect jump dispatch at %p. size = %d\n",
                 code_buf, insts_num);
     total_insts_num += insts_num;
     code_buf += insts_num * 4;

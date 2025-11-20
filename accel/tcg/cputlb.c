@@ -103,6 +103,9 @@ static void tb_jmp_cache_clear_page(CPUState *cpu, target_ulong page_addr)
     unsigned int i, i0 = tb_jmp_cache_hash_page(page_addr);
 
     for (i = 0; i < TB_JMP_PAGE_SIZE; i++) {
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+        latx_fast_jmp_cache_clear(cpu, i0 + i);
+#endif
         qatomic_set(&cpu->tb_jmp_cache[i0 + i], NULL);
     }
 }
@@ -364,6 +367,9 @@ static void tlb_flush_by_mmuidx_async_work(CPUState *cpu, run_on_cpu_data data)
 
     qemu_spin_unlock(&env_tlb(env)->c.lock);
 
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+    latx_fast_jmp_cache_clear_all(cpu);
+#endif
     cpu_tb_jmp_cache_clear(cpu);
 
     if (to_clean == ALL_MMUIDX_BITS) {

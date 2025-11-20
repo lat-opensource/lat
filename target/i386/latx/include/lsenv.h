@@ -5,7 +5,6 @@
 #include "qemu-def.h"
 
 extern __thread ENV *lsenv;
-extern FastTB *fast_jmp_cache;
 #define CODEIS64 (((CPUX86State *)lsenv->cpu_state)->sys.codemode)
 //#define CODEIS64 (assert(((CPUX86State *)lsenv->cpu_state)->sys.codemode),1)
 #define LATX_DT_X86    0

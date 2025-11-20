@@ -20,6 +20,9 @@
 #ifndef EXEC_ALL_H
 #define EXEC_ALL_H
 
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+#include "exec/fasttb.h"
+#endif
 #include "cpu.h"
 #ifdef CONFIG_LATX
 #include "optimize-config.h"
@@ -486,12 +489,6 @@ typedef struct TBProfile
 #define ADD_TB_PROFILE(tb, area, value) (((tb->profile).area) += (value))
 
 
-#ifdef CONFIG_LATX
-typedef struct FastTB {
-    target_ulong pc;
-    const void *ptr;    /* pointer to the translated code */
-} FastTB;
-#endif
 #if defined(CONFIG_LATX_TU) || defined(CONFIG_LATX_AOT)
 #define TU_TB_INDEX_NEXT 0
 #define TU_TB_INDEX_TARGET 1

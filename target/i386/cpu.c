@@ -6305,7 +6305,7 @@ static void x86_cpu_reset(DeviceState *dev)
         kvm_arch_reset_vcpu(cpu);
     }
 #endif
-#ifdef CONFIG_LATX
+#if defined(CONFIG_LATX) && !defined(CONFIG_LATX_FAST_JMPCACHE)
     env->tb_jmp_cache_ptr = s->tb_jmp_cache;
 #endif
 }

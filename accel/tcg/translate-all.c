@@ -80,6 +80,9 @@
 #include "ts.h"
 #include "latx-smc.h"
 #endif
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+#include "exec/fasttb.h"
+#endif
 #ifdef CONFIG_LATX_TU
 void tu_reset_tb(TranslationBlock *tb);
 #endif
@@ -1716,13 +1719,10 @@ void do_tb_flush(CPUState *cpu, run_on_cpu_data tb_flush_count)
     }
 
     CPU_FOREACH(cpu) {
-        cpu_tb_jmp_cache_clear(cpu);
-#ifdef CONFIG_LATX
-        if (!close_latx_parallel && !(cpu->tcg_cflags & CF_PARALLEL) &&
-            cpu->cpu_index == 0) {
-            latx_fast_jmp_cache_clear_all();
-        }
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+        latx_fast_jmp_cache_clear_all(cpu);
 #endif
+        cpu_tb_jmp_cache_clear(cpu);
     }
 
     qht_reset_size(&tb_ctx.htable, CODE_GEN_HTABLE_SIZE);
@@ -1930,12 +1930,10 @@ static void do_tb_phys_invalidate(TranslationBlock *tb, bool rm_from_page_list)
     h = tb_jmp_cache_hash_func(tb->pc);
     CPU_FOREACH(cpu) {
         if (qatomic_read(&cpu->tb_jmp_cache[h]) == tb) {
-            qatomic_set(&cpu->tb_jmp_cache[h], NULL);
-#ifdef CONFIG_LATX
-            if (!close_latx_parallel && !(cpu->tcg_cflags & CF_PARALLEL)) {
-                latx_fast_jmp_cache_clear(h);
-            }
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+            latx_fast_jmp_cache_clear(cpu, h);
 #endif
+            qatomic_set(&cpu->tb_jmp_cache[h], NULL);
         }
     }
 

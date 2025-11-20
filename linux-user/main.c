@@ -318,7 +318,7 @@ CPUArchState *cpu_copy(CPUArchState *env)
         cpu_watchpoint_insert(new_cpu, wp->vaddr, wp->len, wp->flags, NULL);
     }
 
-#ifdef CONFIG_LATX
+#if defined(CONFIG_LATX) && !defined(CONFIG_LATX_FAST_JMPCACHE)
     new_env->tb_jmp_cache_ptr = new_cpu->tb_jmp_cache;
 #endif
     return new_env;
@@ -1466,10 +1466,10 @@ int main(int argc, char **argv, char **envp)
         printf("Error while loading %s: %s\n", exec_path, strerror(-ret));
         _exit(EXIT_FAILURE);
     }
-#ifdef CONFIG_LATX
-    if (!close_latx_parallel) {
-        latx_fast_jmp_cache_init(env);
-    }
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+        if(!latx_fast_jmp_cache_init(env)) {
+            fprintf(stderr, "[LATX-ERR] latx_fast_jmp_cache_init error!\n");
+        }
 #endif
 #if defined(CONFIG_LATX_KZT) && defined(TARGET_X86_64)
     kzt_init(argv, argc, target_argv, target_argc, &bprm);
