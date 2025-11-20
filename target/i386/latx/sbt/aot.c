@@ -1214,11 +1214,7 @@ void aot_do_tb_reloc(TranslationBlock *tb, struct aot_tb *stb,
     int lib_method_index;
     CPUArchState* env = (CPUArchState*)(lsenv->cpu_state);
     target_ulong base = env->segs[R_CS].base;
-    uint32_t parallel = tb->cflags & CF_PARALLEL;
     ADDR loacl_indirect_jmp_glue = indirect_jmp_glue;
-    if (close_latx_parallel || parallel) {
-        loacl_indirect_jmp_glue = parallel_indirect_jmp_glue;
-    }
 
     aot_rel_table = aot_buffer +
         ((aot_header *)aot_buffer)->rel_table_offset;

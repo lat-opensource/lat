@@ -774,12 +774,10 @@ static inline TranslationBlock *tb_find(CPUState *cpu,
     }
         /* We add the TB in the virtual pc hash table for the fast lookup */
         int hash_value = tb_jmp_cache_hash_func(pc);
-        qatomic_set(&cpu->tb_jmp_cache[hash_value], tb);
-#ifdef CONFIG_LATX
-        if (!close_latx_parallel && !(cpu->tcg_cflags & CF_PARALLEL)) {
-            latx_fast_jmp_cache_add(hash_value, tb);
-        }
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+        latx_fast_jmp_cache_add(cpu, hash_value, tb);
 #endif
+        qatomic_set(&cpu->tb_jmp_cache[hash_value], tb);
         mmap_unlock();
     }
 #ifndef CONFIG_USER_ONLY

@@ -15,6 +15,10 @@
 #include "tu.h"
 #endif
 
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+#include "exec/fasttb.h"
+#endif
+
 /* static GTree *ts_tree; */
 static __thread tb_tmp_message *dynamic_tb_message_vector;
 static __thread uint32 dynamic_tb_num;
@@ -223,6 +227,9 @@ static inline void translate_init(CPUState *cpu,
             * sizeof(TranslationBlock*));
 
     }
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+    latx_fast_jmp_cache_clear_all(cpu);
+#endif
     for (int i = 0; i < TB_JMP_CACHE_SIZE; i++) {
         qatomic_set(&cpu->tb_jmp_cache[i], NULL);
     }
@@ -370,6 +377,9 @@ static TranslationBlock *lookup_static_tb(target_ulong pc, int cflags,
 static void save_static_tb(TranslationBlock *tb, CPUState *cpu)
 {
     uint32_t hash = tb_jmp_cache_hash_func(tb->pc);
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+    latx_fast_jmp_cache_add(cpu, hash, tb);
+#endif
     qatomic_set(&cpu->tb_jmp_cache[hash], tb);
 }
 

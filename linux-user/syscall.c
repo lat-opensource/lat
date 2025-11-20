@@ -156,6 +156,9 @@
 #include "aot.h"
 #include "latx-options.h"
 #endif
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+#include "exec/fasttb.h"
+#endif
 
 #include <linux/perf_event.h>
 #include <sys/ptrace.h>
@@ -5238,11 +5241,6 @@ static inline abi_ulong do_shmat(CPUArchState *cpu_env,
     if (!(cpu->tcg_cflags & CF_PARALLEL)) {
         cpu->tcg_cflags |= CF_PARALLEL;
         tb_flush(cpu);
-#ifdef CONFIG_LATX
-        if (!close_latx_parallel) {
-            latx_fast_jmp_cache_free(cpu_env);
-        }
-#endif
     }
 
     if (shmaddr) {
@@ -8915,11 +8913,6 @@ static int do_fork(CPUArchState *env, unsigned int flags, abi_ulong newsp,
         if (!close_latx_parallel && !(cpu->tcg_cflags & CF_PARALLEL)) {
             cpu->tcg_cflags |= CF_PARALLEL;
             tb_flush(cpu);
-#ifdef CONFIG_LATX
-            if (!close_latx_parallel) {
-                latx_fast_jmp_cache_free(env);
-            }
-#endif
         }
 
         /* we create a new CPU instance. */
@@ -8946,6 +8939,11 @@ static int do_fork(CPUArchState *env, unsigned int flags, abi_ulong newsp,
         pthread_mutex_lock(&info.mutex);
         pthread_cond_init(&info.cond, NULL);
         info.env = new_env;
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+        if(!latx_fast_jmp_cache_init(new_env)) {
+            fprintf(stderr, "[LATX-ERR] latx_fast_jmp_cache_init error!\n");
+        }
+#endif
         if (flags & CLONE_CHILD_SETTID) {
             info.child_tidptr = child_tidptr;
         }

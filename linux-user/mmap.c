@@ -737,12 +737,6 @@ abi_long target_mmap(abi_ulong start, abi_ulong len, int target_prot,
         if (!(cpu->tcg_cflags & CF_PARALLEL)) {
             cpu->tcg_cflags |= CF_PARALLEL;
             tb_flush(cpu);
-#ifdef CONFIG_LATX
-            if (!close_latx_parallel) {
-                CPUArchState* env = cpu->env_ptr;
-                latx_fast_jmp_cache_free(env);
-            }
-#endif
         }
     }
 

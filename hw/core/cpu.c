@@ -227,6 +227,9 @@ static void cpu_common_reset(DeviceState *dev)
     cpu->cflags_next_tb = -1;
 
     if (tcg_enabled()) {
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+        latx_fast_jmp_cache_clear_all(cpu);
+#endif
         cpu_tb_jmp_cache_clear(cpu);
 
         tcg_flush_softmmu_tlb(cpu);

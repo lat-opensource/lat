@@ -348,8 +348,6 @@ static size_t gen_tunnel_glue(TranslationBlock *tb,
         struct lib_method_item *method_item)
 {
     TRANSLATION_DATA *lat_ctx = lsenv->tr_data;
-    CPUArchState* env = (CPUArchState*)(lsenv->cpu_state);
-    CPUState *cpu = env_cpu(env);
     IR2_OPND esp_ir2_opnd = ra_alloc_gpr(esp_index);
     /* start tb loongarch assemble create session */
     tr_init(tb);
@@ -379,11 +377,7 @@ static size_t gen_tunnel_glue(TranslationBlock *tb,
     ARCH(gen_set_next_tb_code)(&esp_ir2_opnd);
     ARCH(gen_set_last_tb_code)(tb);
     /* tunnel glue return to indirect_jmp_glue*/
-    if (!close_latx_parallel && !(cpu->tcg_cflags & CF_PARALLEL)) {
-        set_ret_location(tb, indirect_jmp_glue);
-    } else {
-        set_ret_location(tb, parallel_indirect_jmp_glue);
-    }
+    set_ret_location(tb, indirect_jmp_glue);
     /* set_ret_location(tb, context_switch_native_to_bt); */
     label_dispose(tb, lat_ctx);
     int code_nr = tr_ir2_assemble((void *)tb->tc.ptr, lat_ctx->first_ir2) + 1;

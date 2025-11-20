@@ -89,13 +89,7 @@ static void tr_generate_exit_tb_for_bridge(void)
     IR2_OPND target = ra_alloc_data();
     la_data_li(base, (ADDR)tb->tc.ptr);
     if (!qemu_loglevel_mask(CPU_LOG_TB_NOCHAIN)) {
-        CPUArchState* env = (CPUArchState*)(lsenv->cpu_state);
-        CPUState *cpu = env_cpu(env);
-        if (!(cpu->tcg_cflags & CF_PARALLEL)) {
-            la_data_li(target, indirect_jmp_glue);
-        } else {
-            la_data_li(target, parallel_indirect_jmp_glue);
-        }
+        la_data_li(target, indirect_jmp_glue);
         aot_la_append_ir2_jmp_far(target, base, B_NATIVE_JMP_GLUE2, 0);
     } else {
         la_data_li(target, context_switch_native_to_bt_ret_0);
