@@ -467,8 +467,6 @@ bool translate_shl(IR1_INST *pir1)
     if (directly) {
         /* GPR32/GPR64 can broken the reg */
         dest = src = ra_alloc_gpr(ir1_opnd_base_reg_num(opnd1));
-        shift_inst = (opnd_size == 64) ? la_sll_d : la_sll_w;
-        shifti_inst = (opnd_size == 64) ? la_slli_d : la_slli_w;
     } else {
         /*
          * shift left did not consider EXTENSION
@@ -476,9 +474,9 @@ bool translate_shl(IR1_INST *pir1)
          */
         src = load_ireg_from_ir1(opnd1, UNKNOWN_EXTENSION, false);
         dest = ra_alloc_itemp();
-        shift_inst = la_sll_d;
-        shifti_inst = la_slli_d;
     }
+    shift_inst = (opnd_size == 64) ? la_sll_d : la_sll_w;
+    shifti_inst = (opnd_size == 64) ? la_slli_d : la_slli_w;
 
     if (ir1_opnd_is_imm(opnd2)) {
         /* Shift is imm8/1 case */
@@ -505,16 +503,19 @@ bool translate_shl(IR1_INST *pir1)
     } else {
         IR2_OPND label_exit = ra_alloc_label();
         /* Shift is CL */
-        IR2_OPND original_count =
+        IR2_OPND count =
             load_ireg_from_ir1(opnd2, UNKNOWN_EXTENSION, false);
-        IR2_OPND count = ra_alloc_itemp();
 
-        /* 1. mask */
-        la_andi(count, original_count, mask);
-        /* 2. check if zero */
-        la_beq(count, zero_ir2_opnd, label_exit);
+        if (ir1_need_calculate_any_flag(pir1)) {
+            IR2_OPND masked_count = ra_alloc_itemp();
 
-        generate_eflag_calculation(dest, src, count, pir1, false);
+            /* 1. mask */
+            la_andi(masked_count, count, mask);
+            /* 2. check if zero */
+            la_beq(masked_count, zero_ir2_opnd, label_exit);
+
+            generate_eflag_calculation(dest, src, count, pir1, false);
+        }
 
         /* 3. shift */
         shift_inst(dest, src, count);
@@ -574,14 +575,12 @@ bool translate_shr(IR1_INST *pir1)
     if (directly) {
         /* GPR32/GPR64 can broken the reg */
         dest = src = ra_alloc_gpr(ir1_opnd_base_reg_num(opnd1));
-        shift_inst = (opnd_size == 64) ? la_srl_d : la_srl_w;
-        shifti_inst = (opnd_size == 64) ? la_srli_d : la_srli_w;
     } else {
         src = load_ireg_from_ir1(opnd1, ZERO_EXTENSION, false);
         dest = ra_alloc_itemp();
-        shift_inst = la_srl_d;
-        shifti_inst = la_srli_d;
     }
+    shift_inst = (opnd_size == 64) ? la_srl_d : la_srl_w;
+    shifti_inst = (opnd_size == 64) ? la_srli_d : la_srli_w;
 
     if (ir1_opnd_is_imm(opnd2)) {
         /* Shift is imm8/1 case */
@@ -608,16 +607,19 @@ bool translate_shr(IR1_INST *pir1)
     } else {
         IR2_OPND label_exit = ra_alloc_label();
         /* Shift is CL */
-        IR2_OPND original_count =
+        IR2_OPND count =
             load_ireg_from_ir1(opnd2, UNKNOWN_EXTENSION, false);
-        IR2_OPND count = ra_alloc_itemp();
 
-        /* 1. mask */
-        la_andi(count, original_count, mask);
-        /* 2. check if zero */
-        la_beq(count, zero_ir2_opnd, label_exit);
+        if (ir1_need_calculate_any_flag(pir1)) {
+            IR2_OPND masked_count = ra_alloc_itemp();
 
-        generate_eflag_calculation(dest, src, count, pir1, false);
+            /* 1. mask */
+            la_andi(masked_count, count, mask);
+            /* 2. check if zero */
+            la_beq(masked_count, zero_ir2_opnd, label_exit);
+
+            generate_eflag_calculation(dest, src, count, pir1, false);
+        }
 
         /* 3. shift */
         shift_inst(dest, src, count);
@@ -682,14 +684,12 @@ bool translate_sar(IR1_INST *pir1)
     if (directly) {
         /* GPR32/GPR64 can broken the reg */
         dest = src = ra_alloc_gpr(ir1_opnd_base_reg_num(opnd1));
-        shift_inst = (opnd_size == 64) ? la_sra_d : la_sra_w;
-        shifti_inst = (opnd_size == 64) ? la_srai_d : la_srai_w;
     } else {
         src = load_ireg_from_ir1(opnd1, SIGN_EXTENSION, false);
         dest = ra_alloc_itemp();
-        shift_inst = la_sra_d;
-        shifti_inst = la_srai_d;
     }
+    shift_inst = (opnd_size == 64) ? la_sra_d : la_sra_w;
+    shifti_inst = (opnd_size == 64) ? la_srai_d : la_srai_w;
 
     if (ir1_opnd_is_imm(opnd2)) {
         /* Shift is imm8/1 case */
@@ -716,16 +716,19 @@ bool translate_sar(IR1_INST *pir1)
     } else {
         IR2_OPND label_exit = ra_alloc_label();
         /* Shift is CL */
-        IR2_OPND original_count =
+        IR2_OPND count =
             load_ireg_from_ir1(opnd2, UNKNOWN_EXTENSION, false);
-        IR2_OPND count = ra_alloc_itemp();
 
-        /* 1. mask */
-        la_andi(count, original_count, mask);
-        /* 2. check if zero */
-        la_beq(count, zero_ir2_opnd, label_exit);
+        if (ir1_need_calculate_any_flag(pir1)) {
+            IR2_OPND masked_count = ra_alloc_itemp();
 
-        generate_eflag_calculation(dest, src, count, pir1, false);
+            /* 1. mask */
+            la_andi(masked_count, count, mask);
+            /* 2. check if zero */
+            la_beq(masked_count, zero_ir2_opnd, label_exit);
+
+            generate_eflag_calculation(dest, src, count, pir1, false);
+        }
 
         /* 3. shift */
         shift_inst(dest, src, count);
@@ -754,8 +757,67 @@ bool translate_sar(IR1_INST *pir1)
 bool translate_rol(IR1_INST *pir1)
 {
     IR1_OPND *opnd0 = ir1_get_opnd(pir1, 0);
+    IR1_OPND *opnd1 = ir1_get_opnd(pir1, 1);
     int dest_size = ir1_opnd_size(opnd0);
 
+    if (ir1_opnd_is_imm(opnd1)) {
+        /* Shift is imm8/1 case */
+        uint32 mask = (dest_size == 64) ? 63 : 31;
+        uint8 shift = ir1_opnd_uimm(opnd1) & mask;
+
+        if(shift) {
+            IR2_OPND dest;
+            if(ir1_opnd_is_gpr(opnd0) && !ir1_opnd_is_8h(opnd0)) {
+                int gpr_num = ir1_opnd_base_reg_num(opnd0);
+                dest =  ra_alloc_gpr(gpr_num);
+            } else {
+                dest = load_ireg_from_ir1(opnd0, ZERO_EXTENSION, false);
+            }
+
+
+            if (ir1_need_calculate_any_flag(pir1)) {
+                if (dest_size == 8) {
+                    la_x86rotli_b(dest, shift);
+                } else if (dest_size == 16) {
+                    la_x86rotli_h(dest, shift);
+                } else if (dest_size == 32) {
+                    la_x86rotli_w(dest, shift);
+                } else if (dest_size == 64) {
+                    la_x86rotli_d(dest, shift);
+                }
+            }
+            IR2_OPND tmp_dest = ra_alloc_itemp();
+
+            if (dest_size == 8) {
+                la_rotri_b(tmp_dest, dest, dest_size - shift);
+            } else if (dest_size == 16) {
+                la_rotri_h(tmp_dest, dest, dest_size - shift);
+            } else if (dest_size == 32) {
+                la_rotri_w(tmp_dest, dest, dest_size - shift);
+            } else if (dest_size == 64) {
+                if(ir1_opnd_is_gpr(opnd0)) {
+                    la_rotri_d(dest, dest, dest_size - shift);
+                    return true;
+                } else {
+                    la_rotri_d(tmp_dest, dest, dest_size - shift);
+                }
+            }
+
+            store_ireg_to_ir1(tmp_dest, opnd0, false);
+            ra_free_temp(tmp_dest);
+        } else {
+#ifdef TARGET_X86_64
+            /* In x64 when opnd_size==32, dest is zero-extended even if rotate 0 bit */
+            if (!GHBR_ON(pir1) && ir1_opnd_size(ir1_get_opnd(pir1, 0)) == 32
+            && ir1_opnd_is_gpr(ir1_get_opnd(pir1, 0))) {
+                IR2_OPND gpr_opnd = ra_alloc_gpr(ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 0)));
+                la_mov32_zx(gpr_opnd, gpr_opnd);
+            }
+#endif
+        }
+
+        return true;
+    }
     /* get real count */
     IR2_OPND label_exit = ra_alloc_label();
 
@@ -847,7 +909,66 @@ bool translate_rol(IR1_INST *pir1)
 bool translate_ror(IR1_INST *pir1)
 {
     IR1_OPND *opnd0 = ir1_get_opnd(pir1, 0);
+    IR1_OPND *opnd1 = ir1_get_opnd(pir1, 1);
     int dest_size = ir1_opnd_size(opnd0);
+
+    if (ir1_opnd_is_imm(opnd1)) {
+        /* Shift is imm8/1 case */
+        uint32 mask = (dest_size == 64) ? 63 : 31;
+        uint8 shift = ir1_opnd_uimm(opnd1) & mask;
+
+        if(shift) {
+            IR2_OPND dest;
+            if(ir1_opnd_is_gpr(opnd0) && !ir1_opnd_is_8h(opnd0)) {
+                int gpr_num = ir1_opnd_base_reg_num(opnd0);
+                dest =  ra_alloc_gpr(gpr_num);
+            } else {
+                dest = load_ireg_from_ir1(opnd0, ZERO_EXTENSION, false);
+            }
+
+
+            if (ir1_need_calculate_any_flag(pir1)) {
+                if (dest_size == 8) {
+                    la_x86rotri_b(dest, shift);
+                } else if (dest_size == 16) {
+                    la_x86rotri_h(dest, shift);
+                } else if (dest_size == 32) {
+                    la_x86rotri_w(dest, shift);
+                } else if (dest_size == 64) {
+                    la_x86rotri_d(dest, shift);
+                }
+            }
+            IR2_OPND tmp_dest = ra_alloc_itemp();
+
+            if (dest_size == 8) {
+                la_rotri_b(tmp_dest, dest, shift);
+            } else if (dest_size == 16) {
+                la_rotri_h(tmp_dest, dest, shift);
+            } else if (dest_size == 32) {
+                la_rotri_w(tmp_dest, dest, shift);
+            } else if (dest_size == 64) {
+                if(ir1_opnd_is_gpr(opnd0)) {
+                    la_rotri_d(dest, dest, shift);
+                    return true;
+                } else {
+                    la_rotri_d(tmp_dest, dest, shift);
+                }
+            }
+
+            store_ireg_to_ir1(tmp_dest, opnd0, false);
+            ra_free_temp(tmp_dest);
+        } else {
+#ifdef TARGET_X86_64
+            /* In x64 when opnd_size==32, dest is zero-extended even if rotate 0 bit */
+            if (!GHBR_ON(pir1) && ir1_opnd_size(ir1_get_opnd(pir1, 0)) == 32
+            && ir1_opnd_is_gpr(ir1_get_opnd(pir1, 0))) {
+                IR2_OPND gpr_opnd = ra_alloc_gpr(ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 0)));
+                la_mov32_zx(gpr_opnd, gpr_opnd);
+           }
+#endif
+        }
+        return true;
+    }
 
     /* get real count */
     IR2_OPND label_exit = ra_alloc_label();
