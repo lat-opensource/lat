@@ -8730,46 +8730,71 @@ bool translate_vpcmpistrm(IR1_INST *pir1)
 }
 #endif
 
+static void cal_pclmulqdq(IR2_OPND d, IR2_OPND v, IR2_OPND s, uint8_t ctrl)
+{
+    IR2_OPND ctrlp = ra_alloc_itemp();
+    IR2_OPND a = ra_alloc_itemp();// a = al
+    IR2_OPND b = ra_alloc_itemp();
+    IR2_OPND ftemp = ra_alloc_ftemp();
+
+    /* 选取操作数 */
+    li_d(ctrlp, ctrl);
+    la_andi(a, ctrlp, 1);// ((ctrl  1) != 0)
+    la_vreplve_d( ftemp, v, a);
+    la_vpickve2gr_d( a, ftemp, 0);
+    la_bstrpick_d( b, ctrlp, 4, 4);
+    la_vreplve_d( ftemp, s, b);
+    la_vpickve2gr_d( b, ftemp, 0);
+    ra_free_temp(ctrlp);
+
+    IR2_OPND ah = ra_alloc_itemp();
+    IR2_OPND resl = ra_alloc_itemp();
+    IR2_OPND resh = ra_alloc_itemp();
+    IR2_OPND all_label = ra_alloc_label();
+    IR2_OPND bit_label = ra_alloc_label();
+    IR2_OPND end_label = ra_alloc_label();
+
+    /* 开始运算 */
+    la_and( resl, resl, zero_ir2_opnd);
+    la_and( resh, resh, zero_ir2_opnd);
+    la_and( ah, ah, zero_ir2_opnd);
+    la_beqz( b, end_label);
+    la_label( all_label);
+    la_andi( a0_ir2_opnd, b, 1);// b  1
+    la_srli_d( b, b, 1);
+    la_beqz(a0_ir2_opnd, bit_label);
+    la_xor( resl, resl, a);
+    la_xor( resh, resh, ah);
+    la_label( bit_label);
+    la_slli_d(a1_ir2_opnd, ah, 1);
+    la_bstrpick_d(ah, a, 63, 63);
+    la_or( ah, a1_ir2_opnd, ah);
+    la_slli_d( a, a, 0x1);
+    la_bnez( b, all_label);
+    la_label( end_label);
+    la_vinsgr2vr_d( d, resl, 0);
+    la_vinsgr2vr_d( d, resh, 1);
+}
+
 bool translate_pclmulqdq(IR1_INST * pir1) {
     IR1_OPND * opnd0 = ir1_get_opnd(pir1, 0);
     IR1_OPND * opnd1 = ir1_get_opnd(pir1, 1);
     IR1_OPND * opnd2 = ir1_get_opnd(pir1, 2);
 
-    IR2_OPND dest = load_freg128_from_ir1(opnd0);
-    IR2_OPND temp = ra_alloc_ftemp();
-    if (option_enable_lasx) {
-        la_xvori_b(temp,dest,0x0);
-    } else {
-        la_vori_b(temp,dest,0x0);
-    }
     int s0 = ir1_opnd_base_reg_num(opnd0);
     uint8_t ctrl = ir1_opnd_uimm(opnd2);
+    IR2_OPND dest = ra_alloc_xmm(s0);
+    IR2_OPND src;
+
     if (!ir1_opnd_is_mem(opnd1)) {
         int s1 = ir1_opnd_base_reg_num(opnd1);
-        tr_gen_call_to_helper_pcmpxstrx((ADDR)helper_pclmulqdq_xmm, s0, s1, ctrl);
+        src = ra_alloc_xmm(s1);
     } else {
-        int s1 = 0;
-        while (s1 < 8) {
-            if (s1 != s0) {
-                break;
-            }
-            s1++;
-        }
-        IR2_OPND temp_mem = ra_alloc_ftemp();
-        IR2_OPND src = ra_alloc_xmm(s1);
-        if (option_enable_lasx) {
-            la_xvor_v(temp_mem, src, src);
-        } else {
-            la_vor_v(temp_mem, src, src);
-        }
+        src = ra_alloc_ftemp();
         load_freg128_from_ir1_mem(src, opnd1);
-        tr_gen_call_to_helper_pcmpxstrx((ADDR)helper_pclmulqdq_xmm, s0, s1, ctrl);
-        if (option_enable_lasx) {
-            la_xvor_v(src, temp_mem, temp_mem);
-        } else {
-            la_vor_v(src, temp_mem, temp_mem);
-        }
     }
+
+    cal_pclmulqdq(dest, dest, src, ctrl);
     return true;
 }
 
