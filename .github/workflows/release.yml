@@ -36,7 +36,7 @@ jobs:
         type: [ 'build-release', 'build32', 'build32-dbg', 'build64', 'build64-dbg' ]
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           submodules: true
 
