@@ -1126,19 +1126,19 @@ int main(int argc, char **argv, char **envp)
     }
 #endif
 
-    optind = parse_args(argc, argv);
-
-    error_init(argv[0]);
-    module_call_init(MODULE_INIT_TRACE);
-    qemu_init_cpu_list();
-    module_call_init(MODULE_INIT_QOM);
-
     envlist = envlist_create();
 
     /* add current environment into the list */
     for (wrk = environ; *wrk != NULL; wrk++) {
         (void) envlist_setenv(envlist, *wrk);
     }
+
+    optind = parse_args(argc, argv);
+
+    error_init(argv[0]);
+    module_call_init(MODULE_INIT_TRACE);
+    qemu_init_cpu_list();
+    module_call_init(MODULE_INIT_QOM);
 
     /* Read the stack limit from the kernel.  If it's "unlimited",
        then we can do little else besides use the default.  */
