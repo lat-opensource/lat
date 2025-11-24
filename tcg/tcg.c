@@ -678,7 +678,7 @@ static void *query_tu_tbm_table(TBMini *tbm, uintptr_t tc_ptr)
     do {
         tbm -= 1;
         curr_pos += tbm->mtbp_struct.magic;
-    } while(curr_pos < tc_ptr);
+    } while(curr_pos <= tc_ptr);
     return (void *)(tbm->mtbp_uint64 &
             MAKE_64BIT_MASK(0, HOST_VIRT_ADDR_SPACE_BITS));
 }
