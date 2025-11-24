@@ -290,6 +290,8 @@ static inline int create_aot_tb(aot_tb *curr_aot_tb, TranslationBlock *tb,
         curr_aot_tb->tu_search_addr_offset = tb->tu_search_addr_offset;
     }
 #endif
+    curr_aot_tb->lazypc[0] = tb->lazypc[0];
+    curr_aot_tb->lazypc[1] = tb->lazypc[1];
     curr_aot_tb->jmp_stub_target_arg[0] = tb->jmp_stub_target_arg[0];
     curr_aot_tb->jmp_stub_target_arg[1] = tb->jmp_stub_target_arg[1];
     if (use_tu_jmp(tb)) {
@@ -348,6 +350,7 @@ static inline int create_aot_tb(aot_tb *curr_aot_tb, TranslationBlock *tb,
                 tb->pc, curr_aot_tb->offset_in_segment,
                 curr_aot_tb->tb_cache_size);
     }
+#ifndef CONFIG_LATX_LAZYLINK
     for (int k = 0; k < 2; k++) {
         if (!use_tu_jmp(tb) && (curr_aot_tb->jmp_reset_offset[k] !=
                     TB_JMP_RESET_OFFSET_INVALID)) {
@@ -363,6 +366,7 @@ static inline int create_aot_tb(aot_tb *curr_aot_tb, TranslationBlock *tb,
             }
         }
     }
+#endif
     return 0;
 }
 
@@ -1234,6 +1238,29 @@ void aot_do_tb_reloc(TranslationBlock *tb, struct aot_tb *stb,
             light_tb_target_set_jmp_target((uintptr_t)tb->tc.ptr,
             (uintptr_t)pinsn, (uintptr_t)pinsn, context_switch_native_to_bt);
             break;
+#ifdef CONFIG_LATX_LAZYEXIT
+        case B_EPILOGUE_RET_ID_3:
+            lsassert(((*pinsn) & 0xfc000000) == 0x50000000 ||
+            (((*pinsn) & 0xfe000000) == 0x1e000000 &&/* pcaddu18i */
+            (*(pinsn + 1) & 0xfc000000) == 0x4c000000));
+            light_tb_target_set_jmp_target((uintptr_t)tb->tc.ptr,
+            (uintptr_t)pinsn, (uintptr_t)pinsn, context_switch_native_to_bt_ret_id_3);
+            break;
+        case B_EPILOGUE_RET_ID_1:
+            lsassert(((*pinsn) & 0xfc000000) == 0x50000000 ||
+            (((*pinsn) & 0xfe000000) == 0x1e000000 &&/* pcaddu18i */
+            (*(pinsn + 1) & 0xfc000000) == 0x4c000000));
+            light_tb_target_set_jmp_target((uintptr_t)tb->tc.ptr,
+            (uintptr_t)pinsn, (uintptr_t)pinsn, context_switch_native_to_bt_ret_id_1);
+            break;
+        case B_EPILOGUE_RET_ID_0:
+            lsassert(((*pinsn) & 0xfc000000) == 0x50000000 ||
+            (((*pinsn) & 0xfe000000) == 0x1e000000 &&/* pcaddu18i */
+            (*(pinsn + 1) & 0xfc000000) == 0x4c000000));
+            light_tb_target_set_jmp_target((uintptr_t)tb->tc.ptr,
+            (uintptr_t)pinsn, (uintptr_t)pinsn, context_switch_native_to_bt_ret_id_0);
+            break;
+#endif
         case B_EPILOGUE_RET_0:
             lsassert(((*pinsn) & 0xfc000000) == 0x50000000 ||
             (((*pinsn) & 0xfe000000) == 0x1e000000 &&/* pcaddu18i */

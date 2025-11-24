@@ -680,6 +680,9 @@ struct TranslationBlock {
 #define TBSMC_OPTED_MASK        (0x1 << 16)
     unsigned long smc_data;
 #endif
+    int64_t lazypc[2];
+    int8_t lazylink[2];
+    uint64_t lazylinkinst[2];
     struct separated_data *s_data;
 #endif
 };

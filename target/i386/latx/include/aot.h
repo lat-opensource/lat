@@ -136,12 +136,16 @@ typedef struct aot_tb {
     uintptr_t return_target_ptr_offset;
     unsigned long next_86_pc_offset;
 
+    int64_t lazypc[2];
 } aot_tb;
 
 typedef enum aot_rel_kind {
 
     B_PROLOGUE,
     B_EPILOGUE,
+    B_EPILOGUE_RET_ID_3,
+    B_EPILOGUE_RET_ID_1,
+    B_EPILOGUE_RET_ID_0,
     B_EPILOGUE_RET_0,
     B_NATIVE_JMP_GLUE2,
 

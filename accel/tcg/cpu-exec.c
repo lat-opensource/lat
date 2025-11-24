@@ -264,6 +264,30 @@ cpu_tb_exec(CPUState *cpu, TranslationBlock *itb, int *tb_exit)
 
     env->fpu_clobber = false;
     ret = tcg_qemu_tb_exec(env, tb_ptr);
+#ifdef CONFIG_LATX_LAZYTB
+    {
+        int tbexit = ret & TB_EXIT_MASK;
+        ret = ret & ~TB_EXIT_MASK;
+        TranslationBlock *rettb = tcg_tb_lookup(ret);
+        ret = (uint64_t)rettb | tbexit;
+    }
+#endif
+#ifdef CONFIG_LATX_LAZYPC
+    {
+        int tbexit = ret & TB_EXIT_MASK;
+        TranslationBlock *rettb = (void *)(ret & ~TB_EXIT_MASK);
+        uint64_t lazypc = 0;
+        if (rettb) {
+            if (tbexit) {
+                lazypc = rettb->pc + rettb->lazypc[1];
+            } else {
+                lazypc = rettb->pc + rettb->lazypc[0];
+            }
+            env->eip = lazypc;
+        }
+
+    }
+#endif
 
 #ifdef CONFIG_LATX_MONITOR_SHARED_MEM
     if (option_monitor_shared_mem && env->checksum_fail_tb) {
@@ -594,7 +618,25 @@ void tb_set_jmp_target(TranslationBlock *tb, int n, uintptr_t addr)
         uintptr_t tc_ptr = (uintptr_t)tb->tc.ptr;
         uintptr_t jmp_rx = tc_ptr + offset;
         uintptr_t jmp_rw = jmp_rx - tcg_splitwx_diff;
+#ifdef CONFIG_LATX_LAZYLINK
+        uintptr_t reset_addr = (uintptr_t)(tb->tc.ptr + tb->jmp_reset_offset[n]);
+        if (addr == reset_addr) {
+            if (tb->lazylink[n] == 2) {
+                /* TB unlink */
+                tb->lazylink[n] = 1;
+                *(uint64_t*)jmp_rw = tb->lazylinkinst[n];
+                flush_idcache_range(jmp_rx, jmp_rw, 8);
+            }
+        } else {
+            /* TB link */
+            assert(tb->lazylink[n] == 1);
+            tb->lazylink[n] = 2;
+            tb->lazylinkinst[n] = *(uint64_t*)jmp_rx; /* save inst */
+            tb_target_set_jmp_target(tc_ptr, jmp_rx, jmp_rw, addr);
+        }
+#else
         tb_target_set_jmp_target(tc_ptr, jmp_rx, jmp_rw, addr);
+#endif
     } else {
         tb->jmp_target_arg[n] = addr;
     }

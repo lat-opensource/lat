@@ -57,6 +57,11 @@ static int ss_generate_match_fail_native_code(void* code_buf);
 
 ADDR context_switch_bt_to_native;
 ADDR context_switch_native_to_bt_ret_0;
+#ifdef CONFIG_LATX_LAZYEXIT
+ADDR context_switch_native_to_bt_ret_id_3;
+ADDR context_switch_native_to_bt_ret_id_1;
+ADDR context_switch_native_to_bt_ret_id_0;
+#endif
 ADDR context_switch_native_to_bt;
 ADDR ss_match_fail_native;
 void *interpret_glue;
@@ -2516,6 +2521,10 @@ static void generate_indirect_goto(void *code_buf, bool parallel)
      * ra_alloc_dbt_arg2: next x86 ip
      */
 
+#ifdef CONFIG_LATX_LAZYPC
+    la_store_addrx(next_x86_addr, env_ir2_opnd,
+            lsenv_offset_of_eip(lsenv));
+#endif
     la_data_li(target, context_switch_native_to_bt_ret_0);
     aot_la_append_ir2_jmp_far(target, base, B_EPILOGUE_RET_0, 0);
 
@@ -2535,13 +2544,16 @@ void tr_generate_exit_tb(IR1_INST *branch, int succ_id)
 #endif
 {
     TRANSLATION_DATA *t_data = lsenv->tr_data;
+    (void)t_data;
     TranslationBlock *tb = lsenv->tr_data->curr_tb;
     IR1_OPCODE opcode = ir1_opcode(branch);
     ADDR tb_addr = (ADDR)tb;
+    (void)tb_addr;
     ADDR succ_x86_addr = 0;
     /* The epilogue function needs to return the address of the tb */
     IR2_OPND tb_ptr_opnd = a0_ir2_opnd;
     IR2_OPND succ_x86_addr_opnd = ra_alloc_dbt_arg2();
+    (void)succ_x86_addr_opnd ;
     IR2_OPND goto_label_opnd = ra_alloc_label();
     IR2_OPND label_first_jmp_align = ra_alloc_label();
 
@@ -2609,7 +2621,7 @@ direct_jmp:
             la_label(label_first_jmp_align);
             tb->first_jmp_align = ir2_opnd_label_id(&label_first_jmp_align);
         }
-        la_code_align(2, 0x03400000);
+        /*la_code_align(2, 0x03400000);*/
 
         if (!use_tu_jmp(tb)) {
 #ifndef CONFIG_LATX_XCOMISX_OPT
@@ -2636,32 +2648,57 @@ direct_jmp:
 
             }
 
-            la_code_align(2, 0x03400000);
+            /*la_code_align(2, 0x03400000);*/
 
             la_label(goto_label_opnd);
             tb->jmp_reset_offset[succ_id] = ir2_opnd_label_id(&goto_label_opnd);
 #endif
+#ifdef CONFIG_LATX_LAZYLINK
+            tb->lazylink[succ_id] = 1;
+#else
             la_b(ir2_opnd_addr);
 #ifdef CONFIG_LATX_LARGE_CC
             la_nop();
+#endif
 #endif
         }
 
 #ifdef CONFIG_LATX_PROFILER
         la_profile_begin();
 #endif
+#ifdef CONFIG_LATX_LAZYTB
+        la_pcaddi(tb_ptr_opnd, 0x0);
+#else
         aot_load_host_addr(tb_ptr_opnd, tb_addr, LOAD_TB_ADDR, 0);
+#endif
         if (succ_x86_addr) {
             succ_x86_addr = ir1_target_addr(branch);
         } else {
             succ_x86_addr = succ_id ? ir1_target_addr(branch) : ir1_addr_next(branch);
         }
 
+#ifdef CONFIG_LATX_LAZYPC
+        if (succ_id) {
+            tb->lazypc[1] = succ_x86_addr - tb->pc;
+        } else {
+            tb->lazypc[0] = succ_x86_addr - tb->pc;
+        }
+#else
         target_ulong call_offset __attribute__((unused)) =
                 aot_get_call_offset(succ_x86_addr);
         aot_load_guest_addr(succ_x86_addr_opnd, succ_x86_addr,
                 LOAD_CALL_TARGET, call_offset);
+#endif
 
+#ifdef CONFIG_LATX_LAZYEXIT
+        if (succ_id) {
+            la_data_li(target, context_switch_native_to_bt_ret_id_1);
+            aot_la_append_ir2_jmp_far(target, base, B_EPILOGUE_RET_ID_1, 0);
+        } else {
+            la_data_li(target, context_switch_native_to_bt_ret_id_0);
+            aot_la_append_ir2_jmp_far(target, base, B_EPILOGUE_RET_ID_0, 0);
+        }
+#else
         bool self_jmp = ((opcode == dt_X86_INS_JMP) &&
                          (succ_x86_addr == ir1_addr(branch)) &&
                          (t_data->curr_ir1_count + 1 != MAX_IR1_NUM_PER_TB));
@@ -2673,6 +2710,7 @@ direct_jmp:
         }
         la_data_li(target, context_switch_native_to_bt);
         aot_la_append_ir2_jmp_far(target, base, B_EPILOGUE, 0);
+#endif
         break;
     case dt_X86_INS_RET:
     case dt_X86_INS_RETF:
@@ -2799,14 +2837,28 @@ void generate_context_switch_bt_to_native(void *code_buf)
 
 void generate_context_switch_native_to_bt(void)
 {
+#ifdef CONFIG_LATX_LAZYEXIT
+    IR2_OPND label_cs = ra_alloc_label();
+    la_or(a0_ir2_opnd, zero_ir2_opnd, zero_ir2_opnd); // ret 0
+    la_b(label_cs);
+    la_ori(a0_ir2_opnd, a0_ir2_opnd, 0x3); // ret id3
+    la_b(label_cs);
+    la_ori(a0_ir2_opnd, a0_ir2_opnd, 0x1); // ret id1
+    la_b(label_cs);
+    la_ori(a0_ir2_opnd, a0_ir2_opnd, 0x0); // ret id0
+    la_label(label_cs);
+#else
     la_mov64(a0_ir2_opnd, zero_ir2_opnd);
+#endif
 
     /* 2. store eip (in $25) into env */
+#ifndef CONFIG_LATX_LAZYPC
     IR2_OPND eip_opnd = ra_alloc_dbt_arg2();
     lsassert(lsenv_offset_of_eip(lsenv) >= -2048 &&
             lsenv_offset_of_eip(lsenv) <= 2047);
     la_store_addrx(eip_opnd, env_ir2_opnd,
                             lsenv_offset_of_eip(lsenv));
+#endif
 
     /* 3. store x86 MMX and XMM registers to env */
     tr_save_registers_to_env(0xff, 0xff, option_save_xmm, options_to_save());
