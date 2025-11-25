@@ -798,7 +798,7 @@ EXPORT int my_vkDestroyDebugReportCallbackEXT(void* instance, void* callback, vo
     my_VkAllocationCallbacks_t my_alloc;
     return my->vkDestroyDebugReportCallbackEXT(instance, callback, find_VkAllocationCallbacks(&my_alloc, alloc));
 }
-
+#define VK_ICD_WSI_PLATFORM_WAYLAND 1
 #define VK_ICD_WSI_PLATFORM_XCB 3
 #define VK_ICD_WSI_PLATFORM_XLIB 4
 
@@ -811,12 +811,15 @@ typedef struct {
     void *connection;
 } my_VkIcdSurfaceXcb_s;
 
-EXPORT int32_t my_vkGetPhysicalDeviceSurfaceSupportKHR(void* v1, uint32_t v2, uint64_t v3, void* v4)
+EXPORT int32_t my_vkGetPhysicalDeviceSurfaceSupportKHR(void* physicalDevice, uint32_t queueFamilyIndex, uint64_t surface, void* pSupported)
 {
-    int32_t ret = my->vkGetPhysicalDeviceSurfaceSupportKHR(v1, v2, v3, v4);
-    my_VkIcdSurfaceBase_s * icd_surface = (my_VkIcdSurfaceBase_s *)v3;
+    int32_t ret = my->vkGetPhysicalDeviceSurfaceSupportKHR(physicalDevice, queueFamilyIndex, surface, pSupported);
+    my_VkIcdSurfaceBase_s * icd_surface = (my_VkIcdSurfaceBase_s *)surface;
     if (icd_surface->platform == VK_ICD_WSI_PLATFORM_XCB) {//only sync xcb platform ,xlib skip, other assert
         sync_xcb_connection(((my_VkIcdSurfaceXcb_s *)icd_surface)->connection);
+    } else if(icd_surface->platform == VK_ICD_WSI_PLATFORM_WAYLAND){
+        // TODO: report not support for wayland surface, need fix when wayland support complete.
+        *((uint32_t*)pSupported) = 0;
     } else if (icd_surface->platform != VK_ICD_WSI_PLATFORM_XLIB) {
         lsassertm(0, "error surface platform is %d\n", icd_surface->platform);
     }
