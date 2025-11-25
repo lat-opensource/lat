@@ -3055,7 +3055,7 @@ static void tb_exec_dump_info(void *ptr)
 
 static gboolean tb_tree_stats_iter(gpointer key, gpointer value, gpointer data)
 {
-    const TranslationBlock *tb = value;
+    TranslationBlock *tb = value;
     struct tb_tree_stats *tst = data;
 
     tst->nb_tbs++;
@@ -6507,7 +6507,7 @@ static int interpret_cmpxchg8b(ucontext_t *uc, uint32_t* inst,
 }
 
 static int interpret_add(ucontext_t *uc, uint32_t* inst,
-        uint64_t *fixed_siaddr)
+        uint64_t *fixed_siaddr, int size)
 {
     uint32_t rj0, rd0, rk0;
     abi_ulong page_addr;
@@ -6532,7 +6532,7 @@ static int interpret_add(ucontext_t *uc, uint32_t* inst,
     }
 
     int opnd0_size = (inst[-2] & 0xffc003ff) == 0x03400000 ?
-                ((inst[-2] << 10)) >> 20 : 64;
+                ((inst[-2] << 10)) >> 20 : size;
     if (page_addr != ((siaddr + (opnd0_size >> 3)) & qemu_host_page_mask)) {
         page_num = 2;
     } else {
@@ -6566,9 +6566,18 @@ static int interpret_add(ucontext_t *uc, uint32_t* inst,
         } else {
             assert(0);
         }
-    } else {
+    } else if (opnd0_size == 64) {
         UC_GR(uc)[rd0] = *(int64_t *)newaddr;
         *(int64_t *)newaddr = UC_GR(uc)[rd0] + UC_GR(uc)[rk0];
+    } else if (opnd0_size == 32) {
+        UC_GR(uc)[rd0] = *(int32_t *)newaddr;
+        *(int32_t *)newaddr = UC_GR(uc)[rd0] + UC_GR(uc)[rk0];
+    } else if (opnd0_size == 16) {
+        UC_GR(uc)[rd0] = *(int16_t *)newaddr;
+        *(int16_t *)newaddr = UC_GR(uc)[rd0] + UC_GR(uc)[rk0];
+    } else if (opnd0_size == 8) {
+        UC_GR(uc)[rd0] = *(int8_t *)newaddr;
+        *(int8_t *)newaddr = UC_GR(uc)[rd0] + UC_GR(uc)[rk0];
     }
     UC_PC(uc) += 4;
     qemu_log_mask(LAT_LOG_MEM, "[LATX_LOCK] %s UC_GR(uc)[rd0] = 0x%llx"
@@ -6580,7 +6589,7 @@ static int interpret_add(ucontext_t *uc, uint32_t* inst,
 }
 
 static int interpret_and(ucontext_t *uc, uint32_t* inst,
-        uint64_t *fixed_siaddr)
+        uint64_t *fixed_siaddr, int size)
 {
     uint32_t rj0, rd0, rk0;
     abi_ulong page_addr;
@@ -6605,7 +6614,7 @@ static int interpret_and(ucontext_t *uc, uint32_t* inst,
     }
 
     int opnd0_size = (inst[-1] & 0xffc003ff) == 0x03400000 ?
-                ((inst[-1] << 10)) >> 20 : 64;
+                ((inst[-1] << 10)) >> 20 : size;
     if (page_addr != ((siaddr + (opnd0_size >> 3)) & qemu_host_page_mask)) {
         page_num = 2;
     } else {
@@ -6639,9 +6648,12 @@ static int interpret_and(ucontext_t *uc, uint32_t* inst,
         } else {
             assert(0);
         }
-    } else {
+    } else if (opnd0_size == 64) {
         UC_GR(uc)[rd0] = *(int64_t *)newaddr;
         *(int64_t *)newaddr = UC_GR(uc)[rd0] & UC_GR(uc)[rk0];
+    } else if (opnd0_size == 32) {
+        UC_GR(uc)[rd0] = *(int32_t *)newaddr;
+        *(int32_t *)newaddr = UC_GR(uc)[rd0] & UC_GR(uc)[rk0];
     }
     UC_PC(uc) += 4;
     qemu_log_mask(LAT_LOG_MEM, "[LATX_LOCK] %s UC_GR(uc)[rd0] = 0x%llx"
@@ -6653,7 +6665,7 @@ static int interpret_and(ucontext_t *uc, uint32_t* inst,
 }
 
 static int interpret_or(ucontext_t *uc, uint32_t* inst,
-        uint64_t *fixed_siaddr)
+        uint64_t *fixed_siaddr, int size)
 {
     uint32_t rj0, rd0, rk0;
     abi_ulong page_addr;
@@ -6678,7 +6690,7 @@ static int interpret_or(ucontext_t *uc, uint32_t* inst,
     }
 
     int opnd0_size = (inst[-1] & 0xffc003ff) == 0x03400000 ?
-                ((inst[-1] << 10)) >> 20 : 64;
+                ((inst[-1] << 10)) >> 20 : size;
     if (page_addr != ((siaddr + (opnd0_size >> 3)) & qemu_host_page_mask)) {
         page_num = 2;
     } else {
@@ -6712,9 +6724,12 @@ static int interpret_or(ucontext_t *uc, uint32_t* inst,
         } else {
             assert(0);
         }
-    } else {
+    } else if (opnd0_size == 64) {
         UC_GR(uc)[rd0] = *(int64_t *)newaddr;
         *(int64_t *)newaddr = UC_GR(uc)[rd0] | UC_GR(uc)[rk0];
+    } else if (opnd0_size == 32) {
+        UC_GR(uc)[rd0] = *(int32_t *)newaddr;
+        *(int32_t *)newaddr = UC_GR(uc)[rd0] | UC_GR(uc)[rk0];
     }
     UC_PC(uc) += 4;
     qemu_log_mask(LAT_LOG_MEM, "[LATX_LOCK] %s UC_GR(uc)[rd0] = 0x%llx"
@@ -6726,7 +6741,7 @@ static int interpret_or(ucontext_t *uc, uint32_t* inst,
 }
 
 static int interpret_xor(ucontext_t *uc, uint32_t* inst,
-        uint64_t *fixed_siaddr)
+        uint64_t *fixed_siaddr, int size)
 {
     uint32_t rj0, rd0, rk0;
     abi_ulong page_addr;
@@ -6751,7 +6766,7 @@ static int interpret_xor(ucontext_t *uc, uint32_t* inst,
     }
 
     int opnd0_size = (inst[-2] & 0xffc003ff) == 0x03400000 ?
-                ((inst[-2] << 10)) >> 20 : 64;
+                ((inst[-2] << 10)) >> 20 : size;
     if (page_addr != ((siaddr + (opnd0_size >> 3)) & qemu_host_page_mask)) {
         page_num = 2;
     } else {
@@ -6785,9 +6800,12 @@ static int interpret_xor(ucontext_t *uc, uint32_t* inst,
         } else {
             assert(0);
         }
-    } else {
+    } else if (opnd0_size == 64) {
         UC_GR(uc)[rd0] = *(int64_t *)newaddr;
         *(int64_t *)newaddr = UC_GR(uc)[rd0] ^ UC_GR(uc)[rk0];
+    } else if (opnd0_size == 32) {
+        UC_GR(uc)[rd0] = *(int32_t *)newaddr;
+        *(int32_t *)newaddr = UC_GR(uc)[rd0] ^ UC_GR(uc)[rk0];
     }
     UC_PC(uc) += 4;
     qemu_log_mask(LAT_LOG_MEM, "[LATX_LOCK] %s UC_GR(uc)[rd0] = 0x%llx"
@@ -6879,7 +6897,7 @@ static int interpret_sub(ucontext_t *uc, uint32_t* inst,
 }
 
 static int interpret_xchg(ucontext_t *uc, uint32_t* inst,
-        uint64_t *fixed_siaddr)
+        uint64_t *fixed_siaddr, int size)
 {
     uint32_t rj0, rd0, rk0;
     abi_ulong page_addr;
@@ -6904,7 +6922,7 @@ static int interpret_xchg(ucontext_t *uc, uint32_t* inst,
     }
 
     int opnd0_size = (inst[-1] & 0xffc003ff) == 0x03400000 ?
-                ((inst[-1] << 10)) >> 20 : 64;
+                ((inst[-1] << 10)) >> 20 : size;
     if (page_addr != ((siaddr + (opnd0_size >> 3)) & qemu_host_page_mask)) {
         page_num = 2;
     } else {
@@ -6938,15 +6956,97 @@ static int interpret_xchg(ucontext_t *uc, uint32_t* inst,
         } else {
             assert(0);
         }
-    } else {
+    } else if (opnd0_size == 64) {
         UC_GR(uc)[rd0] = *(int64_t *)newaddr;
         *(int64_t *)newaddr = UC_GR(uc)[rk0];
+    } else if (opnd0_size == 32) {
+        UC_GR(uc)[rd0] = *(int32_t *)newaddr;
+        *(int32_t *)newaddr = UC_GR(uc)[rk0];
+    } else if (opnd0_size == 16) {
+        UC_GR(uc)[rd0] = *(int16_t *)newaddr;
+        *(int16_t *)newaddr = UC_GR(uc)[rk0];
+    } else if (opnd0_size == 8) {
+        UC_GR(uc)[rd0] = *(int8_t *)newaddr;
+        *(int8_t *)newaddr = UC_GR(uc)[rk0];
     }
     UC_PC(uc) += 4;
     qemu_log_mask(LAT_LOG_MEM, "[LATX_LOCK] %s UC_GR(uc)[rd0] = 0x%llx"
                 " UC_GR(uc)[rj0] = 0x%llx UC_GR(uc)[rk0] = 0x%llx"
                 " *new mem = 0x%lx\n", __func__, UC_GR(uc)[rd0],
                 UC_GR(uc)[rj0], UC_GR(uc)[rk0], *(int64_t *)newaddr);
+
+    return recover_interpret_oldpage(page_addr, newpage, page_num);
+}
+
+static int interpret_cas(ucontext_t *uc, uint32_t* inst,
+        uint64_t *fixed_siaddr, int size)
+{
+    uint32_t rd, rk, rj;
+    int64_t siaddr;
+    abi_ulong page_addr;
+    uint64_t newaddr;
+    void *newpage;
+    int page_num;
+
+    /*
+     * amcas rd, rk, rj
+     */
+    rd = (inst[0]) & 0x1f;
+    rk = (inst[0] >> 10) & 0x1f;
+    rj = (inst[0] >> 5) & 0x1f;
+
+    /* get siaddr and page */
+    siaddr = UC_GR(uc)[rj];
+    page_addr = siaddr & qemu_host_page_mask;
+    *fixed_siaddr = siaddr;
+
+    /* check if guest page has PAGE_WRITE_ORG */
+    if (lock_interpret_check(siaddr)) {
+        return LOCKINT_SEGV; /* send segv to guest */
+    }
+
+    int opnd0_size = size;
+    if (page_addr != ((siaddr + (opnd0_size >> 3)) & qemu_host_page_mask)) {
+        page_num = 2;
+    } else {
+        page_num = 1;
+    }
+
+    newpage = set_interpret_newpage(page_addr, page_num);
+    if (newpage == NULL) {
+        return LOCKINT_BAD;
+    }
+
+    int64_t page_off = (int64_t)newpage - page_addr;
+    newaddr = page_off + siaddr;
+
+    if (opnd0_size == 64) {
+        int64_t old_val = *(int64_t *)newaddr;
+        if ((int64_t)UC_GR(uc)[rd] == old_val) {
+            *(int64_t *)newaddr = UC_GR(uc)[rk];
+        }
+        UC_GR(uc)[rd] = old_val;
+    } else if (opnd0_size == 32) {
+        int32_t old_val = *(int32_t *)newaddr;
+        if ((int32_t)UC_GR(uc)[rd] == old_val) {
+            *(int32_t *)newaddr = UC_GR(uc)[rk];
+        }
+        UC_GR(uc)[rd] = old_val;
+    } else if (opnd0_size == 16) {
+        int16_t old_val = *(int16_t *)newaddr;
+        if ((int16_t)UC_GR(uc)[rd] == old_val) {
+            *(int16_t *)newaddr = UC_GR(uc)[rk];
+        }
+        UC_GR(uc)[rd] = old_val;
+    } else {
+        int8_t old_val = *(int8_t *)newaddr;
+        if ((int8_t)UC_GR(uc)[rd] == old_val) {
+            *(int8_t *)newaddr = UC_GR(uc)[rk];
+        }
+        UC_GR(uc)[rd] = old_val;
+    }
+
+    UC_PC(uc) += 0x4;
 
     return recover_interpret_oldpage(page_addr, newpage, page_num);
 }
@@ -7105,9 +7205,38 @@ int lock_interpret(siginfo_t *info, ucontext_t *uc)
         case 0x70d3:
             /*
              * amswap.d/amswap_db.d:
-             *  xchg
              */
-            ret = interpret_xchg(uc, inst, &fixed_siaddr);
+            ret = interpret_xchg(uc, inst, &fixed_siaddr, 64);
+            if (ret == LOCKINT_SEGV) {
+                lock_interpret_segv(info, uc, fixed_siaddr, 0x0);
+            }
+            return ret;
+        case 0x70c0:
+        case 0x70d2:
+            /*
+             * amswap.w/amswap_db.w:
+             */
+            ret = interpret_xchg(uc, inst, &fixed_siaddr, 32);
+            if (ret == LOCKINT_SEGV) {
+                lock_interpret_segv(info, uc, fixed_siaddr, 0x0);
+            }
+            return ret;
+        case 0x70b9:
+        case 0x70bd:
+            /*
+             * amswap.h/amswap_db.h:
+             */
+            ret = interpret_xchg(uc, inst, &fixed_siaddr, 16);
+            if (ret == LOCKINT_SEGV) {
+                lock_interpret_segv(info, uc, fixed_siaddr, 0x0);
+            }
+            return ret;
+        case 0x70b8:
+        case 0x70bc:
+            /*
+             * amswap.b/amswap_db.b:
+             */
+            ret = interpret_xchg(uc, inst, &fixed_siaddr, 8);
             if (ret == LOCKINT_SEGV) {
                 lock_interpret_segv(info, uc, fixed_siaddr, 0x0);
             }
@@ -7115,7 +7244,7 @@ int lock_interpret(siginfo_t *info, ucontext_t *uc)
         case 0x70c3:
         case 0x70d5:
             /*
-             * amadd.d:
+             * amadd.d/amadd_db.d:
              *  lock add
              *  lock adc
              *  lock inc
@@ -7124,7 +7253,37 @@ int lock_interpret(siginfo_t *info, ucontext_t *uc)
              *  lock sbb
              *  lock xadd
              */
-            ret = interpret_add(uc, inst, &fixed_siaddr);
+            ret = interpret_add(uc, inst, &fixed_siaddr, 64);
+            if (ret == LOCKINT_SEGV) {
+                lock_interpret_segv(info, uc, fixed_siaddr, 0x0);
+            }
+            return ret;
+        case 0x70c2:
+        case 0x70d4:
+            /*
+             * amadd.w/amadd_db.w:
+             */
+            ret = interpret_add(uc, inst, &fixed_siaddr, 32);
+            if (ret == LOCKINT_SEGV) {
+                lock_interpret_segv(info, uc, fixed_siaddr, 0x0);
+            }
+            return ret;
+        case 0x70bb:
+        case 0x70bf:
+            /*
+             * amadd.h/amadd_db.h:
+             */
+            ret = interpret_add(uc, inst, &fixed_siaddr, 16);
+            if (ret == LOCKINT_SEGV) {
+                lock_interpret_segv(info, uc, fixed_siaddr, 0x0);
+            }
+            return ret;
+        case 0x70ba:
+        case 0x70be:
+            /*
+             * amadd.b/amadd_db.b:
+             */
+            ret = interpret_add(uc, inst, &fixed_siaddr, 8);
             if (ret == LOCKINT_SEGV) {
                 lock_interpret_segv(info, uc, fixed_siaddr, 0x0);
             }
@@ -7132,9 +7291,19 @@ int lock_interpret(siginfo_t *info, ucontext_t *uc)
         case 0x70c5:
         case 0x70d7:
             /*
-             * lock and
+             * amand.d/amand_db.d
              */
-            ret = interpret_and(uc, inst, &fixed_siaddr);
+            ret = interpret_and(uc, inst, &fixed_siaddr, 64);
+            if (ret == LOCKINT_SEGV) {
+                lock_interpret_segv(info, uc, fixed_siaddr, 0x0);
+            }
+            return ret;
+        case 0x70c4:
+        case 0x70d6:
+            /*
+             * amand.w/amand_db.w
+             */
+            ret = interpret_and(uc, inst, &fixed_siaddr, 32);
             if (ret == LOCKINT_SEGV) {
                 lock_interpret_segv(info, uc, fixed_siaddr, 0x0);
             }
@@ -7142,9 +7311,19 @@ int lock_interpret(siginfo_t *info, ucontext_t *uc)
         case 0x70c7:
         case 0x70d9:
             /*
-             * lock or
+             * amor.d/amor_db.d
              */
-            ret = interpret_or(uc, inst, &fixed_siaddr);
+            ret = interpret_or(uc, inst, &fixed_siaddr, 64);
+            if (ret == LOCKINT_SEGV) {
+                lock_interpret_segv(info, uc, fixed_siaddr, 0x0);
+            }
+            return ret;
+        case 0x70c6:
+        case 0x70d8:
+            /*
+             * amor.w/amor_db.w
+             */
+            ret = interpret_or(uc, inst, &fixed_siaddr, 32);
             if (ret == LOCKINT_SEGV) {
                 lock_interpret_segv(info, uc, fixed_siaddr, 0x0);
             }
@@ -7152,11 +7331,28 @@ int lock_interpret(siginfo_t *info, ucontext_t *uc)
         case 0x70c9:
         case 0x70db:
             /*
-             * amxor.d
-             *  lock xor
-             *  lock not
+             * amxor.d/amxor_db.d
              */
-            ret = interpret_xor(uc, inst, &fixed_siaddr);
+            ret = interpret_xor(uc, inst, &fixed_siaddr, 64);
+            if (ret == LOCKINT_SEGV) {
+                lock_interpret_segv(info, uc, fixed_siaddr, 0x0);
+            }
+            return ret;
+        case 0x70c8:
+        case 0x70da:
+            /*
+             * amxor.w/amxor_db.w
+             */
+            ret = interpret_xor(uc, inst, &fixed_siaddr, 32);
+            if (ret == LOCKINT_SEGV) {
+                lock_interpret_segv(info, uc, fixed_siaddr, 0x0);
+            }
+            return ret;
+        case 0x70b0 ... 0x70b7:
+            /*
+             * amcas(_db).(b/h/w/d)
+             */
+            ret = interpret_cas(uc, inst, &fixed_siaddr, (1 << ((inst[0]>>15)&0x3)) * 8);
             if (ret == LOCKINT_SEGV) {
                 lock_interpret_segv(info, uc, fixed_siaddr, 0x0);
             }

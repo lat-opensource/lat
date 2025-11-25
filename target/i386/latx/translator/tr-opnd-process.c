@@ -276,6 +276,41 @@ IR2_OPND load_ireg_from_ir2_mem(IR2_OPND mem_opnd, int mem_imm, int mem_size,
     return opnd2;
 }
 
+void load_ireg_from_ir2_mem_2(IR2_OPND opnd2, IR2_OPND mem_opnd, int mem_imm, int mem_size,
+                                   EXTENSION_MODE em, bool is_xmm_hi)
+{
+#ifndef TARGET_X86_64
+    la_mov32_zx(mem_opnd, mem_opnd);
+#else
+    if (!CODEIS64) {
+        la_mov32_zx(mem_opnd, mem_opnd);
+    }
+#endif
+    if (mem_size == 32) {
+        if (em == ZERO_EXTENSION) {
+            la_ld_wu(opnd2, mem_opnd, mem_imm);
+        } else {
+            la_ld_w(opnd2, mem_opnd, mem_imm);
+        }
+    } else if (mem_size == 64) {
+        la_ld_d(opnd2, mem_opnd, mem_imm);
+    } else if (mem_size == 8) {
+        if (em == ZERO_EXTENSION) {
+            la_ld_bu(opnd2, mem_opnd, mem_imm);
+        } else {
+            la_ld_b(opnd2, mem_opnd, mem_imm);
+        }
+    } else if (mem_size == 16) {
+        if (em == ZERO_EXTENSION) {
+            la_ld_hu(opnd2, mem_opnd, mem_imm);
+        } else {
+            la_ld_h(opnd2, mem_opnd, mem_imm);
+        }
+    } else {
+        lsassert(0);
+    }
+}
+
 /**
 @load an ir1 register operand to a specific ir2 register operand.
 @param the ir1 register operand

@@ -91,6 +91,7 @@ int option_shadow_file;
 int option_smc_opt;
 int option_set_rounding_opt;
 int option_cvt_opt;
+int option_fast_atomic;
 
 unsigned long long counter_tb_exec;
 unsigned long long counter_tb_tr;
@@ -155,6 +156,7 @@ void options_init(void)
 
     option_set_rounding_opt = 1;
     option_cvt_opt = 1;
+    option_fast_atomic = 1;
 }
 
 #define OPTIONS_IMM_REG 0
