@@ -2458,7 +2458,9 @@ static void generate_indirect_goto(void *code_buf)
      * 如果修改该函数，需要注意 unlink_indirect_jmp 中写 nop 的位置！！！
      */
     IR2_OPND next_x86_addr = ra_alloc_dbt_arg2();
+    IR2_OPND target = ra_alloc_data();
     IR2_OPND base = ra_alloc_data();
+    la_data_li(target, context_switch_native_to_bt_ret_0);
     la_data_li(base, (ADDR)code_buf);
 
     /* indirect jmp */
@@ -2466,8 +2468,6 @@ static void generate_indirect_goto(void *code_buf)
     IR2_OPND jmp_cache_addr = ra_alloc_static0();
 
     IR2_OPND next_tb = V0_RENAME_OPND;
-    IR2_OPND target = ra_alloc_data();
-    IR2_OPND label_miss = ra_alloc_label();
     /*
      * lookup HASH_JMP_CACHE
      * Step 1: calculate HASH = (x86_addr >> 12) ^ (x86_addr & 0xfff)
@@ -2482,11 +2482,27 @@ static void generate_indirect_goto(void *code_buf)
     la_bstrpick_d(next_tb, next_tb, TB_JMP_CACHE_BITS - 1, 0);
 
 #ifdef CONFIG_LATX_FAST_JMPCACHE
+    IR2_OPND epi_addr = ra_alloc_itemp();
+    int real_inst_num = CURRENT_INST_COUNTER(lsenv);
+    int offset = context_switch_native_to_bt_ret_0 - (ADDR)code_buf -
+                ((real_inst_num + 1) << 2);
+
+    if (int32_in_int20(offset)) {
+        la_pcaddi_relocate(epi_addr, target, base);
+    } else {
+        li_d(epi_addr, context_switch_native_to_bt_ret_0);
+    }
+
     la_alsl_d(next_tb, next_tb, jmp_cache_addr, 3);
     la_ld_d(jmp_entry, next_tb, 0);
-    la_bne(jmp_entry, next_x86_addr, label_miss);
-    la_ld_d(jmp_entry, next_tb, 8);
+    la_ld_d(next_tb, next_tb, 8);
+    la_xor(jmp_entry, jmp_entry, next_x86_addr);
+    la_masknez(next_tb, next_tb, jmp_entry);
+    la_maskeqz(epi_addr, epi_addr, jmp_entry);
+    la_or(next_tb, next_tb, epi_addr);
+    la_jirl(zero_ir2_opnd, next_tb, 0);
 #else
+    IR2_OPND label_miss = ra_alloc_label();
     la_slli_d(next_tb, next_tb, 3);
     la_ldx_d(next_tb, next_tb, jmp_cache_addr);
     la_beq(next_tb, zero_ir2_opnd, label_miss);
@@ -2506,7 +2522,6 @@ static void generate_indirect_goto(void *code_buf)
     la_ld_d(jmp_entry, next_tb,
             offsetof(TranslationBlock, tc) +
             offsetof(struct tb_tc, ptr));
-#endif
 
 /* hit: */
     la_jirl(zero_ir2_opnd, jmp_entry, 0);
@@ -2527,6 +2542,7 @@ static void generate_indirect_goto(void *code_buf)
 #endif
     la_data_li(target, context_switch_native_to_bt_ret_0);
     aot_la_append_ir2_jmp_far(target, base, B_EPILOGUE_RET_0, 0);
+#endif
 
     return;
 }
@@ -2822,7 +2838,13 @@ void generate_context_switch_bt_to_native(void *code_buf)
 
 void generate_context_switch_native_to_bt(void)
 {
+    /* 2. store eip (in $25) into env */
+    IR2_OPND eip_opnd = ra_alloc_dbt_arg2();
 #ifdef CONFIG_LATX_LAZYEXIT
+    lsassert(lsenv_offset_of_eip(lsenv) >= -2048 &&
+            lsenv_offset_of_eip(lsenv) <= 2047);
+    la_store_addrx(eip_opnd, env_ir2_opnd,
+                            lsenv_offset_of_eip(lsenv));
     IR2_OPND label_cs = ra_alloc_label();
     la_or(a0_ir2_opnd, zero_ir2_opnd, zero_ir2_opnd); // ret 0
     la_b(label_cs);
@@ -2834,11 +2856,6 @@ void generate_context_switch_native_to_bt(void)
     la_label(label_cs);
 #else
     la_mov64(a0_ir2_opnd, zero_ir2_opnd);
-#endif
-
-    /* 2. store eip (in $25) into env */
-#ifndef CONFIG_LATX_LAZYPC
-    IR2_OPND eip_opnd = ra_alloc_dbt_arg2();
     lsassert(lsenv_offset_of_eip(lsenv) >= -2048 &&
             lsenv_offset_of_eip(lsenv) <= 2047);
     la_store_addrx(eip_opnd, env_ir2_opnd,

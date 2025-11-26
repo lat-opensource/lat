@@ -80,6 +80,24 @@ IR2_INST *la_inst_diff(IR2_OPND dest, IR2_OPND label1, IR2_OPND label2);
 IR2_INST *la_far_jump(IR2_OPND jmp_target, IR2_OPND counter_base);
 
 /**
+ * @brief generate pcaddi inst
+ * @details
+ * This function is used to hint to generate a pcaddi inst.
+ * First opnd 'rd' is pcaddi dest. Second opnd 'jump_target' is jump
+ * target (absolute address). Last opnd 'counter_base' is TB/TU first
+ * inst absolute address.
+ * The generater will use under algorithm to caculate offset:
+ * <jump_target - counter_base - counter * 4>
+ * So, two opnd *MUST* be IR2_OPND_DATA
+ * @note This is a pseudo-instruction, but will generate some real instructions.
+ * @param jmp_target jump target address
+ * @param counter_base base address, for insts counter (or say address when
+ * counter = 1)
+ * @return IR2_INST* this ir2_inst
+ */
+IR2_INST *la_pcaddi_relocate(IR2_OPND rd, IR2_OPND jmp_target, IR2_OPND counter_base);
+
+/**
  * @brief generate translator data store operation
  * @details
  * This function is used to hint the relocator to save the data into translator

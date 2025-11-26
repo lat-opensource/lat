@@ -5,6 +5,9 @@
 #include "mem.h"
 #include "error.h"
 
+#define int32_in_intn(x, n) (!(((x) + (1 << ((n) - 1))) & (~((1 << n) - 1))))
+#define int32_in_int20(x)  int32_in_intn(x, 20)
+
 #define BITS_ARE_SET_ANY(value, bits) (((value) & (bits)) != 0)
 #define BITS_ARE_SET_ALL(value, bits) (((value) & (bits)) == (bits))
 #define BITS_ARE_SET(value, bits) BITS_ARE_SET_ALL(value, bits)
