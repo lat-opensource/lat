@@ -370,7 +370,7 @@ void ir2_dump_init(void)
 
 int ir2_dump(const IR2_INST *ir2, bool print)
 {
-    char str[64];
+    char str[128];
     int size = 0;
 
     /* an empty IR2_INST was inserted into the ir2 */
