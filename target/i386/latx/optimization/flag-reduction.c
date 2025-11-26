@@ -201,8 +201,8 @@ static const IR1_EFLAG_USEDEF ir1_opcode_eflag_usedef[] = {
     /* FLAG_DEFINE(REP,     __NONE, __INVALID, __NONE), */
     /* FLAG_DEFINE(REPNE,     __NONE, __INVALID, __NONE), */
     FLAG_DEFINE(RET,     __NONE, __NONE, __NONE), /* change */
-    FLAG_DEFINE(ROL,     __CF, __OF | __CF, __NONE),
-    FLAG_DEFINE(ROR,     __CF, __OF | __CF, __NONE),
+    FLAG_DEFINE(ROL,     __NONE, __OF | __CF, __NONE),
+    FLAG_DEFINE(ROR,     __NONE, __OF | __CF, __NONE),
     FLAG_DEFINE(RSM,     __NONE, __ALL_EFLAGS | __DF, __NONE),
     FLAG_DEFINE(SAHF,    __NONE, __SZAPCF, __NONE),
     FLAG_DEFINE(SAL,     __NONE, __ALL_EFLAGS, __AF), /* change */
