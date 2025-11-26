@@ -1183,6 +1183,7 @@ void store_freg_to_ir1(IR2_OPND opnd2, IR1_OPND *opnd1, bool is_xmm_hi,
 
 IR2_OPND set_fpu_fcsr_rounding_field_by_x86(void)
 {
+    if (option_set_rounding_opt) return zero_ir2_opnd;
     CPUArchState* env = (CPUArchState*)(lsenv->cpu_state);
     CPUState *cpu = env_cpu(env);
     if (!close_latx_parallel && !(cpu->tcg_cflags & CF_PARALLEL)) {
@@ -1213,6 +1214,7 @@ IR2_OPND set_fpu_fcsr_rounding_field_by_x86(void)
 
 void set_fpu_rounding_mode(IR2_OPND rm)
 {
+    if (option_set_rounding_opt) return;
     CPUArchState* env = (CPUArchState*)(lsenv->cpu_state);
     CPUState *cpu = env_cpu(env);
     if (close_latx_parallel) {

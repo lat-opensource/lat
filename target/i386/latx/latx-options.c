@@ -89,6 +89,7 @@ int option_real_maps;
 int option_monitor_shared_mem;
 int option_shadow_file;
 int option_smc_opt;
+int option_set_rounding_opt;
 
 unsigned long long counter_tb_exec;
 unsigned long long counter_tb_tr;
@@ -149,6 +150,12 @@ void options_init(void)
 
 #ifdef CONFIG_LATX_SMC_OPT
     option_smc_opt = 0;
+#endif
+
+#ifdef CONFIG_LATX_AVX_OPT
+    option_set_rounding_opt = 0;
+#else
+    option_set_rounding_opt = 1;
 #endif
 }
 

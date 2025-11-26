@@ -623,6 +623,7 @@ static void handle_arg_latx_softfpu(const char *arg)
     option_softfpu = strtol(arg, NULL, 0);
     if (option_softfpu) {
         option_aot = 0;
+        option_set_rounding_opt = 0;
     }
 }
 
@@ -679,6 +680,11 @@ static void handle_arg_latx_jrra(const char *arg)
 static void handle_arg_latx_smc(const char *arg)
 {
     option_smc_opt = strtol(arg, NULL, 0);
+}
+
+static void handle_arg_latx_rounding(const char *arg)
+{
+    option_set_rounding_opt = strtol(arg, NULL, 0);
 }
 
 static void handle_arg_latx_anonym(const char *arg)
@@ -809,6 +815,8 @@ static const struct qemu_argument arg_table[] = {
     "",           "enable softfpu fast"},
     {"latx-prlimit",    "LATX_PRLIMIT",     true,  handle_arg_latx_prlimit,
     "",           "enable prlimit"},
+    {"latx-rounding",    "LATX_ROUNDING_OPT",     true,  handle_arg_latx_rounding,
+    "",           "enable rounding opt"},
 #if defined(CONFIG_LATX_AVX_OPT)
     {"latx-avx-cpuid",    "LATX_AVX_CPUID",     true,  handle_arg_latx_avx_cpuid,
     "",           "enable avx cpuid"},

@@ -221,6 +221,23 @@ bool translate_ldmxcsr(IR1_INST *pir1)
     lsassert(offset <= 0x7ff);
     la_st_w(new_mxcsr, env_ir2_opnd, offset);
 
+    if (option_set_rounding_opt) {
+        IR2_OPND fcsr = ra_alloc_itemp();
+        IR2_OPND temp = ra_alloc_itemp();
+
+        la_bstrpick_w(temp, new_mxcsr, 14, 13);
+        la_andi(fcsr, temp, 0x1);
+        IR2_OPND label1 = ra_alloc_label();
+        la_beq(fcsr, zero_ir2_opnd, label1);
+        la_xori(temp, temp, 0x2);
+        la_label(label1);
+        la_bstrins_w(fcsr, temp, 9, 8);
+        la_movgr2fcsr(fcsr3_ir2_opnd, fcsr);
+
+        ra_free_temp(fcsr);
+        ra_free_temp(temp);
+    }
+
     tr_gen_call_to_helper1((ADDR)update_mxcsr_status, 1,
                            LOAD_HELPER_UPDATE_MXCSR_STATUS);
 
