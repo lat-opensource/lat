@@ -274,10 +274,10 @@ int target_latx_epilogue(void *code_buf_addr)
      *
      * TODO: 20 and 24 can be removed
      */
-    context_switch_native_to_bt_ret_id_3 = (ADDR)code_buf_addr + 8;
-    context_switch_native_to_bt_ret_id_1 = (ADDR)code_buf_addr + 16;
-    context_switch_native_to_bt_ret_id_0 = (ADDR)code_buf_addr + 24;
-    context_switch_native_to_bt = (ADDR)code_buf_addr + 28;
+    context_switch_native_to_bt_ret_id_3 = (ADDR)code_buf_addr + 12;
+    context_switch_native_to_bt_ret_id_1 = (ADDR)code_buf_addr + 20;
+    context_switch_native_to_bt_ret_id_0 = (ADDR)code_buf_addr + 28;
+    context_switch_native_to_bt = (ADDR)code_buf_addr + 32;
 #else
     context_switch_native_to_bt = (ADDR)code_buf_addr + 4;
 #endif

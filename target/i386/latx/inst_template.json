@@ -139,6 +139,13 @@
         ],
         "note": "hint the area of profile"
     },
+    "pcaddi_relocate": {
+        "opcode": "0",
+        "opnd": [
+            "opd_invalid"
+        ],
+        "note": "hint pseudo inst do pcaddi relocate"
+    },
     "pseudo_end": {
         "opcode": "0",
         "opnd": [
