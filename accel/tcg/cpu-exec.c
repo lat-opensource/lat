@@ -272,7 +272,7 @@ cpu_tb_exec(CPUState *cpu, TranslationBlock *itb, int *tb_exit)
         ret = (uint64_t)rettb | tbexit;
     }
 #endif
-#ifdef CONFIG_LATX_LAZYPC
+#ifdef CONFIG_LATX_LAZYEXITPC
     {
         int tbexit = ret & TB_EXIT_MASK;
         TranslationBlock *rettb = (void *)(ret & ~TB_EXIT_MASK);
@@ -285,7 +285,6 @@ cpu_tb_exec(CPUState *cpu, TranslationBlock *itb, int *tb_exit)
             }
             env->eip = lazypc;
         }
-
     }
 #endif
 

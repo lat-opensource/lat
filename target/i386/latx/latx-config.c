@@ -260,25 +260,28 @@ int target_latx_epilogue(void *code_buf_addr)
 
     lsassert(context_switch_native_to_bt == 0);
     context_switch_native_to_bt_ret_0 = (ADDR)code_buf_addr;
-#ifdef CONFIG_LATX_LAZYEXIT
+#ifdef CONFIG_LATX_LAZYEXITPC
     /*
-     *  0:   mov  a0, zero      ret_0
-     *  4:   b    cs
-     *  8:   ori  a0, a0, 0x3   ret_id_3
-     * 12:  b    cs
-     * 16:  ori  a0, a0, 0x1    ret_id_1
-     * 20:  b    cs
-     * 24:  ori  a0, a0, 0x0    ret_id_0
-     * cs:
-     * 28:  context switch
-     *
-     * TODO: 20 and 24 can be removed
+     *  0:  save eip to env     ret_0
+     *  4:  mov  a0, zero
+     *  8:  b    cs
+     * 12:  ori  a0, a0, 0x3    ret_id_3
+     * 16:  b    cs
+     * 20:  ori  a0, a0, 0x1    ret_id_1
+     * 24:  b    cs
+     * 28:  ori  a0, a0, 0x0    ret_id_0
+     * 32:  context switch      native_to_bt
      */
     context_switch_native_to_bt_ret_id_3 = (ADDR)code_buf_addr + 12;
     context_switch_native_to_bt_ret_id_1 = (ADDR)code_buf_addr + 20;
     context_switch_native_to_bt_ret_id_0 = (ADDR)code_buf_addr + 28;
     context_switch_native_to_bt = (ADDR)code_buf_addr + 32;
 #else
+    /*
+     *  0:  mov a0, zero        ret_0
+     *  4:  save eip to env     native_to_bt
+     *  8:  context switch
+     */
     context_switch_native_to_bt = (ADDR)code_buf_addr + 4;
 #endif
 

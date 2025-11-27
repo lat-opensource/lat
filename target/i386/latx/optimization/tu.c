@@ -339,6 +339,13 @@ static void generate_tu_switch_native_tb(TranslationBlock *broken_tb)
     aot_load_host_addr(succ_x86_addr_opnd, succ_x86_addr,
             LOAD_CALL_TARGET, call_offset);
 
+#ifdef CONFIG_LATX_LAZYEXITPC
+    /* here we store EIP to env
+     * since context_switch_native_to_bt will not */
+    la_store_addrx(succ_x86_addr_opnd, env_ir2_opnd,
+            lsenv_offset_of_eip(lsenv));
+#endif
+
     la_ori(la_ret_opnd, zero_ir2_opnd, 1);
     la_data_li(target, context_switch_native_to_bt);
     #ifdef TU_DEBUG //for debug
