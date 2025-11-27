@@ -54,27 +54,16 @@ static void Push64(CPUX86State *cpu, uint64_t v)
 int init_x86dlfun(void);
 int init_x86dlfun(void)
 {
-    elfheader_t* h = NULL;
-    char *tmp = ResolveFile("libdl.so.2", &my_context->box64_ld_lib);
-    if(FileExist(tmp, IS_FILE)) {
-        FILE *f = fopen(tmp, "rb");
-        if(!f) {
-            printf_log(LOG_NONE, "Error: Cannot open %s\n", tmp);
-            return -1;
-        }
-        h = LoadAndCheckElfHeader(f, tmp, 0);
-        ElfHeadReFix(h, loadSoaddrFromMap(tmp));
-        if ((uintptr_t)h->VerSym > (uintptr_t)h->delta) {
-            h->delta = 0;
-        }
-    } else {
-        lsassertm(0, "cannot find %s\n", tmp);
-    }
+    elfheader_t* h = loadElfFromFile("libdl.so.2");
     lsassert(h);
     const char* syms[] = {"dlopen", "dlsym", "dlclose", "dladdr", "dladdr1"};
     void *rsyms[5] = {0};
     int rrsyms = 0;
     ResetSpecialCaseElf(h, syms, 5, rsyms, &rrsyms);
+    if (rrsyms != 5) {
+        h = loadElfFromFile("libc.so.6");
+        ResetSpecialCaseElf(h, syms, 5, rsyms, &rrsyms);
+    }
     lsassert(rrsyms == 5);
     my_context->dlprivate->x86dlopen = rsyms[0];
     my_context->dlprivate->x86dlsym = rsyms[1];
