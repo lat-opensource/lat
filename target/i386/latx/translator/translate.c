@@ -2465,7 +2465,6 @@ static void generate_indirect_goto(void *code_buf)
     IR2_OPND next_x86_addr = ra_alloc_dbt_arg2();
     IR2_OPND target = ra_alloc_data();
     IR2_OPND base = ra_alloc_data();
-    la_data_li(target, context_switch_native_to_bt_ret_0);
     la_data_li(base, (ADDR)code_buf);
 
     /* indirect jmp */
@@ -2487,16 +2486,9 @@ static void generate_indirect_goto(void *code_buf)
     la_bstrpick_d(next_tb, next_tb, TB_JMP_CACHE_BITS - 1, 0);
 
 #ifdef CONFIG_LATX_FAST_JMPCACHE
+#define PCADDI_JMP_INST_OFF 9
     IR2_OPND epi_addr = ra_alloc_itemp();
-    int real_inst_num = CURRENT_INST_COUNTER(lsenv);
-    int offset = context_switch_native_to_bt_ret_0 - (ADDR)code_buf -
-                ((real_inst_num + 1) << 2);
-
-    if (int32_in_int20(offset)) {
-        la_pcaddi_relocate(epi_addr, target, base);
-    } else {
-        li_d(epi_addr, context_switch_native_to_bt_ret_0);
-    }
+    la_pcaddi(epi_addr, PCADDI_JMP_INST_OFF);
 
     la_alsl_d(next_tb, next_tb, jmp_cache_addr, 3);
     la_ld_d(jmp_entry, next_tb, 0);
@@ -2541,9 +2533,9 @@ static void generate_indirect_goto(void *code_buf)
      * ra_alloc_dbt_arg2: next x86 ip
      */
 
+#endif
     la_data_li(target, context_switch_native_to_bt_ret_0);
     aot_la_append_ir2_jmp_far(target, base, B_EPILOGUE_RET_0, 0);
-#endif
 
     return;
 }
