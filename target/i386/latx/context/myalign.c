@@ -2545,6 +2545,16 @@ static struct x86_ld_info * find_ld_part(char * start, int len)
                 K_LEA(6),         // 0x48 0x8d 0x64 0xd8                        (lea -0x28(%rbp),%rsp)
             },
             .part_offset = 0x20
+        },
+        {   // glibc 2.42 (Yongbao x86_64_runtime)
+            .ins = {
+                K_OR(0),          // 0x41 0x80 0x8e 0x54 0x03 0x00 0x00 0x08    (orb $0x8,0x354(%r14))
+                K_CMP_48(8),      // 0x48 0x83 0xbd 0x28 0xff 0xff 0xff 0x00    (cmpq   $0x0,-0xd8(%rbp))
+                K_JNE(8),         // 0x0f 0x85 0x2a 0x18 0x00 0x00              (jne)
+                K_LEA(6),         // 0x48 0x8d 0x65 0xd8                        (lea    -0x28(%rbp),%rsp)
+                K_SKIP(0),
+            },
+            .part_offset = 0x25
         }
     };
     while((_dl_relocate_object_end = memmem(start, len - (start - old_start), searchpopret_part,
@@ -2761,5 +2771,26 @@ void kzt_wine_init_x86(void)
     AddMallocMap(my_context, m);
     x86free = m->freep;
     x86realloc = m->reallocp;
+}
+
+elfheader_t* loadElfFromFile(const char* name)
+{
+    elfheader_t* h = NULL;
+    char *tmp = ResolveFile(name, &my_context->box64_ld_lib);
+    if (FileExist(tmp, IS_FILE)) {
+        FILE *f = fopen(tmp, "rb");
+        if (!f) {
+            printf_log(LOG_NONE, "Error: Cannot open %s\n", tmp);
+            return NULL;
+        }
+        h = LoadAndCheckElfHeader(f, tmp, 0);
+        ElfHeadReFix(h, loadSoaddrFromMap(tmp));
+        if ((uintptr_t)h->VerSym > (uintptr_t)h->delta) {
+            h->delta = 0;
+        }
+    } else {
+        lsassertm(0, "cannot find %s\n", tmp);
+    }
+    return h;
 }
 #pragma GCC diagnostic pop
