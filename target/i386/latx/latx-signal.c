@@ -150,6 +150,11 @@ void unlink_indirect_jmp(CPUArchState *env, TranslationBlock *tb, ucontext_t *uc
     }
 #endif
 #endif
+
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+    insn = qatomic_read((uint32_t *)(jmp_rx + INS_SIZE * 11));
+    jmp_rw += INS_SIZE * 11;
+#else
     CPUState *cpu = env_cpu(env);
     uint32_t parallel = cpu->tcg_cflags & CF_PARALLEL;
     if (!close_latx_parallel && !parallel) {
@@ -166,6 +171,7 @@ void unlink_indirect_jmp(CPUArchState *env, TranslationBlock *tb, ucontext_t *uc
         insn = qatomic_read((uint32_t *)(jmp_rx + INS_SIZE * 7));
         jmp_rw += INS_SIZE * 7;
     }
+#endif
 
     env->insn_save[0] = jmp_rw;
     env->insn_save[1] = insn;
