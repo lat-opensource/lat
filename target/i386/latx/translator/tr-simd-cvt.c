@@ -49,8 +49,61 @@ static void tr_x87_to_mmx(void)
  * @return true
  * @return false
  */
+static bool translate_cvttpx2dq_opt(IR1_INST *pir1)
+{
+    IR1_OPND *opnd1 = ir1_get_opnd(pir1, 0);
+    IR1_OPND *opnd2 = ir1_get_opnd(pir1, 1);
+
+    IR2_OPND dest = ra_alloc_xmm(ir1_opnd_base_reg_num(opnd1));
+    IR2_OPND src = load_freg128_from_ir1(opnd2);
+    IR2_OPND temp_f = ra_alloc_ftemp();
+    IR2_OPND sse_invalid = ra_alloc_ftemp();
+    IR2_OPND overflow = ra_alloc_ftemp();
+    IR2_OPND comp_mask = ra_alloc_ftemp();
+
+    if (ir1_opcode(pir1) == dt_X86_INS_CVTTPS2DQ) {
+        // IR2_OPND temp_fcsr = ra_alloc_itemp();
+        // IR2_OPND label_fastend = ra_alloc_label();
+        la_vftintrz_w_s(temp_f, src);
+        // la_movfcsr2gr(temp_fcsr, fcsr_ir2_opnd);
+        // la_bstrpick_w(temp_fcsr, temp_fcsr , FCSR_OFF_CAUSE_V, FCSR_OFF_CAUSE_O);
+        // la_beqz(temp_fcsr, label_fastend);
+        //slow path, either Nan or overflow
+        la_vldi(sse_invalid, 0b1001110000000); // broadcast 0x80000000 to all 0x1380
+        la_vldi(overflow, (0b10011 << 8) | 0x4f); //0x134f
+        la_vfcmp_cond_s(comp_mask, overflow, src, 0xE); // get Nan mark 0xE=cULE
+        la_vbitsel_v(temp_f, temp_f, sse_invalid, comp_mask);
+        // la_label(label_fastend);
+        la_vand_v(dest, temp_f, temp_f);
+    } else if (ir1_opcode(pir1) == dt_X86_INS_CVTTPD2DQ) {
+        IR2_OPND temp_i = ra_alloc_itemp();
+        // IR2_OPND label_fastend = ra_alloc_label();
+        la_vftintrz_w_d(temp_f, src, src);
+        // la_movfcsr2gr(temp_i, fcsr_ir2_opnd);
+        // la_bstrpick_w(temp_i, temp_i , FCSR_OFF_CAUSE_V, FCSR_OFF_CAUSE_O);
+        // la_beqz(temp_i, label_fastend);
+        //slow path, either Nan or overflow
+        la_vldi(sse_invalid, 0b1001110000000); // broadcast 0x80000000 to all 0x1380
+        li_d(temp_i, 0x41E0000000000000); //0x41E0000000000000
+        la_vreplgr2vr_d(overflow, temp_i);
+        la_vfcmp_cond_d(comp_mask, overflow, src, 0xE); // get Nan mark 0xE=cULE
+        la_vshuf4i_w(comp_mask, comp_mask, 0x88);
+        la_vbitsel_v(temp_f, temp_f, sse_invalid, comp_mask);
+        // la_label(label_fastend);
+        la_vand_v(dest, temp_f, temp_f);
+        la_vinsgr2vr_d(dest, zero_ir2_opnd, 1);
+    } else {
+        lsassert(0);
+    }
+    return true;
+}
+
 bool translate_cvttpx2dq(IR1_INST *pir1)
 {
+    if (option_cvt_opt) {
+        return translate_cvttpx2dq_opt(pir1);
+    }
+
     IR1_OPND *opnd1 = ir1_get_opnd(pir1, 0);
     IR1_OPND *opnd2 = ir1_get_opnd(pir1, 1);
     IR1_OPCODE op = ir1_opcode(pir1);
@@ -165,8 +218,42 @@ bool translate_cvttpx2dq(IR1_INST *pir1)
 /**
  * Refer to cvtps2pi
  */
+static bool translate_cvtpd2dq_opt(IR1_INST *pir1)
+{
+    IR1_OPND *opnd1 = ir1_get_opnd(pir1, 0);
+    IR1_OPND *opnd2 = ir1_get_opnd(pir1, 1);
+
+    IR2_OPND dest = ra_alloc_xmm(ir1_opnd_base_reg_num(opnd1));
+    IR2_OPND src = load_freg128_from_ir1(opnd2);
+    IR2_OPND temp_f = ra_alloc_ftemp();
+    IR2_OPND temp_i = ra_alloc_itemp();
+    IR2_OPND sse_invalid = ra_alloc_ftemp();
+    IR2_OPND overflow = ra_alloc_ftemp();
+    IR2_OPND comp_mask = ra_alloc_ftemp();
+    // IR2_OPND label_fastend = ra_alloc_label();
+
+    la_vftint_w_d(temp_f, src, src);
+    // la_movfcsr2gr(temp_i, fcsr_ir2_opnd);
+    // la_bstrpick_w(temp_i, temp_i , FCSR_OFF_CAUSE_V, FCSR_OFF_CAUSE_O);
+    // la_beqz(temp_i, label_fastend);
+    //slow path, either Nan or overflow
+    la_vldi(sse_invalid, 0b1001110000000); // broadcast 0x80000000 to all 0x1380
+    li_d(temp_i, 0x41E0000000000000); //0x41E0000000000000
+    la_vreplgr2vr_d(overflow, temp_i);
+    la_vfcmp_cond_d(comp_mask, overflow, src, 0xE); // get Nan mark 0xE=cULE
+    la_vshuf4i_w(comp_mask, comp_mask, 0x88);
+    la_vbitsel_v(temp_f, temp_f, sse_invalid, comp_mask);
+    // la_label(label_fastend);
+    la_vand_v(dest, temp_f, temp_f);
+    la_vinsgr2vr_d(dest, zero_ir2_opnd, 1);
+    return true;
+}
+
 bool translate_cvtpd2dq(IR1_INST *pir1)
 {
+    if (option_cvt_opt) {
+        return translate_cvtpd2dq_opt(pir1);
+    }
     IR2_OPND dest = load_freg128_from_ir1(ir1_get_opnd(pir1, 0));
 
     IR2_OPND src_lo;
@@ -271,8 +358,38 @@ bool translate_cvtpd2dq(IR1_INST *pir1)
  * @return false
  */
 
+static bool translate_cvtps2dq_opt(IR1_INST *pir1)
+{
+    IR1_OPND *opnd1 = ir1_get_opnd(pir1, 0);
+    IR1_OPND *opnd2 = ir1_get_opnd(pir1, 1);
+
+    IR2_OPND dest = ra_alloc_xmm(ir1_opnd_base_reg_num(opnd1));
+    IR2_OPND src = load_freg128_from_ir1(opnd2);
+
+    IR2_OPND temp_f = ra_alloc_ftemp();
+    // IR2_OPND temp_i = ra_alloc_itemp();
+    IR2_OPND sse_invalid = ra_alloc_ftemp();
+    IR2_OPND overflow = ra_alloc_ftemp();
+    IR2_OPND comp_mask = ra_alloc_ftemp();
+    // IR2_OPND label_fastend = ra_alloc_label();
+    la_vftint_w_s(temp_f, src);
+    // la_movfcsr2gr(temp_i, fcsr_ir2_opnd);
+    // la_bstrpick_w(temp_i, temp_i , FCSR_OFF_CAUSE_V, FCSR_OFF_CAUSE_O);
+    // la_beqz(temp_i, label_fastend);
+    la_vldi(sse_invalid, 0b1001110000000); // broadcast 0x80000000 to all 0x1380
+    la_vldi(overflow, (0b10011 << 8) | 0x4f); //0x134f
+    la_vfcmp_cond_s(comp_mask, overflow, src, 0xE); // get Nan mark 0xE=cULE
+    la_vbitsel_v(temp_f, temp_f, sse_invalid, comp_mask);
+    // la_label(label_fastend);
+    la_vand_v(dest, temp_f, temp_f);
+    return true;
+}
+
 bool translate_cvtps2dq(IR1_INST *pir1)
 {
+    if (option_cvt_opt) {
+        return translate_cvtps2dq_opt(pir1);
+    }
     IR2_OPND temp_fcsr = ra_alloc_itemp();
     IR2_OPND temp_int = ra_alloc_itemp();
     IR2_OPND temp_operand_count = ra_alloc_itemp();
@@ -346,9 +463,42 @@ bool translate_cvtps2dq(IR1_INST *pir1)
     return true;
 }
 
+static bool translate_cvtpd2pi_opt(IR1_INST *pir1)
+{
+    tr_x87_to_mmx();
+
+    IR2_OPND dest = ra_alloc_mmx(ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 0)));
+    IR2_OPND src = load_freg128_from_ir1(ir1_get_opnd(pir1, 1));
+    IR2_OPND temp_i = ra_alloc_itemp();
+    // IR2_OPND label_fastend = ra_alloc_label();
+    IR2_OPND sse_invalid = ra_alloc_ftemp();
+    IR2_OPND overflow = ra_alloc_ftemp();
+    IR2_OPND comp_mask = ra_alloc_ftemp();
+    IR2_OPND temp_f = ra_alloc_ftemp();
+
+    la_vftint_w_d(temp_f, src, src);
+    // la_movfcsr2gr(temp_i, fcsr_ir2_opnd);
+    // la_bstrpick_w(temp_i, temp_i, FCSR_OFF_CAUSE_V, FCSR_OFF_CAUSE_O);
+    // la_beqz(temp_i, label_fastend);
+    //slow path, either Nan or overflow
+    la_vldi(sse_invalid, 0b1001110000000); // broadcast 0x80000000 to all
+    li_d(temp_i, 0x41E0000000000000); //0x41E0000000000000
+    la_vreplgr2vr_d(overflow, temp_i);
+    la_vfcmp_cond_d(comp_mask, overflow, src, 0xE); // get Nan mark 0xE=cULE
+    la_vshuf4i_w(comp_mask, comp_mask, 0x88);
+    la_vbitsel_v(temp_f, temp_f, sse_invalid, comp_mask);
+    
+    // la_label(label_fastend);
+    la_vextrins_d(dest, temp_f, VEXTRINS_IMM_4_0(0, 0));
+    return true;
+}
+
 /* refer to cvtps2pi */
 bool translate_cvtpd2pi(IR1_INST *pir1)
 {
+    if (option_cvt_opt) {
+        return translate_cvtpd2pi_opt(pir1);
+    }
     tr_x87_to_mmx();
 
     IR2_OPND dest = ra_alloc_mmx(ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 0)));
@@ -434,8 +584,39 @@ bool translate_cvtpd2pi(IR1_INST *pir1)
     return true;
 }
 
+static bool translate_cvttpd2pi_opt(IR1_INST *pir1)
+{
+    tr_x87_to_mmx();
+    IR2_OPND dest = ra_alloc_mmx(ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 0)));
+    IR2_OPND src = load_freg128_from_ir1(ir1_get_opnd(pir1, 1));
+
+    IR2_OPND temp_f = ra_alloc_ftemp();
+    IR2_OPND temp_i = ra_alloc_itemp();
+    IR2_OPND sse_invalid = ra_alloc_ftemp();
+    IR2_OPND overflow = ra_alloc_ftemp();
+    IR2_OPND comp_mask = ra_alloc_ftemp();
+    // IR2_OPND label_fastend = ra_alloc_label();
+
+    la_vftintrz_w_d(temp_f, src, src);
+    // la_movfcsr2gr(temp_i, fcsr_ir2_opnd);
+    // la_bstrpick_w(temp_i, temp_i , FCSR_OFF_CAUSE_V, FCSR_OFF_CAUSE_O);
+    // la_beqz(temp_i, label_fastend);
+    la_vldi(sse_invalid, 0b1001110000000); // broadcast 0x80000000 to all 0x1380
+    li_d(temp_i, 0x41E0000000000000); //0x41E0000000000000
+    la_vreplgr2vr_d(overflow, temp_i);
+    la_vfcmp_cond_d(comp_mask, overflow, src, 0xE); // get Nan mark 0xE=cULE
+    la_vshuf4i_w(comp_mask, comp_mask, 0x88);
+    la_vbitsel_v(temp_f, temp_f, sse_invalid, comp_mask);
+    // la_label(label_fastend);
+    la_vextrins_d(dest, temp_f, VEXTRINS_IMM_4_0(0, 0));
+    return true;
+}
+
 bool translate_cvttpd2pi(IR1_INST *pir1)
 {
+    if (option_cvt_opt) {
+        return translate_cvttpd2pi_opt(pir1);
+    }
     tr_x87_to_mmx();
 
     IR2_OPND dest = ra_alloc_mmx(ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 0)));
@@ -588,8 +769,40 @@ bool translate_cvtpi2pd(IR1_INST *pir1)
  *
  * So we can not use 'la_vftint_w_s' directly due to the above difference.
  */
+static bool translate_cvtps2pi_opt(IR1_INST *pir1)
+{
+    tr_x87_to_mmx();
+    IR2_OPND dest = ra_alloc_mmx(ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 0)));
+    IR2_OPND src_lo;                                         
+    src_lo = load_freg128_from_ir1(ir1_get_opnd(pir1, 1));
+    // IR2_OPND temp_fcsr = ra_alloc_itemp();
+    // IR2_OPND label_fastend = ra_alloc_label();
+    IR2_OPND sse_invalid = ra_alloc_ftemp();
+    IR2_OPND comp_mask = ra_alloc_ftemp();
+    IR2_OPND overflow = ra_alloc_ftemp();
+    IR2_OPND temp = ra_alloc_ftemp();
+
+    la_vreplve_d(temp, src_lo, zero_ir2_opnd);
+    la_vftint_w_s(temp, temp);
+    // la_movfcsr2gr(temp_fcsr, fcsr_ir2_opnd);
+    // la_bstrpick_w(temp_fcsr, temp_fcsr , FCSR_OFF_CAUSE_V, FCSR_OFF_CAUSE_O);
+    // la_beqz(temp_fcsr, label_fastend);
+    //slow path, either Nan or overflow
+    la_vldi(sse_invalid, 0b1001110000000); // broadcast 0x80000000 to all 0x1380
+    la_vldi(overflow, (0b10011 << 8) | 0x4f); //0x134f
+    la_vfcmp_cond_s(comp_mask, overflow, src_lo, 0xE); // get Nan mark 0xE=cULE
+    la_vbitsel_v(temp, temp, sse_invalid, comp_mask);
+    // la_label(label_fastend);
+    la_vextrins_d(dest, temp, VEXTRINS_IMM_4_0(0, 0));
+
+    return true;
+}
+
 bool translate_cvtps2pi(IR1_INST *pir1)
 {
+    if (option_cvt_opt) {
+        return translate_cvtps2pi_opt(pir1);
+    }
     tr_x87_to_mmx();
 
     IR2_OPND dest = ra_alloc_mmx(ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 0)));
@@ -670,8 +883,41 @@ bool translate_cvtps2pi(IR1_INST *pir1)
     return true;
 }
 
+static bool translate_cvttps2pi_opt(IR1_INST *pir1)
+{
+    tr_x87_to_mmx();
+    IR2_OPND dest = ra_alloc_mmx(ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 0)));
+    IR2_OPND src_lo;                                         
+    src_lo = load_freg128_from_ir1(ir1_get_opnd(pir1, 1));
+    // IR2_OPND temp_fcsr = ra_alloc_itemp();
+    // IR2_OPND label_fastend = ra_alloc_label();
+    IR2_OPND sse_invalid = ra_alloc_ftemp();
+    IR2_OPND comp_mask = ra_alloc_ftemp();
+    IR2_OPND overflow = ra_alloc_ftemp();
+    IR2_OPND temp = ra_alloc_ftemp();
+
+    la_vreplve_d(temp, src_lo, zero_ir2_opnd);
+    la_vftintrz_w_s(temp, temp);
+    // la_movfcsr2gr(temp_fcsr, fcsr_ir2_opnd);
+    // la_bstrpick_w(temp_fcsr, temp_fcsr , FCSR_OFF_CAUSE_V, FCSR_OFF_CAUSE_O);
+    // la_beqz(temp_fcsr, label_fastend);
+    //slow path, either Nan or overflow
+    la_vldi(sse_invalid, 0b1001110000000); // broadcast 0x80000000 to all 0x1380
+    la_vldi(overflow, (0b10011 << 8) | 0x4f); //0x134f
+    la_vfcmp_cond_s(comp_mask, overflow, src_lo, 0xE); // get Nan mark 0xE=cULE
+    la_vbitsel_v(temp, temp, sse_invalid, comp_mask);
+    // la_label(label_fastend);
+    la_vextrins_d(dest, temp, VEXTRINS_IMM_4_0(0, 0));
+
+    return true;
+
+}
+
 bool translate_cvttps2pi(IR1_INST *pir1)
 {
+    if (option_cvt_opt) {
+        return translate_cvttps2pi_opt(pir1);
+    }
     tr_x87_to_mmx();
 
     IR2_OPND dest = ra_alloc_mmx(ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 0)));
@@ -884,8 +1130,99 @@ bool translate_cvtps2pd(IR1_INST *pir1)
  * @return true
  * @return false
  */
+static bool translate_cvtsx2si_opt(IR1_INST *pir1)
+{
+    IR1_OPND *opnd1 = ir1_get_opnd(pir1, 0);
+    IR1_OPND *opnd2 = ir1_get_opnd(pir1, 1);
+
+    IR2_OPND src = load_freg128_from_ir1(opnd2);
+    IR2_OPND dest = ra_alloc_gpr(ir1_opnd_base_reg_num(opnd1));
+    int opnd0_size = ir1_opnd_size(opnd1);
+
+    IR2_OPND temp_f = ra_alloc_ftemp();
+    IR2_OPND temp_i = ra_alloc_itemp();
+    IR2_OPND overflow = ra_alloc_ftemp();
+
+    if (ir1_opcode(pir1) == dt_X86_INS_CVTSD2SI) {
+        
+        IR2_OPND sse_invalid = ra_alloc_ftemp();
+        IR2_OPND comp_mask = ra_alloc_ftemp();
+
+        if (opnd0_size == 32) {
+            la_ftint_w_d(temp_f, src);
+            la_vldi(sse_invalid, 0b1001110000000); // broadcast 0x80000000 to all 0x1380
+            li_d(temp_i, 0x41E0000000000000); //0x41E0000000000000
+            la_vreplgr2vr_d(overflow, temp_i);
+            la_vfcmp_cond_d(comp_mask, overflow, src, 0xE); // get Nan mark 0xE=cULE
+            la_vshuf4i_w(comp_mask, comp_mask, 0x88);
+            la_vbitsel_v(temp_f, temp_f, sse_invalid, comp_mask);
+            la_movfr2gr_s(temp_i, temp_f);
+            la_bstrpick_d(dest, temp_i, 31, 0);
+
+            // IR2_OPND temp_dest = ra_alloc_itemp();
+            // la_ftint_w_d(temp_f, src);
+            // li_d(temp_i, 0x41E0000000000000); //0x41E0000000000000
+            // la_movgr2fr_d(temp_f, temp_i);
+            // la_fcmp_cond_d(fcc0_ir2_opnd, temp_f, src, 0xE); // get Nan mark 0xE=cULE
+            // la_movcf2gr(temp_i, fcc0_ir2_opnd);
+            // la_slli_d(temp_i, temp_i, opnd0_size - 1);
+            // la_movfr2gr_d(temp_dest, temp_f);
+            // la_masknez(temp_dest, temp_dest, temp_i);
+            // la_or(temp_dest, temp_dest, temp_i);
+            // la_bstrins_d(dest, temp_dest, 31, 0);
+        } else if (opnd0_size == 64) {
+            la_ftint_l_d(temp_f, src);
+            li_d(temp_i, 0x43E0000000000000);
+            la_movgr2fr_d(overflow, temp_i);
+            la_fcmp_cond_d(fcc0_ir2_opnd, overflow, src, 0xE); // get Nan mark 0xE=cULE
+            la_movcf2gr(temp_i, fcc0_ir2_opnd);
+            la_slli_d(temp_i, temp_i, opnd0_size - 1);
+            la_movfr2gr_d(dest, temp_f);
+            la_masknez(dest, dest, temp_i);
+            la_or(dest, dest, temp_i);
+        } else {
+            lsassert(0);
+        }
+    } else if (ir1_opcode(pir1) == dt_X86_INS_CVTSS2SI){
+        IR2_OPND overflow = ra_alloc_ftemp();
+
+        if (opnd0_size == 32) {
+            IR2_OPND temp_dest = ra_alloc_itemp();
+            la_ftint_w_s(temp_f, src);
+            li_w(temp_i, 0x4f000000);
+            la_movgr2fr_w(overflow, temp_i);
+            la_fcmp_cond_s(fcc0_ir2_opnd, overflow, src, 0xE); // get Nan mark 0xE=cULE
+            la_movcf2gr(temp_i, fcc0_ir2_opnd);
+            la_slli_d(temp_i, temp_i, opnd0_size - 1);
+            la_movfr2gr_s(temp_dest, temp_f);
+            la_masknez(temp_dest, temp_dest, temp_i);
+            la_or(temp_dest, temp_dest, temp_i);
+            la_bstrpick_d(dest, temp_dest, 31, 0);
+        } else if (opnd0_size == 64) {
+            la_ftint_l_s(temp_f, src);
+            li_d(temp_i, 0x5F000000);
+            la_movgr2fr_w(overflow, temp_i);
+            la_fcmp_cond_s(fcc0_ir2_opnd, overflow, src, 0xE); // get Nan mark 0xE=cULE
+            la_movcf2gr(temp_i, fcc0_ir2_opnd);
+            la_slli_d(temp_i, temp_i, opnd0_size - 1);
+            la_movfr2gr_d(dest, temp_f);
+            la_masknez(dest, dest, temp_i);
+            la_or(dest, dest, temp_i);
+        } else {
+            lsassert(0);
+        }
+    } else {
+        return false;
+    }
+    return true;
+}
+
 bool translate_cvtsx2si(IR1_INST *pir1)
 {
+    if (option_cvt_opt) {
+        return translate_cvtsx2si_opt(pir1);
+    }
+
     IR2_OPND fcsr_opnd = set_fpu_fcsr_rounding_field_by_x86();
     IR2_OPND src_lo = load_freg128_from_ir1(ir1_get_opnd(pir1, 1));
     IR2_OPND temp1 = ra_alloc_itemp();
@@ -998,8 +1335,96 @@ bool translate_cvtsx2si(IR1_INST *pir1)
  * @return true
  * @return false
  */
+static bool translate_cvttsx2si_opt(IR1_INST *pir1)
+{
+    IR1_OPND *opnd1 = ir1_get_opnd(pir1, 0);
+    IR1_OPND *opnd2 = ir1_get_opnd(pir1, 1);
+
+    IR2_OPND src = load_freg128_from_ir1(opnd2);
+    IR2_OPND dest = ra_alloc_gpr(ir1_opnd_base_reg_num(opnd1));
+    int opnd0_size = ir1_opnd_size(opnd1);
+
+    IR2_OPND temp_f = ra_alloc_ftemp();
+    IR2_OPND temp_i = ra_alloc_itemp();
+    IR2_OPND overflow = ra_alloc_ftemp();
+
+    if (ir1_opcode(pir1) == dt_X86_INS_CVTTSD2SI) {
+        IR2_OPND sse_invalid = ra_alloc_ftemp();
+        IR2_OPND comp_mask = ra_alloc_ftemp();
+
+        if (opnd0_size == 32) {
+            
+            la_ftintrz_w_d(temp_f, src);
+            la_vldi(sse_invalid, 0b1001110000000); // broadcast 0x80000000 to all 0x1380
+            li_d(temp_i, 0x41E0000000000000); //0x41E0000000000000
+            la_vreplgr2vr_d(overflow, temp_i);
+            la_vfcmp_cond_d(comp_mask, overflow, src, 0xE); // get Nan mark 0xE=cULE
+            la_vshuf4i_w(comp_mask, comp_mask, 0x88);
+            la_vbitsel_v(temp_f, temp_f, sse_invalid, comp_mask);
+            la_movfr2gr_s(temp_i, temp_f);
+            la_bstrpick_d(dest, temp_i, 31, 0);
+
+            // IR2_OPND temp_dest = ra_alloc_itemp();
+            // la_ftint_w_d(temp_f, src);
+            // li_d(temp_i, 0x41E0000000000000); //0x41E0000000000000
+            // la_movgr2fr_d(temp_f, temp_i);
+            // la_fcmp_cond_d(fcc0_ir2_opnd, temp_f, src, 0xE); // get Nan mark 0xE=cULE
+            // la_movcf2gr(temp_i, fcc0_ir2_opnd);
+            // la_slli_d(temp_i, temp_i, opnd0_size - 1);
+            // la_movfr2gr_d(temp_dest, temp_f);
+            // la_masknez(temp_dest, temp_dest, temp_i);
+            // la_or(temp_dest, temp_dest, temp_i);
+            // la_bstrins_d(dest, temp_dest, 31, 0);
+        } else if (opnd0_size == 64) {
+            la_ftintrz_l_d(temp_f, src);
+            li_d(temp_i, 0x43E0000000000000);
+            la_movgr2fr_d(overflow, temp_i);
+            la_fcmp_cond_d(fcc0_ir2_opnd, overflow, src, 0xE); // get Nan mark 0xE=cULE
+            la_movcf2gr(temp_i, fcc0_ir2_opnd);
+            la_slli_d(temp_i, temp_i, opnd0_size - 1);
+            la_movfr2gr_d(dest, temp_f);
+            la_masknez(dest, dest, temp_i);
+            la_or(dest, dest, temp_i);
+        } else {
+            lsassert(0);
+        }
+    } else if (ir1_opcode(pir1) == dt_X86_INS_CVTTSS2SI){
+        if (opnd0_size == 32) {
+            IR2_OPND temp_dest = ra_alloc_itemp();
+            la_ftintrz_w_s(temp_f, src);
+            li_w(temp_i, 0x4f000000);
+            la_movgr2fr_w(overflow, temp_i);
+            la_fcmp_cond_s(fcc0_ir2_opnd, overflow, src, 0xE); // get Nan mark 0xE=cULE
+            la_movcf2gr(temp_i, fcc0_ir2_opnd);
+            la_slli_d(temp_i, temp_i, opnd0_size - 1);
+            la_movfr2gr_s(temp_dest, temp_f);
+            la_masknez(temp_dest, temp_dest, temp_i);
+            la_or(temp_dest, temp_dest, temp_i);
+            la_bstrpick_d(dest, temp_dest, 31, 0);
+        } else if (opnd0_size == 64) {
+            la_ftintrz_l_s(temp_f, src);
+            li_d(temp_i, 0x5F000000);
+            la_movgr2fr_w(overflow, temp_i);
+            la_fcmp_cond_s(fcc0_ir2_opnd, overflow, src, 0xE); // get Nan mark 0xE=cULE
+            la_movcf2gr(temp_i, fcc0_ir2_opnd);
+            la_slli_d(temp_i, temp_i, opnd0_size - 1);
+            la_movfr2gr_d(dest, temp_f);
+            la_masknez(dest, dest, temp_i);
+            la_or(dest, dest, temp_i);
+        } else {
+            lsassert(0);
+        }
+    } else {
+        return false;
+    }
+    return true;
+}
+
 bool translate_cvttsx2si(IR1_INST *pir1)
 {
+    if (option_cvt_opt) {
+        return translate_cvttsx2si_opt(pir1);
+    }
     IR2_OPND src_lo = load_freg128_from_ir1(ir1_get_opnd(pir1, 1));
     IR2_OPND temp1 = ra_alloc_itemp();
     int opnd0_size = ir1_opnd_size(ir1_get_opnd(pir1, 0));

@@ -90,6 +90,7 @@ int option_monitor_shared_mem;
 int option_shadow_file;
 int option_smc_opt;
 int option_set_rounding_opt;
+int option_cvt_opt;
 
 unsigned long long counter_tb_exec;
 unsigned long long counter_tb_tr;
@@ -157,6 +158,7 @@ void options_init(void)
 #else
     option_set_rounding_opt = 1;
 #endif
+    option_cvt_opt = 1;
 }
 
 #define OPTIONS_IMM_REG 0

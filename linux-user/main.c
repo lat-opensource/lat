@@ -687,6 +687,11 @@ static void handle_arg_latx_rounding(const char *arg)
     option_set_rounding_opt = strtol(arg, NULL, 0);
 }
 
+static void handle_arg_latx_cvt_opt(const char *arg)
+{
+    option_cvt_opt = strtol(arg, NULL, 0);
+}
+
 static void handle_arg_latx_anonym(const char *arg)
 {
     option_anonym = strtol(arg, NULL, 0);
@@ -817,6 +822,8 @@ static const struct qemu_argument arg_table[] = {
     "",           "enable prlimit"},
     {"latx-rounding",    "LATX_ROUNDING_OPT",     true,  handle_arg_latx_rounding,
     "",           "enable rounding opt"},
+    {"latx-cvt-opt",    "LATX_CVT_OPT",     true,  handle_arg_latx_cvt_opt,
+    "",           "enable cvt opt"},
 #if defined(CONFIG_LATX_AVX_OPT)
     {"latx-avx-cpuid",    "LATX_AVX_CPUID",     true,  handle_arg_latx_avx_cpuid,
     "",           "enable avx cpuid"},
