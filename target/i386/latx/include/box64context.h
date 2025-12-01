@@ -53,6 +53,7 @@ typedef struct dlprivate_s {
     void *     x86dlsym;
     void *     x86dladdr1;
     void *     x86dladdr;
+    void *     x86dlinfo;
 } dlprivate_t;
 struct latx_kzt_debug {
     char *name;

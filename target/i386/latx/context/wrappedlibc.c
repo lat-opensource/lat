@@ -3536,20 +3536,21 @@ int init_x86dlfun(void)
 #endif
     h = loadElfFromFile("libc.so.6");
     lsassert(h);
-    const char* syms[] = {"dlopen", "dlsym", "dlclose", "dladdr", "dladdr1"};
-    void *rsyms[5] = {0};
+    const char* syms[] = {"dlopen", "dlsym", "dlclose", "dladdr", "dladdr1", "dlinfo"};
+    void *rsyms[6] = {0};
     int rrsyms = 0;
-    ResetSpecialCaseElf(h, syms, 5, rsyms, &rrsyms);
-    if (rrsyms != 5) {
+    ResetSpecialCaseElf(h, syms, 6, rsyms, &rrsyms);
+    if (rrsyms != 6) {
         h = loadElfFromFile("libdl.so.2");
-        ResetSpecialCaseElf(h, syms, 5, rsyms, &rrsyms);
+        ResetSpecialCaseElf(h, syms, 6, rsyms, &rrsyms);
     }
-    lsassert(rrsyms == 5);
+    lsassert(rrsyms == 6);
     my_context->dlprivate->x86dlopen = rsyms[0];
     my_context->dlprivate->x86dlsym = rsyms[1];
     my_context->dlprivate->x86dlclose = rsyms[2];
     my_context->dlprivate->x86dladdr = rsyms[3];
     my_context->dlprivate->x86dladdr1 = rsyms[4];
+    my_context->dlprivate->x86dlinfo = rsyms[5];
     kzt_wine_init_x86();
     return 0;
 }

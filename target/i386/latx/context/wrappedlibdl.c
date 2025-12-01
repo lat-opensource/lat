@@ -56,20 +56,21 @@ int init_x86dlfun(void)
 {
     elfheader_t* h = loadElfFromFile("libdl.so.2");
     lsassert(h);
-    const char* syms[] = {"dlopen", "dlsym", "dlclose", "dladdr", "dladdr1"};
-    void *rsyms[5] = {0};
+    const char* syms[] = {"dlopen", "dlsym", "dlclose", "dladdr", "dladdr1", "dlinfo"};
+    void *rsyms[6] = {0};
     int rrsyms = 0;
-    ResetSpecialCaseElf(h, syms, 5, rsyms, &rrsyms);
-    if (rrsyms != 5) {
+    ResetSpecialCaseElf(h, syms, 6, rsyms, &rrsyms);
+    if (rrsyms != 6) {
         h = loadElfFromFile("libc.so.6");
-        ResetSpecialCaseElf(h, syms, 5, rsyms, &rrsyms);
+        ResetSpecialCaseElf(h, syms, 6, rsyms, &rrsyms);
     }
-    lsassert(rrsyms == 5);
+    lsassert(rrsyms == 6);
     my_context->dlprivate->x86dlopen = rsyms[0];
     my_context->dlprivate->x86dlsym = rsyms[1];
     my_context->dlprivate->x86dlclose = rsyms[2];
     my_context->dlprivate->x86dladdr = rsyms[3];
     my_context->dlprivate->x86dladdr1 = rsyms[4];
+    my_context->dlprivate->x86dlinfo = rsyms[5];
     return 0;
 }
 static int callx86dlopen(void *filename, int flag, elfheader_t * h, int is_local) {
@@ -624,52 +625,13 @@ int my_dlinfo(void* handle, int request, void* info)
     printf_dlsym(LOG_DEBUG, "Call to dlinfo(%p, %d, %p)\n", handle, request, info);
     dlprivate_t *dl = my_context->dlprivate;
     CLEARERR
-    lsassert(0);//latx not support yet.
-    if (!dl->x86dlopen) {
+    if (!dl->x86dlinfo) {
         init_x86dlfun();
-        lsassert(dl->x86dlopen);
+        lsassert(dl->x86dlinfo);
     }
-    size_t nlib = (size_t)handle;
-    if(nlib > dl->lib_sz) {
-        for (int i = 0; i < dl->lib_sz; i++) {
-            if (dl->libs[i] && dl->libs[i]->active && dl->libs[i]->type == LIB_EMULATED && ((size_t)dl->libs[i]->x86linkmap) == nlib) {
-                nlib = i + 1;
-                break;
-            } 
-        }
-    }
-    --nlib;
-    // size_t is unsigned
-    if(nlib>=dl->lib_sz) {
-        if(!dl->last_error)
-            dl->last_error = box_calloc(1, 129);
-        snprintf(dl->last_error, 129, "Bad handle %p)\n", handle);
-        printf_dlsym(LOG_DEBUG, "dlinfo: %s\n", dl->last_error);
-        return -1;
-    }
-    #if 0
-    if(!dl->dllibs[nlib].count || !dl->dllibs[nlib].full) {
-        if(!dl->last_error)
-            dl->last_error = box_calloc(1, 129);
-        snprintf(dl->last_error, 129, "Bad handle %p (already closed))\n", handle);
-        printf_dlsym(LOG_DEBUG, "dlinfo: %s\n", dl->last_error);
-        return -1;
-    }
-    #endif
-    library_t *lib = dl->libs[nlib];
-    switch(request) {
-        case 2: // RTLD_DI_LINKMAP
-            {
-                *(linkmap_t**)info = getLinkMapLib(lib);
-            }
-            return 0;
-        default:
-            printf_dlsym(LOG_NONE, "Warning, unsupported call to dlinfo(%p, %d, %p)\n", handle, request, info);
-        if(!dl->last_error)
-            dl->last_error = box_calloc(1, 129);
-        snprintf(dl->last_error, 129, "unsupported call to dlinfo request:%d\n", request);
-    }
-    return -1;
+    __MY_CPU;
+    uint64_t ret = RunFunctionWithState((uintptr_t)my_context->dlprivate->x86dlinfo, 3, cpu->regs[R_EDI], cpu->regs[R_ESI], cpu->regs[R_EDX]);
+    return ret;
 }
 
 #include "wrappedlib_init.h"
