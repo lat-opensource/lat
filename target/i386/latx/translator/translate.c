@@ -2630,7 +2630,7 @@ direct_jmp:
             la_label(label_first_jmp_align);
             tb->first_jmp_align = ir2_opnd_label_id(&label_first_jmp_align);
         }
-        /*la_code_align(2, 0x03400000);*/
+        la_code_align(2, 0x03400000);
 
         if (!use_tu_jmp(tb)) {
 #ifndef CONFIG_LATX_XCOMISX_OPT
@@ -2657,7 +2657,7 @@ direct_jmp:
 
             }
 
-            /*la_code_align(2, 0x03400000);*/
+            la_code_align(2, 0x03400000);
 
             la_label(goto_label_opnd);
             tb->jmp_reset_offset[succ_id] = ir2_opnd_label_id(&goto_label_opnd);
