@@ -2466,6 +2466,7 @@ static void generate_indirect_goto(void *code_buf)
     IR2_OPND target = ra_alloc_data();
     IR2_OPND base = ra_alloc_data();
     la_data_li(base, (ADDR)code_buf);
+    IR2_OPND label_miss = ra_alloc_label();
 
     /* indirect jmp */
     IR2_OPND jmp_entry = ra_alloc_itemp();
@@ -2486,10 +2487,10 @@ static void generate_indirect_goto(void *code_buf)
     la_bstrpick_d(next_tb, next_tb, TB_JMP_CACHE_BITS - 1, 0);
 
 #ifdef CONFIG_LATX_FAST_JMPCACHE
-#define PCADDI_JMP_INST_OFF 9
+#ifdef CONFIG_LATX_GLUE_MASK
+    #define PCADDI_JMP_INST_OFF 9
     IR2_OPND epi_addr = ra_alloc_itemp();
     la_pcaddi(epi_addr, PCADDI_JMP_INST_OFF);
-
     la_alsl_d(next_tb, next_tb, jmp_cache_addr, 3);
     la_ld_d(jmp_entry, next_tb, 0);
     la_ld_d(next_tb, next_tb, 8);
@@ -2497,9 +2498,14 @@ static void generate_indirect_goto(void *code_buf)
     la_masknez(next_tb, next_tb, jmp_entry);
     la_maskeqz(epi_addr, epi_addr, jmp_entry);
     la_or(next_tb, next_tb, epi_addr);
+#else
+    la_alsl_d(next_tb, next_tb, jmp_cache_addr, 3);
+    la_ld_d(jmp_entry, next_tb, 0);
+    la_bne(jmp_entry, next_x86_addr, label_miss);
+    la_ld_d(next_tb, next_tb, 8);
+#endif
     la_jirl(zero_ir2_opnd, next_tb, 0);
 #else
-    IR2_OPND label_miss = ra_alloc_label();
     la_slli_d(next_tb, next_tb, 3);
     la_ldx_d(next_tb, next_tb, jmp_cache_addr);
     la_beq(next_tb, zero_ir2_opnd, label_miss);
@@ -2525,7 +2531,6 @@ static void generate_indirect_goto(void *code_buf)
 
     ra_free_temp(jmp_entry);
 /* miss: */
-    la_label(label_miss);
     /*
      * jump to epilogue with 0 return
      * two args are pass-through:
@@ -2534,6 +2539,7 @@ static void generate_indirect_goto(void *code_buf)
      */
 
 #endif
+    la_label(label_miss);
     la_data_li(target, context_switch_native_to_bt_ret_0);
     aot_la_append_ir2_jmp_far(target, base, B_EPILOGUE_RET_0, 0);
 
