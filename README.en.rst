@@ -19,6 +19,11 @@ the box64 project.
 
 `中文版本点击这里 >> <README.rst>`_
 
+Commit Convention
+========
+
+`Commit Convention (English) <COMMIT_CONVENTION.en.md>`_
+
 
 Project Background
 ========
