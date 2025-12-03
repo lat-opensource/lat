@@ -35,6 +35,7 @@
 #include "qemu.h"
 #include "latx-options.h"
 #include "latx-backtrace.h"
+#include "latx-smc.h"
 #endif
 #ifdef CONFIG_LATX_DEBUG
 #include "latx-debug.h"
@@ -205,6 +206,7 @@ static uint64_t parse_guest_store(siginfo_t *info, ucontext_t *uc, int *size)
     int64_t imm, real_guest_addr;
     static uint64_t unsup = 0, unsup_sc = 0;
     int s = -1; /* unsupport inst */
+    int check_cross_host = 0;
 
     /* sc.w/d/q can not be interpreted here in a sample way.
      * Treat as unsupport inst and profile this case
@@ -229,8 +231,8 @@ static uint64_t parse_guest_store(siginfo_t *info, ucontext_t *uc, int *size)
     case 0xa7: /* ST.D */ s = 8; break;
     case 0xb1: /* VST */ s = 16; break;
     case 0xb3: /* XVST */ s = 32; break;
-    case 0xad: /* FST.S */ s = 4; break;
-    case 0xaf: /* FST.D */ s = 8; break;
+    case 0xad: /* FST.S */ s = 4; check_cross_host = 1; break;
+    case 0xaf: /* FST.D */ s = 8; check_cross_host = 1; break;
     default: break;
     }
     if (s > 0) goto do_rj_imm12;
@@ -265,6 +267,15 @@ do_rj_imm12:
 
 do_return:
     *size = s;
+    if (check_cross_host) {
+        if (((real_guest_addr)     & qemu_host_page_mask) !=
+            ((real_guest_addr + s) & qemu_host_page_mask))
+        {
+            /* In some cases, the store inst can not be interpreted
+             * if the memory address cross the host page boundary. */
+            *size = -3;
+        }
+    }
     return real_guest_addr;
 }
 
@@ -306,6 +317,12 @@ static int smc_store_interpret(siginfo_t *info, ucontext_t *uc,
 {
     uint32_t inst, rd, fd;
     int64_t value, mem_addr;
+#ifndef CONFIG_LOONGARCH_NEW_WORLD
+    uint32_t rj;
+    ShadowPageDesc *spd;
+#endif
+    /* UC_PC(uc) += size after interpret */
+    int size = 0x4;
 
 #ifdef CONFIG_LOONGARCH_NEW_WORLD
     struct extctx_layout extctx;
@@ -360,14 +377,30 @@ static int smc_store_interpret(siginfo_t *info, ucontext_t *uc,
         break;
 #ifndef CONFIG_LOONGARCH_NEW_WORLD
     case 0xad: /* FST.S */
-        fd = rd + 1;
-        value = UC_FREG(uc)[fd].__val32[0];
-        smc_store_shadow_page(mem_addr, value, 4);
+        rj = (inst >> 5) & 0x1f;
+        if (((mem_addr)     & qemu_host_page_mask) ==
+            ((mem_addr + 4) & qemu_host_page_mask))
+        {
+            smc_set_interpret_glue_code(uc, inst, rj);
+            spd = page_get_target_data(mem_addr);
+            UC_GR(uc)[rj] += spd ->access_off;
+            size = 0; /* no change UC_PC(uc) again */
+        } else {
+            g_assert_not_reached();
+        }
         break;
     case 0xaf: /* FST.D */
-        fd = rd + 1;
-        value = UC_FREG(uc)[fd].__val64[0];
-        smc_store_shadow_page(mem_addr, value, 8);
+        rj = (inst >> 5) & 0x1f;
+        if (((mem_addr)     & qemu_host_page_mask) ==
+            ((mem_addr + 8) & qemu_host_page_mask))
+        {
+            smc_set_interpret_glue_code(uc, inst, rj);
+            spd = page_get_target_data(mem_addr);
+            UC_GR(uc)[rj] += spd ->access_off;
+            size = 0; /* no change UC_PC(uc) again */
+        } else {
+            g_assert_not_reached();
+        }
         break;
     case 0xb1: /* VST */
         fd = rd + 1;
@@ -428,7 +461,8 @@ static int smc_store_interpret(siginfo_t *info, ucontext_t *uc,
     }
 
 do_return:
-    return 0;
+    /* UC_PC(uc) += size after interpret */
+    return size;
 }
 
 #endif
@@ -577,10 +611,17 @@ static inline int handle_cpu_signal(uintptr_t pc, siginfo_t *info,
                  * During page_unprotect(), the shadow page will be created for
                  * the page to be writen. So does the 2nd page if the store
                  * cross the guest page boundary.
+                 *
+                 * The smc_store_interpret return an offset which is used to
+                 * update the UC_PC(uc) after signal return. On default the
+                 * offset is 0x4 to bypass the original the store inst.
+                 * In some cases, the glue code is used to interpret the
+                 * store inst. The UC_PC(uc) will point to the glue code.
+                 * So the offset will be 0x0.
                  */
                 mmap_lock();
-                smc_store_interpret(info, uc, guest_store_address);
-                UC_PC(uc) += 0x4;
+                size = smc_store_interpret(info, uc, guest_store_address);
+                UC_PC(uc) += size;
                 mmap_unlock();
             }
 #endif

@@ -20,4 +20,6 @@ void smc_hook_get_xmm(void *_env, int reg, uint64_t *val);
  * To restore guest cpu state, aka. CPUArchState. */
 void smc_store_helper_restore_cpu_state(void *_env);
 
+void smc_set_interpret_glue_code(void *uc, unsigned int inst, int rj);
+
 #endif

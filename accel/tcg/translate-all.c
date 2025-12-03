@@ -5090,6 +5090,10 @@ static void set_interpret_glue_code(ucontext_t *uc, unsigned int inst, int rj)
     glue[2] = 0x48000300;
     UC_PC(uc) = (unsigned long)glue;
 }
+void smc_set_interpret_glue_code(void *uc, unsigned int inst, int rj)
+{
+    set_interpret_glue_code(uc, inst, rj);
+}
 #endif
 
 int shared_private_interpret(siginfo_t *info, ucontext_t *uc)
