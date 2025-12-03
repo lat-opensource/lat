@@ -179,13 +179,12 @@ IR1_INST *get_ir1_list(struct TranslationBlock *tb, ADDRX pc, int max_insns)
     ADDRX start_pc = pc;
 
 #ifdef CONFIG_LATX_TU
-    /* TODO */
-    //IR1_INST *ir1_list = (IR1_INST *)mm_calloc(max_insns, sizeof(IR1_INST));
     uint32_t *ir1_num_in_tu = &(tu_data->ir1_num_in_tu);
     if (tb->s_data->tu_tb_mode == TB_GEN_CODE) {
         *ir1_num_in_tu = 0;
     }
     IR1_INST *ir1_list = ir1_list_rel + (*ir1_num_in_tu);
+    pir1_base = (void *)((uint64_t)pir1_base + *ir1_num_in_tu * sizeof(struct la_dt_insn));
 #endif
 
     if (max_insns == 1) {
@@ -227,11 +226,7 @@ IR1_INST *get_ir1_list(struct TranslationBlock *tb, ADDRX pc, int max_insns)
         /* disasemble this instruction */
         pir1 = &ir1_list[ir1_num];
         /* get next pc */
-#ifdef CONFIG_LATX_TU
-        pc = ir1_disasm(pir1, inst_cache, pc, *ir1_num_in_tu + ir1_num, pir1_base);
-#else
         pc = ir1_disasm(pir1, inst_cache, pc, ir1_num, pir1_base);
-#endif
         if (pir1->info == NULL) {
             fprintf(stderr, "invalid assembly pc: " TARGET_FMT_lx "\n", pc);
 #if defined(CONFIG_LATX_TU)
