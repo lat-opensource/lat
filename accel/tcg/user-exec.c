@@ -202,24 +202,69 @@ static uint64_t parse_guest_store(siginfo_t *info, ucontext_t *uc, int *size)
 {
     uint32_t inst = *(uint32_t *)UC_PC(uc);
     int rj = (inst >> 5) & 0x1f;
-    int16_t imm12 = (inst >> 10) & 0xfff;
-    imm12 = (int16_t)(imm12 << 4) >> 4;
-    int64_t real_guest_addr = UC_GR(uc)[rj] + imm12;
+    int64_t imm, real_guest_addr;
+    static uint64_t unsup = 0, unsup_sc = 0;
+    int s = -1; /* unsupport inst */
+
+    /* sc.w/d/q can not be interpreted here in a sample way.
+     * Treat as unsupport inst and profile this case
+     * to indicate futher optimization. */
+    switch (inst >> 15) {
+    case 0x70ae: /* SC.Q */ s = -2; break;
+    default: break;
+    }
+    switch (inst >> 24) {
+    case 0x21: /* SC.W */ s = -2; break;
+    case 0x23: /* SC.D */ s = -2; break;
+    case 0x25: /* STPTR.W */ s = 4; break;
+    case 0x27: /* STPTR.D */ s = 8; break;
+    default: break;
+    }
+    if (s > 0) goto do_rj_imm14;
 
     switch (inst >> 22) {
-    case 0xa4: /* ST.B */ *size = 1; break;
-    case 0xa5: /* ST.H */ *size = 2; break;
-    case 0xa6: /* ST.W */ *size = 4; break;
-    case 0xa7: /* ST.D */ *size = 8; break;
-    case 0xb1: /* VST */ *size = 16; break;
-    default:
-        fprintf(stderr, "%s:%d SMC unsupport inst %08x\n",
-                __func__, __LINE__, inst);
-        fflush(stderr);
-        g_assert_not_reached();
-        break;
+    case 0xa4: /* ST.B */ s = 1; break;
+    case 0xa5: /* ST.H */ s = 2; break;
+    case 0xa6: /* ST.W */ s = 4; break;
+    case 0xa7: /* ST.D */ s = 8; break;
+    case 0xb1: /* VST */ s = 16; break;
+    case 0xb3: /* XVST */ s = 32; break;
+    case 0xad: /* FST.S */ s = 4; break;
+    case 0xaf: /* FST.D */ s = 8; break;
+    default: break;
     }
+    if (s > 0) goto do_rj_imm12;
 
+    /* handle unsupport inst here */
+    unsup += 1;
+    if (s == -2) unsup_sc += 1;
+
+    if (unsup < 1024) {
+        fprintf(stderr, "%s:%d SMC unsupport inst %08x count %lu %lu\n",
+                __func__, __LINE__, inst, unsup, unsup_sc);
+    } else if (!(unsup & 0x3ff)) {
+        fprintf(stderr, "%s:%d SMC unsupport inst %08x count %lu %lu\n",
+                __func__, __LINE__, inst, unsup, unsup_sc);
+        fprintf(stderr, "%s:%d SMC unsupport too much !!! "
+                "Try export LAT_SMC = 0 and report this problem please.\n",
+                __func__, __LINE__);
+    }
+    fflush(stderr);
+    goto do_return;
+
+do_rj_imm14:
+    imm = (inst >> 10) & 0x3fff;
+    imm = (int16_t)(imm << 2);
+    real_guest_addr = UC_GR(uc)[rj] + imm;
+    goto do_return;
+
+do_rj_imm12:
+    imm = (inst >> 10) & 0xfff;
+    imm = (int16_t)(imm << 4) >> 4;
+    real_guest_addr = UC_GR(uc)[rj] + imm;
+
+do_return:
+    *size = s;
     return real_guest_addr;
 }
 
@@ -256,9 +301,10 @@ static void smc_store_shadow_page(int64_t mem_addr, int64_t value, int deal_byte
     }
 }
 
-static int smc_store_interpret(siginfo_t *info, ucontext_t *uc)
+static int smc_store_interpret(siginfo_t *info, ucontext_t *uc,
+        uint64_t real_guest_addr)
 {
-    uint32_t inst, rd, rj, fd;
+    uint32_t inst, rd, fd;
     int64_t value, mem_addr;
 
 #ifdef CONFIG_LOONGARCH_NEW_WORLD
@@ -270,11 +316,30 @@ static int smc_store_interpret(siginfo_t *info, ucontext_t *uc)
 
     inst = *(uint32_t *)UC_PC(uc);
     rd = inst & 0x1f;
-    rj = (inst >> 5) & 0x1f;
-    int16_t imm12 = (inst >> 10) & 0xfff;
-    imm12 = (int16_t)(imm12 << 4) >> 4;
-    int64_t real_guest_addr = UC_GR(uc)[rj] + imm12;
     mem_addr = real_guest_addr;
+
+    switch (inst >> 15) {
+    case 0x70ae: /* SC.Q */
+        g_assert_not_reached();
+    default:
+        break;
+    }
+    switch (inst >> 24) {
+    case 0x21: /* SC.W */
+        g_assert_not_reached();
+    case 0x23: /* SC.D */
+        g_assert_not_reached();
+    case 0x25: /* STPTR.W */
+        value = UC_GR(uc)[rd];
+        smc_store_shadow_page(mem_addr, value, 4);
+        goto do_return;
+    case 0x27: /* STPTR.D */
+        value = UC_GR(uc)[rd];
+        smc_store_shadow_page(mem_addr, value, 8);
+        goto do_return;
+    default:
+        break;
+    }
 
     switch (inst >> 22) {
     case 0xa4: /* ST.B */
@@ -294,6 +359,16 @@ static int smc_store_interpret(siginfo_t *info, ucontext_t *uc)
         smc_store_shadow_page(mem_addr, value, 8);
         break;
 #ifndef CONFIG_LOONGARCH_NEW_WORLD
+    case 0xad: /* FST.S */
+        fd = rd + 1;
+        value = UC_FREG(uc)[fd].__val32[0];
+        smc_store_shadow_page(mem_addr, value, 4);
+        break;
+    case 0xaf: /* FST.D */
+        fd = rd + 1;
+        value = UC_FREG(uc)[fd].__val64[0];
+        smc_store_shadow_page(mem_addr, value, 8);
+        break;
     case 0xb1: /* VST */
         fd = rd + 1;
         value = UC_FREG(uc)[fd].__val64[0];
@@ -301,13 +376,47 @@ static int smc_store_interpret(siginfo_t *info, ucontext_t *uc)
         value = UC_FREG(uc)[fd].__val64[1];
         smc_store_shadow_page(mem_addr + 8, value, 8);
         break;
+    case 0xb3: /* XVST */
+        fd = rd + 1;
+        value = UC_FREG(uc)[fd].__val64[0];
+        smc_store_shadow_page(mem_addr, value, 8);
+        value = UC_FREG(uc)[fd].__val64[1];
+        smc_store_shadow_page(mem_addr + 8, value, 8);
+        value = UC_FREG(uc)[fd].__val64[2];
+        smc_store_shadow_page(mem_addr + 16, value, 8);
+        value = UC_FREG(uc)[fd].__val64[3];
+        smc_store_shadow_page(mem_addr + 24, value, 8);
+        break;
 #else
+    case 0xad: /* FST.S */
+        fd = rd;
+        fd = fd < 8 ? (fd + UC_GET_FTOP(&extctx, uint32_t)) & 7 : fd;
+        value = UC_GET_FPR(&extctx, fd, uint32_t);
+        smc_store_shadow_page(mem_addr, value, 4);
+        break;
+    case 0xaf: /* FST.D */
+        fd = rd;
+        fd = fd < 8 ? (fd + UC_GET_FTOP(&extctx, uint32_t)) & 7 : fd;
+        value = UC_GET_FPR(&extctx, fd, uint64_t);
+        smc_store_shadow_page(mem_addr, value, 8);
+        break;
     case 0xb1: /* VST */
         fd = rd;
         value = UC_GET_LSX(&extctx, fd, 0, uint64_t);
         smc_store_shadow_page(mem_addr, value, 8);
         value = UC_GET_LSX(&extctx, fd, 1, uint64_t);
         smc_store_shadow_page(mem_addr + 8, value, 8);
+        break;
+    case 0xb3: /* XVST */
+        fd = rd;
+        value = UC_GET_LSX(&extctx, fd, 0, uint64_t);
+        smc_store_shadow_page(mem_addr, value, 8);
+        value = UC_GET_LSX(&extctx, fd, 1, uint64_t);
+        smc_store_shadow_page(mem_addr + 8, value, 8);
+        value = UC_GET_LSX(&extctx, fd, 2, uint64_t);
+        smc_store_shadow_page(mem_addr + 16, value, 8);
+        value = UC_GET_LSX(&extctx, fd, 3, uint64_t);
+        smc_store_shadow_page(mem_addr + 24, value, 8);
         break;
 #endif
     default:
@@ -318,6 +427,7 @@ static int smc_store_interpret(siginfo_t *info, ucontext_t *uc)
         break;
     }
 
+do_return:
     return 0;
 }
 
@@ -433,10 +543,20 @@ static inline int handle_cpu_signal(uintptr_t pc, siginfo_t *info,
              * when return:
              *     if *emu = 1 : page is not writable, interpret the store
              *     if *emu = 0 : page is writable, ok to return
+             *
+             * if parse_guest_store return with size < 0, it means the
+             * inst is unsupported or sc.w/d/q.
+             * To avoid abort, fallback to invalidate all TB on this page
+             * to make this page writable and return.
              */
             guest_store_address = parse_guest_store(info, uc, &size);
-            emu_store = size;
-            emu = &emu_store;
+            if (size < 0) {
+                guest_store_address = h2g(address);
+                emu = NULL;
+            } else {
+                emu_store = size;
+                emu = &emu_store;
+            }
         }
         switch (page_unprotect(guest_store_address, pc, emu)) {
 #else
@@ -459,7 +579,7 @@ static inline int handle_cpu_signal(uintptr_t pc, siginfo_t *info,
                  * cross the guest page boundary.
                  */
                 mmap_lock();
-                smc_store_interpret(info, uc);
+                smc_store_interpret(info, uc, guest_store_address);
                 UC_PC(uc) += 0x4;
                 mmap_unlock();
             }
