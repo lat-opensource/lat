@@ -6,6 +6,7 @@
 #include<stdio.h>
 #include <assert.h>
 #include"dirent.h"
+#include <errno.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -78,7 +79,11 @@ int file_lock(char *file_name, int *fd, int type, bool wait)
         mask |= O_RDWR;
     }
     *fd = open(file_name, mask, 0666);
-    if (fd < 0) {
+    if (*fd < 0) {
+    #ifdef AOT_DEBUG
+        qemu_log_mask(LAT_LOG_AOT, "open %s failed err=%s!\n", file_name,
+                      strerror(errno));
+    #endif
         return *fd;
     }
     return flock_set(*fd, type, wait);
