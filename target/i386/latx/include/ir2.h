@@ -64,6 +64,8 @@ void ir2_dump_init(void);
 int ir2_to_string(const IR2_INST *, char *);
 IR2_INST *ir2_prev(const IR2_INST *);
 IR2_INST *ir2_next(const IR2_INST *);
+void la_disasm(uint32_t insn);
+IR2_OPCODE la_decode(uint32_t insn);
 
 void ir2_append(IR2_INST *);
 void ir2_remove(int id);
