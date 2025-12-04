@@ -183,6 +183,13 @@ static bool smc_retrans_insert(TranslationBlock *tb)
     }
     return false;
 }
+static void smc_retrans_destory(void)
+{
+    if (smc_retrans_tree) {
+        g_tree_destroy(smc_retrans_tree);
+        smc_retrans_tree = NULL;
+    }
+}
 
 #endif
 
@@ -2174,6 +2181,11 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
     tb->return_target_ptr = NULL;
 #endif
 #ifdef CONFIG_LATX_SMC_OPT
+#ifdef CONFIG_LATX_AOT
+    if (in_pre_translate) {
+        smc_retrans_destory();
+    }
+#endif
     if (smc_retrans_lookup(pc)) {
         tb->smc_data |= TBSMC_OPTED_MASK;
         smc_retrans_remove(pc);
