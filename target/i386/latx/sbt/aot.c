@@ -182,6 +182,7 @@ static void get_seg_infomation(void)
 
 static int page_count;
 static page_table_info *aot_page_table;
+static const size_t aot_max_page_count = 204800;
 
 static struct aot_header *get_aot_buffer(int first_seg_in_lib,
         int end_seg_in_lib)
@@ -193,7 +194,13 @@ static struct aot_header *get_aot_buffer(int first_seg_in_lib,
         page_count += (seg->seg_end - seg->seg_begin + TARGET_PAGE_SIZE)
             / TARGET_PAGE_SIZE;
     }
-    assert(page_count < 204800);
+    if (page_count > aot_max_page_count) {
+        qemu_log_mask(LAT_LOG_AOT,
+            "aot page count %d exceeds limit %zu, skip aot\n",
+            page_count, aot_max_page_count);
+        page_count = aot_max_page_count;
+        return NULL;
+    }
     /*
      * Allocate memory to store aot infomation(metadata infomation, code cache
      * excluded). Then we will write entire buffer into aot file. */
@@ -664,9 +671,14 @@ void do_generate_aot(int first_seg_in_lib, int end_seg_in_lib)
     sigprocmask(SIG_BLOCK, &mask, &oldmask);
     qatomic_xchg(&ts->signal_pending, 1);
     reset_all_locks(&tb_ctx.htable);
-    struct aot_header *p_header = 
+    struct aot_header *p_header =
         get_aot_buffer(first_seg_in_lib, end_seg_in_lib);
-    assert(p_header && "allocatge aot_buffer failed\n");
+    if (!p_header) {
+        qemu_log_mask(LAT_LOG_AOT,
+            "skip aot generation for %s due to buffer preparation failure\n",
+            curr_lib_name);
+        return;
+    }
     struct stat statbuf;
     if (stat(curr_lib_name, &statbuf)) {
         qemu_log_mask(LAT_LOG_AOT, "ERROT stat %s failed\n", curr_lib_name);
