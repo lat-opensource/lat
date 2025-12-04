@@ -34,13 +34,17 @@ void lib_tree_init(void)
     lsassert(lib_tree);
 }
 
+typedef struct lib_dump_ctx {
+    lib_info **vec;
+    int index;
+} lib_dump_ctx;
+
 static gboolean dump_lib_tree_node(gpointer key, gpointer val,
                                        gpointer data)
 {
-    static int index;
-    lib_info **vec = (lib_info **)data;
+    lib_dump_ctx *ctx = (lib_dump_ctx *)data;
     lib_info *lib = (lib_info *)val;
-    vec[index++] = lib;
+    ctx->vec[ctx->index++] = lib;
     return 0;
 }
 
@@ -80,7 +84,11 @@ gint get_lib_num(void)
 
 void do_lib_record(lib_info **lib_info_vector)
 {
-    g_tree_foreach(lib_tree, dump_lib_tree_node, lib_info_vector);
+    lib_dump_ctx ctx = {
+        .vec = lib_info_vector,
+        .index = 0,
+    };
+    g_tree_foreach(lib_tree, dump_lib_tree_node, &ctx);
 }
 
 #endif
