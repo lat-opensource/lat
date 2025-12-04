@@ -2785,10 +2785,18 @@ static void load_elf_image(const char *image_name, const ImageSource *src,
      * In both cases, we will overwrite pages in this range with mappings
      * from the executable.
      */
-    load_addr = target_mmap(loaddr, len, PROT_NONE,
-                            MAP_PRIVATE | MAP_ANON | MAP_NORESERVE |
-                            (ehdr->e_type == ET_EXEC ? MAP_FIXED : 0),
-                            -1, 0, 1);
+#ifdef CONFIG_LATX_KZT
+    if (option_kzt)
+        load_addr = target_mmap(loaddr, len, PROT_READ,
+                                MAP_PRIVATE | MAP_ANON | MAP_NORESERVE |
+                                (ehdr->e_type == ET_EXEC ? MAP_FIXED : 0),
+                                -1, 0, 1);
+    else
+#endif // CONFIG_LATX_KZT
+        load_addr = target_mmap(loaddr, len, PROT_NONE,
+                                MAP_PRIVATE | MAP_ANON | MAP_NORESERVE |
+                                (ehdr->e_type == ET_EXEC ? MAP_FIXED : 0),
+                                -1, 0, 1);
     if (load_addr == -1) {
         goto exit_mmap;
     }
