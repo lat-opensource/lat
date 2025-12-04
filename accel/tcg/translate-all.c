@@ -4502,8 +4502,32 @@ int page_unprotect(target_ulong address, uintptr_t pc, int *emu)
             /* fprintf(stderr, "page_unprotect\n"); */
         }
 #endif
-        target_ulong start, len, i;
+        target_ulong start, len, i, addr;
         int prot;
+
+        PageFlagsNode *pflags[4];
+        int pflags_cache = 0, pflags_num = 0;
+        /* get all guest pages' flags and cache them */
+        pflags_num = qemu_host_page_size / TARGET_PAGE_SIZE;
+        if (qemu_host_page_size <= TARGET_PAGE_SIZE) {
+            goto no_pageflags_cache;
+        }
+        if (pflags_num > 4) {
+            goto no_pageflags_cache;
+        }
+        pflags_cache = 1;
+        addr = address & qemu_host_page_mask;
+        for (i = 0; i < pflags_num; ++i) {
+            pflags[i] = pageflags_find(addr, addr);
+            /* Check flags before creating shadow page.
+             * All guest page must be valid. */
+            if (inv_one_tb &&
+               (!pflags[i] || !(pflags[i]->flags & PAGE_VALID))) {
+                inv_one_tb = 0;
+            }
+            addr += TARGET_PAGE_SIZE;
+        }
+no_pageflags_cache:
 
         if (inv_one_tb) {
             /* === create shadow page for smc === */
@@ -4581,17 +4605,20 @@ int page_unprotect(target_ulong address, uintptr_t pc, int *emu)
                     len = qemu_host_page_size;
                     prot = PAGE_BITS;
                     /* for all guest pages in this host pages */
-                    for (i = 0; i < len; i += TARGET_PAGE_SIZE) {
-                        target_ulong addr = start + i;
-                        p = pageflags_find(addr, addr);
-                        if (!p) continue;
-                        /* enable write on the related guest page */
-                        if (addr == (address & TARGET_PAGE_MASK))
-                            SMC_ENABLE_PAGE_WRITE(address, p);
-                        if (is_cross && addr == (address2 & TARGET_PAGE_MASK))
-                            SMC_ENABLE_PAGE_WRITE(address2, p);
-                        /* accumulate to get the final prot of the host page */
-                        prot &= p->flags;
+                    assert(pflags_num != 0);
+                    addr = start;
+                    for (i = 0; i < pflags_num; ++i) {
+                        p = pflags_cache ? pflags[i] : pageflags_find(addr, addr);
+                        if (p) {
+                            /* enable write on the related guest page */
+                            if (addr == (address & TARGET_PAGE_MASK))
+                                SMC_ENABLE_PAGE_WRITE(address, p);
+                            if (is_cross && addr == (address2 & TARGET_PAGE_MASK))
+                                SMC_ENABLE_PAGE_WRITE(address2, p);
+                            /* accumulate to get the final prot of the host page */
+                            prot &= p->flags;
+                        }
+                        addr += TARGET_PAGE_SIZE;
                     }
                     /* enable write on the 2nd guest page if cross host */
                     if (is_cross_host) {
@@ -4626,10 +4653,11 @@ int page_unprotect(target_ulong address, uintptr_t pc, int *emu)
             len = qemu_host_page_size;
             prot = 0;
 
-            for (i = 0; i < len; i += TARGET_PAGE_SIZE) {
-                target_ulong addr = start + i;
+            assert(pflags_num != 0);
+            addr = start;
+            for (i = 0; i < pflags_num; ++i) {
 
-                p = pageflags_find(addr, addr);
+                p = pflags_cache ? pflags[i] : pageflags_find(addr, addr);
                 if (p) {
                     prot |= p->flags;
                     if (p->flags & PAGE_WRITE_ORG) {
@@ -4644,6 +4672,8 @@ int page_unprotect(target_ulong address, uintptr_t pc, int *emu)
                 */
                 current_tb_invalidated |=
                     tb_invalidate_phys_page_unwind(addr, pc, NULL);
+
+                addr += TARGET_PAGE_SIZE;
             }
         }
         if (do_mprotect) {
