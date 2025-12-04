@@ -4118,7 +4118,7 @@ just_return:
  *
  * return *prot with accumulate prot of guest pages
  */
-static inline int smc_shmm_checke_page_anon(uint64_t start, int *prot)
+static inline int smc_shmm_check_page_anon(uint64_t start, int *prot)
 {
     PageFlagsNode *p;
     uint64_t end, addr;
@@ -4157,7 +4157,7 @@ static int smc_create_shadow_page_shmm(uint64_t start)
     ShadowPageDesc *spd;
 
     /* can NOT use shmm if guest page is not MAP_ANON */
-    if (smc_shmm_checke_page_anon(start, &prot)) {
+    if (smc_shmm_check_page_anon(start, &prot)) {
         return -1;
     }
 
@@ -4278,9 +4278,9 @@ static void smc_retrans_triger(TranslationBlock *ctb)
 #define SMC_HELPER_CHECK(spd, p, addr, addr2, size) do {    \
     if (!(spd)) return 1;                                   \
     if (!((p)->flags & PAGE_WRITE_ORG)) return 1;           \
-    (address2) = (address) + (size) - 1;                    \
-    if (((address)  & TARGET_PAGE_MASK) !=                  \
-        ((address2) & TARGET_PAGE_MASK)) {                  \
+    addr2 = (addr) + (size) - 1;                            \
+    if (((addr)  & TARGET_PAGE_MASK) !=                     \
+        ((addr2) & TARGET_PAGE_MASK)) {                     \
         return 1;                                           \
     }                                                       \
 } while (0)
