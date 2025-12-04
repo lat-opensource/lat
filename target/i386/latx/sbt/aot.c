@@ -1311,7 +1311,7 @@ void aot_do_tb_reloc(TranslationBlock *tb, struct aot_tb *stb,
                              (tb->jmp_target_arg[j] + 20))) {
                         aot_link_tree_insert(thread_cpu, tb, (target_ulong)call_target,
                                 (uint32_t *)(tb->tc.ptr + tb->jmp_target_arg[j]),
-                                base, tb->flags, tb->flags, AOT_LINK_TYPE_TB_LINK);
+                                tb->flags, tb->flags, AOT_LINK_TYPE_TB_LINK);
                     }
                 }
             }

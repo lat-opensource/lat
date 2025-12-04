@@ -151,7 +151,7 @@ static void recover_tb_range(target_ulong page, struct aot_tb *p_aot_tbs,
         if (p_aot_tbs[i].return_target_ptr_offset) {
             aot_link_tree_insert(thread_cpu,
                 tb, tb->next_86_pc, (uint32_t *)(tb->tc.ptr +
-                p_aot_tbs[i].return_target_ptr_offset), base, tb->flags,
+                p_aot_tbs[i].return_target_ptr_offset), tb->flags,
                 tb->cflags, AOT_LINK_TYPE_JRRA);
         }
 #endif
@@ -221,7 +221,7 @@ static void recover_tb_range(target_ulong page, struct aot_tb *p_aot_tbs,
             if (p_aot_tbs[k].return_target_ptr_offset) {
                 aot_link_tree_insert(thread_cpu,
                     tb, tb->next_86_pc, (uint32_t *)(tb->tc.ptr +
-                        p_aot_tbs[k].return_target_ptr_offset), base, tb->flags,
+                        p_aot_tbs[k].return_target_ptr_offset), tb->flags,
                         tb->cflags, AOT_LINK_TYPE_JRRA);
             }
 #endif

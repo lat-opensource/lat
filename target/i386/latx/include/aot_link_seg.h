@@ -17,7 +17,6 @@ typedef struct aot_link_info {
     TranslationBlock *curr;
     target_ulong pc;
     const void *addr;
-    target_ulong base;
     uint32_t flags;
     uint32_t cflags;
     CPUState *cpu;
@@ -26,6 +25,6 @@ typedef struct aot_link_info {
 
 void aot_link_tree_init(void);
 void aot_link_tree_insert(CPUState *cpu, TranslationBlock *curr,
-    target_ulong pc, const void *addr, target_ulong base, uint32_t flags, uint32_t cflags, AOT_LINK_TYPE type);
+    target_ulong pc, const void *addr, uint32_t flags, uint32_t cflags, AOT_LINK_TYPE type);
 void try_aot_link(void);
 #endif

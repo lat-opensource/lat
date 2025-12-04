@@ -20,7 +20,7 @@ void aot_link_tree_init(void)
     aot_global_info_index = 0;
 }
 void aot_link_tree_insert(CPUState *cpu, TranslationBlock *curr,
-    target_ulong pc, const void *addr, target_ulong base, uint32_t flags, uint32_t cflags, AOT_LINK_TYPE type)
+    target_ulong pc, const void *addr, uint32_t flags, uint32_t cflags, AOT_LINK_TYPE type)
 {
     if (aot_global_info_index >= aot_global_info_total) {
         aot_global_info_total += 1000;
@@ -45,7 +45,7 @@ void try_aot_link(void)
         if (info->type == AOT_LINK_TYPE_TB_LINK) {
             if (*((uint32_t *)info->addr) != 0x50000800) {
                 TranslationBlock *next = tb_htable_lookup(info->cpu,
-                    info->pc, info->base, info->flags, info->cflags);
+                    info->pc, 0, info->flags, info->cflags);
                     if (next) {
                         /*has_link++;*/
                         light_tb_target_set_jmp_target(0, (uintptr_t)info->addr,
@@ -61,7 +61,7 @@ void try_aot_link(void)
                 index = 1;
             }
             TranslationBlock *next = tb_htable_lookup(info->cpu,
-                info->pc, info->base, info->flags, info->cflags);
+                info->pc, 0, info->flags, info->cflags);
             if (next && (((index ? tb_page_addr1(info->curr) : tb_page_addr0(info->curr)) & TARGET_PAGE_MASK)
                         == (tb_page_addr0(next) & TARGET_PAGE_MASK))) {
                 int temp0 = reg_itemp_map[ITEMP0];
