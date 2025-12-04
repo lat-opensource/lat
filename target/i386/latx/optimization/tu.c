@@ -943,6 +943,42 @@ static void mov_unlink_stub_to_end(uint32_t tb_num_in_tu, TranslationBlock **tb_
 #endif
 }
 
+static char ir1_type_name[IR1_TYPE_COUNT][8] = {
+    [IR1_TYPE_NORMAL]  = "normal",
+    [IR1_TYPE_BRANCH]  = "branch",
+    [IR1_TYPE_JUMP]    = "jmp",
+    [IR1_TYPE_CALL]    = "call",
+    [IR1_TYPE_RET]     = "ret",
+    [IR1_TYPE_JUMPIN]  = "jmpin",
+    [IR1_TYPE_CALLIN]  = "callin",
+    [IR1_TYPE_SYSCALL] = "syscall",
+};
+
+static void dump_tu_ir2(uint32 tb_num_in_tu, TranslationBlock **tb_list)
+{
+    if (!option_dump_ir2) {
+        return;
+    }
+    int all_ir2_num = 0;
+    qemu_log("dump tu ir2, tb_num_in_tu %d pid %d \n", tb_num_in_tu, getpid());
+    qemu_log("============================================================\n");
+    for (int i = 0; i < tb_num_in_tu; i++) {
+        TranslationBlock *tb = tb_list[i];
+        qemu_log("tb %d pc 0x%lx next pc 0x%lx target_pc 0x%lx use_tu_jmp %d ",
+                i, (uint64_t)tb->pc, (uint64_t)tb->s_data->next_pc,
+                (uint64_t)tb->s_data->target_pc,  use_tu_jmp(tb));
+        qemu_log("last_ir1_type %s -------------------\n",
+                ir1_type_name[tb->s_data->last_ir1_type]);
+        uint32_t *ir2_vec = (uint32_t *)tb->tc.ptr;
+        for (int j = 0; j < tb->tc.size / 4; j++) {
+            qemu_log("IR2[%04d][%03d] at %p 0x%08x ",
+                    all_ir2_num, j, &ir2_vec[j], ir2_vec[j]);
+            all_ir2_num++;
+            la_disasm(ir2_vec[j]);
+        }
+    }
+}
+
 void translate_tu(uint32 tb_num_in_tu, TranslationBlock **tb_list)
 {
     if (tb_num_in_tu == 0) {
@@ -1026,6 +1062,7 @@ retry:
                 CODE_GEN_ALIGN));
     tb_list[0]->s_data->tu_size = tcg_ctx->code_gen_ptr - tb_list[0]->tc.ptr;
 
+    dump_tu_ir2(tb_num_in_tu, tb_list);
 }
 
 static void register_tu(uint32 tb_num_in_tu, TranslationBlock **tb_list,

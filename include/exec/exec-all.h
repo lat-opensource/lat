@@ -718,6 +718,7 @@ typedef enum IR1_TYPE {
     IR1_TYPE_JUMPIN,
     IR1_TYPE_CALLIN,
     IR1_TYPE_SYSCALL,
+    IR1_TYPE_COUNT,
 } IR1_TYPE;
 
 /* Hide the qatomic_read to make code a little easier on the eyes */
