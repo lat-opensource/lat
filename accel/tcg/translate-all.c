@@ -4118,7 +4118,7 @@ static inline int smc_shmm_checke_page_anon(uint64_t start, int *prot)
         if (p && !(p->flags & PAGE_ANON)) {
             return 1;
         }
-        *prot &= (p->flags & (PAGE_READ | PAGE_WRITE));
+        if (p) *prot &= (p->flags & (PAGE_READ | PAGE_WRITE));
     }
 
     return 0;
