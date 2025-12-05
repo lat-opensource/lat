@@ -9,6 +9,7 @@
 #include "qemu/osdep.h"
 #include "qemu/host-utils.h"
 #include "qemu/atomic.h"
+#include "larchintrin.h"
 
 int qemu_icache_linesize = 0;
 int qemu_icache_linesize_log;
@@ -143,6 +144,16 @@ static void arch_cache_info(int *isize, int *dsize)
     if (*dsize == 0) {
         *dsize = qemu_getauxval(AT_DCACHEBSIZE);
     }
+}
+
+#elif defined(__loongarch__)
+
+static void arch_cache_info(int *isize, int *dsize)
+{
+    uint64_t i = __cpucfg(0x11);
+    uint64_t d = __cpucfg(0x12);
+    *isize = 0x1 << ((i >> 24) & 0x7f);
+    *dsize = 0x1 << ((d >> 24) & 0x7f);
 }
 
 #else

@@ -4,6 +4,18 @@
 #include "reg-alloc.h"
 #include "aot.h"
 
+IR2_INST *la_code_accl(IR2_OPND data_base, int ninst, uint32_t filling)
+{
+    IR2_INST *pir2 = ir2_allocate();
+    ir2_set_opcode(pir2, LISA_ACCL);
+    pir2->op_count = 3;
+    pir2->_opnd[0] = data_base;
+    pir2->_opnd[1] = create_ir2_opnd(IR2_OPND_PSEUDO, ninst);
+    pir2->_opnd[2] = create_ir2_opnd(IR2_OPND_PSEUDO, filling);
+    ir2_append(pir2);
+    return pir2;
+}
+
 IR2_INST *la_code_align(int align, uint32_t filling)
 {
     IR2_INST *pir2 = ir2_allocate();
@@ -163,6 +175,38 @@ IR2_INST *ir2_relocate(TRANSLATION_DATA *lat_ctx, IR2_INST *current, int *counte
     ptrdiff_t insn_offset;
 
     switch (opcode) {
+    case LISA_ACCL:
+        lsassert(ir2_opnd_is_data(&current->_opnd[0]));
+        lsassert(ir2_opnd_is_pseudo(&current->_opnd[1]));
+        lsassert(ir2_opnd_is_pseudo(&current->_opnd[2]));
+        /* tb base */
+        opnd0 = ir2_opnd_val(&current->_opnd[0]);
+        insn_offset = data[opnd0];
+        /* number of inst */
+        opnd1 = ir2_opnd_val(&current->_opnd[1]);
+        assert(opnd1 < (qemu_icache_linesize >> 2));
+        /* filling data(code) */
+        opnd2 = ir2_opnd_val(&current->_opnd[2]);
+        /* current position */
+        insn_offset += (*counter) << 2;
+        /*
+         *       +----- bottom
+         *      /|
+         * cache |
+         * line  |----- high water
+         *      \| opnd1 : number of inst
+         *       +----- top
+         */
+        insn_offset = insn_offset & (qemu_icache_linesize - 1);
+        while (insn_offset > (qemu_icache_linesize - (opnd1 << 2))) {
+            pir2 = generate_code(opnd2);
+            ir2_insert_before(pir2, cur_id);
+            opnd1 -= 1;
+            *counter += 1;
+        }
+        ir2_remove(cur_id);
+        break;
+
     case LISA_ALIGN:
         lsassert(ir2_opnd_is_pseudo(&current->_opnd[0]));
         lsassert(ir2_opnd_is_pseudo(&current->_opnd[1]));

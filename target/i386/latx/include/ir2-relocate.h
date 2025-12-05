@@ -6,6 +6,19 @@
 #include "qemu-def.h"
 
 /**
+ * @brief Avoid IR2 cross cacheline
+ * @details
+ * This function is used to generate some filling instruciton to avoid
+ * the following @ninst instructions spans two cacheline.
+ * The icacheline size is obtained by qemu in util/cacheinfo.c
+ * and is usually 64 bytes in most cases.
+ * @param data_base base of translation block
+ * @param ninst number of inst to be keep inside one cacheline
+ * @param filling filling data/code
+ */
+IR2_INST *la_code_accl(IR2_OPND data_base, int ninst, uint32_t filling);
+
+/**
  * @brief Add pseudo inst to hint align
  *
  * @param align align size (byte), recommend {2^n}

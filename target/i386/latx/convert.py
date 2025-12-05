@@ -322,7 +322,7 @@ def convertToConstructorForPseudo(name = str, header_list = list):
 def main():
     # pseudo insts which also not generate function like 'la_xxx()'
     pseudoinstruction_nofunction_list = [
-        "align", "code", "far_jump", "data_li", "data_add", "inst_diff",
+        "accl", "align", "code", "far_jump", "data_li", "data_add", "inst_diff",
         "data_st", "data_st_rel_table", "profile", "pcaddi_relocate", "pseudo_end"]
     pseudoinstruction_list = ["label", "x86_inst",
                               "mov64", "mov32_sx", "mov32_zx", "add", "sub",

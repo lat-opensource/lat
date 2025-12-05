@@ -19,6 +19,13 @@
         ],
         "note": "divide each x86 insts"
     },
+    "accl": {
+        "opcode": "0x0",
+        "opnd": [
+            "opd_invalid"
+        ],
+        "note": "ir2 avoid cross cacheline"
+    },
     "align": {
         "opcode": "0x0",
         "opnd": [
