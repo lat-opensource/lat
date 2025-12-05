@@ -1224,8 +1224,6 @@ void aot_do_tb_reloc(TranslationBlock *tb, struct aot_tb *stb,
     uint64_t offset;
     uintptr_t helper_address;
     int lib_method_index;
-    CPUArchState* env = (CPUArchState*)(lsenv->cpu_state);
-    target_ulong base = env->segs[R_CS].base;
     ADDR loacl_indirect_jmp_glue = indirect_jmp_glue;
 
     aot_rel_table = aot_buffer +
