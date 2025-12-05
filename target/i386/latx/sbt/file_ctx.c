@@ -120,41 +120,24 @@ uint64_t aot_file_rmgroup(char *aotFile)
     return f_size;
 }
 
+static bool ends_with(const char *file_name, const char *suffix)
+{
+    size_t file_len = strlen(file_name);
+    size_t suffix_len = strlen(suffix);
+
+    return file_len >= suffix_len
+        && !strncmp(file_name + file_len - suffix_len, suffix, suffix_len);
+}
+
 static bool is_aot_file(char *file_name)
 {
-    int file_len = strlen(file_name);
-    if (file_len < 5) {
-        return false;
-    }
-    if (file_name[file_len - 4] == 'a' &&
-            file_name[file_len - 3] == 'o' &&
-            file_name[file_len - 2] == 't' &&
-            file_name[file_len - 1] == '2') {
-        return true;
-    }
-    if (file_name[file_len - 5] == 'a' &&
-            file_name[file_len - 4] == 'o' &&
-            file_name[file_len - 3] == 't' &&
-            file_name[file_len - 2] == '2') {
-        return true;
-    }
-    return false;
+    /* aot2 and .aot2 */
+    return ends_with(file_name, "aot2") || ends_with(file_name, ".aot2");
 }
 
 static bool is_aot_lock(char *file_name)
 {
-    int file_len = strlen(file_name);
-    if (file_len < 5) {
-        return false;
-    }
-    if (file_name[file_len - 5] == '.' &&
-            file_name[file_len - 4] == 'l' &&
-            file_name[file_len - 3] == 'o' &&
-            file_name[file_len - 2] == 'c' &&
-            file_name[file_len - 1] == 'k') {
-        return true;
-    }
-    return false;
+    return ends_with(file_name, ".lock");
 }
 
 static void aot_file_release_oldfile(struct aot_info **f_info,
