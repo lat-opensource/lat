@@ -6,7 +6,7 @@
 #include "ts.h"
 #include "accel/tcg/internal.h"
 #include "aot_smc.h"
-#include "opt-jmp.h"
+#include "jrra.h"
 #include "latx-options.h"
 #include "latx-config.h"
 #include "ir1.h"
@@ -747,14 +747,10 @@ static void translate_seg(seg_info *seg, CPUState *cpu,
 #else
     translate_by_tu(cpu, cs_base, flags, cflags);
 #endif
-    if (option_jr_ra || option_jr_ra_stack) {
-        for (int i = curr_seg->first_tb_id; i < curr_seg->last_tb_id; i++) {
-            TranslationBlock *tb = curr_tb_message_vector[i].tb;
-            if (tb != NULL) {
-                jrra_pre_translate((void **)&tb, 1, cpu,
-                        0, tb->flags, tb->cflags);
-                        /* tb->cs_base, tb->flags, tb->cflags); */
-            }
+    for (int i = curr_seg->first_tb_id; i < curr_seg->last_tb_id; i++) {
+        TranslationBlock *tb = curr_tb_message_vector[i].tb;
+        if (tb != NULL) {
+            jrra_pre_translate((void **)&tb, 1, cpu, tb->flags, tb->cflags);
         }
     }
 }

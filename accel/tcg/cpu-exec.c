@@ -61,6 +61,9 @@ extern struct elfheader_s * elf_header;
 #ifdef CONFIG_LATX_PERF
 #include "latx-perf.h"
 #endif
+#ifdef CONFIG_LATX
+#include "jrra.h"
+#endif
 /* -icount align implementation. */
 
 typedef struct SyncClocks {
@@ -713,9 +716,6 @@ static inline void tb_add_jump(TranslationBlock *tb, int n,
 #ifdef CONFIG_LATX_TU
 #include "tu.h"
 #endif
-#ifdef CONFIG_LATX
-#include "opt-jmp.h"
-#endif
 
 static inline TranslationBlock *tb_find(CPUState *cpu,
                                         TranslationBlock *last_tb,
@@ -752,17 +752,8 @@ static inline TranslationBlock *tb_find(CPUState *cpu,
     latx_timer_start(TIMER_TS);
 #endif
 
-#ifdef CONFIG_LATX_TU
-        tb = tb_gen_code(cpu, pc, cs_base, flags, cflags);
-        jrra_pre_translate((void **)&tb, 1, cpu, cs_base, flags, cflags);
-        /* jrra_pre_translate((void **)tu_data->tb_list, tu_data->tb_num, */
-        /*                     cpu, cs_base, flags, cflags); */
-#else
-        tb = tb_gen_code(cpu, pc, cs_base, flags, cflags);
- #ifdef CONFIG_LATX
-        jrra_pre_translate((void **)&tb, 1, cpu, cs_base, flags, cflags);
- #endif
-#endif
+    tb = tb_gen_code(cpu, pc, cs_base, flags, cflags);
+    jrra_pre_translate((void **)&tb, 1, cpu, flags, cflags);
 #ifdef CONFIG_LATX_PERF
     latx_timer_stop(TIMER_TS);
 #endif

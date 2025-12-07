@@ -7,7 +7,6 @@
 #include "latx-options.h"
 #include "reg-map.h"
 #include "accel/tcg/internal.h"
-#include "opt-jmp.h"
 
 #ifdef CONFIG_LATX_AOT
 static aot_link_info *aot_global_info;

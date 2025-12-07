@@ -76,6 +76,7 @@
 #include "debug.h"
 #include "aot_smc.h"
 #include "aot_page.h"
+#include "jrra.h"
 #include "accel/tcg/internal.h"
 #include "ts.h"
 #include "latx-smc.h"
@@ -1954,12 +1955,7 @@ static void do_tb_phys_invalidate(TranslationBlock *tb, bool rm_from_page_list)
     qatomic_set(&tcg_ctx->tb_phys_invalidate_count,
                tcg_ctx->tb_phys_invalidate_count + 1);
 
-#ifdef CONFIG_LATX_JRRA
-    if (option_jr_ra) {
-        qatomic_set((uint32_t *)tb->tc.ptr, SMC_ILL_INST);
-        flush_idcache_range((uintptr_t)tb->tc.ptr, (uintptr_t)tb->tc.ptr, 4);
-    }
-#endif
+    jrra_install_smc_sentinel(tb);
 }
 
 static void tb_phys_invalidate__locked(TranslationBlock *tb)
@@ -2176,10 +2172,7 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
 #ifdef CONFIG_LATX_PROFILER
     CLN_TB_PROFILE(tb);
 #endif
-#ifdef CONFIG_LATX_JRRA
-    tb->next_86_pc = 0;
-    tb->return_target_ptr = NULL;
-#endif
+    jrra_tb_reset(tb);
 #ifdef CONFIG_LATX_SMC_OPT
 #ifdef CONFIG_LATX_AOT
     if (in_pre_translate) {
@@ -2680,13 +2673,12 @@ foreach_tb_start:
                 current_tb_modified = true;
                 cpu_restore_state_from_tb(current_cpu, current_tb, pc, true);
             }
-            if (option_jr_ra && current_tb == tb && !current_tb_modified) {
-                inst = qatomic_read((uint32_t *)tb->tc.ptr);
-            }
+            bool inst_saved = jrra_preserve_current_tb_head(tb, current_tb,
+                                    current_tb_modified, &inst);
             tb_phys_invalidate__locked(tb);
-            if (option_jr_ra && current_tb == tb && !current_tb_modified) {
-                qatomic_set((uint32_t *)tb->tc.ptr, inst);
-                flush_idcache_range((uintptr_t)tb->tc.ptr, (uintptr_t)tb->tc.ptr, 4);
+            if (inst_saved) {
+                jrra_restore_current_tb_head(tb, current_tb,
+                                    current_tb_modified, inst);
             }
         }
 

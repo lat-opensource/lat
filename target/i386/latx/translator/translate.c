@@ -12,6 +12,7 @@
 #include "tu.h"
 #include "imm-cache.h"
 #include "latx-smc.h"
+#include "jrra.h"
 #include "latx-native-asm.h"
 
 extern void *helper_tb_lookup_ptr(CPUArchState *);
@@ -2816,11 +2817,7 @@ void generate_context_switch_bt_to_native(void *code_buf)
 #ifdef TARGET_X86_64
     tr_load_x64_8_registers_from_env(0xff, option_save_xmm);
 #endif
-#if defined(CONFIG_LATX_JRRA) || defined(CONFIG_LATX_JRRA_STACK)
-    if (option_jr_ra || option_jr_ra_stack) {
-        la_gr2scr(scr0_ir2_opnd, zero_ir2_opnd);
-    }
-#endif
+    jrra_context_switch_bt_to_native();
 
     /* jump to native code address (saved in t9) */
     la_jirl(zero_ir2_opnd, native_addr_opnd, 0);

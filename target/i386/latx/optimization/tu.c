@@ -12,6 +12,7 @@
 #include "ir1-optimization.h"
 #include "latx-config.h"
 #include "tu.h"
+#include "jrra.h"
 #include "reg-alloc.h"
 #include "latx-options.h"
 #include "aot_page.h"
@@ -914,15 +915,7 @@ static void mov_unlink_stub_to_end(uint32_t tb_num_in_tu, TranslationBlock **tb_
         tb = tb_list[i];
         memmove((void *)curr_pos, tb->tc.ptr, tb->tc.size);
         assert(curr_pos % 4 == 0);
-#ifdef CONFIG_LATX_JRRA
-    	if (option_jr_ra || option_jr_ra_stack) {
-            if (tb->next_86_pc && tb->return_target_ptr) {
-                uintptr_t addr = (uintptr_t)tb->return_target_ptr;
-                addr = addr - (uintptr_t)tb->tc.ptr;
-                tb->return_target_ptr = (unsigned long *)(curr_pos + addr);
-            }
-        }
-#endif
+        jrra_relocate_return_target(tb, curr_pos);
         tb->tc.ptr = (void *)curr_pos;
         tb->s_data->offset_in_tu = tb->tc.ptr - tb_list[0]->tc.ptr;
         curr_pos += tb->tc.size;

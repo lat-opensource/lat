@@ -8,6 +8,7 @@
 #include "profile.h"
 #include "tu.h"
 #include "hbr.h"
+#include "jrra-translator.h"
 
 #if defined(CONFIG_LATX_KZT)
 #include "wrapper.h"
@@ -589,7 +590,7 @@ bool translate_call(IR1_INST *pir1)
     if(ir1_is_indirect_call(pir1)){
         return translate_callin(pir1);
     }
-    /* 1. adjust ssp */
+    /* 1. adjust esp */
     IR2_OPND esp_opnd = ra_alloc_gpr(esp_index);
     int opnd_size = ir1_get_opnd_size(pir1) >> 3;
 
@@ -602,60 +603,8 @@ bool translate_call(IR1_INST *pir1)
     aot_load_guest_addr(x86_addr_opnd, ir1_addr_next(pir1),
                         LOAD_CALL_TARGET, call_offset);
 
-#ifdef CONFIG_LATX_JRRA
-    TranslationBlock *tb = lsenv->tr_data->curr_tb;
-    if (option_jr_ra_stack) {
-        la_code_align(2, 0x03400000);
-        IR2_OPND target_ptr = ra_alloc_data();
-        IR2_OPND tb_base = ra_alloc_data();
-        IR2_OPND curr_ptr = ra_alloc_label();
-        /* set return_target_ptr */
-        /* tb->return_target_ptr = tb->tc.ptr + CURRENT_INST_COUNTER; */
-        la_label(curr_ptr);
-        la_data_li(target_ptr, (uint64_t)&tb->return_target_ptr);
-        la_data_li(tb_base, (uint64_t)tb->tc.ptr);
-        la_data_add(tb_base, tb_base, curr_ptr);
-        la_data_st(target_ptr, tb_base);
-        /* set next_86_pc */
-        tb->next_86_pc = ir1_addr_next(pir1);
-        /*
-         * pcalau12i itemp0, offset_high
-         * ori itemp0, itemp0, offset_low
-         * gr2scr scr1, itemp0
-         * gr2scr scr0, itemp1
-         */
-        // la_ori(zero_ir2_opnd, zero_ir2_opnd, 0);
-        // la_ori(zero_ir2_opnd, zero_ir2_opnd, 0);
-        la_ori(zero_ir2_opnd, zero_ir2_opnd, 0);
-        la_gr2scr(scr0_ir2_opnd, zero_ir2_opnd);
-    }
-
-    if (option_jr_ra) {
-        la_code_align(2, 0x03400000);
-        IR2_OPND target_ptr = ra_alloc_data();
-        IR2_OPND tb_base = ra_alloc_data();
-        IR2_OPND curr_ptr = ra_alloc_label();
-        /* set return_target_ptr */
-        /* tb->return_target_ptr = tb->tc.ptr + CURRENT_INST_COUNTER; */
-        la_label(curr_ptr);
-        la_data_li(target_ptr, (uint64_t)&tb->return_target_ptr);
-        la_data_li(tb_base, (uint64_t)tb->tc.ptr);
-        la_data_add(tb_base, tb_base, curr_ptr);
-        la_data_st(target_ptr, tb_base);
-        /* set next_86_pc */
-        tb->next_86_pc = ir1_addr_next(pir1);
-        /*
-         * pcalau12i itemp0, offset_high
-         * ori itemp0, itemp0, offset_low
-         * gr2scr scr1, itemp0
-         * gr2scr scr0, itemp1
-         */
-        la_ori(zero_ir2_opnd, zero_ir2_opnd, 0);
-        la_ori(zero_ir2_opnd, zero_ir2_opnd, 0);
-        la_ori(zero_ir2_opnd, zero_ir2_opnd, 0);
-        la_gr2scr(scr0_ir2_opnd, zero_ir2_opnd);
-    }
-#endif
+    jrra_emit_call_metadata(lsenv->tr_data->curr_tb, ir1_addr_next(pir1),
+                           JRRA_CALL_DIRECT);
 
 #ifndef TARGET_X86_64
     la_bstrpick_d(esp_opnd, esp_opnd, 31, 0);
@@ -754,60 +703,8 @@ bool translate_callin(IR1_INST *pir1)
     aot_load_guest_addr(return_addr_opnd, ir1_addr_next(pir1),
                         LOAD_CALL_TARGET, call_offset);
 
-#ifdef CONFIG_LATX_JRRA
-    TranslationBlock *tb = lsenv->tr_data->curr_tb;
-    if (option_jr_ra_stack) {
-        la_code_align(2, 0x03400000);
-        IR2_OPND target_ptr = ra_alloc_data();
-        IR2_OPND tb_base = ra_alloc_data();
-        IR2_OPND curr_ptr = ra_alloc_label();
-        /* set return_target_ptr */
-        /* tb->return_target_ptr = tb->tc.ptr + CURRENT_INST_COUNTER; */
-        la_label(curr_ptr);
-        la_data_li(target_ptr, (uint64_t)&tb->return_target_ptr);
-        la_data_li(tb_base, (uint64_t)tb->tc.ptr);
-        la_data_add(tb_base, tb_base, curr_ptr);
-        la_data_st(target_ptr, tb_base);
-        /* set next_86_pc */
-        tb->next_86_pc = ir1_addr_next(pir1);
-        /*
-         * pcalau12i itemp0, offset_high
-         * ori itemp0, itemp0, offset_low
-         * gr2scr scr1, itemp0
-         * gr2scr scr0, itemp1
-         */
-        la_ori(zero_ir2_opnd, zero_ir2_opnd, 0);
-        la_ori(zero_ir2_opnd, zero_ir2_opnd, 0);
-        // la_ori(zero_ir2_opnd, zero_ir2_opnd, 0);
-        // la_gr2scr(scr0_ir2_opnd, zero_ir2_opnd);
-    }
-
-    if (option_jr_ra) {
-        la_code_align(2, 0x03400000);
-        IR2_OPND target_ptr = ra_alloc_data();
-        IR2_OPND tb_base = ra_alloc_data();
-        IR2_OPND curr_ptr = ra_alloc_label();
-        /* set return_target_ptr */
-        /* tb->return_target_ptr = tb->tc.ptr + CURRENT_INST_COUNTER; */
-        la_label(curr_ptr);
-        la_data_li(target_ptr, (uint64_t)&tb->return_target_ptr);
-        la_data_li(tb_base, (uint64_t)tb->tc.ptr);
-        la_data_add(tb_base, tb_base, curr_ptr);
-        la_data_st(target_ptr, tb_base);
-        /* set next_86_pc */
-        tb->next_86_pc = ir1_addr_next(pir1);
-        /*
-         * pcalau12i itemp0, offset_high
-         * ori itemp0, itemp0, offset_low
-         * gr2scr scr1, itemp0
-         * gr2scr scr0, itemp1
-         */
-        la_ori(zero_ir2_opnd, zero_ir2_opnd, 0);
-        la_ori(zero_ir2_opnd, zero_ir2_opnd, 0);
-        la_ori(zero_ir2_opnd, zero_ir2_opnd, 0);
-        la_gr2scr(scr0_ir2_opnd, zero_ir2_opnd);
-    }
-#endif
+    jrra_emit_call_metadata(lsenv->tr_data->curr_tb, ir1_addr_next(pir1),
+                           JRRA_CALL_INDIRECT);
 
 #ifndef TARGET_X86_64
     la_bstrpick_d(esp_opnd, esp_opnd, 31, 0);
@@ -987,26 +884,7 @@ bool translate_ret_without_ss_opt(IR1_INST *pir1)
     } else {
         la_addi_addrx(esp_opnd, esp_opnd, opnd_size);
     }
-    if (option_jr_ra) {
-        IR2_OPND scr0 = ra_alloc_scr(0);
-        IR2_OPND scr1 = ra_alloc_scr(1);
-        IR2_OPND saved_x86_pc = ra_alloc_itemp();
-        IR2_OPND target_label_opnd = ra_alloc_label();
-
-        TranslationBlock *tb __attribute__((unused));
-        tb = lsenv->tr_data->curr_tb;
-        PER_TB_COUNT((void *)&((tb->profile).jrra_in), 1);
-
-        la_scr2gr(saved_x86_pc, scr0);
-        la_bne(saved_x86_pc, return_addr_opnd, target_label_opnd);
-        la_scr2gr(saved_x86_pc, scr1);
-        la_jirl(zero_ir2_opnd, saved_x86_pc, 0);
-        la_label(target_label_opnd);
-
-        PER_TB_COUNT((void *)&((tb->profile).jrra_miss), 1);
-    }
-    if (option_jr_ra_stack) {
-        la_jirl(zero_ir2_opnd, return_addr_opnd, 0);
+    if (jrra_translate_ret(lsenv->tr_data->curr_tb, return_addr_opnd, pir1)) {
         return true;
     }
     tr_generate_exit_tb(pir1, 0);
