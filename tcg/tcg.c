@@ -692,7 +692,7 @@ static void *tcg_tb_lookup_fast(uintptr_t tc_ptr)
     if (!in_code_gen_buffer((void *)tc_ptr)) {
         return NULL;
     }
-    TBMini *tbm = (TBMini *)(ROUND_DOWN((uintptr_t)tc_ptr,
+    TBMini *tbm = (TBMini *)(ROUND_DOWN((uintptr_t)tc_ptr - 4,
                 CODE_GEN_ALIGN));
     while (tbm->mtbp_struct.magic != TB_MAGIC) {
         tbm = (TBMini *)((uint64_t)tbm - CODE_GEN_ALIGN);
