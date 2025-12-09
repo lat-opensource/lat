@@ -4964,7 +4964,6 @@ void *set_shadow_page(target_ulong orig_page, void *shadow_p, int64_t access_off
             qemu_log_mask(LAT_LOG_MEM, "[LATX_16K] %s orig_p 0x"
                     TARGET_FMT_lx " shadow_p %p access_off 0x%lx\n",
                     __func__, orig_page, shadow_p, access_off);
-        spm_set(orig_page, TARGET_PAGE_SIZE);
     } else {
         /* this page has been managed, shadow page needs to be released first */
         mmap_lock();
@@ -4975,9 +4974,9 @@ void *set_shadow_page(target_ulong orig_page, void *shadow_p, int64_t access_off
                 TARGET_FMT_lx " shadow_p %p access_off 0x%lx "
                 "(this page has been managed)\n",
                 __func__, orig_page, shadow_p, access_off);
-        spm_clear(orig_page, TARGET_PAGE_SIZE);
         mmap_unlock();
     }
+    spm_set(orig_page, TARGET_PAGE_SIZE);
     return shadow_pd;
 }
 /*
@@ -7490,7 +7489,7 @@ void shadow_page_munmap(abi_ulong start, abi_ulong end)
         if (shadow_pd) {
             ret = munmap(shadow_pd->p_addr, qemu_host_page_size);
             assert(ret == 0);
-            spm_clear(addr, TARGET_PAGE_SIZE);
+            //spm_clear(addr, TARGET_PAGE_SIZE);
             qemu_log_mask(LAT_LOG_MEM, "[LATX_16K] %s addr 0x"
                     TARGET_FMT_lx " shadow_p %p\n",
                     __func__, addr, shadow_pd->p_addr);
