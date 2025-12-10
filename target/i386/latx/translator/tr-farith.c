@@ -1505,69 +1505,6 @@ bool translate_fxrstor(IR1_INST *pir1)
     IR1_OPND *opnd0 = ir1_get_opnd(pir1, 0);
     IR2_OPND mem_opnd = convert_mem_no_offset(opnd0);
 
-    if (option_softfpu) {
-        IR2_OPND new_mxcsr = ra_alloc_itemp();
-        la_ld_wu(new_mxcsr, mem_opnd, 24);
-
-        IR2_OPND fcsr = ra_alloc_itemp();
-        IR2_OPND temp = ra_alloc_itemp();
-
-        la_or(fcsr, zero_ir2_opnd, zero_ir2_opnd);
-        /* PE */
-        la_bstrpick_w(temp, new_mxcsr, 5, 5);
-        la_bstrins_w(fcsr, temp, 24, 24);
-        la_bstrins_w(fcsr, temp, 16, 16);
-        /* UE */
-        la_bstrpick_w(temp, new_mxcsr, 4, 4);
-        la_bstrins_w(fcsr, temp, 25, 25);
-        la_bstrins_w(fcsr, temp, 17, 17);
-        /* OE */
-        la_bstrpick_w(temp, new_mxcsr, 3, 3);
-        la_bstrins_w(fcsr, temp, 26, 26);
-        la_bstrins_w(fcsr, temp, 18, 18);
-        /* ZE */
-        la_bstrpick_w(temp, new_mxcsr, 2, 2);
-        la_bstrins_w(fcsr, temp, 27, 27);
-        la_bstrins_w(fcsr, temp, 19, 19);
-        /* IE */
-        la_bstrpick_w(temp, new_mxcsr, 0, 0);
-        la_bstrins_w(fcsr, temp, 28, 28);
-        la_bstrins_w(fcsr, temp, 20, 20);
-        la_movgr2fcsr(fcsr2_ir2_opnd, fcsr);
-        /* rounding */
-        la_bstrpick_w(temp, new_mxcsr, 14, 13);
-        la_andi(fcsr, temp, 0x1);
-        IR2_OPND label1 = ra_alloc_label();
-        la_beq(fcsr, zero_ir2_opnd, label1);
-        la_xori(temp, temp, 0x2);
-        la_label(label1);
-        la_bstrins_w(fcsr, temp, 9, 8);
-        la_movgr2fcsr(fcsr3_ir2_opnd, fcsr);
-        /* PM */
-        la_bstrpick_w(temp, new_mxcsr, 12, 12);
-        la_bstrins_w(fcsr, temp, 0, 0);
-        /* UM */
-        la_bstrpick_w(temp, new_mxcsr, 11, 11);
-        la_bstrins_w(fcsr, temp, 1, 1);
-        /* OM */
-        la_bstrpick_w(temp, new_mxcsr, 10, 10);
-        la_bstrins_w(fcsr, temp, 2, 2);
-        /* ZM */
-        la_bstrpick_w(temp, new_mxcsr, 9, 9);
-        la_bstrins_w(fcsr, temp, 3, 3);
-        /* IM */
-        la_bstrpick_w(temp, new_mxcsr, 7, 7);
-        la_bstrins_w(fcsr, temp, 4, 4);
-        la_nor(fcsr, zero_ir2_opnd, fcsr);
-
-        /* If FTZ set, enable UE to emulate */
-        la_bstrpick_w(temp, new_mxcsr, 15, 15);
-        la_slli_w(temp, temp, 1);
-        la_or(fcsr, fcsr, temp);
-
-        la_movgr2fcsr(fcsr1_ir2_opnd, fcsr);
-    }
-
     tr_gen_call_to_helper2((ADDR)helper_fxrstor, mem_opnd, 0, LOAD_HELPER_FXRSTOR);
 
     return true;

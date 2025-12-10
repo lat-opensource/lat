@@ -31,7 +31,10 @@
 #ifdef CONFIG_SOFTMMU
 #include "hw/irq.h"
 #endif
-
+#ifdef CONFIG_LATX
+#include <fenv.h>
+#include "latx-options.h"
+#endif
 /* float macros */
 #define FT0    (env->ft0)
 #define ST0    (env->fpregs[env->fpstt].d)
@@ -770,6 +773,15 @@ static void set_x86_rounding_mode(unsigned mode, float_status *status)
     };
     assert(mode < ARRAY_SIZE(x86_round_mode));
     set_float_rounding_mode(x86_round_mode[mode], status);
+    if (option_set_rounding_opt) {
+        static int round_mode_enum[4] = {
+            FE_TONEAREST,
+            FE_DOWNWARD,
+            FE_UPWARD,
+            FE_TOWARDZERO
+        };
+        fesetround(round_mode_enum[mode]);
+    }
 }
 
 void update_fp_status(CPUX86State *env)

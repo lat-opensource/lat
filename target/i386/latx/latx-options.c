@@ -153,11 +153,7 @@ void options_init(void)
     option_smc_opt = latx_smc_default();
 #endif
 
-#ifdef CONFIG_LATX_AVX_OPT
-    option_set_rounding_opt = 0;
-#else
     option_set_rounding_opt = 1;
-#endif
     option_cvt_opt = 1;
 }
 
