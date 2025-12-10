@@ -1156,7 +1156,11 @@ static bool translate_cvtsx2si_opt(IR1_INST *pir1)
     IR2_OPND temp_i = ra_alloc_itemp();
     IR2_OPND overflow = ra_alloc_ftemp();
 
-    if (ir1_opcode(pir1) == dt_X86_INS_CVTSD2SI) {
+    if (ir1_opcode(pir1) == dt_X86_INS_CVTSD2SI
+#ifdef CONFIG_LATX_AVX_OPT
+        || ir1_opcode(pir1) == dt_X86_INS_VCVTSD2SI
+#endif
+        ) {
         if (opnd0_size == 32) {
             // la_ftint_w_d(temp_f, src);
             // la_vldi(sse_invalid, 0b1001110000000); // broadcast 0x80000000 to all 0x1380
@@ -1215,7 +1219,11 @@ static bool translate_cvtsx2si_opt(IR1_INST *pir1)
         } else {
             lsassert(0);
         }
-    } else if (ir1_opcode(pir1) == dt_X86_INS_CVTSS2SI){
+    } else if (ir1_opcode(pir1) == dt_X86_INS_CVTSS2SI
+#ifdef CONFIG_LATX_AVX_OPT
+        || ir1_opcode(pir1) == dt_X86_INS_VCVTSS2SI
+#endif
+        ){
         IR2_OPND overflow = ra_alloc_ftemp();
 
         if (opnd0_size == 32) {
@@ -1380,7 +1388,11 @@ static bool translate_cvttsx2si_opt(IR1_INST *pir1)
     IR2_OPND temp_i = ra_alloc_itemp();
     IR2_OPND overflow = ra_alloc_ftemp();
 
-    if (ir1_opcode(pir1) == dt_X86_INS_CVTTSD2SI) {
+    if (ir1_opcode(pir1) == dt_X86_INS_CVTTSD2SI
+#ifdef CONFIG_LATX_AVX_OPT
+        || ir1_opcode(pir1) == dt_X86_INS_VCVTTSD2SI
+#endif
+        ) {
         if (opnd0_size == 32) {
             
             // la_ftintrz_w_d(temp_f, src);
@@ -1417,7 +1429,12 @@ static bool translate_cvttsx2si_opt(IR1_INST *pir1)
         } else {
             lsassert(0);
         }
-    } else if (ir1_opcode(pir1) == dt_X86_INS_CVTTSS2SI){
+    } else if (ir1_opcode(pir1) == dt_X86_INS_CVTTSS2SI
+#ifdef CONFIG_LATX_AVX_OPT
+        || ir1_opcode(pir1) == dt_X86_INS_VCVTTSS2SI
+
+#endif
+        ){
         if (opnd0_size == 32) {
             IR2_OPND temp_dest = ra_alloc_itemp();
             la_ftintrz_w_s(temp_f, src);
