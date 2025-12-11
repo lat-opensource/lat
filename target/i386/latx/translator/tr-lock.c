@@ -1806,7 +1806,7 @@ bool translate_lock_cmpxchg(IR1_INST *pir1)
     } else {
         uint32 mask;
 
-        IR2_OPND mask_opnd = ra_alloc_itemp();
+        IR2_OPND mask_opnd = a1_ir2_opnd;
         la_slli_d(tmp, tmp, 3);
 
         la_label(label_ll);
