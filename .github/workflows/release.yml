@@ -41,7 +41,7 @@ jobs:
           submodules: true
 
       - name: Setup Cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: /tmp/.cache
           key: ${{ matrix.container }}-${{ matrix.type }}-${{ github.sha }}
