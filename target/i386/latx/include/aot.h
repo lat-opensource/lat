@@ -137,6 +137,7 @@ typedef struct aot_tb {
     unsigned long next_86_pc_offset;
 
     int64_t lazypc[2];
+    int8_t canlink[2];
 } aot_tb;
 
 typedef enum aot_rel_kind {

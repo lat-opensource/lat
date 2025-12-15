@@ -260,7 +260,6 @@ int target_latx_epilogue(void *code_buf_addr)
 
     lsassert(context_switch_native_to_bt == 0);
     context_switch_native_to_bt_ret_0 = (ADDR)code_buf_addr;
-#ifdef CONFIG_LATX_LAZYEXITPC
     /*
      *  0:  save eip to env     ret_0
      *  4:  mov  a0, zero
@@ -276,14 +275,6 @@ int target_latx_epilogue(void *code_buf_addr)
     context_switch_native_to_bt_ret_id_1 = (ADDR)code_buf_addr + 20;
     context_switch_native_to_bt_ret_id_0 = (ADDR)code_buf_addr + 28;
     context_switch_native_to_bt = (ADDR)code_buf_addr + 32;
-#else
-    /*
-     *  0:  mov a0, zero        ret_0
-     *  4:  save eip to env     native_to_bt
-     *  8:  context switch
-     */
-    context_switch_native_to_bt = (ADDR)code_buf_addr + 4;
-#endif
 
     if (option_dump)
         qemu_log("[LATX] context_switch_native_to_bt = %p\n",

@@ -2452,6 +2452,8 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
     tb->jmp_list_next[1] = (uintptr_t)NULL;
     tb->jmp_dest[0] = (uintptr_t)NULL;
     tb->jmp_dest[1] = (uintptr_t)NULL;
+    tb->canlink[0] = 1;
+    tb->canlink[1] = 1;
 
     assert(!use_tu_jmp(tb));
     /* init original jump addresses which have been set during tcg_gen_code() */

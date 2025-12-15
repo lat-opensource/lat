@@ -1162,11 +1162,9 @@ int8 get_etb_type(IR1_INST *pir1);
 IR1_INST *get_ir1_list(struct TranslationBlock *tb, ADDRX pc, int max_insns);
 
 extern ADDR context_switch_native_to_bt_ret_0;
-#ifdef CONFIG_LATX_LAZYEXITPC
 extern ADDR context_switch_native_to_bt_ret_id_3;
 extern ADDR context_switch_native_to_bt_ret_id_1;
 extern ADDR context_switch_native_to_bt_ret_id_0;
-#endif
 extern ADDR context_switch_native_to_bt;
 extern ADDR ss_match_fail_native;
 

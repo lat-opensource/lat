@@ -35,6 +35,8 @@ inline static TranslationBlock *creat_tb(aot_tb *p_aot_tb, abi_ulong start,
     qemu_spin_init(&tb->jmp_lock);
     tb->lazypc[0] = p_aot_tb->lazypc[0];
     tb->lazypc[1] = p_aot_tb->lazypc[1];
+    tb->canlink[0] = 1;
+    tb->canlink[1] = 1;
     tb->lazylink[0] = 1;
     tb->lazylink[1] = 1;
     tb->cflags = p_aot_tb->cflags;

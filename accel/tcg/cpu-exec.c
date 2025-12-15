@@ -267,29 +267,25 @@ cpu_tb_exec(CPUState *cpu, TranslationBlock *itb, int *tb_exit)
 
     env->fpu_clobber = false;
     ret = tcg_qemu_tb_exec(env, tb_ptr);
-#ifdef CONFIG_LATX_LAZYTB
-    {
-        int tbexit = ret & TB_EXIT_MASK;
-        ret = ret & ~TB_EXIT_MASK;
-        TranslationBlock *rettb = tcg_tb_lookup(ret);
-        ret = (uint64_t)rettb | tbexit;
-    }
-#endif
-#ifdef CONFIG_LATX_LAZYEXITPC
-    {
-        int tbexit = ret & TB_EXIT_MASK;
-        TranslationBlock *rettb = (void *)(ret & ~TB_EXIT_MASK);
-        uint64_t lazypc = 0;
-        if (rettb) {
-            if (tbexit) {
-                lazypc = rettb->pc + rettb->lazypc[1];
-            } else {
-                lazypc = rettb->pc + rettb->lazypc[0];
+
+    uint64_t lazypc = 0;
+    int tbexit = ret & TB_EXIT_MASK;
+    ret = ret & ~TB_EXIT_MASK;
+    TranslationBlock *rettb = tcg_tb_lookup(ret);
+    if (rettb) {
+        if (tbexit) {
+            if (rettb->canlink[1]) {
+                ret = (uint64_t)rettb | tbexit;
             }
-            env->eip = lazypc;
+            lazypc = rettb->pc + rettb->lazypc[1];
+        } else {
+            if (rettb->canlink[0]) {
+                ret = (uint64_t)rettb;
+            }
+            lazypc = rettb->pc + rettb->lazypc[0];
         }
+        env->eip = lazypc;
     }
-#endif
 
 #ifdef CONFIG_LATX_MONITOR_SHARED_MEM
     if (option_monitor_shared_mem && env->checksum_fail_tb) {

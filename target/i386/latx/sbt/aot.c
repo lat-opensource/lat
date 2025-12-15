@@ -299,6 +299,8 @@ static inline int create_aot_tb(aot_tb *curr_aot_tb, TranslationBlock *tb,
 #endif
     curr_aot_tb->lazypc[0] = tb->lazypc[0];
     curr_aot_tb->lazypc[1] = tb->lazypc[1];
+    curr_aot_tb->canlink[0] = tb->canlink[0];
+    curr_aot_tb->canlink[1] = tb->canlink[1];
     curr_aot_tb->jmp_stub_target_arg[0] = tb->jmp_stub_target_arg[0];
     curr_aot_tb->jmp_stub_target_arg[1] = tb->jmp_stub_target_arg[1];
     if (use_tu_jmp(tb)) {
@@ -1244,7 +1246,6 @@ void aot_do_tb_reloc(TranslationBlock *tb, struct aot_tb *stb,
             light_tb_target_set_jmp_target((uintptr_t)tb->tc.ptr,
             (uintptr_t)pinsn, (uintptr_t)pinsn, context_switch_native_to_bt);
             break;
-#ifdef CONFIG_LATX_LAZYEXITPC
         case B_EPILOGUE_RET_ID_3:
             lsassert(((*pinsn) & 0xfc000000) == 0x50000000 ||
             (((*pinsn) & 0xfe000000) == 0x1e000000 &&/* pcaddu18i */
@@ -1266,7 +1267,6 @@ void aot_do_tb_reloc(TranslationBlock *tb, struct aot_tb *stb,
             light_tb_target_set_jmp_target((uintptr_t)tb->tc.ptr,
             (uintptr_t)pinsn, (uintptr_t)pinsn, context_switch_native_to_bt_ret_id_0);
             break;
-#endif
         case B_EPILOGUE_RET_0:
             lsassert(((*pinsn) & 0xfc000000) == 0x50000000 ||
             (((*pinsn) & 0xfe000000) == 0x1e000000 &&/* pcaddu18i */

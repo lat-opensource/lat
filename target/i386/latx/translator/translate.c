@@ -58,11 +58,9 @@ static int ss_generate_match_fail_native_code(void* code_buf);
 
 ADDR context_switch_bt_to_native;
 ADDR context_switch_native_to_bt_ret_0;
-#ifdef CONFIG_LATX_LAZYEXITPC
 ADDR context_switch_native_to_bt_ret_id_3;
 ADDR context_switch_native_to_bt_ret_id_1;
 ADDR context_switch_native_to_bt_ret_id_0;
-#endif
 ADDR context_switch_native_to_bt;
 ADDR ss_match_fail_native;
 void *interpret_glue;
@@ -2060,11 +2058,9 @@ static void tr_check_x86ins_change(struct TranslationBlock *tb)
     IR2_OPND eip_opnd = ra_alloc_dbt_arg2();
     /* set eip = tb->pc*/
     la_ld_d(eip_opnd, tb_opnd, offsetof(struct TranslationBlock, pc));
-#ifdef CONFIG_LATX_LAZYEXITPC
     /* here we store EIP to env
      * since context_switch_native_to_bt will not */
     la_store_addrx(eip_opnd, env_ir2_opnd, lsenv_offset_of_eip(lsenv));
-#endif
     IR2_OPND tb_ptr_opnd = a0_ir2_opnd;
     li_d(tb_ptr_opnd , 0);
     /* set base_address data */
@@ -2679,45 +2675,30 @@ direct_jmp:
 #ifdef CONFIG_LATX_PROFILER
         la_profile_begin();
 #endif
-#ifdef CONFIG_LATX_LAZYTB
-        la_pcaddi(tb_ptr_opnd, 0x0);
-#else
-        aot_load_host_addr(tb_ptr_opnd, tb_addr, LOAD_TB_ADDR, 0);
-#endif
         if (succ_x86_addr) {
             succ_x86_addr = ir1_target_addr(branch);
         } else {
             succ_x86_addr = succ_id ? ir1_target_addr(branch) : ir1_addr_next(branch);
         }
 
-#ifdef CONFIG_LATX_LAZYEXITPC
-        if (succ_id) {
-            tb->lazypc[1] = succ_x86_addr - tb->pc;
-            la_data_li(target, context_switch_native_to_bt_ret_id_1);
-            aot_la_append_ir2_jmp_far(target, base, B_EPILOGUE_RET_ID_1, 0);
-        } else {
-            tb->lazypc[0] = succ_x86_addr - tb->pc;
-            la_data_li(target, context_switch_native_to_bt_ret_id_0);
-            aot_la_append_ir2_jmp_far(target, base, B_EPILOGUE_RET_ID_0, 0);
-        }
-#else
-        target_ulong call_offset __attribute__((unused)) =
-                aot_get_call_offset(succ_x86_addr);
-        aot_load_guest_addr(succ_x86_addr_opnd, succ_x86_addr,
-                LOAD_CALL_TARGET, call_offset);
+        tb->lazypc[succ_id] = succ_x86_addr - tb->pc;
 
         bool self_jmp = ((opcode == dt_X86_INS_JMP) &&
                          (succ_x86_addr == ir1_addr(branch)) &&
                          (t_data->curr_ir1_count + 1 != MAX_IR1_NUM_PER_TB));
 
-        if (!qemu_loglevel_mask(CPU_LOG_TB_NOCHAIN) && !self_jmp) {
-            la_ori(tb_ptr_opnd, tb_ptr_opnd, succ_id);
-        } else {
-            la_ori(tb_ptr_opnd, zero_ir2_opnd, succ_id);
+        if (qemu_loglevel_mask(CPU_LOG_TB_NOCHAIN) || self_jmp) {
+            tb->canlink[succ_id] = 0;
         }
-        la_data_li(target, context_switch_native_to_bt);
-        aot_la_append_ir2_jmp_far(target, base, B_EPILOGUE, 0);
-#endif
+
+        la_pcaddi(tb_ptr_opnd, 0x0);
+        if (succ_id) {
+            la_data_li(target, context_switch_native_to_bt_ret_id_1);
+            aot_la_append_ir2_jmp_far(target, base, B_EPILOGUE_RET_ID_1, 0);
+        } else {
+            la_data_li(target, context_switch_native_to_bt_ret_id_0);
+            aot_la_append_ir2_jmp_far(target, base, B_EPILOGUE_RET_ID_0, 0);
+        }
         break;
     case dt_X86_INS_RET:
     case dt_X86_INS_RETF:
@@ -2827,7 +2808,6 @@ void generate_context_switch_native_to_bt(void)
 {
     /* 2. store eip (in $25) into env */
     IR2_OPND eip_opnd = ra_alloc_dbt_arg2();
-#ifdef CONFIG_LATX_LAZYEXITPC
     lsassert(lsenv_offset_of_eip(lsenv) >= -2048 &&
             lsenv_offset_of_eip(lsenv) <= 2047);
     la_store_addrx(eip_opnd, env_ir2_opnd,
@@ -2841,13 +2821,6 @@ void generate_context_switch_native_to_bt(void)
     la_b(label_cs);
     la_ori(a0_ir2_opnd, a0_ir2_opnd, 0x0); // ret id0
     la_label(label_cs);
-#else
-    la_mov64(a0_ir2_opnd, zero_ir2_opnd);
-    lsassert(lsenv_offset_of_eip(lsenv) >= -2048 &&
-            lsenv_offset_of_eip(lsenv) <= 2047);
-    la_store_addrx(eip_opnd, env_ir2_opnd,
-                            lsenv_offset_of_eip(lsenv));
-#endif
 
     /* 3. store x86 MMX and XMM registers to env */
     tr_save_registers_to_env(0xff, 0xff, option_save_xmm, options_to_save());
