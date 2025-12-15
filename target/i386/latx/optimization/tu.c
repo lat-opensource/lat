@@ -987,7 +987,7 @@ void translate_tu(uint32 tb_num_in_tu, TranslationBlock **tb_list)
                 ROUND_UP((uintptr_t)tcg_ctx->code_gen_ptr, CODE_GEN_ALIGN);
     uintptr_t last_tbmini_ptr = tbmini_ptr +
                 sizeof(struct TBMini) * (tb_num_in_tu + 1);
-    qatomic_set(&tcg_ctx->code_gen_ptr, last_tbmini_ptr);
+    qatomic_set(&tcg_ctx->code_gen_ptr, (void *)ROUND_UP(last_tbmini_ptr, qemu_icache_linesize));
 
 #else
     qatomic_set(&tcg_ctx->code_gen_ptr, (void *)
