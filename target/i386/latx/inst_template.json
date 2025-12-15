@@ -153,6 +153,13 @@
         ],
         "note": "hint pseudo inst do pcaddi relocate"
     },
+    "jump_epilogue": {
+        "opcode": "0",
+        "opnd": [
+            "opd_invalid"
+        ],
+        "note": "pseudo-instruction for the jump epilogue"
+    },
     "pseudo_end": {
         "opcode": "0",
         "opnd": [

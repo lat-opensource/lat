@@ -147,6 +147,8 @@ typedef enum aot_rel_kind {
     B_EPILOGUE_RET_ID_3,
     B_EPILOGUE_RET_ID_1,
     B_EPILOGUE_RET_ID_0,
+    JIRL_EPILOGUE_RET_ID_1,
+    JIRL_EPILOGUE_RET_ID_0,
     B_EPILOGUE_RET_0,
     B_NATIVE_JMP_GLUE2,
 

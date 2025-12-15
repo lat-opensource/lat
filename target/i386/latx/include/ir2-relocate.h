@@ -111,6 +111,25 @@ IR2_INST *la_far_jump(IR2_OPND jmp_target, IR2_OPND counter_base);
 IR2_INST *la_pcaddi_relocate(IR2_OPND rd, IR2_OPND jmp_target, IR2_OPND counter_base);
 
 /**
+ * @brief generate 2 insts for the jump epilogue
+ * @details
+ * This function is used to hint to generate a jump stub. The stub contain
+ * 'pcaddu18i+jirl'.
+ * First opnd 'jump_target' is jump target (absolute address). Second opnd
+ * 'counter_base' is TB/TU first inst absolute address, which is the address
+ * when 'counter = 1'.
+ * The generater will use under algorithm to caculate offset:
+ * <jump_target - counter_base - counter * 4>
+ * So, two opnd *MUST* be IR2_OPND_DATA
+ * @note This is a pseudo-instruction, but will generate some real instructions.
+ * @param jmp_target jump target address
+ * @param counter_base base address, for insts counter (or say address when
+ * counter = 1)
+ * @return IR2_INST* this ir2_inst
+ */
+IR2_INST *la_jump_epilogue(IR2_OPND jmp_target, IR2_OPND counter_base);
+
+/**
  * @brief generate translator data store operation
  * @details
  * This function is used to hint the relocator to save the data into translator

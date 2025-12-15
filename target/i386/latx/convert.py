@@ -323,7 +323,8 @@ def main():
     # pseudo insts which also not generate function like 'la_xxx()'
     pseudoinstruction_nofunction_list = [
         "accl", "align", "code", "far_jump", "data_li", "data_add", "inst_diff",
-        "data_st", "data_st_rel_table", "profile", "pcaddi_relocate", "pseudo_end"]
+        "data_st", "data_st_rel_table", "profile", "pcaddi_relocate",
+        "jump_epilogue", "pseudo_end"]
     pseudoinstruction_list = ["label", "x86_inst",
                               "mov64", "mov32_sx", "mov32_zx", "add", "sub",
                               "addi_addrx", "load_addrx", "store_addrx", "ill", "nop"

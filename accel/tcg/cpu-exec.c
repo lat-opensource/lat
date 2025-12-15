@@ -268,19 +268,20 @@ cpu_tb_exec(CPUState *cpu, TranslationBlock *itb, int *tb_exit)
     env->fpu_clobber = false;
     ret = tcg_qemu_tb_exec(env, tb_ptr);
 
-    uint64_t lazypc = 0;
     int tbexit = ret & TB_EXIT_MASK;
-    ret = ret & ~TB_EXIT_MASK;
+    ret = (ret & ~TB_EXIT_MASK) - 4;
     TranslationBlock *rettb = tcg_tb_lookup(ret);
+    ret = tbexit;
     if (rettb) {
+        uint64_t lazypc = 0;
         if (tbexit) {
             if (rettb->canlink[1]) {
-                ret = (uint64_t)rettb | tbexit;
+                ret |= (uint64_t)rettb;
             }
             lazypc = rettb->pc + rettb->lazypc[1];
         } else {
             if (rettb->canlink[0]) {
-                ret = (uint64_t)rettb;
+                ret |= (uint64_t)rettb;
             }
             lazypc = rettb->pc + rettb->lazypc[0];
         }

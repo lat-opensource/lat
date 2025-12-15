@@ -2558,7 +2558,6 @@ void tr_generate_exit_tb(IR1_INST *branch, int succ_id)
     (void)tb_addr;
     ADDR succ_x86_addr = 0;
     /* The epilogue function needs to return the address of the tb */
-    IR2_OPND tb_ptr_opnd = a0_ir2_opnd;
     IR2_OPND succ_x86_addr_opnd = ra_alloc_dbt_arg2();
     (void)succ_x86_addr_opnd ;
     IR2_OPND goto_label_opnd = ra_alloc_label();
@@ -2683,21 +2682,20 @@ direct_jmp:
 
         tb->lazypc[succ_id] = succ_x86_addr - tb->pc;
 
-        bool self_jmp = ((opcode == dt_X86_INS_JMP) &&
-                         (succ_x86_addr == ir1_addr(branch)) &&
-                         (t_data->curr_ir1_count + 1 != MAX_IR1_NUM_PER_TB));
+        //bool self_jmp = ((opcode == dt_X86_INS_JMP) &&
+        //                 (succ_x86_addr == ir1_addr(branch)) &&
+        //                 (t_data->curr_ir1_count + 1 != MAX_IR1_NUM_PER_TB));
 
-        if (qemu_loglevel_mask(CPU_LOG_TB_NOCHAIN) || self_jmp) {
-            tb->canlink[succ_id] = 0;
-        }
+        //if (qemu_loglevel_mask(CPU_LOG_TB_NOCHAIN) || self_jmp) {
+        //    tb->canlink[succ_id] = 0;
+        //}
 
-        la_pcaddi(tb_ptr_opnd, 0x0);
         if (succ_id) {
             la_data_li(target, context_switch_native_to_bt_ret_id_1);
-            aot_la_append_ir2_jmp_far(target, base, B_EPILOGUE_RET_ID_1, 0);
+            aot_la_append_ir2_jmp_epilogue(target, base, JIRL_EPILOGUE_RET_ID_1, 0);
         } else {
             la_data_li(target, context_switch_native_to_bt_ret_id_0);
-            aot_la_append_ir2_jmp_far(target, base, B_EPILOGUE_RET_ID_0, 0);
+            aot_la_append_ir2_jmp_epilogue(target, base, JIRL_EPILOGUE_RET_ID_0, 0);
         }
         break;
     case dt_X86_INS_RET:

@@ -1267,6 +1267,18 @@ void aot_do_tb_reloc(TranslationBlock *tb, struct aot_tb *stb,
             light_tb_target_set_jmp_target((uintptr_t)tb->tc.ptr,
             (uintptr_t)pinsn, (uintptr_t)pinsn, context_switch_native_to_bt_ret_id_0);
             break;
+        case JIRL_EPILOGUE_RET_ID_1:
+            lsassert((((*pinsn) & 0xfe000000) == 0x1e000000 &&/* pcaddu18i */
+            (*(pinsn + 1) & 0xfc000000) == 0x4c000000));
+            reset_pcaddu18i_jirl_target((uintptr_t)tb->tc.ptr,
+            (uintptr_t)pinsn, (uintptr_t)pinsn, context_switch_native_to_bt_ret_id_1);
+            break;
+        case JIRL_EPILOGUE_RET_ID_0:
+            lsassert((((*pinsn) & 0xfe000000) == 0x1e000000 &&/* pcaddu18i */
+            (*(pinsn + 1) & 0xfc000000) == 0x4c000000));
+            reset_pcaddu18i_jirl_target((uintptr_t)tb->tc.ptr,
+            (uintptr_t)pinsn, (uintptr_t)pinsn, context_switch_native_to_bt_ret_id_0);
+            break;
         case B_EPILOGUE_RET_0:
             lsassert(((*pinsn) & 0xfc000000) == 0x50000000 ||
             (((*pinsn) & 0xfe000000) == 0x1e000000 &&/* pcaddu18i */

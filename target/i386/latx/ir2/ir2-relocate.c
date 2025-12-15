@@ -84,6 +84,19 @@ IR2_INST *la_pcaddi_relocate(IR2_OPND rd, IR2_OPND jmp_target, IR2_OPND counter_
     return pir2;
 }
 
+IR2_INST *la_jump_epilogue(IR2_OPND jmp_target, IR2_OPND counter_base)
+{
+    lsassert(ir2_opnd_is_data(&jmp_target));
+    lsassert(ir2_opnd_is_data(&counter_base));
+    IR2_INST *pir2 = ir2_allocate();
+    ir2_set_opcode(pir2, LISA_JUMP_EPILOGUE);
+    pir2->op_count = 2;
+    pir2->_opnd[0] = jmp_target;
+    pir2->_opnd[1] = counter_base;
+    ir2_append(pir2);
+    return pir2;
+}
+
 IR2_INST *la_inst_diff(IR2_OPND dest, IR2_OPND label1, IR2_OPND label2)
 {
     lsassert(ir2_opnd_is_data(&dest));
@@ -268,6 +281,27 @@ IR2_INST *ir2_relocate(TRANSLATION_DATA *lat_ctx, IR2_INST *current, int *counte
         ir2_insert_before(generate_pcaddi(current->_opnd[0],
                             insn_offset), cur_id);
         (*counter)++;
+        ir2_remove(cur_id);
+
+        break;
+
+    case LISA_JUMP_EPILOGUE:
+        /* cannot be label, if you want to use label, to la_b(label) */
+        lsassert(ir2_opnd_is_data(&current->_opnd[0])); /* jump abs pc */
+        lsassert(ir2_opnd_is_data(&current->_opnd[1])); /* begin pc */
+        /* if is data, we need to sub the current pc */
+        insn_offset   = data[ir2_opnd_val(&current->_opnd[0])];
+        insn_offset  -= (*counter << 2) + data[ir2_opnd_val(&current->_opnd[1])];
+        insn_offset >>= 2;
+
+        ptrdiff_t upper, lower;
+        lower = (int16_t)insn_offset;
+        upper = (insn_offset - lower) >> 16;
+        IR2_OPND tmp = ra_alloc_itemp();
+        ir2_insert_before(generate_pcaddu18i(tmp, upper), cur_id);
+        ir2_insert_before(generate_jirl(a0_ir2_opnd, tmp, lower), cur_id);
+        ra_free_temp(tmp);
+        (*counter) += 2;
         ir2_remove(cur_id);
 
         break;

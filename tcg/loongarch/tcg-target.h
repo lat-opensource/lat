@@ -166,6 +166,7 @@ void tb_target_set_jmp_target(uintptr_t, uintptr_t, uintptr_t, uintptr_t);
 void tb_target_set_nop(uintptr_t, uintptr_t, uintptr_t, uintptr_t);
 #endif
 void light_tb_target_set_jmp_target(uintptr_t, uintptr_t, uintptr_t, uintptr_t);
+void reset_pcaddu18i_jirl_target(uintptr_t, uintptr_t, uintptr_t, uintptr_t);
 void b_to_addr(uintptr_t jmp_rx, uintptr_t jmp_rw, uintptr_t addr);
 
 #define TCG_TARGET_DEFAULT_MO (0)

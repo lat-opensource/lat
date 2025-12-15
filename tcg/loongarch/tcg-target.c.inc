@@ -1977,6 +1977,24 @@ void light_tb_target_set_jmp_target(uintptr_t tc_ptr, uintptr_t jmp_rx,
 #endif
 }
 
+void reset_pcaddu18i_jirl_target(uintptr_t tc_ptr, uintptr_t jmp_rx,
+                              uintptr_t jmp_rw, uintptr_t addr)
+{
+    ptrdiff_t offset = addr - jmp_rx;
+    unsigned int rd;
+
+    tcg_insn_unit i1, i2;
+    offset >>= 2;
+    int64_t upper, lower;
+    upper = ((offset + (1 << 15)) >> 16) & 0xfffff;
+    lower = (offset & 0xffff);
+    rd = *((uint32_t *)(jmp_rw + 4)) & 0x1f;
+    i1 = 0x1e000000 | upper << 5 | TCG_REG_T0;       /* pcaddu18i */
+    i2 = 0x4c000000 | lower << 10 | TCG_REG_T0 << 5 | rd; /* jirl */
+    *((uint32_t *)(jmp_rw + 4)) = i2;
+    *((uint32_t *)jmp_rw) = i1;
+}
+
 typedef struct {
     DebugFrameHeader h;
     uint8_t fde_def_cfa[4];
