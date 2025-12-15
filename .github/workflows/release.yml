@@ -70,7 +70,7 @@ jobs:
           echo "SHORT_COMMIT=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
 
       - name: "Upload Artifact"
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.container }}-${{ matrix.type }}-${{ env.SHORT_COMMIT }}
           path: |
