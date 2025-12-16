@@ -45,5 +45,9 @@ void target_disasm(struct TranslationBlock *tb, int max_insns);
 #define B_STUB_SIZE 4
 #endif
 
+#ifdef CONFIG_LATX_LAZYLINK
+#undef  B_STUB_SIZE
+#define B_STUB_SIZE 0
+#endif
 
 #endif /* _LATX_CONFIG_H_ */
