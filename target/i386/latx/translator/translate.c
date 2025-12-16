@@ -2565,6 +2565,21 @@ void set_jmp_reset_offset(TranslationBlock *tb, void *func, IR1_INST *stub, int 
     tb->jmp_reset_offset[succ_id] = ir2_opnd_label_id(&goto_label_opnd);
 }
 
+static inline void set_tb_canlink(IR1_INST *branch, int succ_id, ADDR succ_x86_addr)
+{
+    IR1_OPCODE opcode = ir1_opcode(branch);
+    TRANSLATION_DATA *t_data = lsenv->tr_data;
+    TranslationBlock *tb = lsenv->tr_data->curr_tb;
+
+    bool self_jmp = ((opcode == dt_X86_INS_JMP) &&
+                     (succ_x86_addr == ir1_addr(branch)) &&
+                     (t_data->curr_ir1_count + 1 != MAX_IR1_NUM_PER_TB));
+
+    if (qemu_loglevel_mask(CPU_LOG_TB_NOCHAIN) || self_jmp) {
+        tb->canlink[succ_id] = 0;
+    }
+}
+
 #ifdef CONFIG_LATX_XCOMISX_OPT
 inline
 void tr_generate_exit_tb(IR1_INST *branch, int succ_id)
@@ -2610,7 +2625,7 @@ void tr_generate_exit_tb(IR1_INST *branch, int succ_id)
         if (ir1_is_indirect_jmp(branch)) {
             goto indirect_jmp;
         } else {
-            succ_x86_addr = 1;
+            succ_x86_addr = ir1_target_addr(branch);
             goto direct_jmp;
         }
         break;
@@ -2636,6 +2651,13 @@ void tr_generate_exit_tb(IR1_INST *branch, int succ_id)
     case dt_X86_INS_LOOP:
     case dt_X86_INS_LOOPE:
     case dt_X86_INS_LOOPNE:
+        if (succ_id) {
+            succ_x86_addr = ir1_target_addr(branch);
+        } else {
+            succ_x86_addr = ir1_addr_next(branch);
+            la_label(label_first_jmp_align);
+            tb->first_jmp_align = ir2_opnd_label_id(&label_first_jmp_align);
+        }
 direct_jmp:
         /*
          * If option_lsfpu is open, condition jmp will jmp to next tb diretly.
@@ -2649,10 +2671,6 @@ direct_jmp:
          * Also, if we need to patch the offset, the patch place need to be
          * aligned. This nop is used to do that.
          */
-        if (!succ_id) {
-            la_label(label_first_jmp_align);
-            tb->first_jmp_align = ir2_opnd_label_id(&label_first_jmp_align);
-        }
         la_code_accl(base, 2, 0x03400000);
 
         if (!use_tu_jmp(tb)) {
@@ -2668,22 +2686,8 @@ direct_jmp:
 #ifdef CONFIG_LATX_PROFILER
         la_profile_begin();
 #endif
-        if (succ_x86_addr) {
-            succ_x86_addr = ir1_target_addr(branch);
-        } else {
-            succ_x86_addr = succ_id ? ir1_target_addr(branch) : ir1_addr_next(branch);
-        }
-
         tb->lazypc[succ_id] = succ_x86_addr - tb->pc;
-
-        //bool self_jmp = ((opcode == dt_X86_INS_JMP) &&
-        //                 (succ_x86_addr == ir1_addr(branch)) &&
-        //                 (t_data->curr_ir1_count + 1 != MAX_IR1_NUM_PER_TB));
-
-        //if (qemu_loglevel_mask(CPU_LOG_TB_NOCHAIN) || self_jmp) {
-        //    tb->canlink[succ_id] = 0;
-        //}
-
+        set_tb_canlink(branch, succ_id, succ_x86_addr);
         if (succ_id) {
             la_data_li(target, context_switch_native_to_bt_ret_id_1);
             aot_la_append_ir2_jmp_epilogue(target, base, JIRL_EPILOGUE_RET_ID_1, 0);
@@ -2692,6 +2696,7 @@ direct_jmp:
             aot_la_append_ir2_jmp_epilogue(target, base, JIRL_EPILOGUE_RET_ID_0, 0);
         }
         break;
+
     case dt_X86_INS_RET:
     case dt_X86_INS_RETF:
     case dt_X86_INS_IRET:
