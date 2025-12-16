@@ -100,7 +100,7 @@ bool translate_cmp_jcc(IR1_INST *ir1)
             IR2_OPND translated_label_opnd = ra_alloc_label();
             /* la_code_align(2, 0x03400000); */
             la_label(translated_label_opnd);
-            la_b(ir2_opnd_new(IR2_OPND_IMM, 0));
+            la_b(imm_zero_ir2_opnd);
             la_nop();
             tb->tu_jmp[TU_TB_INDEX_NEXT] = translated_label_opnd._label_id;
         }
@@ -358,7 +358,7 @@ bool translate_sub_jcc(IR1_INST *ir1)
             IR2_OPND translated_label_opnd = ra_alloc_label();
             /* la_code_align(2, 0x03400000); */
             la_label(translated_label_opnd);
-            la_b(ir2_opnd_new(IR2_OPND_IMM, 0));
+            la_b(imm_zero_ir2_opnd);
             la_nop();
             tb->tu_jmp[TU_TB_INDEX_NEXT] = translated_label_opnd._label_id;
         }
@@ -487,7 +487,7 @@ static inline bool xcomisx_jcc(IR1_INST *ir1, bool is_double, bool qnan_exp)
             IR2_OPND translated_label_opnd = ra_alloc_label();
             /* la_code_align(2, 0x03400000); */
             la_label(translated_label_opnd);
-            la_b(ir2_opnd_new(IR2_OPND_IMM, 0));
+            la_b(imm_zero_ir2_opnd);
             la_nop();
             tb->tu_jmp[TU_TB_INDEX_NEXT] = translated_label_opnd._label_id;
         }
@@ -665,7 +665,7 @@ bool translate_bt_jcc(IR1_INST *ir1)
             IR2_OPND translated_label_opnd = ra_alloc_label();
             /* la_code_align(2, 0x03400000); */
             la_label(translated_label_opnd);
-            la_b(ir2_opnd_new(IR2_OPND_IMM, 0));
+            la_b(imm_zero_ir2_opnd);
             la_nop();
             tb->tu_jmp[TU_TB_INDEX_NEXT] = translated_label_opnd._label_id;
         }
@@ -917,7 +917,7 @@ bool translate_test_jcc(IR1_INST *ir1)
             IR2_OPND translated_label_opnd = ra_alloc_label();
             /* la_code_align(2, 0x03400000); */
             la_label(translated_label_opnd);
-            la_b(ir2_opnd_new(IR2_OPND_IMM, 0));
+            la_b(imm_zero_ir2_opnd);
             la_nop();
             tb->tu_jmp[TU_TB_INDEX_NEXT] = translated_label_opnd._label_id;
         }

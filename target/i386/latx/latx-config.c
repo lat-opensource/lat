@@ -322,6 +322,7 @@ static void global_register_init(void)
 {
     env_ir2_opnd = INIT_RA(IR2_OPND_GPR, reg_statics_map[S_ENV]);
 
+    imm_zero_ir2_opnd = INIT_IMM(0);
     /* All LA reg */
     zero_ir2_opnd = INIT_RA(IR2_OPND_GPR, la_zero);
     ra_ir2_opnd = INIT_RA(IR2_OPND_GPR, la_ra);

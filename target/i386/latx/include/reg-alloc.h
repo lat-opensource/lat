@@ -11,6 +11,7 @@
 #include "lsenv.h"
 #include "imm-cache.h"
 
+extern IR2_OPND imm_zero_ir2_opnd;
 extern IR2_OPND env_ir2_opnd;
 extern IR2_OPND zero_ir2_opnd;
 extern IR2_OPND ra_ir2_opnd;
@@ -130,6 +131,8 @@ static int ra_alloc_##name##_num(void)                                  \
 
 #define INIT_RA(type, phyno)                                            \
 (IR2_OPND){._type = type, ._reg_num = phyno}
+#define INIT_IMM(imm)                                                   \
+    (IR2_OPND){._type = IR2_OPND_IMM, ._imm32 = imm}
 
 /*
  * Function declarations

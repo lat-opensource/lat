@@ -28,10 +28,9 @@ bool translate_jcc(IR1_INST *pir1)
 
         /* next_tb[TU_TB_INDEX_NEXT] already be translated */
         if (tb->tu_jmp[TU_TB_INDEX_NEXT] != TB_JMP_RESET_OFFSET_INVALID) {
-            IR2_OPND ir2_opnd_addr = ir2_opnd_new(IR2_OPND_IMM, 0);
             /* la_code_align(2, 0x03400000); */
             la_label(translated_label_opnd);
-            la_b(ir2_opnd_addr);
+            la_b(imm_zero_ir2_opnd);
             la_nop();
             tb->tu_jmp[TU_TB_INDEX_NEXT] = translated_label_opnd._label_id;
         }
@@ -72,10 +71,9 @@ bool translate_jcxz(IR1_INST *pir1)
         tu_jcc_nop_gen(tb);
         if (tb->tu_jmp[TU_TB_INDEX_NEXT] != TB_JMP_RESET_OFFSET_INVALID) {
             IR2_OPND next_label_opnd = ra_alloc_label();
-            IR2_OPND ir2_opnd_addr = ir2_opnd_new(IR2_OPND_IMM, 0);
             /* la_code_align(2, 0x03400000); */
             la_label(next_label_opnd);
-            la_b(ir2_opnd_addr);
+            la_b(imm_zero_ir2_opnd);
             la_nop();
             tb->tu_jmp[TU_TB_INDEX_NEXT] = next_label_opnd._label_id;
         }
@@ -120,10 +118,9 @@ bool translate_jecxz(IR1_INST *pir1)
         tu_jcc_nop_gen(tb);
         if (tb->tu_jmp[TU_TB_INDEX_NEXT] != TB_JMP_RESET_OFFSET_INVALID) {
             IR2_OPND next_label_opnd = ra_alloc_label();
-            IR2_OPND ir2_opnd_addr = ir2_opnd_new(IR2_OPND_IMM, 0);
             /* la_code_align(2, 0x03400000); */
             la_label(next_label_opnd);
-            la_b(ir2_opnd_addr);
+            la_b(imm_zero_ir2_opnd);
             la_nop();
             tb->tu_jmp[TU_TB_INDEX_NEXT] = next_label_opnd._label_id;
         }
@@ -166,10 +163,9 @@ bool translate_jrcxz(IR1_INST *pir1)
         tu_jcc_nop_gen(tb);
         if (tb->tu_jmp[TU_TB_INDEX_NEXT] != TB_JMP_RESET_OFFSET_INVALID) {
             IR2_OPND next_label_opnd = ra_alloc_label();
-            IR2_OPND ir2_opnd_addr = ir2_opnd_new(IR2_OPND_IMM, 0);
             /* la_code_align(2, 0x03400000); */
             la_label(next_label_opnd);
-            la_b(ir2_opnd_addr);
+            la_b(imm_zero_ir2_opnd);
             la_nop();
             tb->tu_jmp[TU_TB_INDEX_NEXT] = next_label_opnd._label_id;
         }

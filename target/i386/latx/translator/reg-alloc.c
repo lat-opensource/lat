@@ -14,6 +14,7 @@
 /*
  * Init in global_register_init()
  */
+IR2_OPND imm_zero_ir2_opnd;
 IR2_OPND env_ir2_opnd;
 IR2_OPND zero_ir2_opnd;
 IR2_OPND ra_ir2_opnd;

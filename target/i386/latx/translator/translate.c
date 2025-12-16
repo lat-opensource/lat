@@ -2637,8 +2637,6 @@ direct_jmp:
                 tb->jmp_reset_offset[succ_id] = ir2_opnd_label_id(&goto_label_opnd);
             }
 #endif
-            IR2_OPND ir2_opnd_addr;
-            ir2_opnd_build(&ir2_opnd_addr, IR2_OPND_IMM, 0);
 #ifdef CONFIG_LATX_XCOMISX_OPT
             /* Add stub for exit recover */
             if (func) {
@@ -2662,7 +2660,7 @@ direct_jmp:
             tb->jmp_reset_offset[succ_id] = ir2_opnd_label_id(&goto_label_opnd);
 #endif
 #ifndef CONFIG_LATX_LAZYLINK
-            la_b(ir2_opnd_addr);
+            la_b(imm_zero_ir2_opnd);
  #ifdef CONFIG_LATX_LARGE_CC
             la_nop();
  #endif
