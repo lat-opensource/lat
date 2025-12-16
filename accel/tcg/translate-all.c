@@ -2454,6 +2454,10 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
     tb->jmp_dest[1] = (uintptr_t)NULL;
     tb->canlink[0] = 1;
     tb->canlink[1] = 1;
+#ifdef CONFIG_LATX_LAZYLINK
+    tb->lazylink[0] = 1;
+    tb->lazylink[1] = 1;
+#endif
 
     assert(!use_tu_jmp(tb));
     /* init original jump addresses which have been set during tcg_gen_code() */

@@ -2661,13 +2661,11 @@ direct_jmp:
             la_label(goto_label_opnd);
             tb->jmp_reset_offset[succ_id] = ir2_opnd_label_id(&goto_label_opnd);
 #endif
-#ifdef CONFIG_LATX_LAZYLINK
-            tb->lazylink[succ_id] = 1;
-#else
+#ifndef CONFIG_LATX_LAZYLINK
             la_b(ir2_opnd_addr);
-#ifdef CONFIG_LATX_LARGE_CC
+ #ifdef CONFIG_LATX_LARGE_CC
             la_nop();
-#endif
+ #endif
 #endif
         }
 
