@@ -2538,6 +2538,33 @@ static void generate_indirect_goto(void *code_buf)
     return;
 }
 
+static inline
+void set_jmp_reset_offset(TranslationBlock *tb, void *func, IR1_INST *stub, int succ_id)
+{
+    IR2_OPND goto_label_opnd = ra_alloc_label();
+#ifdef CONFIG_LATX_XCOMISX_OPT
+    IR2_OPND base = ra_alloc_data();
+    la_data_li(base, (ADDR)tb->tc.ptr);
+
+    /* Add stub for exit recover */
+    if (func) {
+        IR2_OPND stub_label = ra_alloc_label();
+        la_label(stub_label);
+        tb->jmp_stub_reset_offset[succ_id] = ir2_opnd_label_id(&stub_label);
+        /* exit tb_link */
+        la_nop();
+ #ifdef CONFIG_LATX_LARGE_CC
+        la_nop();
+ #endif
+        /* generate stub */
+        ((bool (*)(IR1_INST *))func)(stub);
+        la_code_accl(base, 2, 0x03400000);
+    }
+#endif
+    la_label(goto_label_opnd);
+    tb->jmp_reset_offset[succ_id] = ir2_opnd_label_id(&goto_label_opnd);
+}
+
 #ifdef CONFIG_LATX_XCOMISX_OPT
 inline
 void tr_generate_exit_tb(IR1_INST *branch, int succ_id)
@@ -2560,7 +2587,6 @@ void tr_generate_exit_tb(IR1_INST *branch, int succ_id)
     /* The epilogue function needs to return the address of the tb */
     IR2_OPND succ_x86_addr_opnd = ra_alloc_dbt_arg2();
     (void)succ_x86_addr_opnd ;
-    IR2_OPND goto_label_opnd = ra_alloc_label();
     IR2_OPND label_first_jmp_align = ra_alloc_label();
 
     IR2_OPND base = ra_alloc_data();
@@ -2628,37 +2654,9 @@ direct_jmp:
             tb->first_jmp_align = ir2_opnd_label_id(&label_first_jmp_align);
         }
         la_code_accl(base, 2, 0x03400000);
-        /*la_code_align(2, 0x03400000);*/
 
         if (!use_tu_jmp(tb)) {
-#ifndef CONFIG_LATX_XCOMISX_OPT
-            la_label(goto_label_opnd);
-            if (!use_tu_jmp(tb)) {
-                tb->jmp_reset_offset[succ_id] = ir2_opnd_label_id(&goto_label_opnd);
-            }
-#endif
-#ifdef CONFIG_LATX_XCOMISX_OPT
-            /* Add stub for exit recover */
-            if (func) {
-                IR2_OPND stub_label = ra_alloc_label();
-                la_label(stub_label);
-                tb->jmp_stub_reset_offset[succ_id] = ir2_opnd_label_id(&stub_label);
-                /* exit tb_link */
-                la_nop();
-#ifdef CONFIG_LATX_LARGE_CC
-                la_nop();
-#endif
-                /* generate stub */
-                ((bool (*)(IR1_INST *))func)(stub);
-
-            }
-
-            la_code_accl(base, 2, 0x03400000);
-            /*la_code_align(2, 0x03400000);*/
-
-            la_label(goto_label_opnd);
-            tb->jmp_reset_offset[succ_id] = ir2_opnd_label_id(&goto_label_opnd);
-#endif
+            set_jmp_reset_offset(tb, func, stub, succ_id);
 #ifndef CONFIG_LATX_LAZYLINK
             la_b(imm_zero_ir2_opnd);
  #ifdef CONFIG_LATX_LARGE_CC
