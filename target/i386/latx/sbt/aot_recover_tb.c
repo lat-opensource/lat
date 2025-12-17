@@ -123,13 +123,14 @@ static void recover_tb_range(target_ulong page, struct aot_tb *p_aot_tbs,
         /* set TBMini */
         uintptr_t tbmini_ptr = (uintptr_t)tb_buff;
         tb_buff = (void *)ROUND_UP((uintptr_t)tb_buff + sizeof(struct TBMini), qemu_icache_linesize);
+
+        TranslationBlock *tb = creat_tb(&p_aot_tbs[i], start, base, tb_buff);
         qatomic_set(&tcg_ctx->code_gen_ptr, tb_buff);
+        aot_tbmini_set_pointer(tbmini_ptr, (uint64_t)tb, TB_MAGIC);
+#else
+        TranslationBlock *tb = creat_tb(&p_aot_tbs[i], start, base, tb_buff);
 #endif
         copy_code_to_buff(tb_buff, &p_aot_tbs[i]);
-        TranslationBlock *tb = creat_tb(&p_aot_tbs[i], start, base, tb_buff);
-#if defined(CONFIG_LATX_TBMINI_ENABLE)
-        aot_tbmini_set_pointer(tbmini_ptr, (uint64_t)tb, TB_MAGIC);
-#endif
         /* Relocate this tb by traverse aot_rel_table. */
         aot_do_tb_reloc(tb, &p_aot_tbs[i], start, end);
         if (p_aot_tbs[i].last_ir1_type == IR1_TYPE_BRANCH) {
@@ -192,15 +193,16 @@ static void recover_tb_range(target_ulong page, struct aot_tb *p_aot_tbs,
 #if defined(CONFIG_LATX_TBMINI_ENABLE)
         int tb_num_in_tu = j - i;
         /* Reserve space for tu tbmin table. */
-        uintptr_t tbmini_ptr = (uintptr_t)
+        TBMini *tbmini_ptr= (TBMini *)
             ROUND_UP((uintptr_t)tcg_ctx->code_gen_ptr, CODE_GEN_ALIGN);
-        uintptr_t last_tbmini_ptr = tbmini_ptr +
-                    sizeof(struct TBMini) * (tb_num_in_tu + 1);
-        qatomic_set(&tcg_ctx->code_gen_ptr, (void *)ROUND_UP(last_tbmini_ptr, qemu_icache_linesize));
+        qatomic_set(&tcg_ctx->code_gen_ptr, ROUND_UP((uintptr_t)tbmini_ptr +
+                    sizeof(struct TBMini) * (tb_num_in_tu + 1), qemu_icache_linesize));
         /* First tbm save tb_num_in_tu and TB_MAGIC. */
-        aot_tbmini_set_pointer(tbmini_ptr, tb_num_in_tu, TB_MAGIC);
-        uintptr_t curr_tbmini_ptr = last_tbmini_ptr -
-                                sizeof(struct TBMini) * (tb_num_in_tu + 1);
+        aot_tbmini_set_pointer((uintptr_t)tbmini_ptr, tb_num_in_tu, TB_MAGIC);
+        for (int k = i; k < j; k++) {
+            TranslationBlock *tb = tb_in_order[k - i];
+            aot_tbmini_set_pointer((uintptr_t)++tbmini_ptr, (uint64_t)tb, (uint64_t)tb->tc.size);
+        }
 #else
     	qatomic_set(&tcg_ctx->code_gen_ptr, (void *)
             ROUND_UP((uintptr_t)tcg_ctx->code_gen_ptr, CODE_GEN_ALIGN));
@@ -216,10 +218,6 @@ static void recover_tb_range(target_ulong page, struct aot_tb *p_aot_tbs,
         for (int k = i; k < j; k++) {
             TranslationBlock *tb = tb_in_order[k - i];
             tb->tc.ptr = tu_begin_ptr + p_aot_tbs[k].offset_in_tu;
-#if defined(CONFIG_LATX_TBMINI_ENABLE)
-            curr_tbmini_ptr += sizeof(struct TBMini);
-            aot_tbmini_set_pointer(curr_tbmini_ptr, (uint64_t)tb, (uint64_t)tb->tc.size);
-#endif
             assert((tb->pc & TARGET_PAGE_MASK) == page);
             assert((tb->cflags & CF_PARALLEL) == (tcg_ctx->tb_cflags & CF_PARALLEL));
             aot_do_tb_reloc(tb, &p_aot_tbs[k], start, end);
