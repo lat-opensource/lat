@@ -2580,6 +2580,30 @@ static inline void set_tb_canlink(IR1_INST *branch, int succ_id, ADDR succ_x86_a
     }
 }
 
+void set_tb_jmp_indirect_label(TranslationBlock *tb)
+{
+    IR2_OPND old_jmp_label = ra_alloc_label();
+    la_label(old_jmp_label);
+    tb->jmp_indirect = ir2_opnd_label_id(&old_jmp_label);
+}
+
+void generate_indirect_exit_stub(void)
+{
+    TranslationBlock *tb = lsenv->tr_data->curr_tb;
+    IR2_OPND base = ra_alloc_data();
+    IR2_OPND target = ra_alloc_data();
+    la_data_li(base, (ADDR)tb->tc.ptr);
+
+    tb->bool_flags |= IS_INDIRECT_JMP;
+    if (qemu_loglevel_mask(CPU_LOG_TB_NOCHAIN)) {
+        la_data_li(target, context_switch_native_to_bt_ret_0);
+        aot_la_append_ir2_jmp_far(target, base, B_EPILOGUE_RET_0, 0);
+    } else {
+        set_tb_jmp_indirect_label(tb);
+        generate_indirect_goto((void *)tb->tc.ptr);
+    }
+}
+
 #ifdef CONFIG_LATX_XCOMISX_OPT
 inline
 void tr_generate_exit_tb(IR1_INST *branch, int succ_id)
@@ -2702,22 +2726,7 @@ direct_jmp:
     case dt_X86_INS_IRETD:
     case dt_X86_INS_IRETQ:
 indirect_jmp:
-        tb->bool_flags |= IS_INDIRECT_JMP;
-        /*
-         * If option_lsfpu is open, LATX do not need to fpu_rotate, therefore
-         * do not save the TB pointer.
-         *
-         * If using tb_link, LATX will jmp to jmp_glue finding the next TB.
-         */
-        if (!qemu_loglevel_mask(CPU_LOG_TB_NOCHAIN)) {
-            IR2_OPND old_jmp_label = ra_alloc_label();
-            la_label(old_jmp_label);
-            tb->jmp_indirect = ir2_opnd_label_id(&old_jmp_label);
-            generate_indirect_goto((void *)tb->tc.ptr);
-        } else {
-            la_data_li(target, context_switch_native_to_bt_ret_0);
-            aot_la_append_ir2_jmp_far(target, base, B_EPILOGUE_RET_0, 0);
-        }
+        generate_indirect_exit_stub();
         break;
     default:
         lsassertm(0, "not implement %d.\n", opcode);
