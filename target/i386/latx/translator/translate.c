@@ -2683,9 +2683,7 @@ direct_jmp:
 #endif
         }
 
-#ifdef CONFIG_LATX_PROFILER
         la_profile_begin();
-#endif
         tb->lazypc[succ_id] = succ_x86_addr - tb->pc;
         set_tb_canlink(branch, succ_id, succ_x86_addr);
         if (succ_id) {
@@ -2695,6 +2693,7 @@ direct_jmp:
             la_data_li(target, context_switch_native_to_bt_ret_id_0);
             aot_la_append_ir2_jmp_epilogue(target, base, JIRL_EPILOGUE_RET_ID_0, 0);
         }
+        la_profile_end();
         break;
 
     case dt_X86_INS_RET:
@@ -2719,17 +2718,10 @@ indirect_jmp:
             la_data_li(target, context_switch_native_to_bt_ret_0);
             aot_la_append_ir2_jmp_far(target, base, B_EPILOGUE_RET_0, 0);
         }
-#ifdef CONFIG_LATX_PROFILER
-        la_profile_begin();
-#endif
         break;
     default:
         lsassertm(0, "not implement %d.\n", opcode);
     }
-
-#ifdef CONFIG_LATX_PROFILER
-    la_profile_end();
-#endif
 }
 
 void tr_generate_goto_tb(void) /* TODO */

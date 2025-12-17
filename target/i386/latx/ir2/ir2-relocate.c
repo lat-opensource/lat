@@ -149,6 +149,7 @@ IR2_INST *generate_code(uint32_t code)
     return pir2;
 }
 
+#ifdef CONFIG_LATX_PROFILER
 IR2_INST *la_profile_begin(void)
 {
     IR2_OPND label = ra_alloc_label();
@@ -176,6 +177,10 @@ IR2_INST *la_profile_end(void)
     ir2_append(pir2);
     return pir2;
 }
+#else
+void la_profile_begin(void) {}
+void la_profile_end(void) {}
+#endif
 
 IR2_INST *ir2_relocate(TRANSLATION_DATA *lat_ctx, IR2_INST *current, int *counter,
                   int *label, uint64_t *data)
