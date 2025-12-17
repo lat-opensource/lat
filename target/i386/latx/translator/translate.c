@@ -2448,7 +2448,7 @@ int tr_translate_tb(struct TranslationBlock *tb)
  * ra_alloc_dbt_arg2: next x86 ip
  */
 
-static void generate_indirect_goto(void *code_buf)
+void generate_indirect_goto(void *code_buf, IR2_OPND jirl_rd, IR2_OPND next_tb)
 {
     /*
      * WARNING!!!
@@ -2464,7 +2464,6 @@ static void generate_indirect_goto(void *code_buf)
     IR2_OPND jmp_entry = ra_alloc_itemp();
     IR2_OPND jmp_cache_addr = ra_alloc_static0();
 
-    IR2_OPND next_tb = V0_RENAME_OPND;
     /*
      * lookup HASH_JMP_CACHE
      * Step 1: calculate HASH = (x86_addr >> 12) ^ (x86_addr & 0xfff)
@@ -2600,7 +2599,7 @@ void generate_indirect_exit_stub(void)
         aot_la_append_ir2_jmp_far(target, base, B_EPILOGUE_RET_0, 0);
     } else {
         set_tb_jmp_indirect_label(tb);
-        generate_indirect_goto((void *)tb->tc.ptr);
+        generate_indirect_goto((void *)tb->tc.ptr, zero_ir2_opnd, V0_RENAME_OPND);
     }
 }
 
@@ -2864,7 +2863,7 @@ static int generate_indirect_jmp_glue(void *code_buf)
     int ins_num;
     tr_init(NULL);
 
-    generate_indirect_goto(code_buf);
+    generate_indirect_goto(code_buf, zero_ir2_opnd, V0_RENAME_OPND);
 
     TRANSLATION_DATA *lat_ctx = lsenv->tr_data;
     label_dispose(NULL, lat_ctx);

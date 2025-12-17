@@ -1148,6 +1148,7 @@ TRANS_FUNC_DEF(pclmulqdq);
 void tr_init(void *tb);
 void tr_fini(bool check_the_extension); /* default TRUE */
 
+void generate_indirect_goto(void *code_buf, IR2_OPND jirl_rd, IR2_OPND next_tb);
 void tr_disasm(struct TranslationBlock *tb, int max_insns);
 void etb_add_succ(void* etb,int depth);
 int tr_translate_tb(struct TranslationBlock *tb);
