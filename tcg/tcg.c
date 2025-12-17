@@ -1283,7 +1283,11 @@ TranslationBlock *tcg_tb_alloc(TCGContext *s)
             goto retry;
         }
         qatomic_set(&s->tb_gen_ptr, next_tb);
+#if defined(CONFIG_LATX_TBMINI_ENABLE)
+        next = (void *)ROUND_UP((uintptr_t)s->code_gen_ptr, CODE_GEN_ALIGN);
+#else
         next = (void *)ROUND_UP((uintptr_t)s->code_gen_ptr, align);
+#endif
     } else {
         tb = (void *)ROUND_UP((uintptr_t)s->code_gen_ptr, align);
         next = (void *)ROUND_UP((uintptr_t)(tb + 1), align);
@@ -1318,7 +1322,11 @@ TranslationBlock *tcg_tb_alloc_full(TCGContext *s)
             goto retry;
         }
         qatomic_set(&s->tb_gen_ptr, next_tb);
+#if defined(CONFIG_LATX_TBMINI_ENABLE)
+        next = (void *)ROUND_UP((uintptr_t)s->code_gen_ptr, CODE_GEN_ALIGN);
+#else
         next = (void *)ROUND_UP((uintptr_t)s->code_gen_ptr, align);
+#endif
     } else {
         tb = (void *)ROUND_UP((uintptr_t)s->code_gen_ptr, align);
         new_s_data = (void *)ROUND_UP((uintptr_t)(tb + 1), align);
