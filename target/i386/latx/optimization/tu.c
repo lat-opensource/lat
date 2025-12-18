@@ -997,6 +997,7 @@ void translate_tu(uint32 tb_num_in_tu, TranslationBlock **tb_list)
 retry:
     for (uint32_t i = 0; i < tb_num_in_tu; i++) {
         tb = tb_list[i];
+        tb->bool_flags |= IS_TU_TB;
         if (tb->bool_flags & IS_CODE64) {
             CODEIS64 = 1;
         } else {
@@ -1047,7 +1048,6 @@ retry:
     /*search data*/
     for (int i = 0; i < tb_num_in_tu; i++) {
         tb = tb_list[i];
-        tb->bool_flags |= IS_TU_TB;
         tb->tu_search_addr_offset = (uintptr_t)
             ((uintptr_t)tcg_ctx->code_gen_ptr + search_buff_offset[i] - (uintptr_t)tb->tc.ptr);
     }
@@ -1233,6 +1233,18 @@ bool judge_tu_eflag_gen(void *tb_in_tu) {
 }
 #endif
 #ifdef CONFIG_LATX_TU
+/*
+ * This function must be called only during the TU translation phase.
+ */
+bool next_in_same_tu(TranslationBlock *curr_tb)
+{
+    TranslationBlock *next = curr_tb->s_data->next_tb[TU_TB_INDEX_NEXT];
+    if (next && next->tc.ptr == NULL) {
+        return true;
+    }
+    return false;
+}
+
 bool is_tu_tb(TranslationBlock *tb)
 {
     return (tb->bool_flags & IS_TU_TB) ? true : false;

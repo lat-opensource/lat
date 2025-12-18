@@ -50,6 +50,7 @@ typedef ram_addr_t tb_page_addr_t;
 
 #include "qemu/log.h"
 
+bool next_in_same_tu(TranslationBlock *curr_tb);
 bool is_tu_tb(TranslationBlock *tb);
 bool use_tu_jmp(TranslationBlock *tb);
 void set_use_tu_jmp(TranslationBlock *tb);
@@ -647,8 +648,8 @@ struct TranslationBlock {
 #define SIGNAL_RELINK0    0x200
 #define SIGNAL_UNLINK1    0x400
 #define SIGNAL_RELINK1    0x800
-#define IS_CODE64        0x1000
-#define IS_TU_SPLIT        0x2000
+#define IS_CODE64         0x1000
+#define IS_TU_SPLIT       0x2000
     uint16_t bool_flags;
     uint8_t  eflag_use;
 #ifdef CONFIG_LATX_INSTS_PATTERN
