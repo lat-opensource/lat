@@ -5268,6 +5268,15 @@ int shared_private_interpret(siginfo_t *info, ucontext_t *uc)
         break;
     }
 
+    /* Interpret atomic inst on smc shmm page can not maintain
+     * atomicity since the host page is still readable.
+     * Fallback to try page_unprotect(). */
+#define SMC_SHMM_INTERPRET_FALLBACK(spd) do {                       \
+    if (latx_smc_inv_tb() && latx_smc_shmm() && spd->is_shmm) {     \
+        return 1;                                                   \
+    }                                                               \
+} while (0)
+
     switch (inst >> 22) {
     case 0xa0: /* LD.B */
         if (no_right(real_guest_addr, 1, PAGE_READ, &siaddr)) {
@@ -5987,6 +5996,7 @@ int shared_private_interpret(siginfo_t *info, ucontext_t *uc)
             info->si_addr = (void *)siaddr;
             return 1;
         }
+        SMC_SHMM_INTERPRET_FALLBACK(shadow_pd);
         value = over_page_read(real_guest_addr, 4);
         value = value << 32 >> 32;
         UC_GR(uc)[rd] = value;
@@ -5999,6 +6009,7 @@ int shared_private_interpret(siginfo_t *info, ucontext_t *uc)
             info->si_addr = (void *)siaddr;
             return 1;
         }
+        SMC_SHMM_INTERPRET_FALLBACK(shadow_pd);
         /* set old value */
         value = over_page_read(real_guest_addr, 8);
         UC_GR(uc)[rd] = value;
@@ -6012,6 +6023,7 @@ int shared_private_interpret(siginfo_t *info, ucontext_t *uc)
             info->si_addr = (void *)siaddr;
             return 1;
         }
+        SMC_SHMM_INTERPRET_FALLBACK(shadow_pd);
         value = over_page_read(real_guest_addr, 4);
         value = value << 32 >> 32;
         UC_GR(uc)[rd] = value;
@@ -6026,6 +6038,7 @@ int shared_private_interpret(siginfo_t *info, ucontext_t *uc)
             info->si_addr = (void *)siaddr;
             return 1;
         }
+        SMC_SHMM_INTERPRET_FALLBACK(shadow_pd);
         /* set old value */
         value = over_page_read(real_guest_addr, 8);
         UC_GR(uc)[rd] = value;
@@ -6040,6 +6053,7 @@ int shared_private_interpret(siginfo_t *info, ucontext_t *uc)
             info->si_addr = (void *)siaddr;
             return 1;
         }
+        SMC_SHMM_INTERPRET_FALLBACK(shadow_pd);
         /* set old value */
         value = over_page_read(real_guest_addr, 4);
         value = value << 32 >> 32;
@@ -6055,6 +6069,7 @@ int shared_private_interpret(siginfo_t *info, ucontext_t *uc)
             info->si_addr = (void *)siaddr;
             return 1;
         }
+        SMC_SHMM_INTERPRET_FALLBACK(shadow_pd);
         /* set old value */
         value = over_page_read(real_guest_addr, 8);
         UC_GR(uc)[rd] = value;
@@ -6069,6 +6084,7 @@ int shared_private_interpret(siginfo_t *info, ucontext_t *uc)
             info->si_addr = (void *)siaddr;
             return 1;
         }
+        SMC_SHMM_INTERPRET_FALLBACK(shadow_pd);
         /* set old value */
         value = over_page_read(real_guest_addr, 4);
         value = value << 32 >> 32;
@@ -6084,6 +6100,7 @@ int shared_private_interpret(siginfo_t *info, ucontext_t *uc)
             info->si_addr = (void *)siaddr;
             return 1;
         }
+        SMC_SHMM_INTERPRET_FALLBACK(shadow_pd);
         /* set old value */
         value = over_page_read(real_guest_addr, 8);
         UC_GR(uc)[rd] = value;
@@ -6098,6 +6115,7 @@ int shared_private_interpret(siginfo_t *info, ucontext_t *uc)
             info->si_addr = (void *)siaddr;
             return 1;
         }
+        SMC_SHMM_INTERPRET_FALLBACK(shadow_pd);
         /* set old value */
         value = over_page_read(real_guest_addr, 4);
         value = value << 32 >> 32;
@@ -6113,6 +6131,7 @@ int shared_private_interpret(siginfo_t *info, ucontext_t *uc)
             info->si_addr = (void *)siaddr;
             return 1;
         }
+        SMC_SHMM_INTERPRET_FALLBACK(shadow_pd);
         /* set old value */
         value = over_page_read(real_guest_addr, 8);
         UC_GR(uc)[rd] = value;
@@ -6127,6 +6146,7 @@ int shared_private_interpret(siginfo_t *info, ucontext_t *uc)
             info->si_addr = (void *)siaddr;
             return 1;
         }
+        SMC_SHMM_INTERPRET_FALLBACK(shadow_pd);
         /* set old value */
         value = over_page_read(real_guest_addr, 4);
         value = value << 32 >> 32;
@@ -6145,6 +6165,7 @@ int shared_private_interpret(siginfo_t *info, ucontext_t *uc)
             info->si_addr = (void *)siaddr;
             return 1;
         }
+        SMC_SHMM_INTERPRET_FALLBACK(shadow_pd);
         /* set old value */
         value = over_page_read(real_guest_addr, 8);
         UC_GR(uc)[rd] = value;
@@ -6159,6 +6180,7 @@ int shared_private_interpret(siginfo_t *info, ucontext_t *uc)
             info->si_addr = (void *)siaddr;
             return 1;
         }
+        SMC_SHMM_INTERPRET_FALLBACK(shadow_pd);
         /* set old value */
         value = over_page_read(real_guest_addr, 4);
         value = value << 32 >> 32;
@@ -6177,6 +6199,7 @@ int shared_private_interpret(siginfo_t *info, ucontext_t *uc)
             info->si_addr = (void *)siaddr;
             return 1;
         }
+        SMC_SHMM_INTERPRET_FALLBACK(shadow_pd);
         /* set old value */
         value = over_page_read(real_guest_addr, 8);
         UC_GR(uc)[rd] = value;
@@ -6191,6 +6214,7 @@ int shared_private_interpret(siginfo_t *info, ucontext_t *uc)
             info->si_addr = (void *)siaddr;
             return 1;
         }
+        SMC_SHMM_INTERPRET_FALLBACK(shadow_pd);
         /* set old value */
         value = over_page_read(real_guest_addr, 4);
         value = (uint64_t)value << 32 >> 32;
@@ -6207,6 +6231,7 @@ int shared_private_interpret(siginfo_t *info, ucontext_t *uc)
             info->si_addr = (void *)siaddr;
             return 1;
         }
+        SMC_SHMM_INTERPRET_FALLBACK(shadow_pd);
         /* set old value */
         value = over_page_read(real_guest_addr, 4);
         value = (uint64_t)value << 32 >> 32;
