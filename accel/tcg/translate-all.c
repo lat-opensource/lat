@@ -4115,6 +4115,7 @@ just_return:
  * return 0 if all guest pages are anon
  *
  * return *prot with accumulate prot of guest pages
+ * aka. prot = p0.flags | p1.flags | p2.flags | p3.flags
  */
 static inline int smc_shmm_check_page_anon(uint64_t start, int *prot)
 {
@@ -4124,14 +4125,14 @@ static inline int smc_shmm_check_page_anon(uint64_t start, int *prot)
     start = start & qemu_host_page_mask;
     end   = start + qemu_host_page_size;
 
-    *prot = PAGE_READ | PAGE_WRITE;
+    *prot = 0;
 
     for (addr = start; addr < end; addr += TARGET_PAGE_SIZE) {
         p = pageflags_find(addr, addr);
         if (p && !(p->flags & PAGE_ANON)) {
             return 1;
         }
-        if (p) *prot &= (p->flags & (PAGE_READ | PAGE_WRITE));
+        if (p) *prot |= (p->flags & (PAGE_READ | PAGE_WRITE));
     }
 
     return 0;
@@ -4439,6 +4440,9 @@ do_return:
  * that might be modified by the store inst.
  * The *emu contains the size of the store inst.
  *
+ * But, if *emu < 0, it means to force invalidate all TB on the host page.
+ * This is to make sure the host page is writable after page_unprotect().
+ *
  * When return, the *emu indicates that wether the store inst needs
  * to be interpreted because the page is still not writable.
  */
@@ -4449,6 +4453,7 @@ int page_unprotect(target_ulong address, uintptr_t pc, int *emu)
     int do_mprotect = 1;
     int inv_one_tb = 0;
     int size = 1;
+    int force_inv_host_page= 0;
 
     /* Technically this isn't safe inside a signal handler.  However we
        know this only ever happens in a synchronous SEGV handler, so in
@@ -4460,9 +4465,14 @@ int page_unprotect(target_ulong address, uintptr_t pc, int *emu)
 #endif
 
     if (emu) {
-        inv_one_tb = 1;
-        size = *emu;
-        *emu = 0;
+        if (*emu > 0) {
+            inv_one_tb = 1;
+            size = *emu;
+            *emu = 0;
+        } else {
+            force_inv_host_page = 1;
+            *emu = 0;
+        }
     }
 
     target_ulong address2 = address + size - 1;
@@ -4489,8 +4499,11 @@ int page_unprotect(target_ulong address, uintptr_t pc, int *emu)
     }
 
     current_tb_invalidated = false;
-    if ((!is_cross && p->flags & PAGE_WRITE) ||
-        ( is_cross && p->flags & PAGE_WRITE && p2->flags & PAGE_WRITE)) {
+    if (!force_inv_host_page &&
+        /* check PAGE_WRITE on the guest pages */
+        ((!is_cross && p->flags & PAGE_WRITE) ||
+         ( is_cross && p->flags & PAGE_WRITE && p2->flags & PAGE_WRITE)))
+    {
         /*
          * If the page is actually marked WRITE then assume this is because
          * this thread raced with another one which got here first and
@@ -5231,6 +5244,28 @@ int shared_private_interpret(siginfo_t *info, ucontext_t *uc)
         UC_GR(uc)[rj] += shadow_pd->access_off;
         UC_PC(uc) -= 4;
         goto end;
+    case 0x21: /* SC.W */
+    case 0x23: /* SC.D */
+        if (no_right(siaddr, 4, PAGE_READ | PAGE_WRITE, &siaddr)) {
+            info->si_addr = (void *)siaddr;
+            return 1;
+        }
+        if (latx_smc_inv_tb()) {
+            /* Maybe a write on the smc page which is writable on guest view.
+             *
+             * If host page size > guest page size, the whole host page will
+             * be unwritable to capture smc behavior. But some guest pages
+             * could still be writable if there is no TB on this guest page.
+             *
+             * real prot on host page             : |      r--      |
+             * prot on guest view (aka. p->flags) : |r--|r--|rw-|r--|
+             *
+             * Since the SC.W/D is not possible to be interpreted. Just go
+             * back to try page_unprotect() to make the host page writable. */
+            return 1;
+        }
+        /* SC is still unsupported */
+        break;
     }
 
     switch (inst >> 22) {

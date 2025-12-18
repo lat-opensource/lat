@@ -572,8 +572,11 @@ static inline int handle_cpu_signal(uintptr_t pc, siginfo_t *info,
         } else {
             /*
              * pass @emu to page_unprotect() to only invalidate the those TB
-             * that is affected by the smc store.
-             * The *emu should contain the size of the store inst.
+             *     that is affected by the smc store. The *emu should contain
+             *     the size of the store inst.
+             * pass *emu < 0 to force invalidate all TB on this page no matter
+             *       if the guest page is writable or not. To make sure the
+             *       host page is writable after page_unprotect().
              * when return:
              *     if *emu = 1 : page is not writable, interpret the store
              *     if *emu = 0 : page is writable, ok to return
@@ -586,7 +589,8 @@ static inline int handle_cpu_signal(uintptr_t pc, siginfo_t *info,
             guest_store_address = parse_guest_store(info, uc, &size);
             if (size < 0) {
                 guest_store_address = h2g(address);
-                emu = NULL;
+                emu_store = -1; /* force host page become writable */
+                emu = &emu_store;
             } else {
                 emu_store = size;
                 emu = &emu_store;
