@@ -241,14 +241,14 @@ static uint64_t parse_guest_store(siginfo_t *info, ucontext_t *uc, int *size)
     unsup += 1;
     if (s == -2) unsup_sc += 1;
 
-    if (unsup < 1024) {
+    if (unsup < 0x100) {
         fprintf(stderr, "%s:%d SMC unsupport inst %08x count %lu %lu\n",
                 __func__, __LINE__, inst, unsup, unsup_sc);
-    } else if (!(unsup & 0x3ff)) {
+    } else if (!(unsup & 0xfff)) {
         fprintf(stderr, "%s:%d SMC unsupport inst %08x count %lu %lu\n",
                 __func__, __LINE__, inst, unsup, unsup_sc);
         fprintf(stderr, "%s:%d SMC unsupport too much !!! "
-                "Try export LAT_SMC = 0 and report this problem please.\n",
+                "Maybe try export LATX_SMC=0 and report this problem please.\n",
                 __func__, __LINE__);
     }
     fflush(stderr);

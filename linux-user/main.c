@@ -812,8 +812,8 @@ static const struct qemu_argument arg_table[] = {
 #ifdef CONFIG_LATX
     {"latx-optimize",   "LAT_OPTIMIZE",      false, handle_arg_optimize,
     "",           "specify enabled optimize type"},
-    {"latx-smc",        "LAT_SMC",          true,   handle_arg_latx_smc,
-    "",           "smc strategy: 0 (page,default) 1 (tb)"},
+    {"latx-smc",        "LATX_SMC",         true,   handle_arg_latx_smc,
+    "",           "smc strategy: 0 (page) 1 (tb) 2(+shmm) 6(+helper,default)"},
     {"latx-close-parallel",    "LATX_CLOSE_PARALLEL",     true,  handle_arg_latx_parallel,
     "",           "disable latx parallel"},
     {"latx-softfpu",    "LATX_SOFTFPU",     true,  handle_arg_latx_softfpu,
