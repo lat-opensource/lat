@@ -278,6 +278,10 @@ extern intptr_t qemu_host_page_mask;
 #if defined(CONFIG_USER_ONLY)
 void page_dump(FILE *f);
 
+#define LOCKINT_OK      0
+#define LOCKINT_BAD     1
+#define LOCKINT_SEGV    2
+
 typedef int (*walk_memory_regions_fn)(void *, target_ulong,
                                       target_ulong, unsigned long);
 int walk_memory_regions(void *, walk_memory_regions_fn);

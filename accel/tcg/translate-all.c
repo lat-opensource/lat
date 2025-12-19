@@ -6326,6 +6326,8 @@ ret:
     return 0;
 }
 
+int lock_interpret_check(uint64_t addr);
+
 static void *set_interpret_newpage(abi_ulong oldpage, int host_page_num)
 {
     void *newpage;
@@ -6384,7 +6386,7 @@ static int recover_interpret_oldpage(abi_ulong oldpage, void * newpage,
     void *ret;
 
     if (oldpage == (abi_ulong)(uintptr_t)newpage) {
-        return 0;
+        return LOCKINT_OK;
     }
 
     abi_long len = qemu_host_page_size * page_num;
@@ -6393,14 +6395,15 @@ static int recover_interpret_oldpage(abi_ulong oldpage, void * newpage,
     if (ret == MAP_FAILED) {
         qemu_log_mask(LAT_LOG_MEM, "[LATX_LOCK] %s %d mremap failed\n",
                     __func__, __LINE__);
-        return 1;
+        return LOCKINT_BAD;
     }
 
-    return 0;
+    return LOCKINT_OK;
 }
 
 
-static int interpret_cmpxchg8b(ucontext_t *uc, uint32_t* inst)
+static int interpret_cmpxchg8b(ucontext_t *uc, uint32_t* inst,
+        uint64_t *fixed_siaddr)
 {
     uint32_t rd0, rd1, rd2, rj0;
     int64_t siaddr;
@@ -6429,6 +6432,13 @@ static int interpret_cmpxchg8b(ucontext_t *uc, uint32_t* inst)
     /* get siaddr and page */
     siaddr = UC_GR(uc)[rj0] + off;
     page_addr = siaddr & qemu_host_page_mask;
+    *fixed_siaddr = siaddr;
+
+    /* check if guest page has PAGE_WRITE_ORG */
+    if (lock_interpret_check(siaddr)) {
+        return LOCKINT_SEGV; /* send segv to guest */
+    }
+
     int opnd0_size = (inst[-2] & 0xffc003ff) == 0x03400000 ?
                 ((inst[-2] << 10)) >> 20 : 64;
     if (page_addr != ((siaddr + (opnd0_size >> 3)) & qemu_host_page_mask)) {
@@ -6439,7 +6449,7 @@ static int interpret_cmpxchg8b(ucontext_t *uc, uint32_t* inst)
 
     newpage = set_interpret_newpage(page_addr, page_num);
     if (newpage == NULL) {
-        return 1;
+        return LOCKINT_BAD;
     }
 
     int64_t page_off = (int64_t)newpage - page_addr;
@@ -6491,7 +6501,8 @@ static int interpret_cmpxchg8b(ucontext_t *uc, uint32_t* inst)
     return recover_interpret_oldpage(page_addr, newpage, page_num);
 }
 
-static int interpret_add(ucontext_t *uc, uint32_t* inst)
+static int interpret_add(ucontext_t *uc, uint32_t* inst,
+        uint64_t *fixed_siaddr)
 {
     uint32_t rj0, rd0, rk0;
     abi_ulong page_addr;
@@ -6508,6 +6519,12 @@ static int interpret_add(ucontext_t *uc, uint32_t* inst)
     /* get siaddr and page */
     siaddr = UC_GR(uc)[rj0];
     page_addr = siaddr & qemu_host_page_mask;
+    *fixed_siaddr = siaddr;
+
+    /* check if guest page has PAGE_WRITE_ORG */
+    if (lock_interpret_check(siaddr)) {
+        return LOCKINT_SEGV; /* send segv to guest */
+    }
 
     int opnd0_size = (inst[-2] & 0xffc003ff) == 0x03400000 ?
                 ((inst[-2] << 10)) >> 20 : 64;
@@ -6519,7 +6536,7 @@ static int interpret_add(ucontext_t *uc, uint32_t* inst)
 
     newpage = set_interpret_newpage(page_addr, page_num);
     if (newpage == NULL) {
-        return 1;
+        return LOCKINT_BAD;
     }
 
     int64_t page_off = (int64_t)newpage - page_addr;
@@ -6557,7 +6574,8 @@ static int interpret_add(ucontext_t *uc, uint32_t* inst)
     return recover_interpret_oldpage(page_addr, newpage, page_num);
 }
 
-static int interpret_and(ucontext_t *uc, uint32_t* inst)
+static int interpret_and(ucontext_t *uc, uint32_t* inst,
+        uint64_t *fixed_siaddr)
 {
     uint32_t rj0, rd0, rk0;
     abi_ulong page_addr;
@@ -6574,6 +6592,12 @@ static int interpret_and(ucontext_t *uc, uint32_t* inst)
     /* get siaddr and page */
     siaddr = UC_GR(uc)[rj0];
     page_addr = siaddr & qemu_host_page_mask;
+    *fixed_siaddr = siaddr;
+
+    /* check if guest page has PAGE_WRITE_ORG */
+    if (lock_interpret_check(siaddr)) {
+        return LOCKINT_SEGV; /* send segv to guest */
+    }
 
     int opnd0_size = (inst[-1] & 0xffc003ff) == 0x03400000 ?
                 ((inst[-1] << 10)) >> 20 : 64;
@@ -6585,7 +6609,7 @@ static int interpret_and(ucontext_t *uc, uint32_t* inst)
 
     newpage = set_interpret_newpage(page_addr, page_num);
     if (newpage == NULL) {
-        return 1;
+        return LOCKINT_BAD;
     }
 
     int64_t page_off = (int64_t)newpage - page_addr;
@@ -6623,7 +6647,8 @@ static int interpret_and(ucontext_t *uc, uint32_t* inst)
     return recover_interpret_oldpage(page_addr, newpage, page_num);
 }
 
-static int interpret_or(ucontext_t *uc, uint32_t* inst)
+static int interpret_or(ucontext_t *uc, uint32_t* inst,
+        uint64_t *fixed_siaddr)
 {
     uint32_t rj0, rd0, rk0;
     abi_ulong page_addr;
@@ -6640,6 +6665,12 @@ static int interpret_or(ucontext_t *uc, uint32_t* inst)
     /* get siaddr and page */
     siaddr = UC_GR(uc)[rj0];
     page_addr = siaddr & qemu_host_page_mask;
+    *fixed_siaddr = siaddr;
+
+    /* check if guest page has PAGE_WRITE_ORG */
+    if (lock_interpret_check(siaddr)) {
+        return LOCKINT_SEGV; /* send segv to guest */
+    }
 
     int opnd0_size = (inst[-1] & 0xffc003ff) == 0x03400000 ?
                 ((inst[-1] << 10)) >> 20 : 64;
@@ -6651,7 +6682,7 @@ static int interpret_or(ucontext_t *uc, uint32_t* inst)
 
     newpage = set_interpret_newpage(page_addr, page_num);
     if (newpage == NULL) {
-        return 1;
+        return LOCKINT_BAD;
     }
 
     int64_t page_off = (int64_t)newpage - page_addr;
@@ -6689,7 +6720,8 @@ static int interpret_or(ucontext_t *uc, uint32_t* inst)
     return recover_interpret_oldpage(page_addr, newpage, page_num);
 }
 
-static int interpret_xor(ucontext_t *uc, uint32_t* inst)
+static int interpret_xor(ucontext_t *uc, uint32_t* inst,
+        uint64_t *fixed_siaddr)
 {
     uint32_t rj0, rd0, rk0;
     abi_ulong page_addr;
@@ -6706,6 +6738,12 @@ static int interpret_xor(ucontext_t *uc, uint32_t* inst)
     /* get siaddr and page */
     siaddr = UC_GR(uc)[rj0];
     page_addr = siaddr & qemu_host_page_mask;
+    *fixed_siaddr = siaddr;
+
+    /* check if guest page has PAGE_WRITE_ORG */
+    if (lock_interpret_check(siaddr)) {
+        return LOCKINT_SEGV; /* send segv to guest */
+    }
 
     int opnd0_size = (inst[-2] & 0xffc003ff) == 0x03400000 ?
                 ((inst[-2] << 10)) >> 20 : 64;
@@ -6717,7 +6755,7 @@ static int interpret_xor(ucontext_t *uc, uint32_t* inst)
 
     newpage = set_interpret_newpage(page_addr, page_num);
     if (newpage == NULL) {
-        return 1;
+        return LOCKINT_BAD;
     }
 
     int64_t page_off = (int64_t)newpage - page_addr;
@@ -6755,7 +6793,8 @@ static int interpret_xor(ucontext_t *uc, uint32_t* inst)
     return recover_interpret_oldpage(page_addr, newpage, page_num);
 }
 
-static int interpret_sub(ucontext_t *uc, uint32_t* inst)
+static int interpret_sub(ucontext_t *uc, uint32_t* inst,
+        uint64_t *fixed_siaddr)
 {
     uint32_t rj0, rd0, rd1, rj1, rk1;
     abi_ulong page_addr;
@@ -6775,6 +6814,12 @@ static int interpret_sub(ucontext_t *uc, uint32_t* inst)
     /* get siaddr and page */
     siaddr = UC_GR(uc)[rj0];
     page_addr = siaddr & qemu_host_page_mask;
+    *fixed_siaddr = siaddr;
+
+    /* check if guest page has PAGE_WRITE_ORG */
+    if (lock_interpret_check(siaddr)) {
+        return LOCKINT_SEGV; /* send segv to guest */
+    }
 
     int opnd0_size = (inst[-1] & 0xffc003ff) == 0x03400000 ?
                 ((inst[-1] << 10)) >> 20 : 64;
@@ -6786,7 +6831,7 @@ static int interpret_sub(ucontext_t *uc, uint32_t* inst)
 
     newpage = set_interpret_newpage(page_addr, page_num);
     if (newpage == NULL) {
-        return 1;
+        return LOCKINT_BAD;
     }
 
     int64_t page_off = (int64_t)newpage - page_addr;
@@ -6828,7 +6873,8 @@ static int interpret_sub(ucontext_t *uc, uint32_t* inst)
     return recover_interpret_oldpage(page_addr, newpage, page_num);
 }
 
-static int interpret_xchg(ucontext_t *uc, uint32_t* inst)
+static int interpret_xchg(ucontext_t *uc, uint32_t* inst,
+        uint64_t *fixed_siaddr)
 {
     uint32_t rj0, rd0, rk0;
     abi_ulong page_addr;
@@ -6845,6 +6891,12 @@ static int interpret_xchg(ucontext_t *uc, uint32_t* inst)
     /* get siaddr and page */
     siaddr = UC_GR(uc)[rj0];
     page_addr = siaddr & qemu_host_page_mask;
+    *fixed_siaddr = siaddr;
+
+    /* check if guest page has PAGE_WRITE_ORG */
+    if (lock_interpret_check(siaddr)) {
+        return LOCKINT_SEGV; /* send segv to guest */
+    }
 
     int opnd0_size = (inst[-1] & 0xffc003ff) == 0x03400000 ?
                 ((inst[-1] << 10)) >> 20 : 64;
@@ -6856,7 +6908,7 @@ static int interpret_xchg(ucontext_t *uc, uint32_t* inst)
 
     newpage = set_interpret_newpage(page_addr, page_num);
     if (newpage == NULL) {
-        return 1;
+        return LOCKINT_BAD;
     }
 
     int64_t page_off = (int64_t)newpage - page_addr;
@@ -6895,7 +6947,8 @@ static int interpret_xchg(ucontext_t *uc, uint32_t* inst)
 }
 
 #ifdef CONFIG_LATX
-static int interpret_cmpxchg16b(ucontext_t *uc, uint32_t* inst)
+static int interpret_cmpxchg16b(ucontext_t *uc, uint32_t* inst,
+        uint64_t *fixed_siaddr)
 {
     uint32_t rj, rd;
     abi_ulong page_addr;
@@ -6914,6 +6967,12 @@ static int interpret_cmpxchg16b(ucontext_t *uc, uint32_t* inst)
     /* get siaddr and page */
     siaddr = UC_GR(uc)[rj];
     page_addr = siaddr & qemu_host_page_mask;
+    *fixed_siaddr = siaddr;
+
+    /* check if guest page has PAGE_WRITE_ORG */
+    if (lock_interpret_check(siaddr)) {
+        return LOCKINT_SEGV; /* send segv to guest */
+    }
 
     if (page_addr != ((siaddr + 16) & qemu_host_page_mask)) {
         page_num = 2;
@@ -6923,7 +6982,7 @@ static int interpret_cmpxchg16b(ucontext_t *uc, uint32_t* inst)
 
     newpage = set_interpret_newpage(page_addr, page_num);
     if (newpage == NULL) {
-        return 1;
+        return LOCKINT_BAD;
     }
 
     int64_t page_off = (int64_t)newpage - page_addr;
@@ -6954,6 +7013,27 @@ static int interpret_cmpxchg16b(ucontext_t *uc, uint32_t* inst)
 }
 #endif
 
+int lock_interpret_check(uint64_t addr)
+{
+    int flags = page_get_flags(addr);
+    return !(flags & PAGE_WRITE_ORG);
+}
+
+static void lock_interpret_segv(siginfo_t *info, ucontext_t *uc,
+        uint64_t fixed_siaddr, int pc_offset)
+{
+    info->si_signo = SIGSEGV;
+    info->si_code = SEGV_ACCERR;
+    info->si_addr = (void *)fixed_siaddr;
+    UC_PC(uc) += pc_offset;
+}
+
+/* interpret atomic inst, including ll/sc pattern.
+ * for different return value of each interpret_xxx:
+ *     return 0 : interpret successfully
+ *     return 1 : interpret fails, nothing else needs to be done
+ *     return 2 : guest page !PAGE_WRITE_ORG, should generate guest segv
+ */
 int lock_interpret(siginfo_t *info, ucontext_t *uc)
 {
     if (page_get_target_data((uint64_t)info->si_addr)) {
@@ -6961,6 +7041,8 @@ int lock_interpret(siginfo_t *info, ucontext_t *uc)
         qemu_log_mask(LAT_LOG_MEM, "[LATX_LOCK] shadow page TODO\n");
     } else {
         uint32_t* inst = (uint32_t *)UC_PC(uc);
+        uint64_t fixed_siaddr;
+        int ret = LOCKINT_BAD;
 
         qemu_log_mask(LAT_LOG_MEM, "[LATX_LOCK] %s"
                 " inst[0] = 0x%x inst[1] = 0x%x inst[2] = 0x%x\n",
@@ -6974,13 +7056,27 @@ int lock_interpret(siginfo_t *info, ucontext_t *uc)
                      * cmpxchg and cmpxchg8b:
                      * bne
                      */
-                    return interpret_cmpxchg8b(uc, inst);
+                    ret = interpret_cmpxchg8b(uc, inst, &fixed_siaddr);
+                    if (ret == LOCKINT_SEGV) {
+                        /* ll.d : old UC_PC
+                         * bne
+                         * sc.d : new UC_PC */
+                        lock_interpret_segv(info, uc, fixed_siaddr, 0x8);
+                    }
+                    return ret;
                 } else if ((inst[1] >> 15) == 0x23) {
                     /*
                      * sub.d:
                      *  lock neg
                      */
-                    return interpret_sub(uc, inst);
+                    ret = interpret_sub(uc, inst, &fixed_siaddr);
+                    if (ret == LOCKINT_SEGV) {
+                        /* ll.d : old UC_PC
+                         * sub.d
+                         * sc.d : new UC_PC */
+                        lock_interpret_segv(info, uc, fixed_siaddr, 0x8);
+                    }
+                    return ret;
                 }
             } else if (inst[0] == 0x22000400 &&
                         (inst[1] & 0xfffffc00) == 0x38608000) {
@@ -6988,7 +7084,13 @@ int lock_interpret(siginfo_t *info, ucontext_t *uc)
                  * ll.d zero, zero, 4
                  * amswap.d itemp, zero, mem_opnd
                  */
-                return interpret_cmpxchg16b(uc, inst);
+                ret = interpret_cmpxchg16b(uc, inst, &fixed_siaddr);
+                if (ret == LOCKINT_SEGV) {
+                    /* ll.d     : old UC_PC
+                     * amswap.d : new UC_PC */
+                    lock_interpret_segv(info, uc, fixed_siaddr, 0x4);
+                }
+                return ret;
             }
         }
 
@@ -7000,7 +7102,11 @@ int lock_interpret(siginfo_t *info, ucontext_t *uc)
              * amswap.d/amswap_db.d:
              *  xchg
              */
-            return interpret_xchg(uc, inst);
+            ret = interpret_xchg(uc, inst, &fixed_siaddr);
+            if (ret == LOCKINT_SEGV) {
+                lock_interpret_segv(info, uc, fixed_siaddr, 0x0);
+            }
+            return ret;
         case 0x70c3:
         case 0x70d5:
             /*
@@ -7013,19 +7119,31 @@ int lock_interpret(siginfo_t *info, ucontext_t *uc)
              *  lock sbb
              *  lock xadd
              */
-            return interpret_add(uc, inst);
+            ret = interpret_add(uc, inst, &fixed_siaddr);
+            if (ret == LOCKINT_SEGV) {
+                lock_interpret_segv(info, uc, fixed_siaddr, 0x0);
+            }
+            return ret;
         case 0x70c5:
         case 0x70d7:
             /*
              * lock and
              */
-            return interpret_and(uc, inst);
+            ret = interpret_and(uc, inst, &fixed_siaddr);
+            if (ret == LOCKINT_SEGV) {
+                lock_interpret_segv(info, uc, fixed_siaddr, 0x0);
+            }
+            return ret;
         case 0x70c7:
         case 0x70d9:
             /*
              * lock or
              */
-            return interpret_or(uc, inst);
+            ret = interpret_or(uc, inst, &fixed_siaddr);
+            if (ret == LOCKINT_SEGV) {
+                lock_interpret_segv(info, uc, fixed_siaddr, 0x0);
+            }
+            return ret;
         case 0x70c9:
         case 0x70db:
             /*
@@ -7033,13 +7151,17 @@ int lock_interpret(siginfo_t *info, ucontext_t *uc)
              *  lock xor
              *  lock not
              */
-            return interpret_xor(uc, inst);
+            ret = interpret_xor(uc, inst, &fixed_siaddr);
+            if (ret == LOCKINT_SEGV) {
+                lock_interpret_segv(info, uc, fixed_siaddr, 0x0);
+            }
+            return ret;
         default:
             break;
         }
     }
 
-    return 1;
+    return LOCKINT_BAD;
 }
 #elif defined(__mips__)
 int shared_private_interpret(siginfo_t *info, ucontext_t *uc)

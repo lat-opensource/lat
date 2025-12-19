@@ -1302,6 +1302,11 @@ int cpu_signal_handler(int host_signum, void *pinfo,
     greg_t pc = uc->uc_mcontext.__pc;
     uint32_t insn = *(uint32_t *)pc;
 
+#define UPDATE_PC_INSN() do {   \
+    pc = uc->uc_mcontext.__pc;  \
+    insn = *(uint32_t *)pc;     \
+} while (0)
+
 #ifndef CONFIG_SOFTMMU
     if (info->si_signo == SIGSEGV &&
         info->si_code == SEGV_MAPERR &&
@@ -1328,6 +1333,10 @@ int cpu_signal_handler(int host_signum, void *pinfo,
         if (!ret) {
             mmap_unlock();
             return 1;
+        }
+        if (ret == LOCKINT_SEGV) {
+            /* UC_PC might be changed */
+            UPDATE_PC_INSN();
         }
     }
 #if defined(CONFIG_LATX_KZT)
