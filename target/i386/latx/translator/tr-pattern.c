@@ -1092,159 +1092,223 @@ static bool translate_cdq_idiv(IR1_INST *ir1)
     return true;
 }
 
-static bool ir1_is_same_opnd(IR1_OPND *opnd0, IR1_OPND *opnd1)
-{
-    if (ir1_opnd_is_same_reg(opnd0, opnd1)) {
-        if (opnd0->reg != dt_X86_REG_RIP && opnd0->reg != dt_X86_REG_EIP)
-            return true;
-    } else if (ir1_opnd_is_mem(opnd0) && ir1_opnd_is_mem(opnd1)) {
-        if (opnd0->mem.base == opnd1->mem.base &&
-            opnd0->mem.index == opnd1->mem.index &&
-            opnd0->mem.segment == opnd1->mem.segment &&
-            opnd0->mem.scale == opnd1->mem.scale &&
-            opnd0->mem.disp == opnd1->mem.disp) {
-            if (!ir1_opnd_is_pc_relative(opnd0))
-                return true;
-        }
-    }
-    return false;
-}
+// static bool ir1_is_same_opnd(IR1_OPND *opnd0, IR1_OPND *opnd1)
+// {
+//     if (ir1_opnd_is_same_reg(opnd0, opnd1)) {
+//         if (opnd0->reg != dt_X86_REG_RIP && opnd0->reg != dt_X86_REG_EIP)
+//             return true;
+//     } else if (ir1_opnd_is_mem(opnd0) && ir1_opnd_is_mem(opnd1)) {
+//         if (opnd0->mem.base == opnd1->mem.base &&
+//             opnd0->mem.index == opnd1->mem.index &&
+//             opnd0->mem.segment == opnd1->mem.segment &&
+//             opnd0->mem.scale == opnd1->mem.scale &&
+//             opnd0->mem.disp == opnd1->mem.disp) {
+//             if (!ir1_opnd_is_pc_relative(opnd0))
+//                 return true;
+//         }
+//     }
+//     return false;
+// }
 
-static
-bool translate_cmp_xxcc_con(IR1_INST *ir1)
+static bool translate_cmp_xxcc(IR1_INST *ir1)
 {
     IR1_INST *curr = ir1;
+    IR1_INST *next = ir1->instptn.next;
+
+    int em = ZERO_EXTENSION;
+    int is_cmovcc = 0;
+    switch (ir1_opcode(next)) {
+    case WRAP(CMOVL):
+    case WRAP(CMOVGE):
+    case WRAP(CMOVLE):
+    case WRAP(CMOVG):
+        em = SIGN_EXTENSION;  __attribute__((fallthrough));
+    case WRAP(CMOVB):
+    case WRAP(CMOVAE):
+    case WRAP(CMOVE):
+    case WRAP(CMOVNE):
+    case WRAP(CMOVBE):
+    case WRAP(CMOVA):
+        is_cmovcc = 1;
+        break;
+    case WRAP(SETL):
+    case WRAP(SETGE):
+    case WRAP(SETLE):
+    case WRAP(SETG):
+        em = SIGN_EXTENSION;  __attribute__((fallthrough));
+    case WRAP(SETB):
+    case WRAP(SETAE):
+    case WRAP(SETE):
+    case WRAP(SETNE):
+    case WRAP(SETBE):
+    case WRAP(SETA):
+        break;
+    default:
+        lsassert(0);
+        break;
+    }
+
     IR1_OPND *cmp_opnd0 = ir1_get_opnd(curr, 0);
     IR1_OPND *cmp_opnd1 = ir1_get_opnd(curr, 1);
-    IR2_OPND src0 = load_ireg_from_ir1(ir1_get_opnd(curr, 0), SIGN_EXTENSION, false);
-    IR2_OPND src1 = load_ireg_from_ir1(ir1_get_opnd(curr, 1), SIGN_EXTENSION, false);
+    IR2_OPND src0 = load_ireg_from_ir1(cmp_opnd0, em, false);
+    IR2_OPND src1 = load_ireg_from_ir1(cmp_opnd1, em, false);
     generate_eflag_calculation(src0, src0, src1, curr, true);
 
-    int src0_change = 0;
-    int src1_change = 0;
-
-    for (; curr->instptn.next != NULL;) {
-        curr = curr->instptn.next;
-        lsenv->tr_data->curr_ir1_inst = curr;
-        lsenv->tr_data->curr_ir1_count++;
-
-        IR1_OPND *next_opnd0 = ir1_get_opnd(curr, 0);
-        if (!src0_change && ir1_opnd_is_gpr(cmp_opnd0) && ir1_opnd_is_gpr(next_opnd0) &&
-            ir1_opnd_is_same_reg_without_width(cmp_opnd0, next_opnd0)) {
-            src0_change = 1;
-            IR2_OPND src0_t = ra_alloc_itemp();
-            la_or(src0_t, zero_ir2_opnd, src0);
-            ra_free_temp_auto(src0);
-            src0 = src0_t;
-        }
-        if (!src1_change && ir1_opnd_is_gpr(cmp_opnd1) && ir1_opnd_is_gpr(next_opnd0) &&
-            ir1_opnd_is_same_reg_without_width(cmp_opnd1, next_opnd0)) {
-            src1_change = 1;
-            IR2_OPND src1_t = ra_alloc_itemp();
-            la_or(src1_t, zero_ir2_opnd, src1);
-            ra_free_temp_auto(src1);
-            src1 = src1_t;
-        }
-
-        IR2_OPND target_label = ra_alloc_label();
-        IR2_OPND exit_label = ra_alloc_label();
-
-        int is_cmovcc = 0;
-        switch (ir1_opcode(curr)) {
-        case WRAP(CMOVB):
-            is_cmovcc = 1;  __attribute__((fallthrough));
-        case WRAP(SETB):
-            la_bltu(src0, src1, target_label);
-            break;
-        case WRAP(CMOVAE):
-            is_cmovcc = 1;  __attribute__((fallthrough));
-        case WRAP(SETAE):
-            la_bgeu(src0, src1, target_label);
-            break;
-        case WRAP(CMOVE):
-            is_cmovcc = 1;  __attribute__((fallthrough));
-        case WRAP(SETE):
-            la_beq(src0, src1, target_label);
-            break;
-        case WRAP(CMOVNE):
-            is_cmovcc = 1;  __attribute__((fallthrough));
-        case WRAP(SETNE):
-            la_bne(src0, src1, target_label);
-            break;
-        case WRAP(CMOVBE):
-            is_cmovcc = 1;  __attribute__((fallthrough));
-        case WRAP(SETBE):
-            la_bgeu(src1, src0, target_label);
-            break;
-        case WRAP(CMOVA):
-            is_cmovcc = 1;  __attribute__((fallthrough));
-        case WRAP(SETA):
-            la_bltu(src1, src0, target_label);
-            break;
-        case WRAP(CMOVL):
-            is_cmovcc = 1;  __attribute__((fallthrough));
-        case WRAP(SETL):
-            la_blt(src0, src1, target_label);
-            break;
-        case WRAP(CMOVGE):
-            is_cmovcc = 1;  __attribute__((fallthrough));
-        case WRAP(SETGE):
-            la_bge(src0, src1, target_label);
-            break;
-        case WRAP(CMOVLE):
-            is_cmovcc = 1;  __attribute__((fallthrough));
-        case WRAP(SETLE):
-            la_bge(src1, src0, target_label);
-            break;
-        case WRAP(CMOVG):
-            is_cmovcc = 1;  __attribute__((fallthrough));
-        case WRAP(SETG):
-            la_blt(src1, src0, target_label);
-            break;
-        default:        lsassert(0);        break;
-        }
-
-        if (is_cmovcc) {
-            IR1_OPND *next_opnd1 = ir1_get_opnd(curr, 1);
-
-            /* no mov */
-            if (ir1_opnd_size(next_opnd0) == 32) {
-                IR2_OPND dest_opnd = ra_alloc_gpr(ir1_opnd_base_reg_num(next_opnd0));
-                la_mov32_zx(dest_opnd, dest_opnd);
-            }
-            la_b(exit_label);
-            la_label(target_label);
-
-            IR2_OPND *src_opnd_t = ir1_is_same_opnd(next_opnd1, cmp_opnd0) ? (src0_change ? NULL : &src0) : NULL;
-            src_opnd_t = ir1_is_same_opnd(next_opnd1, cmp_opnd1) ? (src1_change ? NULL : &src1) : NULL;
-            if (src_opnd_t) {
-                store_ireg_to_ir1(*src_opnd_t, next_opnd0, false);
-            } else {
-                IR2_OPND src_opnd = load_ireg_from_ir1(next_opnd1, SIGN_EXTENSION, false);
-                store_ireg_to_ir1(src_opnd, next_opnd0, false);
-                ra_free_temp_auto(src_opnd);
-            }
-        } else {
-            /* set 0 */
-            store_ireg_to_ir1(zero_ir2_opnd, next_opnd0, false);
-            la_b(exit_label);
-            la_label(target_label);
-
-            /* set 1 */
-            IR2_OPND temp1 = ra_alloc_itemp();
-            la_ori(temp1, zero_ir2_opnd, 1);
-            store_ireg_to_ir1(temp1, next_opnd0, false);
-            ra_free_temp(temp1);
-        }
-        la_label(exit_label);
+    IR1_OPND *next_opnd0 = ir1_get_opnd(next, 0);
+    IR2_OPND next_dest, next_src;
+    if (is_cmovcc) {
+        IR1_OPND *next_opnd1 = ir1_get_opnd(next, 1);
+        next_dest = ra_alloc_gpr(ir1_opnd_base_reg_num(next_opnd0));
+        next_src = load_ireg_from_ir1(next_opnd1, UNKNOWN_EXTENSION, false);
     }
+
+    IR2_OPND temp1;
+    IR2_OPND temp2 = ra_alloc_itemp();
+    switch (ir1_opcode(next)) {
+    case WRAP(CMOVB): {
+        temp1 = ra_alloc_itemp();
+        la_sltu(temp2, src0, src1);
+        la_masknez(temp1, next_dest, temp2);
+        la_maskeqz(temp2, next_src, temp2);
+    }
+    break;
+    case WRAP(SETB): {
+        la_sltu(temp2, src0, src1);
+    }
+    break;
+    case WRAP(CMOVAE): {
+        temp1 = ra_alloc_itemp();
+        la_sltu(temp2, src0, src1);
+        la_maskeqz(temp1, next_dest, temp2);
+        la_masknez(temp2, next_src, temp2);
+    }
+    break;
+    case WRAP(SETAE): {
+        la_sltu(temp2, src0, src1);
+        la_xori(temp2, temp2, 1);
+    }
+    break;
+    case WRAP(CMOVE): {
+        temp1 = ra_alloc_itemp();
+        la_sub_d(temp2, src0, src1);
+        la_maskeqz(temp1, next_dest, temp2);
+        la_masknez(temp2, next_src, temp2);
+    }
+    break;
+    case WRAP(SETE): {
+        la_sub_d(temp2, src0, src1);
+        la_sltu(temp2, zero_ir2_opnd, temp2);
+        la_xori(temp2, temp2, 1);
+    }
+    break;
+    case WRAP(CMOVNE): {
+        temp1 = ra_alloc_itemp();
+        la_sub_d(temp2, src0, src1);
+        la_masknez(temp1, next_dest, temp2);
+        la_maskeqz(temp2, next_src, temp2);
+    }
+    break;
+    case WRAP(SETNE): {
+        la_sub_d(temp2, src0, src1);
+        la_sltu(temp2, zero_ir2_opnd, temp2);
+    }
+    break;
+    case WRAP(CMOVBE): {
+        temp1 = ra_alloc_itemp();
+        la_sltu(temp2, src1, src0);
+        la_maskeqz(temp1, next_dest, temp2);
+        la_masknez(temp2, next_src, temp2);
+    }
+    break;
+    case WRAP(SETBE): {
+        la_sltu(temp2, src1, src0);
+        la_xori(temp2, temp2, 1);
+    }
+    break;
+    case WRAP(CMOVA): {
+        temp1 = ra_alloc_itemp();
+        la_sltu(temp2, src1, src0);
+        la_masknez(temp1, next_dest, temp2);
+        la_maskeqz(temp2, next_src, temp2);
+    }
+    break;
+    case WRAP(SETA): {
+        la_sltu(temp2, src1, src0);
+    }
+    break;
+    case WRAP(CMOVL): {
+        temp1 = ra_alloc_itemp();
+        la_slt(temp2, src0, src1);
+        la_masknez(temp1, next_dest, temp2);
+        la_maskeqz(temp2, next_src, temp2);
+    }
+    break;
+    case WRAP(SETL): {
+        la_slt(temp2, src0, src1);
+    }
+    break;
+    case WRAP(CMOVGE): {
+        temp1 = ra_alloc_itemp();
+        la_slt(temp2, src0, src1);
+        la_maskeqz(temp1, next_dest, temp2);
+        la_masknez(temp2, next_src, temp2);
+    }
+    break;
+    case WRAP(SETGE): {
+        la_slt(temp2, src0, src1);
+        la_xori(temp2, temp2, 1);
+    }
+    break;
+    case WRAP(CMOVLE): {
+        temp1 = ra_alloc_itemp();
+        la_slt(temp2, src1, src0);
+        la_maskeqz(temp1, next_dest, temp2);
+        la_masknez(temp2, next_src, temp2);
+    }
+    break;
+    case WRAP(SETLE): {
+        la_slt(temp2, src1, src0);
+        la_xori(temp2, temp2, 1);
+    }
+    break;
+    case WRAP(CMOVG): {
+        temp1 = ra_alloc_itemp();
+        la_slt(temp2, src1, src0);
+        la_masknez(temp1, next_dest, temp2);
+        la_maskeqz(temp2, next_src, temp2);
+    }
+    break;
+    case WRAP(SETG): {
+        la_slt(temp2, src1, src0);
+    }
+    break;
+    default:        lsassert(0);        break;
+    }
+
+    if (is_cmovcc) {
+        if (ir1_opnd_size(next_opnd0) == 64) {
+            la_or(next_dest, temp1, temp2);
+        } else {
+            la_or(temp1, temp1, temp2);
+            store_ireg_to_ir1(temp1, next_opnd0, false);
+        }
+    } else {
+        store_ireg_to_ir1(temp2, next_opnd0, false);
+    }
+
     return true;
 }
 
-static
-bool translate_test_xxcc_con(IR1_INST *pir1)
+static bool translate_test_xxcc(IR1_INST *pir1)
 {
     IR1_INST *curr = pir1;
+    IR1_INST *next = pir1->instptn.next;
+
+    int is_cmovcc = 0;
+    if ( WRAP(CMOVA)<= ir1_opcode(next) && ir1_opcode(next) <= WRAP(CMOVS)) {
+        is_cmovcc = 1;
+    }
+
     IR1_OPND *test_opnd0 = ir1_get_opnd(curr, 0);
     IR1_OPND *test_opnd1 = ir1_get_opnd(curr, 1);
 
@@ -1262,150 +1326,142 @@ bool translate_test_xxcc_con(IR1_INST *pir1)
         la_and(temp, src0, src1);
     }
 
-    int src0_change = 0;
-    int src1_change = 0;
-    for (; curr->instptn.next != NULL;) {
-        curr = curr->instptn.next;
-        lsenv->tr_data->curr_ir1_inst = curr;
-        lsenv->tr_data->curr_ir1_count++;
+    IR1_OPND *next_opnd0 = ir1_get_opnd(next, 0);
+    IR2_OPND next_dest, next_src;
+    if (is_cmovcc) {
+        IR1_OPND *next_opnd1 = ir1_get_opnd(next, 1);
+        next_dest = ra_alloc_gpr(ir1_opnd_base_reg_num(next_opnd0));
+        next_src = load_ireg_from_ir1(next_opnd1, UNKNOWN_EXTENSION, false);
+    }
 
-        IR1_OPND *next_opnd0 = ir1_get_opnd(curr, 0);
-        if (!src0_change && ir1_opnd_is_gpr(test_opnd0) && ir1_opnd_is_gpr(next_opnd0) &&
-            ir1_opnd_is_same_reg_without_width(test_opnd0, next_opnd0)) {
-            src0_change = 1;
-            IR2_OPND src0_t = ra_alloc_itemp();
-            la_or(src0_t, zero_ir2_opnd, src0);
-            ra_free_temp_auto(src0);
-            src0 = src0_t;
-        }
-        if (!is_same_reg && !src1_change && ir1_opnd_is_gpr(test_opnd1) && ir1_opnd_is_gpr(next_opnd0) &&
-            ir1_opnd_is_same_reg_without_width(test_opnd1, next_opnd0)) {
-            src1_change = 1;
-            IR2_OPND src1_t = ra_alloc_itemp();
-            la_or(src1_t, zero_ir2_opnd, src1);
-            ra_free_temp_auto(src1);
-            src1 = src1_t;
-        }
+    IR2_OPND temp1;
+    IR2_OPND temp2 = ra_alloc_itemp();
+    switch (ir1_opcode(next)) {
+    case WRAP(CMOVE): {
+        temp1 = ra_alloc_itemp();
+        la_maskeqz(temp1, next_dest, is_same_reg ? src0 : temp);
+        la_masknez(temp2, next_src, is_same_reg ? src0 : temp);
+    }
+    break;
+    case WRAP(SETE): {
+        la_sltu(temp2, zero_ir2_opnd, is_same_reg ? src0 : temp);
+        la_xori(temp2, temp2, 1);
+    }
+    break;
+    case WRAP(CMOVNE):
+    case WRAP(CMOVA): {
+        temp1 = ra_alloc_itemp();
+        la_masknez(temp1, next_dest, is_same_reg ? src0 : temp);
+        la_maskeqz(temp2, next_src, is_same_reg ? src0 : temp);
+    }
+    break;
+    case WRAP(SETNE):
+    case WRAP(SETA): {
+        la_sltu(temp2, zero_ir2_opnd, is_same_reg ? src0 : temp);
+    }
+    break;
+    case WRAP(CMOVS): {
+        lsassert(is_same_reg);
+        la_slt(temp2, src0, zero_ir2_opnd);
+        temp1 = ra_alloc_itemp();
+        la_masknez(temp1, next_dest, temp2);
+        la_maskeqz(temp2, next_src, temp2);
+    }
+    break;
+    case WRAP(SETS): {
+        lsassert(is_same_reg);
+        la_slt(temp2, src0, zero_ir2_opnd);
+    }
+    break;
+    case WRAP(CMOVNS): {
+        lsassert(is_same_reg);
+        la_slt(temp2, src0, zero_ir2_opnd);
+        temp1 = ra_alloc_itemp();
+        la_maskeqz(temp1, next_dest, temp2);
+        la_masknez(temp2, next_src, temp2);
+    }
+    break;
+    case WRAP(SETNS): {
+        lsassert(is_same_reg);
+        la_slt(temp2, src0, zero_ir2_opnd);
+        la_xori(temp2, temp2, 1);
+    }
+    break;
+    case WRAP(CMOVLE): {
+        lsassert(is_same_reg);
+        la_slt(temp2, zero_ir2_opnd, src0);
+        temp1 = ra_alloc_itemp();
+        la_maskeqz(temp1, next_dest, temp2);
+        la_masknez(temp2, next_src, temp2);
+    }
+    break;
+    case WRAP(SETLE): {
+        lsassert(is_same_reg);
+        la_slt(temp2, zero_ir2_opnd, src0);
+        la_xori(temp2, temp2, 1);
+    }
+    break;
+    case WRAP(CMOVG): {
+        lsassert(is_same_reg);
+        la_slt(temp2, zero_ir2_opnd, src0);
+        temp1 = ra_alloc_itemp();
+        la_masknez(temp1, next_dest, temp2);
+        la_maskeqz(temp2, next_src, temp2);
+    }
+    break;
+    case WRAP(SETG): {
+        lsassert(is_same_reg);
+        la_slt(temp2, zero_ir2_opnd, src0);
+    }
+    break;
+    case WRAP(CMOVNO):
+    case WRAP(CMOVAE): {
+        ra_free_temp(temp2);
+        temp2 = next_src;
+        temp1 = next_src;
+    }
+    break;
+    case WRAP(SETNO):
+    case WRAP(SETAE): {
+        la_ori(temp2, zero_ir2_opnd, 1);
+    }
+    break;
+    case WRAP(CMOVO):
+    case WRAP(CMOVB): {
+        ra_free_temp(temp2);
+        temp2 = next_dest;
+        temp1 = next_dest;
+    }
+    break;
+    case WRAP(SETO):
+    case WRAP(SETB): {
+        ra_free_temp(temp2);
+        temp2 = zero_ir2_opnd;
+    }
+    break;
+    case WRAP(CMOVBE): {
+        temp1 = ra_alloc_itemp();
+        la_maskeqz(temp1, next_dest, is_same_reg ? src0 : temp);
+        la_masknez(temp2, next_src, is_same_reg ? src0 : temp);
+    }
+    break;
+    case WRAP(SETBE): {
+        la_sltu(temp2, zero_ir2_opnd, is_same_reg ? src0 : temp);
+        la_xori(temp2, temp2, 1);
+    }
+    break;
+    default:        lsassert(0);        break;
+    }
 
-        IR2_OPND target_label = ra_alloc_label();
-        IR2_OPND exit_label = ra_alloc_label();
-
-        int is_cmovcc = 0;
-        switch (ir1_opcode(curr)) {
-        case WRAP(CMOVE):
-            is_cmovcc = 1;  __attribute__((fallthrough));
-        case WRAP(SETE):
-            la_beqz(is_same_reg ? src0 : temp, target_label);
-            break;
-        case WRAP(CMOVNE):
-            is_cmovcc = 1;  __attribute__((fallthrough));
-        case WRAP(SETNE):
-            la_bnez(is_same_reg ? src0 : temp, target_label);
-            break;
-        case WRAP(CMOVS):
-            is_cmovcc = 1;  __attribute__((fallthrough));
-        case WRAP(SETS):
-            lsassert(ir1_opnd_is_same_reg(test_opnd0, test_opnd1));
-            la_blt(src0, zero_ir2_opnd, target_label);
-            break;
-        case WRAP(CMOVNS):
-            is_cmovcc = 1;  __attribute__((fallthrough));
-        case WRAP(SETNS):
-            lsassert(ir1_opnd_is_same_reg(test_opnd0, test_opnd1));
-            la_bge(src0, zero_ir2_opnd, target_label);
-            break;
-        case WRAP(CMOVLE):
-            is_cmovcc = 1;  __attribute__((fallthrough));
-        case WRAP(SETLE):
-            lsassert(ir1_opnd_is_same_reg(test_opnd0, test_opnd1));
-            la_bge(zero_ir2_opnd, src0, target_label);
-            break;
-        case WRAP(CMOVG):
-            is_cmovcc = 1;  __attribute__((fallthrough));
-        case WRAP(SETG):
-            lsassert(ir1_opnd_is_same_reg(test_opnd0, test_opnd1));
-            la_blt(zero_ir2_opnd, src0, target_label);
-            break;
-        case WRAP(CMOVNO):
-            is_cmovcc = 1;  __attribute__((fallthrough));
-        case WRAP(SETNO):
-            /* OF = 0 For compatibility with bcc+b */
-            //latxs_append_ir2_opnd2(LISA_BEQZ, zero_ir2_opnd, &target_label);
-            la_b(target_label);
-            break;
-        case WRAP(CMOVO):
-            is_cmovcc = 1;  __attribute__((fallthrough));
-        case WRAP(SETO):
-            /* TODO tb->opt_bcc = false;*/
-            /* OF = 1 */
-            break;
-        case WRAP(CMOVB):
-            is_cmovcc = 1;  __attribute__((fallthrough));
-        case WRAP(SETB):
-            /* TODO tb->opt_bcc = false;*/
-            /* CF = 1 */
-            break;
-        case WRAP(CMOVBE):
-            is_cmovcc = 1;  __attribute__((fallthrough));
-        case WRAP(SETBE):
-            /* CF = 1 or ZF = 1 */
-            la_beqz(is_same_reg ? src0 : temp, target_label);
-            break;
-        case WRAP(CMOVA):
-            is_cmovcc = 1;  __attribute__((fallthrough));
-        case WRAP(SETA):
-            /* CF = 0 and ZF = 0 */
-            la_bnez(is_same_reg ? src0 : temp, target_label);
-            break;
-        case WRAP(CMOVAE):
-            is_cmovcc = 1;  __attribute__((fallthrough));
-        case WRAP(SETAE):
-            /* CF = 0 For compatibility with bcc+b */
-            //latxs_append_ir2_opnd2(LISA_BEQZ, zero_ir2_opnd, &target_label);
-            la_b(target_label);
-            break;
-        default:
-            lsassert(0);
-            break;
-        }
-
-        if (is_cmovcc) {
-            IR1_OPND *next_opnd1 = ir1_get_opnd(curr, 1);
-
-            /* no mov */
-            if (ir1_opnd_size(next_opnd0) == 32) {
-                IR2_OPND dest_opnd = ra_alloc_gpr(ir1_opnd_base_reg_num(next_opnd0));
-                la_mov32_zx(dest_opnd, dest_opnd);
-            }
-            la_b(exit_label);
-            la_label(target_label);
-
-            IR2_OPND *src_opnd_t = NULL;
-            src_opnd_t = ir1_is_same_opnd(next_opnd1, test_opnd0) ? (src0_change ? NULL : &src0) : src_opnd_t;
-            if (!is_same_reg) {
-                src_opnd_t = ir1_is_same_opnd(next_opnd1, test_opnd1) ? (src1_change ? NULL : &src1) : src_opnd_t;
-            }
-
-            if (src_opnd_t) {
-                store_ireg_to_ir1(*src_opnd_t, next_opnd0, false);
-            } else {
-                IR2_OPND src_opnd = load_ireg_from_ir1(next_opnd1, SIGN_EXTENSION, false);;
-                store_ireg_to_ir1(src_opnd, next_opnd0, false);
-                ra_free_temp_auto(src_opnd);
-            }
+    if (is_cmovcc) {
+        if ((ir1_opnd_size(next_opnd0) == 64) && (!ir2_opnd_cmp(&next_dest, &temp1))) {
+            la_or(next_dest, temp1, temp2);
         } else {
-            /* set 0 */
-            store_ireg_to_ir1(zero_ir2_opnd, ir1_get_opnd(curr, 0), false);
-            la_b(exit_label);
-            la_label(target_label);
-
-            /* set 1 */
-            IR2_OPND temp1 = ra_alloc_itemp();
-            la_ori(temp1, zero_ir2_opnd, 1);
+            la_or(temp1, temp1, temp2);
             store_ireg_to_ir1(temp1, next_opnd0, false);
-            ra_free_temp(temp1);
         }
-        la_label(exit_label);
+    } else {
+        store_ireg_to_ir1(temp2, next_opnd0, false);
     }
 
     return true;
@@ -1445,35 +1501,92 @@ static bool translate_ucomisd_seta(IR1_INST *pir1)
     /* 4. mov flag to EFLAGS */
     la_x86mtflag(flag, 0x3f);
 
-    ra_free_temp(flag);
-
-    IR2_OPND* cj = NULL;
     switch (ir1_opcode(next)) {
     case WRAP(SETA):
         la_fcmp_cond_d(fcc0_ir2_opnd, src, dest, FCMP_COND_CLT);
-        cj = &fcc0_ir2_opnd;
         break;
     default:
         lsassert(0);
         break;
     }
 
-    IR2_OPND target_label = ra_alloc_label();
-    IR2_OPND exit_label = ra_alloc_label();
-    la_bcnez(*cj, target_label);
+    la_movcf2gr(flag, fcc0_ir2_opnd);
+    store_ireg_to_ir1(flag, ir1_get_opnd(next, 0), false);
 
-    /* set 0 */
-    store_ireg_to_ir1(zero_ir2_opnd, ir1_get_opnd(next, 0), false);
-    la_b(exit_label);
-    la_label(target_label);
+    ra_free_temp(flag);
+    return true;
+}
 
-    /* set 1 */
-    IR2_OPND temp1 = ra_alloc_itemp();
-    la_ori(temp1, zero_ir2_opnd, 1);
-    store_ireg_to_ir1(temp1, ir1_get_opnd(next, 0), false);
+static bool translate_neg_cmovcc(IR1_INST *pir1)
+{
+    IR1_INST *curr = pir1;
+    IR1_INST *next = curr->instptn.next;
 
-    la_label(exit_label);
+    CPUArchState* env = (CPUArchState*)(lsenv->cpu_state);
+    CPUState *cpu = env_cpu(env);
 
+    IR1_OPND *opnd0 = ir1_get_opnd(curr, 0);
+
+    bool is_lock = ir1_is_prefix_lock(curr) && ir1_opnd_is_mem(opnd0);
+    if (!close_latx_parallel) {
+        is_lock = is_lock && (cpu->tcg_cflags & CF_PARALLEL);
+    }
+
+    if (is_lock) {
+        translate_neg(curr);
+        translate_cmovcc(next);
+        return true;
+    }
+
+    IR2_OPND dest, src0, mem_opnd;
+    int imm;
+    int opnd0_size = ir1_opnd_size(opnd0);
+
+    dest = ra_alloc_itemp();
+
+    if (ir1_opnd_is_gpr(opnd0)) {
+        src0 = convert_gpr_opnd(opnd0, ZERO_EXTENSION);
+    } else {
+        src0 = ra_alloc_itemp();
+        mem_opnd = convert_mem(opnd0, &imm);
+        la_ld_by_op_size(src0, mem_opnd, imm, opnd0_size);
+    }
+
+    generate_eflag_calculation(dest, zero_ir2_opnd, src0, curr, true);
+
+    la_sub_d(dest, zero_ir2_opnd, src0);
+    if (ir1_opnd_is_gpr(opnd0)) {
+        store_ireg_to_ir1(dest, opnd0, false);
+    } else {
+        la_st_by_op_size(dest, mem_opnd, imm, opnd0_size);
+    }
+    ra_free_temp_auto(src0);
+
+    la_bstrpick_d(dest, dest, opnd0_size - 1, opnd0_size - 1);
+    if (ir1_opcode(next) == WRAP(CMOVNS))
+        la_xori(dest, dest, 1);
+
+    IR1_OPND *next_opnd0 = ir1_get_opnd(next, 0);
+    IR1_OPND *next_opnd1 = ir1_get_opnd(next, 1);
+
+    IR2_OPND next_src = load_ireg_from_ir1(next_opnd1, UNKNOWN_EXTENSION, false);
+    IR2_OPND next_dest = ra_alloc_gpr(ir1_opnd_base_reg_num(next_opnd0));
+
+    IR2_OPND cond1 = ra_alloc_itemp();
+    IR2_OPND cond2 = ra_alloc_itemp();
+
+    la_masknez(cond1, next_dest, dest);
+    la_maskeqz(cond2, next_src, dest);
+
+    if (ir1_opnd_size(next_opnd0) == 64) {
+        la_or(next_dest, cond1, cond2);
+    } else {
+        la_or(cond1, cond1, cond2);
+        store_ireg_to_ir1(cond1, next_opnd0, false);
+    }
+    ra_free_temp(cond1);
+    ra_free_temp(cond2);
+    ra_free_temp(dest);
     return true;
 }
 
@@ -2050,6 +2163,7 @@ bool translate_bt_xx_jcc(IR1_INST *pir1)
     return true;
 }
 
+#ifdef CONFIG_LATX_XCOMISX_OPT
 static inline bool xcomisx_xx_jcc(IR1_INST *pir1, bool is_jcc, bool is_double, bool qnan_exp)
 {
     IR1_INST *curr = pir1;
@@ -2240,6 +2354,7 @@ static bool translate_ucomiss_xx_jcc(IR1_INST *pir1)
         return xcomisx_xx_jcc(pir1, true, false, false);
     }
 }
+#endif
 #undef WRAP
 
 bool try_translate_instptn(IR1_INST *pir1)
@@ -2260,6 +2375,7 @@ bool try_translate_instptn(IR1_INST *pir1)
         return translate_cqo_idiv(pir1);
     case INSTPTN_OPC_BT_JCC:
         return translate_bt_jcc(pir1);
+#ifdef CONFIG_LATX_XCOMISX_OPT
     case INSTPTN_OPC_COMISD_JCC:
         return translate_comisd_jcc(pir1);
     case INSTPTN_OPC_COMISS_JCC:
@@ -2268,6 +2384,7 @@ bool try_translate_instptn(IR1_INST *pir1)
         return translate_ucomisd_jcc(pir1);
     case INSTPTN_OPC_UCOMISS_JCC:
         return translate_ucomiss_jcc(pir1);
+#endif
     case INSTPTN_OPC_XOR_DIV:
         return translate_xor_div(pir1);
     case INSTPTN_OPC_CDQ_IDIV:
@@ -2275,10 +2392,10 @@ bool try_translate_instptn(IR1_INST *pir1)
     case INSTPTN_OPC_CMP_SBB:
         return translate_cmp_sbb(pir1);
 
-    case INSTPTN_OPC_CMP_XXCC_CON:
-        return translate_cmp_xxcc_con(pir1);
-    case INSTPTN_OPC_TEST_XXCC_CON:
-        return translate_test_xxcc_con(pir1);
+    case INSTPTN_OPC_CMP_XXCC:
+        return translate_cmp_xxcc(pir1);
+    case INSTPTN_OPC_TEST_XXCC:
+        return translate_test_xxcc(pir1);
 
     case INSTPTN_OPC_UCOMISD_SETA:
         return translate_ucomisd_seta(pir1);
@@ -2291,6 +2408,7 @@ bool try_translate_instptn(IR1_INST *pir1)
         return translate_test_xx_jcc(pir1);
     case INSTPTN_OPC_BT_XX_JCC:
         return translate_bt_xx_jcc(pir1);
+#ifdef CONFIG_LATX_XCOMISX_OPT
     case INSTPTN_OPC_COMISD_XX_JCC:
         return translate_comisd_xx_jcc(pir1);
     case INSTPTN_OPC_COMISS_XX_JCC:
@@ -2299,6 +2417,7 @@ bool try_translate_instptn(IR1_INST *pir1)
         return translate_ucomisd_xx_jcc(pir1);
     case INSTPTN_OPC_UCOMISS_XX_JCC:
         return translate_ucomiss_xx_jcc(pir1);
+#endif
 #ifdef CONFIG_LATX_SMC_OPT
     case INSTPTN_OPC_MOVAPS_VST_X4:{
         if (translate_movaps_vst_x4(pir1)) {
@@ -2312,6 +2431,8 @@ bool try_translate_instptn(IR1_INST *pir1)
         }
     }
 #endif
+    case INSTPTN_OPC_NEG_CMOVCC:
+        return translate_neg_cmovcc(pir1);
     default:
         lsassert(0);
         break;

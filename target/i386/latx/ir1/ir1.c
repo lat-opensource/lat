@@ -1262,7 +1262,7 @@ int ir1_opnd_is_same_reg_without_width(IR1_OPND *opnd0, IR1_OPND *opnd1)
     case dt_X86_REG_BX:
     case dt_X86_REG_EBX:
 #ifdef TARGET_X86_64
-    case X86_REG_RBX:
+    case dt_X86_REG_RBX:
 #endif
         opnd1_index = ebx_index;   break;
     case dt_X86_REG_CL:

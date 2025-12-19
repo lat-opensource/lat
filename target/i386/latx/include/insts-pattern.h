@@ -35,12 +35,13 @@
 #define INSTPTN_OPC_UCOMISD_XX_JCC 0x100000
 #define INSTPTN_OPC_UCOMISS_XX_JCC 0x200000
 
-#define INSTPTN_OPC_CMP_XXCC_CON    0x400000
-#define INSTPTN_OPC_TEST_XXCC_CON   0x800000
+#define INSTPTN_OPC_CMP_XXCC    0x400000
+#define INSTPTN_OPC_TEST_XXCC   0x800000
 
 #define INSTPTN_OPC_UCOMISD_SETA   0x1000000
 #define INSTPTN_OPC_SUB_JCC        0x2000000
 #define INSTPTN_OPC_MOVAPS_VST_X4  0x4000000
+#define INSTPTN_OPC_NEG_CMOVCC     0x8000000
 typedef int scan_elem_t;
 
 void insts_pattern_scan_con(TranslationBlock *tb, IR1_INST *ir1, int index, scan_elem_t *scan_buf);
@@ -103,14 +104,14 @@ bool insts_pattern_scan_jcc_end(TranslationBlock *tb, IR1_INST *ir1, int index, 
 #define instptn_check_ucomisd_xx_jcc_0() INSTPTN_CHECK_XX_0(UCOMISD_XX_JCC)
 #define instptn_check_ucomiss_xx_jcc_0() INSTPTN_CHECK_XX_0(UCOMISS_XX_JCC)
 
-#define instptn_check_cmp_xxcc_con_0() INSTPTN_CHECK_XX_0(CMP_XXCC_CON)
-#define instptn_check_test_xxcc_con_0() INSTPTN_CHECK_XX_0(TEST_XXCC_CON)
+#define instptn_check_cmp_xxcc_0() INSTPTN_CHECK_XX_0(CMP_XXCC)
+#define instptn_check_test_xxcc_0() INSTPTN_CHECK_XX_0(TEST_XXCC)
 
 #define instptn_check_ucomisd_seta_0() INSTPTN_CHECK_XX_0(UCOMISD_SETA)
 #define instptn_check_sub_jcc_0() INSTPTN_CHECK_XX_0(SUB_JCC)
 
 #define instptn_check_movaps_vst_x4_0() INSTPTN_CHECK_XX_0(MOVAPS_VST_X4)
-
+#define instptn_check_neg_cmovcc_0() INSTPTN_CHECK_XX_0(NEG_CMOVCC)
 #else
 #define instptn_check_void(option)
 #define instptn_check_false(option)
@@ -134,11 +135,14 @@ bool insts_pattern_scan_jcc_end(TranslationBlock *tb, IR1_INST *ir1, int index, 
 #define instptn_check_ucomisd_xx_jcc_0()
 #define instptn_check_ucomiss_xx_jcc_0()
 
-#define instptn_check_cmp_xxcc_con_0()
-#define instptn_check_test_xxcc_con_0()
+#define instptn_check_cmp_xxcc_0()
+#define instptn_check_test_xxcc_0()
 
 #define instptn_check_ucomisd_seta_0()
 #define instptn_check_sub_jcc_0()
+
+#define instptn_check_movaps_vst_x4_0()
+#define instptn_check_neg_cmovcc_0()
 #endif
 
 bool try_translate_instptn(IR1_INST *pir1);
