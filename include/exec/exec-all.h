@@ -53,6 +53,7 @@ typedef ram_addr_t tb_page_addr_t;
 bool next_in_same_tu(TranslationBlock *curr_tb);
 bool is_tu_tb(TranslationBlock *tb);
 bool use_tu_jmp(TranslationBlock *tb);
+bool is_indirect_tb(TranslationBlock *tb);
 void set_use_tu_jmp(TranslationBlock *tb);
 void unset_use_tu_jmp(TranslationBlock *tb);
 bool use_indirect_jmp(TranslationBlock *tb);
@@ -504,22 +505,23 @@ typedef enum tu_tb_mode_type {
 #endif
 
 struct separated_data{
+    TranslationBlock *next_tb[2];
     uint8_t eflag_out;
     uint8_t  _top_in;
     uint8_t  _top_out;
-    TranslationBlock *next_tb[2];
-    void     *ir1;
-    int32_t rel_start;
-    int32_t rel_end;
     uint8_t last_ir1_type;
     union {
         int is_first_tb;
         int tu_size;
     };
+    void     *ir1;
+    int32_t rel_start;
+    int32_t rel_end;
 #ifdef CONFIG_LATX_TU
-    tu_tb_mode_type tu_tb_mode;
-    size_t offset_in_tu;
     target_ulong tu_id;
+    uint16_t indirect_exit[2];
+    size_t offset_in_tu;
+    tu_tb_mode_type tu_tb_mode;
 #endif
     target_ulong next_pc;
     target_ulong target_pc;
@@ -650,6 +652,8 @@ struct TranslationBlock {
 #define SIGNAL_RELINK1    0x800
 #define IS_CODE64         0x1000
 #define IS_TU_SPLIT       0x2000
+#define IS_INDIRECT_TB    0x4000
+#define IS_TU_LAST_TB     0x8000
     uint16_t bool_flags;
     uint8_t  eflag_use;
 #ifdef CONFIG_LATX_INSTS_PATTERN

@@ -71,7 +71,7 @@ typedef struct TUControl {
     TranslationBlock *tb_list[MAX_TB_IN_CACHE];
     /* Search GPC to TB in current TU  */
     GTree *tree;
-
+    bool generate_indirext_exit;
 } TUControl;
 
 typedef enum TU_TB_START_TYPE {
@@ -87,6 +87,9 @@ void tu_enough_space(CPUState *cpu);
 void tu_trees_reset(void);
 TranslationBlock *tu_tree_lookup(target_ulong pc);
 void tu_control_init(void);
+void tu_set_generate_indirext_exit(void);
+bool tu_get_generate_indirext_exit(void);
+void tu_init_generate_indirext_exit(void);
 TranslationBlock* tb_create(CPUState *cpu, target_ulong pc,
         target_ulong cs_base, uint32_t flags, int cflags,
         int max_insns, bool tb_is_code64, TU_TB_START_TYPE mode);

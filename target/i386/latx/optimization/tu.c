@@ -87,6 +87,21 @@ inline void tu_trees_reset(void)
     g_tree_destroy(tu_data->tree);
 }
 
+void tu_set_generate_indirext_exit(void)
+{
+    tu_data->generate_indirext_exit = true;
+}
+
+bool tu_get_generate_indirext_exit(void)
+{
+    return tu_data->generate_indirext_exit;
+}
+
+void tu_init_generate_indirext_exit(void)
+{
+    tu_data->generate_indirext_exit = false;
+}
+
 TranslationBlock *tu_tree_lookup(target_ulong pc)
 {
     TranslationBlock key = {.pc = pc};
@@ -99,6 +114,7 @@ void tu_control_init(void)
     tu_data->ir1_num_in_tu = 0;
     tu_data->tb_num = 0;
     tu_trees_init();
+    tu_data->generate_indirext_exit = false;
 
     return;
 }
@@ -157,6 +173,8 @@ void tu_reset_tb(TranslationBlock *tb)
 #endif
 #ifdef CONFIG_LATX_TU
     tb->s_data->offset_in_tu = 0;
+    tb->s_data->indirect_exit[0] = 0;
+    tb->s_data->indirect_exit[1] = 0;
     tb->s_data->next_pc = 0;
     tb->s_data->target_pc = 0;
     tb->s_data->tu_id = 0;
@@ -715,6 +733,51 @@ uint bcc_ins_convert(uint convert_insn)
 
 static bool bcc_jmp_fail;
 
+static int tu_relocat_indirect_exit(TranslationBlock *tb, uintptr_t target)
+{
+    uintptr_t fix_addr = (uintptr_t)tb->tc.ptr + tb->s_data->indirect_exit[0];
+    uint fix_insn = *(uint *)fix_addr;
+    long offset = (target - fix_addr) >> 2;
+
+    switch (fix_insn & BCC_OPCODE) {
+    case BEQ_OPCODE:
+    case BNE_OPCODE:
+        /* clear bcc ins offset */
+        if (offset > OFF16_MAX) {
+            if (!bcc_jmp_fail) {
+                bcc_jmp_fail = true;
+                return -1;
+            }
+#ifdef CONFIG_LATX_LARGE_CC
+            uintptr_t fix_b_addr = ROUND_UP(fix_addr + 4, CODE_GEN_ALIGN / 2);
+#else
+            uintptr_t fix_b_addr = fix_addr + 4;
+#endif
+            lsassert(fix_b_addr <= (uintptr_t)tb->tc.ptr + tb->tc.size - 4);
+            fix_insn &= OFF16_MASK;
+            fix_insn = bcc_ins_convert(fix_insn);
+            /* change target and next */
+            offset = fix_b_addr + 4 - fix_addr;
+#ifdef CONFIG_LATX_LARGE_CC
+            offset += 4;
+#endif
+            offset >>= 2;
+            fix_insn |= (offset & BITS16_MASK) << 10;
+            lsassert(fix_b_addr <= (uintptr_t)tb->tc.ptr + tb->tc.size - 4);
+            tb_target_set_jmp_target((uintptr_t)tb->tc.ptr,
+                                    fix_b_addr, fix_b_addr, target);
+        }
+        fix_insn &= OFF16_MASK;
+        fix_insn |= (offset & BITS16_MASK) << OFF16_SHIFT;
+        *(uint *)(fix_addr) = fix_insn;
+        break;
+    default:
+        lsassert(0);
+        break;
+    }
+    return 0;
+}
+
 int tu_relocat_target_branch(TranslationBlock * tb)
 {
     TranslationBlock *target_tb = tb->s_data->next_tb[TU_TB_INDEX_TARGET];
@@ -995,9 +1058,13 @@ void translate_tu(uint32 tb_num_in_tu, TranslationBlock **tb_list)
 #endif
 
 retry:
+    tu_init_generate_indirext_exit();
     for (uint32_t i = 0; i < tb_num_in_tu; i++) {
         tb = tb_list[i];
         tb->bool_flags |= IS_TU_TB;
+        if (i == tb_num_in_tu - 1) {
+            tb->bool_flags |= IS_TU_LAST_TB;
+        }
         if (tb->bool_flags & IS_CODE64) {
             CODEIS64 = 1;
         } else {
@@ -1022,12 +1089,24 @@ retry:
     }
 
     tb_list[0]->s_data->tu_size = tcg_ctx->code_gen_ptr - tb_list[0]->tc.ptr;
-
     mov_unlink_stub_to_end(tb_num_in_tu, tb_list);
 
+    /* Create a common exit stub path for all indirect jumps within the TU */
+    TranslationBlock *last_tb = (TranslationBlock *)tb_list[tb_num_in_tu - 1];
+    uintptr_t target = (uintptr_t)last_tb->tc.ptr +
+                        tb->s_data->indirect_exit[1];
     for (int i = 0; i < tb_num_in_tu; i++) {
         tb = tb_list[i];
-        if (!use_tu_jmp(tb) || tb->s_data->last_ir1_type == IR1_TYPE_CALL) {
+        if (!use_tu_jmp(tb)) {
+            if (tu_get_generate_indirext_exit() && is_indirect_tb(tb)) {
+                if (tu_relocat_indirect_exit(tb, target)) {
+                    qatomic_set(&tcg_ctx->code_gen_ptr, (void *)
+                                ROUND_UP((uintptr_t)(tb_list[0]->tc.ptr),
+                                CODE_GEN_ALIGN));
+                    assert(bcc_jmp_fail);
+                    goto retry;
+                }
+            }
             continue;
         }
         if ((tb->tu_jmp[TU_TB_INDEX_TARGET] != TB_JMP_RESET_OFFSET_INVALID)) {
@@ -1253,6 +1332,11 @@ bool is_tu_tb(TranslationBlock *tb)
 bool use_tu_jmp(TranslationBlock *tb)
 {
     return (tb->bool_flags & IS_TU_JMP) ? true : false;
+}
+
+bool is_indirect_tb(TranslationBlock *tb)
+{
+    return (tb->bool_flags & IS_INDIRECT_TB) ? true : false;
 }
 
 void set_use_tu_jmp(TranslationBlock *tb)
