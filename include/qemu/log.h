@@ -82,6 +82,7 @@ static inline bool qemu_log_separate(void)
 #define LOG_STRACE_ERROR   (1 << 25)
 #define LAT_LOG_AOT        (1 << 26)
 #define LAT_IMM_REG        (1 << 27)
+#define LAT_LOG_SMC        (1 << 28)
 
 #define LAT_LOG_PROFILE    (1 << 31)
 /* Lock output for a series of related logs.  Since this is not needed

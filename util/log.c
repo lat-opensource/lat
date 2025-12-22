@@ -392,6 +392,7 @@ const QEMULogItem qemu_log_items[] = {
     { LAT_LOG_EFLAGS, "lat_eflags", "latx tail eflags info debug" },
     { LAT_LOG_AOT, "lat_aot", "aot log info"},
     { LAT_IMM_REG, "lat_imm_reg","latx imm reg info debug"},
+    { LAT_LOG_SMC, "lat_log_smc","smc opt log"},
     { 0, NULL, NULL },
 };
 

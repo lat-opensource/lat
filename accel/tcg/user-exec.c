@@ -25,6 +25,7 @@
 #include "exec/cpu_ldst.h"
 #include "exec/translate-all.h"
 #include "exec/helper-proto.h"
+#include "exec/log.h"
 #include "qemu/atomic128.h"
 #include "trace/trace-root.h"
 #include "trace/mem.h"
@@ -242,12 +243,15 @@ static uint64_t parse_guest_store(siginfo_t *info, ucontext_t *uc, int *size)
     if (s == -2) unsup_sc += 1;
 
     if (unsup < 0x100) {
-        fprintf(stderr, "%s:%d SMC unsupport inst %08x count %lu %lu\n",
+        qemu_log_mask(LAT_LOG_SMC,
+                "%s:%d SMC unsupport inst %08x count %lu %lu\n",
                 __func__, __LINE__, inst, unsup, unsup_sc);
     } else if (!(unsup & 0xfff)) {
-        fprintf(stderr, "%s:%d SMC unsupport inst %08x count %lu %lu\n",
+        qemu_log_mask(LAT_LOG_SMC,
+                "%s:%d SMC unsupport inst %08x count %lu %lu\n",
                 __func__, __LINE__, inst, unsup, unsup_sc);
-        fprintf(stderr, "%s:%d SMC unsupport too much !!! "
+        qemu_log_mask(LAT_LOG_SMC,
+                "%s:%d SMC unsupport too much !!! "
                 "Maybe try export LATX_SMC=0 and report this problem please.\n",
                 __func__, __LINE__);
     }
