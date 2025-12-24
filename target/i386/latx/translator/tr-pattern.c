@@ -10,7 +10,7 @@
 #ifdef CONFIG_LATX_INSTS_PATTERN
 
 #define WRAP(ins) (dt_X86_INS_##ins)
-#define EFLAGS_CACULATE(opnd0, opnd1, inst, i)                       \
+#define EFLAGS_CACULATE(opnd0, opnd1, inst, i, flags)            \
     do {                                                             \
         bool need_calc_flag = ir1_need_calculate_any_flag(inst);     \
         if (!need_calc_flag)                                         \
@@ -19,7 +19,7 @@
         IR2_OPND eflags = ra_alloc_label();                          \
         la_label(eflags);                                            \
         tb->eflags_target_arg[i] = ir2_opnd_label_id(&eflags);       \
-        generate_eflag_calculation(opnd0, opnd0, opnd1, inst, true); \
+        generate_eflag_calculation(opnd0, opnd0, opnd1, inst, flags); \
     } while (0)
 
 static bool translate_cmp_jcc(IR1_INST *ir1)
@@ -162,19 +162,19 @@ static bool translate_cmp_jcc(IR1_INST *ir1)
 #endif
 
     /* not taken */
-    EFLAGS_CACULATE(src_opnd_0, src_opnd_1, curr, 0);
+    EFLAGS_CACULATE(src_opnd_0, src_opnd_1, curr, 0, true);
     tr_generate_exit_tb(next, 0);
 
     la_label(target_label_opnd);
     /* taken */
-    EFLAGS_CACULATE(src_opnd_0, src_opnd_1, curr, 1);
+    EFLAGS_CACULATE(src_opnd_0, src_opnd_1, curr, 1, true);
     tr_generate_exit_tb(next, 1);
 
     /*
      * the backup of the eflags instruction, which is used
      * to recover the eflags instruction when unlink a tb.
      */
-    EFLAGS_CACULATE(src_opnd_0, src_opnd_1, curr, EFLAG_BACKUP);
+    EFLAGS_CACULATE(src_opnd_0, src_opnd_1, curr, EFLAG_BACKUP, true);
     return true;
 }
 
@@ -374,14 +374,14 @@ static bool translate_sub_jcc(IR1_INST *ir1)
         jcc_gen_bcc(bcc_src0, bcc_src1, target_label_opnd, next);
     }
     /* not taken */
-    EFLAGS_CACULATE(src_opnd_0, src_opnd_1, curr, 0);
+    EFLAGS_CACULATE(src_opnd_0, src_opnd_1, curr, 0, true);
     gen_sub(dest, src_opnd_0, src_opnd_1, mem_opnd, imm,
             ir1, opnd0, opnd0_size);
     tr_generate_exit_tb(next, 0);
 
     la_label(target_label_opnd);
     /* taken */
-    EFLAGS_CACULATE(src_opnd_0, src_opnd_1, curr, 1);
+    EFLAGS_CACULATE(src_opnd_0, src_opnd_1, curr, 1, true);
     gen_sub(dest, src_opnd_0, src_opnd_1, mem_opnd, imm,
             ir1, opnd0, opnd0_size);
     tr_generate_exit_tb(next, 1);
@@ -389,7 +389,7 @@ static bool translate_sub_jcc(IR1_INST *ir1)
      * the backup of the eflags instruction, which is used
      * to recover the eflags instruction when unlink a tb.
      */
-    EFLAGS_CACULATE(src_opnd_0, src_opnd_1, curr, EFLAG_BACKUP);
+    EFLAGS_CACULATE(src_opnd_0, src_opnd_1, curr, EFLAG_BACKUP, true);
     /* ra_free_temp(bcc_src0); */
     /* ra_free_temp(bcc_src1); */
 
@@ -693,19 +693,19 @@ static bool translate_bt_jcc(IR1_INST *ir1)
 
 
     /* not taken */
-    EFLAGS_CACULATE(src_opnd_0, bit_offset, curr, 0);
+    EFLAGS_CACULATE(src_opnd_0, bit_offset, curr, 0, true);
     tr_generate_exit_tb(next, 0);
 
     la_label(target_label_opnd);
     /* taken */
-    EFLAGS_CACULATE(src_opnd_0, src_opnd_1, curr, 1);
+    EFLAGS_CACULATE(src_opnd_0, src_opnd_1, curr, 1, true);
     tr_generate_exit_tb(next, 1);
 
     /*
      * the backup of the eflags instruction, which is used
      * to recover the eflags instruction when unlink a tb.
      */
-    EFLAGS_CACULATE(src_opnd_0, bit_offset, curr, EFLAG_BACKUP);
+    EFLAGS_CACULATE(src_opnd_0, bit_offset, curr, EFLAG_BACKUP, true);
 
     ra_free_temp_auto(src_opnd_0);
     ra_free_temp(bit_offset);
@@ -997,19 +997,19 @@ static bool translate_test_jcc(IR1_INST *ir1)
 #endif
 
     /* not taken */
-    EFLAGS_CACULATE(src_opnd_0, is_same_reg ? src_opnd_0 : src_opnd_1, curr, 0);
+    EFLAGS_CACULATE(src_opnd_0, is_same_reg ? src_opnd_0 : src_opnd_1, curr, 0, true);
     tr_generate_exit_tb(next, 0);
 
     la_label(target_label_opnd);
     /* taken */
-    EFLAGS_CACULATE(src_opnd_0, is_same_reg ? src_opnd_0 : src_opnd_1, curr, 1);
+    EFLAGS_CACULATE(src_opnd_0, is_same_reg ? src_opnd_0 : src_opnd_1, curr, 1, true);
     tr_generate_exit_tb(next, 1);
 
     /*
      * the backup of the eflags instruction, which is used
      * to recover the eflags instruction when unlink a tb.
      */
-    EFLAGS_CACULATE(src_opnd_0, is_same_reg ? src_opnd_0 : src_opnd_1, curr, EFLAG_BACKUP);
+    EFLAGS_CACULATE(src_opnd_0, is_same_reg ? src_opnd_0 : src_opnd_1, curr, EFLAG_BACKUP, true);
     return true;
 }
 
@@ -2163,6 +2163,328 @@ bool translate_bt_xx_jcc(IR1_INST *pir1)
     return true;
 }
 
+static bool translate_shr_jcc(IR1_INST *pir1)
+{
+    IR1_INST *curr = pir1;
+    IR1_INST *next = curr->instptn.next;
+
+    IR1_OPND *opnd0 = ir1_get_opnd(curr, 0);
+    IR1_OPND *opnd1 = ir1_get_opnd(curr, 1);
+
+    int opnd_size = ir1_opnd_size(opnd0);
+    uint32 mask = (opnd_size == 64) ? 63 : 31;
+    uint8 shift = ir1_opnd_uimm(opnd1) & mask;
+
+    IR2_OPND dest, src;
+
+    if (ir1_opnd_is_gpr(opnd0) && (opnd_size >= 32)) {
+        dest = ra_alloc_gpr(ir1_opnd_base_reg_num(opnd0));
+        if (shift) {
+            if (opnd_size == 64) {
+                src = ra_alloc_itemp();
+                la_mov64(src, dest);
+            } else {
+                src = load_ireg_from_ir1(opnd0, ZERO_EXTENSION, false);
+            }
+        }
+    } else {
+        src = load_ireg_from_ir1(opnd0, ZERO_EXTENSION, false);
+        dest = ra_alloc_itemp();
+    }
+
+    IR2_INST *(*shifti_inst)(IR2_OPND, IR2_OPND, int);
+    shifti_inst = (opnd_size == 64) ? la_srli_d : la_srli_w;
+
+    lsassert(ir1_opnd_is_imm(opnd1));
+    bool can_use_imm = shift < opnd_size;
+    if (shift) {
+        shifti_inst(dest, src, shift);
+    }
+    if (shift || (ir1_opnd_is_gpr(opnd0) && (opnd_size == 32))) {
+        store_ireg_to_ir1(dest, opnd0, false);
+    }
+
+    if (!shift) {
+        translate_jcc(next);
+        return true;
+    }
+
+    IR2_OPND target_label_opnd = ra_alloc_label();
+
+#ifdef CONFIG_LATX_TU
+    IR2_OPND tu_reset_label_opnd = ra_alloc_label();
+    la_label(tu_reset_label_opnd);
+#endif
+
+    switch (ir1_opcode(next)) {
+        case WRAP(JNE): //dest!=0
+            la_bnez(dest, target_label_opnd);
+            break;
+        default:
+            lsassert(0);
+            break;
+    }
+#ifdef CONFIG_LATX_TU
+    if (judge_tu_eflag_gen(lsenv->tr_data->curr_tb)) {
+        TranslationBlock *tb = lsenv->tr_data->curr_tb;
+        tu_jcc_nop_gen(tb);
+        la_label(target_label_opnd);
+        /* tb->jmp_target_arg[0] = target_label_opnd._label_id; */
+        tb->tu_jmp[TU_TB_INDEX_TARGET] = tu_reset_label_opnd._label_id;
+        if (tb->tu_jmp[TU_TB_INDEX_NEXT] != TB_JMP_RESET_OFFSET_INVALID) {
+            IR2_OPND translated_label_opnd = ra_alloc_label();
+            /* la_code_align(2, 0x03400000); */
+            la_label(translated_label_opnd);
+            la_b(ir2_opnd_new(IR2_OPND_IMM, 0));
+            la_nop();
+            tb->tu_jmp[TU_TB_INDEX_NEXT] = translated_label_opnd._label_id;
+        }
+
+        IR2_OPND unlink_label_opnd = ra_alloc_label();
+        la_label(unlink_label_opnd);
+        tb->tu_unlink.stub_offset = unlink_label_opnd._label_id;
+        set_use_tu_jmp(tb);
+
+        IR2_OPND target_label_opnd2 = ra_alloc_label();
+        switch (ir1_opcode(next)) {
+        case WRAP(JNE): //dest!=0
+            la_bnez(dest, target_label_opnd2);
+            break;
+        default:
+            lsassert(0);
+            break;
+        }
+        /* not taken */
+        /* EFLAGS_CACULATE(src_opnd_0, src_opnd_0, curr, 0); */
+        tr_generate_exit_tb(next, 0);
+
+        la_label(target_label_opnd2);
+        /* taken */
+        /* EFLAGS_CACULATE(src_opnd_0, src_opnd_0, curr, 1); */
+        tr_generate_exit_tb(next, 1);
+
+        /*
+         * the backup of the eflags instruction, which is used
+         * to recover the eflags instruction when unlink a tb.
+         */
+        /* EFLAGS_CACULATE(src_opnd_0, src_opnd_0, curr, EFLAG_BACKUP); */
+
+        return true;
+    }
+#endif
+    IR2_OPND src1 = ir2_opnd_new(IR2_OPND_IMM, shift);
+
+    if (shift) {
+        EFLAGS_CACULATE(src, src1, curr, 0, can_use_imm);
+    }
+    tr_generate_exit_tb(next, 0);
+
+    la_label(target_label_opnd);
+
+    if (shift) {
+        EFLAGS_CACULATE(src, src1, curr, 1, can_use_imm);
+    }
+    tr_generate_exit_tb(next, 1);
+    if (shift) {
+        EFLAGS_CACULATE(src, src1, curr, EFLAG_BACKUP, can_use_imm);
+    }
+    return true;
+}
+
+static inline bool imm_mask(int32_t imm, bool *low, uint32_t *pos)
+{
+    *low = imm > 0;
+    /* if 0xff00: ~imm + 1; then imm + 1; */
+    imm = (*low ? imm : ~imm) + 1;
+    /* now src_imm is 0b0..010..0 if in special mode */
+    uint32_t t_pos = __builtin_ctz(imm);
+    uint32_t l_pos = __builtin_clz(imm);
+    if (t_pos + l_pos == sizeof(imm) * 8 - 1) {
+       *pos = t_pos;
+       return true;
+    }
+    *pos = 0;
+    *low = false;
+    return false;
+}
+
+static bool translate_and_jcc(IR1_INST *pir1)
+{
+    IR1_INST *curr = pir1;
+    IR1_INST *next = curr->instptn.next;
+
+    IR1_OPND *opnd0 = ir1_get_opnd(curr, 0);
+    IR1_OPND *opnd1 = ir1_get_opnd(curr, 1);
+
+    CPUArchState* env = (CPUArchState*)(lsenv->cpu_state);
+    CPUState *cpu = env_cpu(env);
+    bool is_lock = ir1_is_prefix_lock(curr) && ir1_opnd_is_mem(opnd0);
+    if (!close_latx_parallel) {
+        is_lock = is_lock && (cpu->tcg_cflags & CF_PARALLEL);
+    }
+    if (is_lock) {
+        translate_and(curr);
+        translate_jcc(next);
+        return true;
+    }
+
+    IR2_OPND src0, src1, dest;
+    IR2_OPND mem_opnd;
+    int imm, opnd0_size;
+    bool opt_imm, eflags_calc;
+
+    opnd0_size = ir1_opnd_size(opnd0);
+    opt_imm = ir1_opnd_is_s2uimm12(opnd1);
+    eflags_calc = ir1_need_calculate_any_flag(pir1);
+
+    bool special_mask = false, low_mask = false;
+    uint32_t mask_pos = 0;
+
+    if (ir1_opnd_is_imm(opnd1)) {
+        special_mask = imm_mask(ir1_opnd_simm(opnd1), &low_mask, &mask_pos);
+        opt_imm |= special_mask;
+    }
+
+    if (opt_imm && !eflags_calc) {
+        src1 = zero_ir2_opnd;
+    } else {
+        src1 = load_ireg_from_ir1(opnd1, UNKNOWN_EXTENSION, false);
+    }
+
+    if (ir1_opnd_is_gpr(opnd0)) {
+        if (opnd0_size == 64) {
+            src0 = ra_alloc_itemp();
+            la_mov64(src0, ra_alloc_gpr(ir1_opnd_base_reg_num(opnd0)));
+        } else {
+            src0 = convert_gpr_opnd(opnd0, ZERO_EXTENSION);
+        }
+
+        /* special_mask can clear origin register directly */
+        if (opnd0_size >= 32 || special_mask) {
+            dest = convert_gpr_opnd(opnd0, UNKNOWN_EXTENSION);
+        } else {
+            dest = ra_alloc_itemp();
+        }
+    } else {
+        src0 = ra_alloc_itemp();
+        dest = src0;
+        mem_opnd = convert_mem(opnd0, &imm);
+        la_ld_by_op_size(src0, mem_opnd, imm, opnd0_size);
+    }
+
+    /* calculate */
+    if (special_mask) {
+        if (low_mask) {
+            /* low mask, clear high bits */
+            int _high_pos = (opnd0_size >= 32) ? 63 : (opnd0_size - 1);
+            la_bstrins_d(dest, zero_ir2_opnd, _high_pos, mask_pos);
+        } else if (mask_pos > 0) {
+            /* high mask, clear low bits (pos cannot be 0 -> 0xff) */
+            la_bstrins_d(dest, zero_ir2_opnd, mask_pos - 1, 0);
+        }
+    } else if (opt_imm) {
+        la_andi(dest, src0, ir1_opnd_s2uimm(opnd1));
+    } else {
+        la_and(dest, src0, src1);
+    }
+
+    /* write back */
+    if (ir1_opnd_is_gpr(opnd0)) {
+        if (opnd0_size == 32 && !low_mask) {
+            la_mov32_zx(dest, dest);
+        } else
+        /* r16/r8 */
+        if (opnd0_size < 32) {
+            store_ireg_to_ir1(dest, opnd0, false);
+        }
+    } else {
+        la_st_by_op_size(dest, mem_opnd, imm, opnd0_size);
+    }
+
+    if (opnd0_size <= 32) {
+        IR2_OPND dest_t = ra_alloc_itemp();
+        la_bstrpick_d(dest_t, dest, opnd0_size - 1, 0);
+        ra_free_temp_auto(dest);
+        dest = dest_t;
+    }
+
+    IR2_OPND target_label_opnd = ra_alloc_label();
+#ifdef CONFIG_LATX_TU
+    IR2_OPND tu_reset_label_opnd = ra_alloc_label();
+    la_label(tu_reset_label_opnd);
+#endif
+
+    switch (ir1_opcode(next)) {
+    case WRAP(JNE):
+        la_bnez(dest, target_label_opnd);
+        break;
+    default:
+        lsassert(0);
+        break;
+    }
+
+#ifdef CONFIG_LATX_TU
+    if (judge_tu_eflag_gen(lsenv->tr_data->curr_tb)) {
+        TranslationBlock *tb = lsenv->tr_data->curr_tb;
+        tu_jcc_nop_gen(tb);
+        la_label(target_label_opnd);
+        /* tb->jmp_target_arg[0] = target_label_opnd._label_id; */
+        tb->tu_jmp[TU_TB_INDEX_TARGET] = tu_reset_label_opnd._label_id;
+        if (tb->tu_jmp[TU_TB_INDEX_NEXT] != TB_JMP_RESET_OFFSET_INVALID) {
+            IR2_OPND translated_label_opnd = ra_alloc_label();
+            /* la_code_align(2, 0x03400000); */
+            la_label(translated_label_opnd);
+            la_b(ir2_opnd_new(IR2_OPND_IMM, 0));
+            la_nop();
+            tb->tu_jmp[TU_TB_INDEX_NEXT] = translated_label_opnd._label_id;
+        }
+
+        IR2_OPND unlink_label_opnd = ra_alloc_label();
+        la_label(unlink_label_opnd);
+        tb->tu_unlink.stub_offset = unlink_label_opnd._label_id;
+        set_use_tu_jmp(tb);
+
+        IR2_OPND target_label_opnd2 = ra_alloc_label();
+        switch (ir1_opcode(next)) {
+        case WRAP(JNE):
+            la_bnez(dest, target_label_opnd2);
+            break;
+        default:
+            lsassert(0);
+            break;
+        }
+        /* not taken */
+        /* EFLAGS_CACULATE(src_opnd_0, src_opnd_1, curr, 0); */
+        tr_generate_exit_tb(next, 0);
+
+        la_label(target_label_opnd2);
+        /* taken */
+        /* EFLAGS_CACULATE(src_opnd_0, src_opnd_1, curr, 1); */
+        tr_generate_exit_tb(next, 1);
+
+        /*
+         * the backup of the eflags instruction, which is used
+         * to recover the eflags instruction when unlink a tb.
+         */
+        /* EFLAGS_CACULATE(src_opnd_0, src_opnd_1, curr, EFLAG_BACKUP); */
+        return true;
+    }
+#endif
+
+    /* not taken */
+    EFLAGS_CACULATE(src0, src1, curr, 0, true);
+    tr_generate_exit_tb(next, 0);
+
+    la_label(target_label_opnd);
+    /* taken */
+    EFLAGS_CACULATE(src0, src1, curr, 1, true);
+    tr_generate_exit_tb(next, 1);
+
+    EFLAGS_CACULATE(src0, src1, curr, EFLAG_BACKUP, true);
+
+    return true;
+}
+
 #ifdef CONFIG_LATX_XCOMISX_OPT
 static inline bool xcomisx_xx_jcc(IR1_INST *pir1, bool is_jcc, bool is_double, bool qnan_exp)
 {
@@ -2433,6 +2755,10 @@ bool try_translate_instptn(IR1_INST *pir1)
 #endif
     case INSTPTN_OPC_NEG_CMOVCC:
         return translate_neg_cmovcc(pir1);
+    case INSTPTN_OPC_SHR_JCC:
+        return translate_shr_jcc(pir1);
+    case INSTPTN_OPC_AND_JCC:
+        return translate_and_jcc(pir1);
     default:
         lsassert(0);
         break;

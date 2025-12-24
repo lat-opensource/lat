@@ -42,6 +42,10 @@
 #define INSTPTN_OPC_SUB_JCC        0x2000000
 #define INSTPTN_OPC_MOVAPS_VST_X4  0x4000000
 #define INSTPTN_OPC_NEG_CMOVCC     0x8000000
+
+#define INSTPTN_OPC_SHR_JCC        0x10000000
+#define INSTPTN_OPC_AND_JCC        0x20000000
+
 typedef int scan_elem_t;
 
 void insts_pattern_scan_con(TranslationBlock *tb, IR1_INST *ir1, int index, scan_elem_t *scan_buf);
@@ -112,6 +116,9 @@ bool insts_pattern_scan_jcc_end(TranslationBlock *tb, IR1_INST *ir1, int index, 
 
 #define instptn_check_movaps_vst_x4_0() INSTPTN_CHECK_XX_0(MOVAPS_VST_X4)
 #define instptn_check_neg_cmovcc_0() INSTPTN_CHECK_XX_0(NEG_CMOVCC)
+
+#define instptn_check_shr_jcc_0() INSTPTN_CHECK_XX_0(SHR_JCC)
+#define instptn_check_and_jcc_0() INSTPTN_CHECK_XX_0(AND_JCC)
 #else
 #define instptn_check_void(option)
 #define instptn_check_false(option)
@@ -143,6 +150,9 @@ bool insts_pattern_scan_jcc_end(TranslationBlock *tb, IR1_INST *ir1, int index, 
 
 #define instptn_check_movaps_vst_x4_0()
 #define instptn_check_neg_cmovcc_0()
+
+#define instptn_check_shr_jcc_0()
+#define instptn_check_and_jcc_0()
 #endif
 
 bool try_translate_instptn(IR1_INST *pir1);

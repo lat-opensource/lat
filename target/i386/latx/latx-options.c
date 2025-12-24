@@ -40,7 +40,7 @@ int option_tunnel_lib;
 #endif
 
 #ifdef CONFIG_LATX_INSTS_PATTERN
-int option_instptn = 0xffffff;
+int option_instptn = 0x3ffffff;
 #endif
 
 int close_latx_parallel;

@@ -556,6 +556,41 @@ bool insts_pattern_scan_jcc_end(TranslationBlock *tb, IR1_INST *pir1, int pir1_i
         default:
             return false;
         }
+    case WRAP(SHR):
+        SCAN_CHECK(scan, 0);
+        ir1_jcc = SCAN_IR1(tb, scan, 0);
+        opnd1 = ir1_get_opnd(pir1, 1);
+        if (!ir1_opnd_is_imm(opnd1))
+            return false;
+        switch (ir1_opcode(ir1_jcc)) {
+        case WRAP(JNE):
+            if (pir1_index + 1 == SCAN_IDX(scan, 0)) {
+                instptn_check_shr_jcc_0();
+                pir1->instptn.opc  = INSTPTN_OPC_SHR_JCC;
+                pir1->instptn.next = ir1_jcc;
+                ir1_jcc->instptn.opc  = INSTPTN_OPC_NOP;
+                // ir1_jcc->instptn.next = NULL;
+            }
+            return false;
+        default:
+            return false;
+        }
+    case WRAP(AND):
+        SCAN_CHECK(scan, 0);
+        ir1_jcc = SCAN_IR1(tb, scan, 0);
+        switch (ir1_opcode(ir1_jcc)) {
+        case WRAP(JNE):
+            if (pir1_index + 1 == SCAN_IDX(scan, 0)) {
+                instptn_check_and_jcc_0();
+                pir1->instptn.opc  = INSTPTN_OPC_AND_JCC;
+                pir1->instptn.next = ir1_jcc;
+                ir1_jcc->instptn.opc  = INSTPTN_OPC_NOP;
+                // ir1_jcc->instptn.next = NULL;
+            }
+            return false;
+        default:
+            return false;
+        }
 #ifdef CONFIG_LATX_XCOMISX_OPT
     case WRAP(COMISD):
         SCAN_CHECK(scan, 0);
