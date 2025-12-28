@@ -457,6 +457,7 @@ bool insts_pattern_scan_jcc_end(TranslationBlock *tb, IR1_INST *pir1, int pir1_i
                 // ir1_jcc->instptn.next = NULL;
             } else {
                 instptn_check_cmp_xx_jcc_0();
+                lsassert(!option_mem_test);
                 pir1->instptn.opc  = INSTPTN_OPC_CMP_XX_JCC;
                 pir1->instptn.next = ir1_jcc;
                 ir1_jcc->instptn.opc  = INSTPTN_OPC_CMP_XX_JCC;
@@ -496,6 +497,7 @@ bool insts_pattern_scan_jcc_end(TranslationBlock *tb, IR1_INST *pir1, int pir1_i
                 // ir1_jcc->instptn.next = NULL;
             } else {
                 instptn_check_test_xx_jcc_0();
+                lsassert(!option_mem_test);
                 pir1->instptn.opc  = INSTPTN_OPC_TEST_XX_JCC;
                 pir1->instptn.next = ir1_jcc;
                 ir1_jcc->instptn.opc  = INSTPTN_OPC_TEST_XX_JCC;
@@ -522,6 +524,7 @@ bool insts_pattern_scan_jcc_end(TranslationBlock *tb, IR1_INST *pir1, int pir1_i
                 // ir1_jcc->instptn.next = NULL;
             } else {
                 instptn_check_bt_xx_jcc_0();
+                lsassert(!option_mem_test);
                 pir1->instptn.opc  = INSTPTN_OPC_BT_XX_JCC;
                 pir1->instptn.next = ir1_jcc;
                 ir1_jcc->instptn.opc  = INSTPTN_OPC_BT_XX_JCC;
@@ -614,6 +617,7 @@ bool insts_pattern_scan_jcc_end(TranslationBlock *tb, IR1_INST *pir1, int pir1_i
                 // ir1_jcc->instptn.next = NULL;
             } else {
                 instptn_check_comisd_xx_jcc_0();
+                lsassert(!option_mem_test);
                 pir1->instptn.opc  = INSTPTN_OPC_COMISD_XX_JCC;
                 pir1->instptn.next = ir1_jcc;
                 ir1_jcc->instptn.opc  = INSTPTN_OPC_COMISD_XX_JCC;
@@ -645,6 +649,7 @@ bool insts_pattern_scan_jcc_end(TranslationBlock *tb, IR1_INST *pir1, int pir1_i
                 // ir1_jcc->instptn.next = NULL;
             } else {
                 instptn_check_comiss_xx_jcc_0();
+                lsassert(!option_mem_test);
                 pir1->instptn.opc  = INSTPTN_OPC_COMISS_XX_JCC;
                 pir1->instptn.next = ir1_jcc;
                 ir1_jcc->instptn.opc  = INSTPTN_OPC_COMISS_XX_JCC;
@@ -676,6 +681,7 @@ bool insts_pattern_scan_jcc_end(TranslationBlock *tb, IR1_INST *pir1, int pir1_i
                 // ir1_jcc->instptn.next = NULL;
             } else {
                 instptn_check_ucomisd_xx_jcc_0();
+                lsassert(!option_mem_test);
                 pir1->instptn.opc  = INSTPTN_OPC_UCOMISD_XX_JCC;
                 pir1->instptn.next = ir1_jcc;
                 ir1_jcc->instptn.opc  = INSTPTN_OPC_UCOMISD_XX_JCC;
@@ -707,6 +713,7 @@ bool insts_pattern_scan_jcc_end(TranslationBlock *tb, IR1_INST *pir1, int pir1_i
                 ir1_jcc->instptn.next = NULL;
             } else {
                 instptn_check_ucomiss_xx_jcc_0();
+                lsassert(!option_mem_test);
                 pir1->instptn.opc  = INSTPTN_OPC_UCOMISS_XX_JCC;
                 pir1->instptn.next = ir1_jcc;
                 ir1_jcc->instptn.opc  = INSTPTN_OPC_UCOMISS_XX_JCC;
@@ -717,10 +724,18 @@ bool insts_pattern_scan_jcc_end(TranslationBlock *tb, IR1_INST *pir1, int pir1_i
             return false;
         }
 #endif
+    case WRAP(MOV): {
+        opnd0 = ir1_get_opnd(pir1, 0);
+        opnd1 = ir1_get_opnd(pir1, 1);
+        if (ir1_opnd_is_mem(opnd0) && ir1_opnd_is_gpr(opnd1) &&
+            (!ir1_opnd_is_8h(opnd1)) && tb_use_smc_opt(lsenv->tr_data->curr_tb)) {
+                return false;
+        }
+        return true;
+    }
     case WRAP(ADDSD):
     case WRAP(ADDSS):
     case WRAP(LEA):
-    case WRAP(MOV):
     case WRAP(MOVAPD):
     case WRAP(MOVHPS):
     case WRAP(MOVLPS):

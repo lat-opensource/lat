@@ -1599,51 +1599,11 @@ bool translate_cmp_xx_jcc(IR1_INST *pir1)
         IR1_OPND *opnd0 = ir1_get_opnd(pir1, 0);
         IR1_OPND *opnd1 = ir1_get_opnd(pir1, 1);
 
-        td->ptn_itemp0 = ra_alloc_ptn_itemp();
-        td->ptn_itemp1 = ra_alloc_ptn_itemp();
+        td->ptn_itemp0 = a0_ir2_opnd;
+        td->ptn_itemp1 = a1_ir2_opnd;
         load_ireg_from_ir1_2(td->ptn_itemp0, opnd0, SIGN_EXTENSION, false);
         load_ireg_from_ir1_2(td->ptn_itemp1, opnd1, SIGN_EXTENSION, false);
-        int os = ir1_opnd_size(opnd0); /* 8, 16, 32, 64 */
-        switch (os)
-        {
-        case 8:
-            la_x86sub_b(td->ptn_itemp0, td->ptn_itemp1);
-            break;
-        case 16:
-            la_x86sub_h(td->ptn_itemp0, td->ptn_itemp1);
-            break;
-        case 32:
-            la_x86sub_w(td->ptn_itemp0, td->ptn_itemp1);
-            break;
-        case 64:
-            la_x86sub_d(td->ptn_itemp0, td->ptn_itemp1);
-            break;
-        default:
-            break;
-        }
-
     } else {
-        if (!td->ptn_itemp_status) {
-            switch (ir1_opcode(pir1)) {
-            case WRAP(JB):
-            case WRAP(JAE):
-            case WRAP(JE):
-            case WRAP(JNE):
-            case WRAP(JBE):
-            case WRAP(JA):
-            case WRAP(JL):
-            case WRAP(JGE):
-            case WRAP(JLE):
-            case WRAP(JG):
-                translate_jcc(pir1);
-                break;
-            default:
-                lsassert(0);
-                break;
-            }
-            return true;
-        }
-
         IR2_OPND target_label_opnd = ra_alloc_label();
 #ifdef CONFIG_LATX_TU
         IR2_OPND tu_reset_label_opnd = ra_alloc_label();
@@ -1741,7 +1701,6 @@ bool translate_cmp_xx_jcc(IR1_INST *pir1)
                 lsassert(0);
                 break;
             }
-            td->ptn_itemp_status = 0;
             /* not taken */
             /* EFLAGS_CACULATE(src_opnd_0, src_opnd_1, curr, 0); */
             tr_generate_exit_tb(pir1, 0);
@@ -1759,13 +1718,16 @@ bool translate_cmp_xx_jcc(IR1_INST *pir1)
             return true;
         }
 #endif
-        td->ptn_itemp_status = 0;
         /* not taken */
+        EFLAGS_CACULATE(td->ptn_itemp0, td->ptn_itemp1, pir1->instptn.next, 0, true);
         tr_generate_exit_tb(pir1, 0);
 
         la_label(target_label_opnd);
         /* taken */
+        EFLAGS_CACULATE(td->ptn_itemp0, td->ptn_itemp1, pir1->instptn.next, 1, true);
         tr_generate_exit_tb(pir1, 1);
+
+        EFLAGS_CACULATE(td->ptn_itemp0, td->ptn_itemp1, pir1->instptn.next, EFLAG_BACKUP, true);
     }
 
     return true;
@@ -1779,58 +1741,25 @@ bool translate_test_xx_jcc(IR1_INST *pir1)
     if (ir1_opcode(pir1) == WRAP(TEST)) {
         IR1_OPND *opnd0 = ir1_get_opnd(pir1, 0);
         IR1_OPND *opnd1 = ir1_get_opnd(pir1, 1);
-        int os = ir1_opnd_size(opnd0);
 
-        td->ptn_itemp0 = ra_alloc_ptn_itemp();
+        td->ptn_itemp0 = a0_ir2_opnd;
         load_ireg_from_ir1_2(td->ptn_itemp0, opnd0, SIGN_EXTENSION, false);
 
         bool is_same_reg = ir1_opnd_is_same_reg(opnd0, opnd1);
-        IR2_OPND src1;
         if (!is_same_reg) {
-            src1 = ra_alloc_itemp();
-            load_ireg_from_ir1_2(src1, opnd1, SIGN_EXTENSION, false);
-        }
-
-        switch (os)
-        {
-        case 8:
-            la_x86and_b(td->ptn_itemp0, is_same_reg ? td->ptn_itemp0 : src1);
-            break;
-        case 16:
-            la_x86and_h(td->ptn_itemp0, is_same_reg ? td->ptn_itemp0 : src1);
-            break;
-        case 32:
-            la_x86and_w(td->ptn_itemp0, is_same_reg ? td->ptn_itemp0 : src1);
-            break;
-        case 64:
-            la_x86and_d(td->ptn_itemp0, is_same_reg ? td->ptn_itemp0 : src1);
-            break;
-        default:
-            break;
-        }
-        if (!is_same_reg) {
-            la_and(td->ptn_itemp0, td->ptn_itemp0, src1);
+            td->ptn_itemp1 = a1_ir2_opnd;
+            load_ireg_from_ir1_2(td->ptn_itemp1, opnd1, SIGN_EXTENSION, false);
+        } else {
+            td->ptn_itemp1 = td->ptn_itemp0;
         }
     } else {
-        if (!td->ptn_itemp_status) {
-            switch (ir1_opcode(pir1)) {
-            case WRAP(JE):
-            case WRAP(JNE):
-            case WRAP(JS):
-            case WRAP(JNS):
-            case WRAP(JLE):
-            case WRAP(JG):
-            case WRAP(JNO):
-            case WRAP(JO):
-            case WRAP(JB):
-            case WRAP(JBE):
-            case WRAP(JA):
-            case WRAP(JAE):
-                translate_jcc(pir1);
-                break;
-            default:        lsassert(0);        break;
-            }
-            return true;
+        IR1_INST *next = pir1->instptn.next;
+        IR2_OPND itemp;
+        if (ir1_opnd_is_same_reg(ir1_get_opnd(next, 0), ir1_get_opnd(next, 1))) {
+            itemp = td->ptn_itemp0;
+        } else {
+            itemp = ra_alloc_itemp();
+            la_and(itemp, td->ptn_itemp0, td->ptn_itemp1);
         }
 
         IR2_OPND target_label_opnd = ra_alloc_label();
@@ -1841,22 +1770,22 @@ bool translate_test_xx_jcc(IR1_INST *pir1)
 #endif
         switch (ir1_opcode(pir1)) {
         case WRAP(JE):
-            la_beqz(td->ptn_itemp0, target_label_opnd);
+            la_beqz(itemp, target_label_opnd);
             break;
         case WRAP(JNE):
-            la_bnez(td->ptn_itemp0, target_label_opnd);
+            la_bnez(itemp, target_label_opnd);
             break;
         case WRAP(JS):
-            la_blt(td->ptn_itemp0, zero_ir2_opnd, target_label_opnd);
+            la_blt(itemp, zero_ir2_opnd, target_label_opnd);
             break;
         case WRAP(JNS):
-            la_bge(td->ptn_itemp0, zero_ir2_opnd, target_label_opnd);
+            la_bge(itemp, zero_ir2_opnd, target_label_opnd);
             break;
         case WRAP(JLE):
-            la_bge(zero_ir2_opnd, td->ptn_itemp0, target_label_opnd);
+            la_bge(zero_ir2_opnd, itemp, target_label_opnd);
             break;
         case WRAP(JG):
-            la_blt(zero_ir2_opnd, td->ptn_itemp0, target_label_opnd);
+            la_blt(zero_ir2_opnd, itemp, target_label_opnd);
             break;
         case WRAP(JNO):
             /* OF = 0 For compatibility with bcc+b */
@@ -1878,11 +1807,11 @@ bool translate_test_xx_jcc(IR1_INST *pir1)
             break;
         case WRAP(JBE):
             /* CF = 1 or ZF = 1 */
-            la_beqz(td->ptn_itemp0, target_label_opnd);
+            la_beqz(itemp, target_label_opnd);
             break;
         case WRAP(JA):
             /* CF = 0 and ZF = 0 */
-            la_bnez(td->ptn_itemp0, target_label_opnd);
+            la_bnez(itemp, target_label_opnd);
             break;
         case WRAP(JAE):
             /* CF = 0 For compatibility with bcc+b */
@@ -1922,22 +1851,22 @@ bool translate_test_xx_jcc(IR1_INST *pir1)
             IR2_OPND target_label_opnd2 = ra_alloc_label();
             switch (ir1_opcode(pir1)) {
             case WRAP(JE):
-                la_beqz(td->ptn_itemp0, target_label_opnd2);
+                la_beqz(itemp, target_label_opnd2);
                 break;
             case WRAP(JNE):
-                la_bnez(td->ptn_itemp0, target_label_opnd2);
+                la_bnez(itemp, target_label_opnd2);
                 break;
             case WRAP(JS):
-                la_blt(td->ptn_itemp0, zero_ir2_opnd, target_label_opnd2);
+                la_blt(itemp, zero_ir2_opnd, target_label_opnd2);
                 break;
             case WRAP(JNS):
-                la_bge(td->ptn_itemp0, zero_ir2_opnd, target_label_opnd2);
+                la_bge(itemp, zero_ir2_opnd, target_label_opnd2);
                 break;
             case WRAP(JLE):
-                la_bge(zero_ir2_opnd, td->ptn_itemp0, target_label_opnd2);
+                la_bge(zero_ir2_opnd, itemp, target_label_opnd2);
                 break;
             case WRAP(JG):
-                la_blt(zero_ir2_opnd, td->ptn_itemp0, target_label_opnd2);
+                la_blt(zero_ir2_opnd, itemp, target_label_opnd2);
                 break;
             case WRAP(JNO):
                 /*
@@ -1960,10 +1889,10 @@ bool translate_test_xx_jcc(IR1_INST *pir1)
                 break;
             case WRAP(JBE):
                 /* CF = 1 or ZF = 1 */
-                la_beqz(td->ptn_itemp0, target_label_opnd2);
+                la_beqz(itemp, target_label_opnd2);
                 break;
             case WRAP(JA):
-                la_bnez(td->ptn_itemp0, target_label_opnd2);
+                la_bnez(itemp, target_label_opnd2);
                 /* CF = 0 and ZF = 0 */
                 break;
             case WRAP(JAE):
@@ -1977,7 +1906,7 @@ bool translate_test_xx_jcc(IR1_INST *pir1)
                 lsassert(0);
                 break;
             }
-            td->ptn_itemp_status = 0;
+
             /* not taken */
             /* EFLAGS_CACULATE(src_opnd_0, src_opnd_0, curr, 0); */
             tr_generate_exit_tb(pir1, 0);
@@ -1996,15 +1925,17 @@ bool translate_test_xx_jcc(IR1_INST *pir1)
             return true;
         }
 #endif
-        td->ptn_itemp_status = 0;
-
         /* not taken */
+        EFLAGS_CACULATE(td->ptn_itemp0, td->ptn_itemp1, next, 0, true);
         tr_generate_exit_tb(pir1, 0);
 
         la_label(target_label_opnd);
 
         /* taken */
+        EFLAGS_CACULATE(td->ptn_itemp0, td->ptn_itemp1, next, 1, true);
         tr_generate_exit_tb(pir1, 1);
+
+        EFLAGS_CACULATE(td->ptn_itemp0, td->ptn_itemp1, next, EFLAG_BACKUP, true);
     }
 
     return true;
@@ -2021,20 +1952,19 @@ bool translate_bt_xx_jcc(IR1_INST *pir1)
         IR1_OPND *bt_opnd0 = ir1_get_opnd(curr, 0);
         IR1_OPND *bt_opnd1 = ir1_get_opnd(curr, 1);
 
-        IR2_OPND src_opnd_0, src_opnd_1, bit_offset;
+        td->ptn_itemp0 = a0_ir2_opnd;
+        td->ptn_itemp1 = a1_ir2_opnd;
         int imm;
 
-        src_opnd_1 = load_ireg_from_ir1(bt_opnd1, ZERO_EXTENSION, false);
+        IR2_OPND src_opnd_1 = load_ireg_from_ir1(bt_opnd1, ZERO_EXTENSION, false);
 
-        bit_offset = ra_alloc_itemp();
-        la_bstrpick_d(bit_offset, src_opnd_1,
+        la_bstrpick_d(td->ptn_itemp1, src_opnd_1,
             __builtin_ctz(ir1_opnd_size(bt_opnd0)) - 1, 0);
         ra_free_temp_auto(src_opnd_1);
         if (ir1_opnd_is_gpr(bt_opnd0)) {
             /* r16/r32/r64 */
-            src_opnd_0 = convert_gpr_opnd(bt_opnd0, UNKNOWN_EXTENSION);
+            load_ireg_from_ir1_2(td->ptn_itemp0, bt_opnd0, UNKNOWN_EXTENSION, false);
         } else {
-            src_opnd_0 = ra_alloc_itemp();
             IR2_OPND tmp_mem_op = convert_mem(bt_opnd0, &imm);
             IR2_OPND mem_opnd = ra_alloc_itemp();
             la_or(mem_opnd, tmp_mem_op, zero_ir2_opnd);
@@ -2059,35 +1989,18 @@ bool translate_bt_xx_jcc(IR1_INST *pir1)
 
             if (ir1_opnd_size(bt_opnd0) == 64) {
                 /* m64 */
-                la_ld_d(src_opnd_0, mem_opnd, imm);
+                la_ld_d(td->ptn_itemp0, mem_opnd, imm);
             } else {
                 /* m16/m32 */
-                la_ld_w(src_opnd_0, mem_opnd, imm);
+                la_ld_w(td->ptn_itemp0, mem_opnd, imm);
             }
             ra_free_temp(mem_opnd);
         }
-
-        td->ptn_itemp0 = ra_alloc_ptn_itemp();
-        la_srl_d(td->ptn_itemp0, src_opnd_0, bit_offset);
-        ra_free_temp(bit_offset);
-        ra_free_temp_auto(src_opnd_0);
-        la_andi(td->ptn_itemp0, td->ptn_itemp0, 1);
-
-        /* update EFALGS */
-        la_x86mtflag(td->ptn_itemp0, 0x1);
     } else {
-        if (!td->ptn_itemp_status) {
-            switch (ir1_opcode(curr)) {
-            case WRAP(JB):
-            case WRAP(JAE):
-                translate_jcc(curr);
-                break;
-            default:
-                lsassert(0);
-                break;
-            }
-            return true;
-        }
+        IR1_INST *next = pir1->instptn.next;
+        IR2_OPND tempi = ra_alloc_itemp();
+        la_srl_d(tempi, td->ptn_itemp0, td->ptn_itemp1);
+        la_andi(tempi, tempi, 1);
 
         IR2_OPND target_label_opnd = ra_alloc_label();
 #ifdef CONFIG_LATX_TU
@@ -2097,10 +2010,10 @@ bool translate_bt_xx_jcc(IR1_INST *pir1)
 
         switch (ir1_opcode(curr)) {
         case WRAP(JB):   /*CF=1*/
-            la_bne(td->ptn_itemp0, zero_ir2_opnd, target_label_opnd);
+            la_bne(tempi, zero_ir2_opnd, target_label_opnd);
             break;
         case WRAP(JAE):  /*CF=0*/
-            la_beq(td->ptn_itemp0, zero_ir2_opnd, target_label_opnd);
+            la_beq(tempi, zero_ir2_opnd, target_label_opnd);
             break;
         default:
             lsassert(0);
@@ -2130,16 +2043,15 @@ bool translate_bt_xx_jcc(IR1_INST *pir1)
             IR2_OPND target_label_opnd2 = ra_alloc_label();
             switch (ir1_opcode(curr)) {
                 case WRAP(JB):   /*CF=1*/
-                    la_bne(td->ptn_itemp0, zero_ir2_opnd, target_label_opnd2);
+                    la_bne(tempi, zero_ir2_opnd, target_label_opnd2);
                     break;
                 case WRAP(JAE):  /*CF=0*/
-                    la_beq(td->ptn_itemp0, zero_ir2_opnd, target_label_opnd2);
+                    la_beq(tempi, zero_ir2_opnd, target_label_opnd2);
                     break;
                 default:
                     lsassert(0);
                     break;
             }
-            td->ptn_itemp_status = 0;
 
             tr_generate_exit_tb(curr, 0);
 
@@ -2150,14 +2062,15 @@ bool translate_bt_xx_jcc(IR1_INST *pir1)
             return true;
         }
 #endif
-
-        td->ptn_itemp_status = 0;
-
+        EFLAGS_CACULATE(td->ptn_itemp0, td->ptn_itemp1, next, 0, true);
         tr_generate_exit_tb(curr, 0);
 
         la_label(target_label_opnd);
         /* taken */
+        EFLAGS_CACULATE(td->ptn_itemp0, td->ptn_itemp1, next, 1, true);
         tr_generate_exit_tb(curr, 1);
+
+        EFLAGS_CACULATE(td->ptn_itemp0, td->ptn_itemp1, next, EFLAG_BACKUP, true);
     }
 
     return true;
@@ -2765,6 +2678,167 @@ bool try_translate_instptn(IR1_INST *pir1)
     }
 
     return false;
+}
+
+void opt_instptn_fix(CPUState *cpu, TranslationBlock *tb, int index)
+{
+    CPUArchState *env = cpu->env_ptr;
+    // int num_insns = tb->icount;
+    for (int i = 0; i < index; i++) {
+        IR1_INST *pir1 = tb_ir1_inst(tb, i);
+        if (pir1->instptn.opc == INSTPTN_OPC_CMP_XX_JCC ||
+            pir1->instptn.opc == INSTPTN_OPC_TEST_XX_JCC ||
+            pir1->instptn.opc == INSTPTN_OPC_BT_XX_JCC) {
+
+            int opnd_size = ir1_opnd_size(ir1_get_opnd(pir1, 0));
+            ucontext_t *uc = env->puc;
+
+            switch (ir1_opcode(pir1))
+            {
+            case dt_X86_INS_CMP:
+            {
+                uint64_t a0 = UC_GR(uc)[4];
+                uint64_t a1 = UC_GR(uc)[5];
+                uint64_t eflags = 0;
+                switch (opnd_size)
+                {
+                case 8:
+                    asm volatile (
+                        /* r4 = a0, r5 = a1 */
+                        "x86sub.b   %[dst], %[src]\n\t"   /* a0 = a0 - a1 (byte) */
+                        "x86mfflag  %[flags], %[csr]\n\t"  /* read x86 EFLAGS */
+                        : [dst]"+r"(a0),
+                        [flags]"=r"(eflags)
+                        : [src]"r"(a1),
+                        [csr]"i"(0x3f)
+                        : "cc"
+                    );
+                break;
+                case 16:
+                    asm volatile (
+                        /* r4 = a0, r5 = a1 */
+                        "x86sub.h   %[dst], %[src]\n\t"   /* a0 = a0 - a1 (byte) */
+                        "x86mfflag  %[flags], %[csr]\n\t"  /* read x86 EFLAGS */
+                        : [dst]"+r"(a0),
+                        [flags]"=r"(eflags)
+                        : [src]"r"(a1),
+                        [csr]"i"(0x3f)
+                        : "cc"
+                    );
+                break;
+                case 32:
+                    asm volatile (
+                        /* r4 = a0, r5 = a1 */
+                        "x86sub.w   %[dst], %[src]\n\t"   /* a0 = a0 - a1 (byte) */
+                        "x86mfflag  %[flags], %[csr]\n\t"  /* read x86 EFLAGS */
+                        : [dst]"+r"(a0),
+                        [flags]"=r"(eflags)
+                        : [src]"r"(a1),
+                        [csr]"i"(0x3f)
+                        : "cc"
+                    );
+                break;
+                case 64:
+                    asm volatile (
+                        /* r4 = a0, r5 = a1 */
+                        "x86sub.d   %[dst], %[src]\n\t"   /* a0 = a0 - a1 (byte) */
+                        "x86mfflag  %[flags], %[csr]\n\t"  /* read x86 EFLAGS */
+                        : [dst]"+r"(a0),
+                        [flags]"=r"(eflags)
+                        : [src]"r"(a1),
+                        [csr]"i"(0x3f)
+                        : "cc"
+                    );
+                break;
+                default:
+                    break;
+                }
+                env->eflags = env->eflags & ~(0b100011010101);
+                env->eflags = env->eflags | (eflags & 0b100011010101);
+            }
+            break;
+            case dt_X86_INS_TEST:
+            {
+                IR1_OPND *opnd0 = ir1_get_opnd(pir1, 0);
+                IR1_OPND *opnd1 = ir1_get_opnd(pir1, 1);
+
+                bool is_same_reg = ir1_opnd_is_same_reg(opnd0, opnd1);
+                uint64_t a0 = UC_GR(uc)[4];
+                uint64_t a1 = is_same_reg ? a0 : UC_GR(uc)[5];
+                uint64_t eflags = 0;
+
+                switch (opnd_size)
+                {
+                case 8:
+                    asm volatile (
+                        /* r4 = a0, r5 = a1 */
+                        "x86and.b   %[dst], %[src]\n\t"   /* a0 = a0 - a1 (byte) */
+                        "x86mfflag  %[flags], %[csr]\n\t"  /* read x86 EFLAGS */
+                        : [dst]"+r"(a0),
+                        [flags]"=r"(eflags)
+                        : [src]"r"(a1),
+                        [csr]"i"(0x3f)
+                        : "cc"
+                    );
+                break;
+                case 16:
+                    asm volatile (
+                        /* r4 = a0, r5 = a1 */
+                        "x86and.h   %[dst], %[src]\n\t"   /* a0 = a0 - a1 (byte) */
+                        "x86mfflag  %[flags], %[csr]\n\t"  /* read x86 EFLAGS */
+                        : [dst]"+r"(a0),
+                        [flags]"=r"(eflags)
+                        : [src]"r"(a1),
+                        [csr]"i"(0x3f)
+                        : "cc"
+                    );
+                break;
+                case 32:
+                    asm volatile (
+                        /* r4 = a0, r5 = a1 */
+                        "x86and.w   %[dst], %[src]\n\t"   /* a0 = a0 - a1 (byte) */
+                        "x86mfflag  %[flags], %[csr]\n\t"  /* read x86 EFLAGS */
+                        : [dst]"+r"(a0),
+                        [flags]"=r"(eflags)
+                        : [src]"r"(a1),
+                        [csr]"i"(0x3f)
+                        : "cc"
+                    );
+                break;
+                case 64:
+                    asm volatile (
+                        /* r4 = a0, r5 = a1 */
+                        "x86and.d   %[dst], %[src]\n\t"   /* a0 = a0 - a1 (byte) */
+                        "x86mfflag  %[flags], %[csr]\n\t"  /* read x86 EFLAGS */
+                        : [dst]"+r"(a0),
+                        [flags]"=r"(eflags)
+                        : [src]"r"(a1),
+                        [csr]"i"(0x3f)
+                        : "cc"
+                    );
+                break;
+                default:
+                    break;
+                }
+                env->eflags = env->eflags & ~(0b100011000101);
+                env->eflags = env->eflags | (eflags & 0b100011000101);
+            }
+            break;
+            case dt_X86_INS_BT:
+            {
+                uint64_t a0 = UC_GR(uc)[4];
+                uint64_t a1 = UC_GR(uc)[5];
+                env->eflags = env->eflags & ~(1); // clear CF
+                env->eflags = env->eflags | ((a0 >> a1) & 1); // set CF
+            }
+            break;
+            default:
+                lsassert(0);
+                break;
+            }
+            return;
+        }
+    }
 }
 
 #endif

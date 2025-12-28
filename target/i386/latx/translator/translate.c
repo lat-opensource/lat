@@ -95,9 +95,7 @@ void tr_init(void *tb)
 
     /* register allocation init */
     ra_free_all();
-#ifdef CONFIG_LATX_INSTS_PATTERN
-    ra_free_ptn();
-#endif
+
     /* reset ir2 array */
     if (t->ir2_inst_array == NULL) {
         lsassert(t->ir2_inst_num_max == 0);

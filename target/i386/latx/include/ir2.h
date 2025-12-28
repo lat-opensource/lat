@@ -110,6 +110,8 @@ bool la_ir2_opcode_is_load(IR2_OPCODE opcode);
 void tr_ir2_optimize(TranslationBlock *tb);
 
 void ir2_opt_push_pop_fix(TranslationBlock *tb, CPUState *cpu, int i);
-
+#ifdef CONFIG_LATX_INSTS_PATTERN
+void opt_instptn_fix(CPUState *cpu, TranslationBlock *tb, int index);
+#endif
 void la_append_ir2_jmp_far(ADDR jmp_offset);
 #endif

@@ -417,6 +417,8 @@ int encode_search(TranslationBlock *tb, uint8_t *block)
 #ifdef CONFIG_LATX_OPT_PUSH_POP
 extern void ir2_opt_push_pop_fix(TranslationBlock *tb, CPUState *cpu, int i);
 #endif
+extern void opt_instptn_fix(CPUState *cpu, TranslationBlock *tb, int i);
+
 /* The cpu state corresponding to 'searched_pc' is restored.
  * When reset_icount is true, current TB will be interrupted and
  * icount should be recalculated.
@@ -475,6 +477,9 @@ static int cpu_restore_state_from_tb(CPUState *cpu, TranslationBlock *tb,
     if (!parallel) {
         ir2_opt_push_pop_fix(tb, cpu, (searched_pc - (uintptr_t)tb->tc.ptr) / 4);
     }
+#endif
+#ifdef CONFIG_LATX_INSTS_PATTERN
+    opt_instptn_fix(cpu, tb, i);
 #endif
 #ifdef CONFIG_PROFILER
     qatomic_set(&prof->restore_time,
