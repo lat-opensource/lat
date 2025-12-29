@@ -132,6 +132,7 @@
 
 #define TARGET_IOC_NR(nr)		(((nr) >> TARGET_IOC_NRSHIFT) & TARGET_IOC_NRMASK)
 #define TARGET_IOC_SIZE(nr)		(((nr) >> TARGET_IOC_SIZESHIFT) & TARGET_IOC_SIZEMASK)
+#define TARGET_IOC_TYPE(nr)		(((nr) >> TARGET_IOC_TYPESHIFT) & TARGET_IOC_TYPEMASK)
 
 /* used to create numbers */
 #define TARGET_IO(type,nr)		TARGET_IOC(TARGET_IOC_NONE,(type),(nr),0)
@@ -2296,7 +2297,7 @@ struct target_stat {
 	abi_long	st_blocks;	/* Number 512-byte blocks allocated. */
 
 	abi_ulong	target_st_atime;
-	abi_ulong 	target_st_atime_nsec; 
+	abi_ulong 	target_st_atime_nsec;
 	abi_ulong	target_st_mtime;
 	abi_ulong	target_st_mtime_nsec;
 	abi_ulong	target_st_ctime;

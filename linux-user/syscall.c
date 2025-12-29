@@ -8172,18 +8172,20 @@ static abi_long do_ioctl(int fd, int cmd, abi_ulong arg)
 #endif
     /* slow path to iterate the ioctl_entries */
     if (ie->target_cmd != cmd) {
-        switch(TARGET_IOC_NR(cmd)) {
-            case TARGET_IOC_NR(TARGET_HIDIOCSFEATURE(0)):
-            case TARGET_IOC_NR(TARGET_HIDIOCGFEATURE(0)):
-            case TARGET_IOC_NR(TARGET_HIDIOCGRAWNAME(0)):
-            case TARGET_IOC_NR(TARGET_HIDIOCGRAWPHYS(0)):
-            case TARGET_IOC_NR(TARGET_HIDIOCGRAWUNIQ(0)):
-            case TARGET_IOC_NR(TARGET_HIDIOCSINPUT(0)):
-            case TARGET_IOC_NR(TARGET_HIDIOCGINPUT(0)):
-            case TARGET_IOC_NR(TARGET_HIDIOCSOUTPUT(0)):
-            case TARGET_IOC_NR(TARGET_HIDIOCGOUTPUT(0)):
-            case TARGET_IOC_NR(TARGET_HIDIOCREVOKE):
-                return handle_hidfeature(fd, cmd, arg, TARGET_IOC_SIZE(cmd), 1);
+        if (TARGET_IOC_TYPE(cmd) == 'H') {
+            switch(TARGET_IOC_NR(cmd)) {
+                case TARGET_IOC_NR(TARGET_HIDIOCSFEATURE(0)):
+                case TARGET_IOC_NR(TARGET_HIDIOCGFEATURE(0)):
+                case TARGET_IOC_NR(TARGET_HIDIOCGRAWNAME(0)):
+                case TARGET_IOC_NR(TARGET_HIDIOCGRAWPHYS(0)):
+                case TARGET_IOC_NR(TARGET_HIDIOCGRAWUNIQ(0)):
+                case TARGET_IOC_NR(TARGET_HIDIOCSINPUT(0)):
+                case TARGET_IOC_NR(TARGET_HIDIOCGINPUT(0)):
+                case TARGET_IOC_NR(TARGET_HIDIOCSOUTPUT(0)):
+                case TARGET_IOC_NR(TARGET_HIDIOCGOUTPUT(0)):
+                case TARGET_IOC_NR(TARGET_HIDIOCREVOKE):
+                    return handle_hidfeature(fd, cmd, arg, TARGET_IOC_SIZE(cmd), 1);
+            }
         }
         ie = ioctl_entries;
         for (i = 0; ; i++) {
