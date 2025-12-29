@@ -1775,7 +1775,8 @@ bool translate_lock_cmpxchg(IR1_INST *pir1)
         la_label(label_3);
         la_ll_d(src0, mem_opnd, 0);
         la_or(dest, src0, zero_ir2_opnd);
-        la_bstrpick_w(src0, src0, 55, 24);
+        la_bstrpick_d(src0, src0, 55, 24);
+        la_slli_w(src0, src0, 0);
         la_bne(src0, eax_opnd, label_unequal);
         la_bstrins_d(dest, src1, 55, 24);
         la_sc_d(dest, mem_opnd, 0);
@@ -1786,7 +1787,8 @@ bool translate_lock_cmpxchg(IR1_INST *pir1)
         la_label(label_2);
         la_ll_d(src0, mem_opnd, 0);
         la_or(dest, src0, zero_ir2_opnd);
-        la_bstrpick_w(src0, src0, 47, 16);
+        la_bstrpick_d(src0, src0, 47, 16);
+        la_slli_w(src0, src0, 0);
         la_bne(src0, eax_opnd, label_unequal);
         la_bstrins_d(dest, src1, 47, 16);
         la_sc_d(dest, mem_opnd, 0);
@@ -1797,7 +1799,8 @@ bool translate_lock_cmpxchg(IR1_INST *pir1)
         la_label(label_1);
         la_ll_d(src0, mem_opnd, 0);
         la_or(dest, src0, zero_ir2_opnd);
-        la_bstrpick_w(src0, src0, 39, 8);
+        la_bstrpick_d(src0, src0, 39, 8);
+        la_slli_w(src0, src0, 0);
         la_bne(src0, eax_opnd, label_unequal);
         la_bstrins_d(dest, src1, 39, 8);
         la_sc_d(dest, mem_opnd, 0);
