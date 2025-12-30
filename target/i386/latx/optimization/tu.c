@@ -1219,13 +1219,15 @@ bool judge_tu_eflag_gen(void *tb_in_tu) {
         /* when tb_next & tb_target exit, get eflags_target_arg */
         TranslationBlock *tb_target = tb->s_data->next_tb[TU_TB_INDEX_TARGET];
         TranslationBlock *tb_next = tb->s_data->next_tb[TU_TB_INDEX_NEXT];
-        if (!tb_target->eflag_use && !tb_next->eflag_use){
-            tb->eflags_target_arg[0] = TB_JMP_RESET_OFFSET_INVALID;
-            tb->eflags_target_arg[1] = TB_JMP_RESET_OFFSET_INVALID;
-            return true;
-        } else {
-            /* TODO */
+        /* TODO */
+        if (tb_target->eflag_use && !tb_next->eflag_use){
+            tb->tu_jmp[TU_TB_INDEX_NEXT] = TB_JMP_RESET_OFFSET_INVALID;
+            tb->tu_jmp[TU_TB_INDEX_TARGET] = TB_JMP_RESET_OFFSET_INVALID;
+            return false;
         }
+        tb->eflags_target_arg[0] = TB_JMP_RESET_OFFSET_INVALID;
+        tb->eflags_target_arg[1] = TB_JMP_RESET_OFFSET_INVALID;
+        return true;
     }
     tb->tu_jmp[TU_TB_INDEX_NEXT] = TB_JMP_RESET_OFFSET_INVALID;
     tb->tu_jmp[TU_TB_INDEX_TARGET] = TB_JMP_RESET_OFFSET_INVALID;

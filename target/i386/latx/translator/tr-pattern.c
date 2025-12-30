@@ -22,35 +22,10 @@
         generate_eflag_calculation(opnd0, opnd0, opnd1, inst, flags); \
     } while (0)
 
-static bool translate_cmp_jcc(IR1_INST *ir1)
+static inline void cmp_jcc_gen_bcc(IR2_OPND src_opnd_0, IR2_OPND src_opnd_1,
+        IR2_OPND target_label_opnd, IR1_INST *jcc_inst)
 {
-    IR1_INST *curr = ir1;
-    IR1_INST *next = ir1->instptn.next;
-
-    curr->info->id = WRAP(CMP);
-
-    int em = ZERO_EXTENSION;
-    switch (ir1_opcode(next)) {
-    case WRAP(JL):
-    case WRAP(JGE):
-    case WRAP(JLE):
-    case WRAP(JG):
-        em = SIGN_EXTENSION;
-        break;
-    default:
-        break;
-    }
-
-    IR2_OPND src_opnd_0 = load_ireg_from_ir1(ir1_get_opnd(curr, 0), em, false);
-    IR2_OPND src_opnd_1 = load_ireg_from_ir1(ir1_get_opnd(curr, 1), em, false);
-
-    IR2_OPND target_label_opnd = ra_alloc_label();
-#ifdef CONFIG_LATX_TU
-    IR2_OPND tu_reset_label_opnd = ra_alloc_label();
-    la_label(tu_reset_label_opnd);
-#endif
-
-    switch (ir1_opcode(next)) {
+    switch (ir1_opcode(jcc_inst)) {
     case WRAP(JB):
         la_bltu(src_opnd_0, src_opnd_1, target_label_opnd);
         break;
@@ -85,17 +60,53 @@ static bool translate_cmp_jcc(IR1_INST *ir1)
         lsassert(0);
         break;
     }
+}
 
+static bool translate_cmp_jcc(IR1_INST *ir1)
+{
+    IR1_INST *curr = ir1;
+    IR1_INST *next = ir1->instptn.next;
+
+    curr->info->id = WRAP(CMP);
+
+    int em = ZERO_EXTENSION;
+    switch (ir1_opcode(next)) {
+    case WRAP(JL):
+    case WRAP(JGE):
+    case WRAP(JLE):
+    case WRAP(JG):
+        em = SIGN_EXTENSION;
+        break;
+    default:
+        break;
+    }
+
+    IR2_OPND src_opnd_0 = load_ireg_from_ir1(ir1_get_opnd(curr, 0), em, false);
+    IR2_OPND src_opnd_1 = load_ireg_from_ir1(ir1_get_opnd(curr, 1), em, false);
+
+    IR2_OPND target_label_opnd = ra_alloc_label();
 #ifdef CONFIG_LATX_TU
-    if (judge_tu_eflag_gen(lsenv->tr_data->curr_tb)) {
-        TranslationBlock *tb = lsenv->tr_data->curr_tb;
-        tu_jcc_nop_gen(tb);
-        la_label(target_label_opnd);
-        /* tb->jmp_target_arg[0] = target_label_opnd._label_id; */
+    TranslationBlock *tb = lsenv->tr_data->curr_tb;
+    if (judge_tu_eflag_gen(tb)) {
+        IR2_OPND tu_reset_label_opnd = ra_alloc_label();
+        TranslationBlock *tb_next = tb->s_data->next_tb[TU_TB_INDEX_NEXT];
+        TranslationBlock *tb_target = tb->s_data->next_tb[TU_TB_INDEX_TARGET];
+
+        if (tb_next->eflag_use && tb_target->eflag_use) {
+            generate_eflag_calculation(src_opnd_0, src_opnd_0, src_opnd_1, curr, true);
+        }
+
+        la_label(tu_reset_label_opnd);
         tb->tu_jmp[TU_TB_INDEX_TARGET] = tu_reset_label_opnd._label_id;
+        cmp_jcc_gen_bcc(src_opnd_0, src_opnd_1, target_label_opnd, next);
+        tu_jcc_nop_gen(tb);
+
+        if (tb_next->eflag_use && !tb_target->eflag_use) {
+            generate_eflag_calculation(src_opnd_0, src_opnd_0, src_opnd_1, curr, true);
+        }
+
         if (tb->tu_jmp[TU_TB_INDEX_NEXT] != TB_JMP_RESET_OFFSET_INVALID) {
             IR2_OPND translated_label_opnd = ra_alloc_label();
-            /* la_code_align(2, 0x03400000); */
             la_label(translated_label_opnd);
             la_b(imm_zero_ir2_opnd);
             la_nop();
@@ -106,60 +117,10 @@ static bool translate_cmp_jcc(IR1_INST *ir1)
         la_label(unlink_label_opnd);
         tb->tu_unlink.stub_offset = unlink_label_opnd._label_id;
         set_use_tu_jmp(tb);
-
-        IR2_OPND target_label_opnd2 = ra_alloc_label();
-        switch (ir1_opcode(next)) {
-        case WRAP(JB):
-            la_bltu(src_opnd_0, src_opnd_1, target_label_opnd2);
-            break;
-        case WRAP(JAE):
-            la_bgeu(src_opnd_0, src_opnd_1, target_label_opnd2);
-            break;
-        case WRAP(JE):
-            la_beq(src_opnd_0, src_opnd_1, target_label_opnd2);
-            break;
-        case WRAP(JNE):
-            la_bne(src_opnd_0, src_opnd_1, target_label_opnd2);
-            break;
-        case WRAP(JBE):
-            la_bgeu(src_opnd_1, src_opnd_0, target_label_opnd2);
-            break;
-        case WRAP(JA):
-            la_bltu(src_opnd_1, src_opnd_0, target_label_opnd2);
-            break;
-        case WRAP(JL):
-            la_blt(src_opnd_0, src_opnd_1, target_label_opnd2);
-            break;
-        case WRAP(JGE):
-            la_bge(src_opnd_0, src_opnd_1, target_label_opnd2);
-            break;
-        case WRAP(JLE):
-            la_bge(src_opnd_1, src_opnd_0, target_label_opnd2);
-            break;
-        case WRAP(JG):
-            la_blt(src_opnd_1, src_opnd_0, target_label_opnd2);
-            break;
-        default:
-            lsassert(0);
-            break;
-        }
-        /* not taken */
-        /* EFLAGS_CACULATE(src_opnd_0, src_opnd_1, curr, 0); */
-        tr_generate_exit_tb(next, 0);
-
-        la_label(target_label_opnd2);
-        /* taken */
-        /* EFLAGS_CACULATE(src_opnd_0, src_opnd_1, curr, 1); */
-        tr_generate_exit_tb(next, 1);
-
-        /*
-         * the backup of the eflags instruction, which is used
-         * to recover the eflags instruction when unlink a tb.
-         */
-        /* EFLAGS_CACULATE(src_opnd_0, src_opnd_1, curr, EFLAG_BACKUP); */
-        return true;
     }
 #endif
+
+    cmp_jcc_gen_bcc(src_opnd_0, src_opnd_1, target_label_opnd, next);
 
     /* not taken */
     EFLAGS_CACULATE(src_opnd_0, src_opnd_1, curr, 0, true);
@@ -202,17 +163,10 @@ static IR2_OPND load_opnd_from_opnd(IR2_OPND src_opnd, EXTENSION_MODE em, int op
 {
     lsassert(em == SIGN_EXTENSION || em == ZERO_EXTENSION ||
              em == UNKNOWN_EXTENSION);
-    IR2_OPND ret_opnd = ra_alloc_itemp_internal();
+    IR2_OPND ret_opnd = ra_alloc_itemp();
     if (opnd_size == 64 || em == UNKNOWN_EXTENSION) {
-#ifdef CONFIG_LATX_TU
-        if (judge_tu_eflag_gen(lsenv->tr_data->curr_tb)) {
-            la_mov64(ret_opnd, src_opnd);
-            return ret_opnd;
-        }
-#endif
-        return src_opnd;
-    }
-    if (opnd_size == 32) {
+        la_mov64(ret_opnd, src_opnd);
+    } else if (opnd_size == 32) {
         if (em == SIGN_EXTENSION ) {
             la_mov32_sx(ret_opnd, src_opnd);
         } else if (em == ZERO_EXTENSION ) {
@@ -329,28 +283,38 @@ static bool translate_sub_jcc(IR1_INST *ir1)
         la_ld_by_op_size(src_opnd_0, mem_opnd, imm, opnd0_size);
     }
 
-    bcc_src0 = load_opnd_from_opnd(src_opnd_0, em, opnd0_size);
-    bcc_src1 = load_opnd_from_opnd(src_opnd_1, em, ir1_opnd_size(opnd1));
-
-    /* bcc_src0 = load_ireg_from_ir1(opnd0, em, false); */
-    /* bcc_src1 = load_ireg_from_ir1(opnd1, em, false); */
+    int opnd1_size = ir1_opnd_size(opnd1);
+    if (opnd1_size == 64 || em == UNKNOWN_EXTENSION) {
+        bcc_src1 = src_opnd_1;
+    } else {
+        bcc_src1 = load_opnd_from_opnd(src_opnd_1, em, opnd1_size);
+    }
 
     IR2_OPND target_label_opnd = ra_alloc_label();
 #ifdef CONFIG_LATX_TU
-    IR2_OPND tu_reset_label_opnd = ra_alloc_label();
-    if (judge_tu_eflag_gen(lsenv->tr_data->curr_tb)) {
-        gen_sub(dest, src_opnd_0, src_opnd_1, mem_opnd, imm,
-                ir1, opnd0, opnd0_size);
+    TranslationBlock *tb = lsenv->tr_data->curr_tb;
+    /* if (judge_tu_eflag_gen(lsenv->tr_data->curr_tb)) { */
+    if (tb->s_data->next_tb[TU_TB_INDEX_NEXT] && tb->s_data->next_tb[TU_TB_INDEX_TARGET]) {
+        IR2_OPND tu_reset_label_opnd = ra_alloc_label();
+        TranslationBlock *tb_next = tb->s_data->next_tb[TU_TB_INDEX_NEXT];
+        TranslationBlock *tb_target = tb->s_data->next_tb[TU_TB_INDEX_TARGET];
+
+        /* cmp_jcc_gen_bcc() is after gen_sub(), so we must store src_opnd_0 into a temp reg. */
+        bcc_src0 = load_opnd_from_opnd(src_opnd_0, em, opnd0_size);
+        if (tb_next->eflag_use || tb_target->eflag_use) {
+            /* Sometimes an extra calculation of eflags is performed. */
+            generate_eflag_calculation(src_opnd_0, src_opnd_0, src_opnd_1, curr, true);
+        }
+
+        gen_sub(dest, src_opnd_0, src_opnd_1, mem_opnd, imm, ir1, opnd0, opnd0_size);
+
         la_label(tu_reset_label_opnd);
-        jcc_gen_bcc(bcc_src0, bcc_src1, target_label_opnd, next);
-        TranslationBlock *tb = lsenv->tr_data->curr_tb;
-        tu_jcc_nop_gen(tb);
-        la_label(target_label_opnd);
-        /* tb->jmp_target_arg[0] = target_label_opnd._label_id; */
         tb->tu_jmp[TU_TB_INDEX_TARGET] = tu_reset_label_opnd._label_id;
+        cmp_jcc_gen_bcc(bcc_src0, bcc_src1, target_label_opnd, next);
+        tu_jcc_nop_gen(tb);
+
         if (tb->tu_jmp[TU_TB_INDEX_NEXT] != TB_JMP_RESET_OFFSET_INVALID) {
             IR2_OPND translated_label_opnd = ra_alloc_label();
-            /* la_code_align(2, 0x03400000); */
             la_label(translated_label_opnd);
             la_b(imm_zero_ir2_opnd);
             la_nop();
@@ -360,19 +324,16 @@ static bool translate_sub_jcc(IR1_INST *ir1)
         la_label(unlink_label_opnd);
         tb->tu_unlink.stub_offset = unlink_label_opnd._label_id;
         set_use_tu_jmp(tb);
-        IR2_OPND target_label_opnd2 = ra_alloc_label();
-        jcc_gen_bcc(bcc_src0, bcc_src1, target_label_opnd2, next);
-        tr_generate_exit_tb(next, 0);
-        la_label(target_label_opnd2);
-        tr_generate_exit_tb(next, 1);
-        /* ra_free_temp(bcc_src0); */
-        /* ra_free_temp(bcc_src1); */
-        return true;
-    } else
-#endif
-    {
-        jcc_gen_bcc(bcc_src0, bcc_src1, target_label_opnd, next);
     }
+#endif
+
+    if (opnd0_size == 64 || em == UNKNOWN_EXTENSION) {
+        bcc_src0 = src_opnd_0;
+    } else {
+        bcc_src0 = load_opnd_from_opnd(src_opnd_0, em, opnd1_size);
+    }
+    cmp_jcc_gen_bcc(bcc_src0, bcc_src1, target_label_opnd, next);
+
     /* not taken */
     EFLAGS_CACULATE(src_opnd_0, src_opnd_1, curr, 0, true);
     gen_sub(dest, src_opnd_0, src_opnd_1, mem_opnd, imm,
@@ -423,6 +384,9 @@ static inline bool xcomisx_jcc(IR1_INST *ir1, bool is_double, bool qnan_exp)
     IR2_OPND dest = load_freg128_from_ir1(ir1_get_opnd(ir1, 0));
     IR2_OPND src = load_freg128_from_ir1(ir1_get_opnd(ir1, 1));
     IR2_OPND target_label_opnd = ra_alloc_label();
+#ifdef CONFIG_LATX_TU
+    TranslationBlock *tb = lsenv->tr_data->curr_tb;
+#endif
 
     switch (ir1_opcode(next)) {
     case WRAP(JA):
@@ -451,7 +415,14 @@ static inline bool xcomisx_jcc(IR1_INST *ir1, bool is_double, bool qnan_exp)
     case WRAP(JL):
         break;
     case WRAP(JGE):
+#ifdef CONFIG_LATX_TU
+        if (!tb->s_data->next_tb[TU_TB_INDEX_NEXT] ||
+                !tb->s_data->next_tb[TU_TB_INDEX_TARGET]) {
+            la_b(target_label_opnd);
+        }
+#else
         la_b(target_label_opnd);
+#endif
         break;
     default:
         lsassert(0);
@@ -459,22 +430,31 @@ static inline bool xcomisx_jcc(IR1_INST *ir1, bool is_double, bool qnan_exp)
     }
 
 #ifdef CONFIG_LATX_TU
-    IR2_OPND tu_reset_label_opnd = ra_alloc_label();
-    la_label(tu_reset_label_opnd);
-#endif
-    if (ir1_opcode(next) != WRAP(JL))
-        la_bcnez(fcc7_ir2_opnd, target_label_opnd);
+    if (judge_tu_eflag_gen(tb)) {
+        IR2_OPND tu_reset_label_opnd = ra_alloc_label();
+        TranslationBlock *tb_next = tb->s_data->next_tb[TU_TB_INDEX_NEXT];
+        TranslationBlock *tb_target = tb->s_data->next_tb[TU_TB_INDEX_TARGET];
 
-#ifdef CONFIG_LATX_TU
-    if (judge_tu_eflag_gen(lsenv->tr_data->curr_tb)) {
-        TranslationBlock *tb = lsenv->tr_data->curr_tb;
-        tu_jcc_nop_gen(tb);
-        la_label(target_label_opnd);
-        /* tb->jmp_target_arg[0] = target_label_opnd._label_id; */
+        if (tb_next->eflag_use && tb_target->eflag_use) {
+            translate_xcomisx(curr);
+        }
+
+        la_label(tu_reset_label_opnd);
         tb->tu_jmp[TU_TB_INDEX_TARGET] = tu_reset_label_opnd._label_id;
+        if (ir1_opcode(next) != WRAP(JL)) {
+            la_bcnez(fcc7_ir2_opnd, target_label_opnd);
+            tu_jcc_nop_gen(tb);
+        } else {
+            /* For unlink. */
+            la_nop();
+        }
+
+        if (tb_next->eflag_use && !tb_target->eflag_use) {
+            translate_xcomisx(curr);
+        }
+
         if (tb->tu_jmp[TU_TB_INDEX_NEXT] != TB_JMP_RESET_OFFSET_INVALID) {
             IR2_OPND translated_label_opnd = ra_alloc_label();
-            /* la_code_align(2, 0x03400000); */
             la_label(translated_label_opnd);
             la_b(imm_zero_ir2_opnd);
             la_nop();
@@ -485,54 +465,11 @@ static inline bool xcomisx_jcc(IR1_INST *ir1, bool is_double, bool qnan_exp)
         la_label(unlink_label_opnd);
         tb->tu_unlink.stub_offset = unlink_label_opnd._label_id;
         set_use_tu_jmp(tb);
-
-        IR2_OPND target_label_opnd2 = ra_alloc_label();
-        switch (ir1_opcode(next)) {
-        case WRAP(JA):
-            la_fcmp(fcc7_ir2_opnd, src, dest, FCMP_COND_CLT + qnan_exp);
-            break;
-        case WRAP(JAE):
-            la_fcmp(fcc7_ir2_opnd, src, dest, FCMP_COND_CLE + qnan_exp);
-            break;
-        case WRAP(JB):
-    	/* below or NAN, x86 special define */
-            la_fcmp(fcc7_ir2_opnd, dest, src, FCMP_COND_CULT + qnan_exp);
-            break;
-        case WRAP(JBE):
-    	/* below or equal or NAN, x86 special define */
-            la_fcmp(fcc7_ir2_opnd, dest, src, FCMP_COND_CULE + qnan_exp);
-            break;
-        case WRAP(JE):
-        case WRAP(JLE):
-    	/* equal or NAN, x86 special define */
-            la_fcmp(fcc7_ir2_opnd, dest, src, FCMP_COND_CUEQ + qnan_exp);
-            break;
-        case WRAP(JNE):
-        case WRAP(JG):
-            la_fcmp(fcc7_ir2_opnd, dest, src, FCMP_COND_CNE + qnan_exp);
-            break;
-        case WRAP(JL):
-            break;
-        case WRAP(JGE):
-            la_b(target_label_opnd);
-        break;
-        default:
-            lsassert(0);
-            break;
-        }
-        if (ir1_opcode(next) != WRAP(JL))
-            la_bcnez(fcc7_ir2_opnd, target_label_opnd2);
-        /* not taken */
-        tr_generate_exit_stub_tb(next, 0, trans, curr);
-
-        la_label(target_label_opnd2);
-        /* taken */
-        tr_generate_exit_stub_tb(next, 1, trans, curr);
-
-        return true;
     }
 #endif
 
+    if (ir1_opcode(next) != WRAP(JL))
+        la_bcnez(fcc7_ir2_opnd, target_label_opnd);
 
     /* not taken */
     tr_generate_exit_stub_tb(next, 0, trans, curr);
@@ -621,11 +558,51 @@ static bool translate_bt_jcc(IR1_INST *ir1)
     IR2_OPND temp_opnd = ra_alloc_itemp();
     la_srl_d(temp_opnd, src_opnd_0, bit_offset);
     la_andi(temp_opnd, temp_opnd, 1);
-
     IR2_OPND target_label_opnd = ra_alloc_label();
+
 #ifdef CONFIG_LATX_TU
-    IR2_OPND tu_reset_label_opnd = ra_alloc_label();
-    la_label(tu_reset_label_opnd);
+    TranslationBlock *tb = lsenv->tr_data->curr_tb;
+    if (judge_tu_eflag_gen(tb)) {
+        TranslationBlock *tb_next = tb->s_data->next_tb[TU_TB_INDEX_NEXT];
+        TranslationBlock *tb_target = tb->s_data->next_tb[TU_TB_INDEX_TARGET];
+        IR2_OPND tu_reset_label_opnd = ra_alloc_label();
+
+        if (tb_next->eflag_use && tb_target->eflag_use) {
+            generate_eflag_calculation(src_opnd_0, src_opnd_0, src_opnd_1, curr, true);
+        }
+
+        la_label(tu_reset_label_opnd);
+        tb->tu_jmp[TU_TB_INDEX_TARGET] = tu_reset_label_opnd._label_id;
+        switch (ir1_opcode(next)) {
+            case WRAP(JB):   /*CF=1*/
+                la_bne(temp_opnd, zero_ir2_opnd, target_label_opnd);
+                break;
+            case WRAP(JAE):  /*CF=0*/
+                la_beq(temp_opnd, zero_ir2_opnd, target_label_opnd);
+                break;
+            default:
+                lsassert(0);
+                break;
+        }
+        tu_jcc_nop_gen(tb);
+
+        if (tb_next->eflag_use && !tb_target->eflag_use) {
+            generate_eflag_calculation(src_opnd_0, src_opnd_0, src_opnd_1, curr, true);
+        }
+
+        if (tb->tu_jmp[TU_TB_INDEX_NEXT] != TB_JMP_RESET_OFFSET_INVALID) {
+            IR2_OPND translated_label_opnd = ra_alloc_label();
+            la_label(translated_label_opnd);
+            la_b(imm_zero_ir2_opnd);
+            la_nop();
+            tb->tu_jmp[TU_TB_INDEX_NEXT] = translated_label_opnd._label_id;
+        }
+
+        IR2_OPND unlink_label_opnd = ra_alloc_label();
+        la_label(unlink_label_opnd);
+        tb->tu_unlink.stub_offset = unlink_label_opnd._label_id;
+        set_use_tu_jmp(tb);
+    }
 #endif
 
     switch (ir1_opcode(next)) {
@@ -639,58 +616,6 @@ static bool translate_bt_jcc(IR1_INST *ir1)
         lsassert(0);
         break;
     }
-
-#ifdef CONFIG_LATX_TU
-    if (judge_tu_eflag_gen(lsenv->tr_data->curr_tb)) {
-        TranslationBlock *tb = lsenv->tr_data->curr_tb;
-        tu_jcc_nop_gen(tb);
-        la_label(target_label_opnd);
-        /* tb->jmp_target_arg[0] = target_label_opnd._label_id; */
-        tb->tu_jmp[TU_TB_INDEX_TARGET] = tu_reset_label_opnd._label_id;
-        if (tb->tu_jmp[TU_TB_INDEX_NEXT] != TB_JMP_RESET_OFFSET_INVALID) {
-            IR2_OPND translated_label_opnd = ra_alloc_label();
-            /* la_code_align(2, 0x03400000); */
-            la_label(translated_label_opnd);
-            la_b(imm_zero_ir2_opnd);
-            la_nop();
-            tb->tu_jmp[TU_TB_INDEX_NEXT] = translated_label_opnd._label_id;
-        }
-
-        IR2_OPND unlink_label_opnd = ra_alloc_label();
-        la_label(unlink_label_opnd);
-        tb->tu_unlink.stub_offset = unlink_label_opnd._label_id;
-        set_use_tu_jmp(tb);
-
-        IR2_OPND target_label_opnd2 = ra_alloc_label();
-        switch (ir1_opcode(next)) {
-            case WRAP(JB):   /*CF=1*/
-                la_bne(temp_opnd, zero_ir2_opnd, target_label_opnd2);
-                break;
-            case WRAP(JAE):  /*CF=0*/
-                la_beq(temp_opnd, zero_ir2_opnd, target_label_opnd2);
-                break;
-            default:
-                lsassert(0);
-                break;
-        }
-        /* not taken */
-        /* EFLAGS_CACULATE(src_opnd_0, src_opnd_1, curr, 0); */
-        tr_generate_exit_tb(next, 0);
-
-        la_label(target_label_opnd2);
-        /* taken */
-        /* EFLAGS_CACULATE(src_opnd_0, src_opnd_1, curr, 1); */
-        tr_generate_exit_tb(next, 1);
-
-        /*
-         * the backup of the eflags instruction, which is used
-         * to recover the eflags instruction when unlink a tb.
-         */
-        /* EFLAGS_CACULATE(src_opnd_0, src_opnd_1, curr, EFLAG_BACKUP); */
-        return true;
-    }
-#endif
-
 
     /* not taken */
     EFLAGS_CACULATE(src_opnd_0, bit_offset, curr, 0, true);
@@ -791,38 +716,11 @@ static bool translate_cmp_sbb(IR1_INST *ir1)
     return true;
 }
 
-static bool translate_test_jcc(IR1_INST *ir1)
+/* Return true when it is a branch. */
+static inline bool test_jcc_gen_bcc(IR2_OPND src_opnd_0, IR2_OPND target_label_opnd,
+        IR2_OPND temp, int is_same_reg, IR1_INST *jcc_inst)
 {
-    IR1_INST *curr = ir1;
-    IR1_INST *next = ir1->instptn.next;
-#ifdef CONFIG_LATX_TU
-    bool is_branch = true;
-#endif
-
-    IR1_OPND *opnd0 = ir1_get_opnd(ir1, 0);
-    IR1_OPND *opnd1 = ir1_get_opnd(ir1, 1);
-
-    IR2_OPND src_opnd_0 =
-        load_ireg_from_ir1(opnd0, SIGN_EXTENSION, false);
-
-    IR2_OPND src_opnd_1;
-    IR2_OPND temp;
-    int is_same_reg = ir1_opnd_is_same_reg(opnd0, opnd1);
-    if (!is_same_reg) {
-        src_opnd_1 = load_ireg_from_ir1(opnd1, SIGN_EXTENSION, false);
-        temp = ra_alloc_itemp();
-        la_and(temp, src_opnd_0, src_opnd_1);
-    }
-
-    IR2_OPND target_label_opnd = ra_alloc_label();
-
-#ifdef CONFIG_LATX_TU
-    IR2_OPND tu_reset_label_opnd = ra_alloc_label();
-    la_label(tu_reset_label_opnd);
-#endif
-
-
-    switch (ir1_opcode(next)) {
+    switch (ir1_opcode(jcc_inst)) {
     case WRAP(JE):
         la_beq(is_same_reg ? src_opnd_0 : temp, zero_ir2_opnd, target_label_opnd);
         // la_beqz(src_opnd_0, target_label_opnd);
@@ -832,19 +730,15 @@ static bool translate_test_jcc(IR1_INST *ir1)
         la_bne(is_same_reg ? src_opnd_0 : temp, zero_ir2_opnd, target_label_opnd);
         break;
     case WRAP(JS):
-        lsassert(ir1_opnd_is_same_reg(opnd0, opnd1));
         la_blt(src_opnd_0, zero_ir2_opnd, target_label_opnd);
         break;
     case WRAP(JNS):
-        lsassert(ir1_opnd_is_same_reg(opnd0, opnd1));
         la_bge(src_opnd_0, zero_ir2_opnd, target_label_opnd);
         break;
     case WRAP(JLE):
-        lsassert(ir1_opnd_is_same_reg(opnd0, opnd1));
         la_bge(zero_ir2_opnd, src_opnd_0, target_label_opnd);
         break;
     case WRAP(JG):
-        lsassert(ir1_opnd_is_same_reg(opnd0, opnd1));
         la_blt(zero_ir2_opnd, src_opnd_0, target_label_opnd);
         break;
     case WRAP(JNO):
@@ -857,15 +751,11 @@ static bool translate_test_jcc(IR1_INST *ir1)
         break;
     case WRAP(JO):
         /* OF = 1 */
-#ifdef CONFIG_LATX_TU
-        is_branch = false;
-#endif
+        return false;
         break;
     case WRAP(JB):
         /* CF = 1 */
-#ifdef CONFIG_LATX_TU
-        is_branch = false;
-#endif
+        return false;
         break;
     case WRAP(JBE):
         /* CF = 1 or ZF = 1 */
@@ -889,112 +779,73 @@ static bool translate_test_jcc(IR1_INST *ir1)
         lsassert(0);
         break;
     }
+    return true;
+}
+
+static bool translate_test_jcc(IR1_INST *ir1)
+{
+    IR1_INST *curr = ir1;
+    IR1_INST *next = ir1->instptn.next;
+    IR1_OPND *opnd0 = ir1_get_opnd(ir1, 0);
+    IR1_OPND *opnd1 = ir1_get_opnd(ir1, 1);
+
+    IR2_OPND src_opnd_0 =
+        load_ireg_from_ir1(opnd0, SIGN_EXTENSION, false);
+
+    IR2_OPND src_opnd_1;
+    IR2_OPND temp;
+    int is_same_reg = ir1_opnd_is_same_reg(opnd0, opnd1);
+    if (!is_same_reg) {
+        src_opnd_1 = load_ireg_from_ir1(opnd1, SIGN_EXTENSION, false);
+        temp = ra_alloc_itemp();
+        la_and(temp, src_opnd_0, src_opnd_1);
+    }
+
+    IR2_OPND target_label_opnd = ra_alloc_label();
+
 #ifdef CONFIG_LATX_TU
-    if (judge_tu_eflag_gen(lsenv->tr_data->curr_tb)) {
-        TranslationBlock *tb = lsenv->tr_data->curr_tb;
-        tu_jcc_nop_gen(tb);
-        la_label(target_label_opnd);
-        if (is_branch) {
-            /* tb->jmp_target_arg[0] = target_label_opnd._label_id; */
-            tb->tu_jmp[TU_TB_INDEX_TARGET] = tu_reset_label_opnd._label_id;
-        } else {
-            /* tb->jmp_target_arg[0] = TB_JMP_RESET_OFFSET_INVALID; */
-            tb->tu_jmp[TU_TB_INDEX_TARGET] = TB_JMP_RESET_OFFSET_INVALID;
-        }
-        if (tb->tu_jmp[TU_TB_INDEX_NEXT] != TB_JMP_RESET_OFFSET_INVALID) {
-            IR2_OPND translated_label_opnd = ra_alloc_label();
-            /* la_code_align(2, 0x03400000); */
-            la_label(translated_label_opnd);
-            la_b(imm_zero_ir2_opnd);
+    TranslationBlock *tb = lsenv->tr_data->curr_tb;
+    if (judge_tu_eflag_gen(tb)) {
+	IR2_OPND tu_reset_label_opnd = ra_alloc_label();
+	TranslationBlock *tb_next = tb->s_data->next_tb[TU_TB_INDEX_NEXT];
+	TranslationBlock *tb_target = tb->s_data->next_tb[TU_TB_INDEX_TARGET];
+
+	if (tb_next->eflag_use && tb_target->eflag_use) {
+            generate_eflag_calculation(src_opnd_0, src_opnd_0,
+                    is_same_reg ? src_opnd_0 : src_opnd_1, curr, true);
+	}
+
+	la_label(tu_reset_label_opnd);
+	tb->tu_jmp[TU_TB_INDEX_TARGET] = tu_reset_label_opnd._label_id;
+	bool is_branch = test_jcc_gen_bcc(src_opnd_0, target_label_opnd,
+                temp, is_same_reg, next);
+        /* For unlink. */
+        if (!is_branch) {
             la_nop();
-            tb->tu_jmp[TU_TB_INDEX_NEXT] = translated_label_opnd._label_id;
         }
+	tu_jcc_nop_gen(tb);
 
-        IR2_OPND unlink_label_opnd = ra_alloc_label();
-        la_label(unlink_label_opnd);
-        tb->tu_unlink.stub_offset = unlink_label_opnd._label_id;
-        set_use_tu_jmp(tb);
+	if (tb_next->eflag_use && !tb_target->eflag_use) {
+            generate_eflag_calculation(src_opnd_0, src_opnd_0,
+                    is_same_reg ? src_opnd_0 : src_opnd_1, curr, true);
+	}
 
-        IR2_OPND target_label_opnd2 = ra_alloc_label();
-        switch (ir1_opcode(next)) {
-        case WRAP(JE):
-            la_beq(is_same_reg ? src_opnd_0 : temp, zero_ir2_opnd, target_label_opnd2);
-            break;
-        case WRAP(JNE):
-            la_bne(is_same_reg ? src_opnd_0 : temp, zero_ir2_opnd, target_label_opnd2);
-            break;
-        case WRAP(JS):
-            lsassert(ir1_opnd_is_same_reg(opnd0, opnd1));
-            la_blt(src_opnd_0, zero_ir2_opnd, target_label_opnd2);
-            break;
-        case WRAP(JNS):
-            lsassert(ir1_opnd_is_same_reg(opnd0, opnd1));
-            la_bge(src_opnd_0, zero_ir2_opnd, target_label_opnd2);
-            break;
-        case WRAP(JLE):
-            lsassert(ir1_opnd_is_same_reg(opnd0, opnd1));
-            la_bge(zero_ir2_opnd, src_opnd_0, target_label_opnd2);
-            break;
-        case WRAP(JG):
-            lsassert(ir1_opnd_is_same_reg(opnd0, opnd1));
-            la_blt(zero_ir2_opnd, src_opnd_0, target_label_opnd2);
-            break;
-        case WRAP(JNO):
-            /*
-             * OF = 0
-             * For compatibility with bcc+b.
-             */
-            la_beq(zero_ir2_opnd, zero_ir2_opnd, target_label_opnd2);
-            break;
-        case WRAP(JO):
-            /* OF = 1 */
-#ifdef CONFIG_LATX_TU
-            is_branch = false;
-#endif
-            break;
-        case WRAP(JB):
-            /* CF = 1 */
-#ifdef CONFIG_LATX_TU
-            is_branch = false;
-#endif
-            break;
-        case WRAP(JBE):
-            /* CF = 1 or ZF = 1 */
-            la_beq(is_same_reg ? src_opnd_0 : temp, zero_ir2_opnd, target_label_opnd2);
-            break;
-        case WRAP(JA):
-            la_bne(is_same_reg ? src_opnd_0 : temp, zero_ir2_opnd, target_label_opnd2);
-            /* CF = 0 and ZF = 0 */
-            break;
-        case WRAP(JAE):
-            /*
-             * CF = 0
-             * For compatibility with bcc+b.
-             */
-            la_beq(zero_ir2_opnd, zero_ir2_opnd, target_label_opnd2);
-            break;
-        default:
-            lsassert(0);
-            break;
-        }
-        /* not taken */
-        /* EFLAGS_CACULATE(src_opnd_0, src_opnd_0, curr, 0); */
-        tr_generate_exit_tb(next, 0);
+	if (tb->tu_jmp[TU_TB_INDEX_NEXT] != TB_JMP_RESET_OFFSET_INVALID) {
+	    IR2_OPND translated_label_opnd = ra_alloc_label();
+	    la_label(translated_label_opnd);
+	    la_b(ir2_opnd_new(IR2_OPND_IMM, 0));
+	    la_nop();
+	    tb->tu_jmp[TU_TB_INDEX_NEXT] = translated_label_opnd._label_id;
+	}
 
-        la_label(target_label_opnd2);
-        /* taken */
-        /* EFLAGS_CACULATE(src_opnd_0, src_opnd_0, curr, 1); */
-        tr_generate_exit_tb(next, 1);
-
-        /*
-         * the backup of the eflags instruction, which is used
-         * to recover the eflags instruction when unlink a tb.
-         */
-        /* EFLAGS_CACULATE(src_opnd_0, src_opnd_0, curr, EFLAG_BACKUP); */
-
-        return true;
+	IR2_OPND unlink_label_opnd = ra_alloc_label();
+	la_label(unlink_label_opnd);
+	tb->tu_unlink.stub_offset = unlink_label_opnd._label_id;
+	set_use_tu_jmp(tb);
     }
 #endif
+
+    test_jcc_gen_bcc(src_opnd_0, target_label_opnd, temp, is_same_reg, next);
 
     /* not taken */
     EFLAGS_CACULATE(src_opnd_0, is_same_reg ? src_opnd_0 : src_opnd_1, curr, 0, true);
@@ -1606,54 +1457,28 @@ bool translate_cmp_xx_jcc(IR1_INST *pir1)
     } else {
         IR2_OPND target_label_opnd = ra_alloc_label();
 #ifdef CONFIG_LATX_TU
-        IR2_OPND tu_reset_label_opnd = ra_alloc_label();
-        la_label(tu_reset_label_opnd);
-#endif
-        switch (ir1_opcode(pir1)) {
-        case WRAP(JB):
-            la_bltu(td->ptn_itemp0, td->ptn_itemp1, target_label_opnd);
-            break;
-        case WRAP(JAE):
-            la_bgeu(td->ptn_itemp0, td->ptn_itemp1, target_label_opnd);
-            break;
-        case WRAP(JE):
-            la_beq(td->ptn_itemp0, td->ptn_itemp1, target_label_opnd);
-            break;
-        case WRAP(JNE):
-            la_bne(td->ptn_itemp0, td->ptn_itemp1, target_label_opnd);
-            break;
-        case WRAP(JBE):
-            la_bgeu(td->ptn_itemp1, td->ptn_itemp0, target_label_opnd);
-            break;
-        case WRAP(JA):
-            la_bltu(td->ptn_itemp1, td->ptn_itemp0, target_label_opnd);
-            break;
-        case WRAP(JL):
-            la_blt(td->ptn_itemp0, td->ptn_itemp1, target_label_opnd);
-            break;
-        case WRAP(JGE):
-            la_bge(td->ptn_itemp0, td->ptn_itemp1, target_label_opnd);
-            break;
-        case WRAP(JLE):
-            la_bge(td->ptn_itemp1, td->ptn_itemp0, target_label_opnd);
-            break;
-        case WRAP(JG):
-            la_blt(td->ptn_itemp1, td->ptn_itemp0, target_label_opnd);
-            break;
-        default:
-            lsassert(0);
-            break;
-        }
-#ifdef CONFIG_LATX_TU
-        if (judge_tu_eflag_gen(lsenv->tr_data->curr_tb)) {
-            TranslationBlock *tb = lsenv->tr_data->curr_tb;
-            tu_jcc_nop_gen(tb);
-            la_label(target_label_opnd);
-            /*tb->jmp_target_arg[0] = target_label_opnd._label_id;*/
+        TranslationBlock *tb = lsenv->tr_data->curr_tb;
+        if (judge_tu_eflag_gen(tb)) {
+            IR2_OPND tu_reset_label_opnd = ra_alloc_label();
+            TranslationBlock *tb_next = tb->s_data->next_tb[TU_TB_INDEX_NEXT];
+            TranslationBlock *tb_target = tb->s_data->next_tb[TU_TB_INDEX_TARGET];
+
+            if (tb_next->eflag_use && tb_target->eflag_use) {
+                generate_eflag_calculation(td->ptn_itemp0, td->ptn_itemp0,
+                        td->ptn_itemp1, pir1->instptn.next, true);
+            }
+
+            la_label(tu_reset_label_opnd);
             tb->tu_jmp[TU_TB_INDEX_TARGET] = tu_reset_label_opnd._label_id;
+            cmp_jcc_gen_bcc(td->ptn_itemp0, td->ptn_itemp1, target_label_opnd, pir1);
+            tu_jcc_nop_gen(tb);
+
+            if (tb_next->eflag_use && !tb_target->eflag_use) {
+                generate_eflag_calculation(td->ptn_itemp0, td->ptn_itemp0,
+                        td->ptn_itemp1, pir1->instptn.next, true);
+            }
             if (tb->tu_jmp[TU_TB_INDEX_NEXT] != TB_JMP_RESET_OFFSET_INVALID) {
                 IR2_OPND translated_label_opnd = ra_alloc_label();
-                /* la_code_align(2, 0x03400000); */
                 la_label(translated_label_opnd);
                 la_b(ir2_opnd_new(IR2_OPND_IMM, 0));
                 la_nop();
@@ -1664,60 +1489,10 @@ bool translate_cmp_xx_jcc(IR1_INST *pir1)
             la_label(unlink_label_opnd);
             tb->tu_unlink.stub_offset = unlink_label_opnd._label_id;
             set_use_tu_jmp(tb);
-
-            IR2_OPND target_label_opnd2 = ra_alloc_label();
-            switch (ir1_opcode(pir1)) {
-            case WRAP(JB):
-            la_bltu(td->ptn_itemp0, td->ptn_itemp1, target_label_opnd2);
-                break;
-            case WRAP(JAE):
-                la_bgeu(td->ptn_itemp0, td->ptn_itemp1, target_label_opnd2);
-                break;
-            case WRAP(JE):
-                la_beq(td->ptn_itemp0, td->ptn_itemp1, target_label_opnd2);
-                break;
-            case WRAP(JNE):
-                la_bne(td->ptn_itemp0, td->ptn_itemp1, target_label_opnd2);
-                break;
-            case WRAP(JBE):
-                la_bgeu(td->ptn_itemp1, td->ptn_itemp0, target_label_opnd2);
-                break;
-            case WRAP(JA):
-                la_bltu(td->ptn_itemp1, td->ptn_itemp0, target_label_opnd2);
-                break;
-            case WRAP(JL):
-                la_blt(td->ptn_itemp0, td->ptn_itemp1, target_label_opnd2);
-                break;
-            case WRAP(JGE):
-                la_bge(td->ptn_itemp0, td->ptn_itemp1, target_label_opnd2);
-                break;
-            case WRAP(JLE):
-                la_bge(td->ptn_itemp1, td->ptn_itemp0, target_label_opnd2);
-                break;
-            case WRAP(JG):
-                la_blt(td->ptn_itemp1, td->ptn_itemp0, target_label_opnd2);
-                break;
-            default:
-                lsassert(0);
-                break;
-            }
-            /* not taken */
-            /* EFLAGS_CACULATE(src_opnd_0, src_opnd_1, curr, 0); */
-            tr_generate_exit_tb(pir1, 0);
-
-            la_label(target_label_opnd2);
-            /* taken */
-            /* EFLAGS_CACULATE(src_opnd_0, src_opnd_1, curr, 1); */
-            tr_generate_exit_tb(pir1, 1);
-
-            /*
-            * the backup of the eflags instruction, which is used
-            * to recover the eflags instruction when unlink a tb.
-            */
-            /* EFLAGS_CACULATE(src_opnd_0, src_opnd_1, curr, EFLAG_BACKUP); */
-            return true;
         }
 #endif
+        cmp_jcc_gen_bcc(td->ptn_itemp0, td->ptn_itemp1, target_label_opnd, pir1);
+
         /* not taken */
         EFLAGS_CACULATE(td->ptn_itemp0, td->ptn_itemp1, pir1->instptn.next, 0, true);
         tr_generate_exit_tb(pir1, 0);
@@ -1730,6 +1505,63 @@ bool translate_cmp_xx_jcc(IR1_INST *pir1)
         EFLAGS_CACULATE(td->ptn_itemp0, td->ptn_itemp1, pir1->instptn.next, EFLAG_BACKUP, true);
     }
 
+    return true;
+}
+
+/* Return true when it is a branch. */
+static inline bool test_xx_jcc_gen_bcc(IR2_OPND itemp,
+        IR2_OPND target_label_opnd, IR1_INST *jcc_inst)
+{
+    switch (ir1_opcode(jcc_inst)) {
+        case WRAP(JE):
+            la_beqz(itemp, target_label_opnd);
+            break;
+        case WRAP(JNE):
+            la_bnez(itemp, target_label_opnd);
+            break;
+        case WRAP(JS):
+            la_blt(itemp, zero_ir2_opnd, target_label_opnd);
+            break;
+        case WRAP(JNS):
+            la_bge(itemp, zero_ir2_opnd, target_label_opnd);
+            break;
+        case WRAP(JLE):
+            la_bge(zero_ir2_opnd, itemp, target_label_opnd);
+            break;
+        case WRAP(JG):
+            la_blt(zero_ir2_opnd, itemp, target_label_opnd);
+            break;
+        case WRAP(JNO):
+            /* OF = 0 For compatibility with bcc+b */
+            la_b(target_label_opnd);
+            break;
+        case WRAP(JO):
+            /* TODO tb->opt_bcc = false;*/
+            /* OF = 1 */
+            return false;
+            break;
+        case WRAP(JB):
+            /* TODO tb->opt_bcc = false;*/
+            /* CF = 1 */
+            return false;
+            break;
+        case WRAP(JBE):
+            /* CF = 1 or ZF = 1 */
+            la_beqz(itemp, target_label_opnd);
+            break;
+        case WRAP(JA):
+            /* CF = 0 and ZF = 0 */
+            la_bnez(itemp, target_label_opnd);
+            break;
+        case WRAP(JAE):
+            /* CF = 0 For compatibility with bcc+b */
+            //latxs_append_ir2_opnd2(LISA_BEQZ, zero, &target_label);
+            la_b(target_label_opnd);
+            break;
+        default:
+            lsassert(0);
+            break;
+    }
     return true;
 }
 
@@ -1763,80 +1595,36 @@ bool translate_test_xx_jcc(IR1_INST *pir1)
         }
 
         IR2_OPND target_label_opnd = ra_alloc_label();
+
 #ifdef CONFIG_LATX_TU
-        bool is_branch = true;
-        IR2_OPND tu_reset_label_opnd = ra_alloc_label();
-        la_label(tu_reset_label_opnd);
-#endif
-        switch (ir1_opcode(pir1)) {
-        case WRAP(JE):
-            la_beqz(itemp, target_label_opnd);
-            break;
-        case WRAP(JNE):
-            la_bnez(itemp, target_label_opnd);
-            break;
-        case WRAP(JS):
-            la_blt(itemp, zero_ir2_opnd, target_label_opnd);
-            break;
-        case WRAP(JNS):
-            la_bge(itemp, zero_ir2_opnd, target_label_opnd);
-            break;
-        case WRAP(JLE):
-            la_bge(zero_ir2_opnd, itemp, target_label_opnd);
-            break;
-        case WRAP(JG):
-            la_blt(zero_ir2_opnd, itemp, target_label_opnd);
-            break;
-        case WRAP(JNO):
-            /* OF = 0 For compatibility with bcc+b */
-            la_b(target_label_opnd);
-            break;
-        case WRAP(JO):
-            /* TODO tb->opt_bcc = false;*/
-            /* OF = 1 */
-#ifdef CONFIG_LATX_TU
-        is_branch = false;
-#endif
-            break;
-        case WRAP(JB):
-            /* TODO tb->opt_bcc = false;*/
-            /* CF = 1 */
-#ifdef CONFIG_LATX_TU
-        is_branch = false;
-#endif
-            break;
-        case WRAP(JBE):
-            /* CF = 1 or ZF = 1 */
-            la_beqz(itemp, target_label_opnd);
-            break;
-        case WRAP(JA):
-            /* CF = 0 and ZF = 0 */
-            la_bnez(itemp, target_label_opnd);
-            break;
-        case WRAP(JAE):
-            /* CF = 0 For compatibility with bcc+b */
-            //latxs_append_ir2_opnd2(LISA_BEQZ, zero, &target_label);
-            la_b(target_label_opnd);
-            break;
-        default:
-            lsassert(0);
-            break;
-        }
-#ifdef CONFIG_LATX_TU
-        if (judge_tu_eflag_gen(lsenv->tr_data->curr_tb)) {
-            TranslationBlock *tb = lsenv->tr_data->curr_tb;
-            tu_jcc_nop_gen(tb);
-            la_label(target_label_opnd);
-            if (is_branch) {
-                /*tb->jmp_target_arg[0] = target_label_opnd._label_id;*/
-                tb->tu_jmp[TU_TB_INDEX_TARGET] = tu_reset_label_opnd._label_id;
-            } else {
-                /*tb->jmp_target_arg[0] = TB_JMP_RESET_OFFSET_INVALID;*/
-                tb->tu_jmp[TU_TB_INDEX_TARGET] = TB_JMP_RESET_OFFSET_INVALID;
+        TranslationBlock *tb = lsenv->tr_data->curr_tb;
+        if (judge_tu_eflag_gen(tb)) {
+            IR2_OPND tu_reset_label_opnd = ra_alloc_label();
+            TranslationBlock *tb_next = tb->s_data->next_tb[TU_TB_INDEX_NEXT];
+            TranslationBlock *tb_target = tb->s_data->next_tb[TU_TB_INDEX_TARGET];
+
+            if (tb_next->eflag_use && tb_target->eflag_use) {
+                generate_eflag_calculation(td->ptn_itemp0, td->ptn_itemp0,
+                        td->ptn_itemp1, next, true);
             }
+
+            la_label(tu_reset_label_opnd);
+            tb->tu_jmp[TU_TB_INDEX_TARGET] = tu_reset_label_opnd._label_id;
+            bool is_branch
+                = test_xx_jcc_gen_bcc(itemp, target_label_opnd, pir1);
+            /* For unlink. */
+            if (!is_branch) {
+                la_nop();
+            }
+            tu_jcc_nop_gen(tb);
+
+            if (tb_next->eflag_use && !tb_target->eflag_use) {
+                generate_eflag_calculation(td->ptn_itemp0, td->ptn_itemp0,
+                        td->ptn_itemp1, next, true);
+            }
+
             if (tb->tu_jmp[TU_TB_INDEX_NEXT] != TB_JMP_RESET_OFFSET_INVALID) {
                 IR2_OPND translated_label_opnd = ra_alloc_label();
-                /* la_code_align(2, 0x03400000); */
                 la_label(translated_label_opnd);
                 la_b(ir2_opnd_new(IR2_OPND_IMM, 0));
                 la_nop();
@@ -1847,84 +1635,11 @@ bool translate_test_xx_jcc(IR1_INST *pir1)
             la_label(unlink_label_opnd);
             tb->tu_unlink.stub_offset = unlink_label_opnd._label_id;
             set_use_tu_jmp(tb);
-
-            IR2_OPND target_label_opnd2 = ra_alloc_label();
-            switch (ir1_opcode(pir1)) {
-            case WRAP(JE):
-                la_beqz(itemp, target_label_opnd2);
-                break;
-            case WRAP(JNE):
-                la_bnez(itemp, target_label_opnd2);
-                break;
-            case WRAP(JS):
-                la_blt(itemp, zero_ir2_opnd, target_label_opnd2);
-                break;
-            case WRAP(JNS):
-                la_bge(itemp, zero_ir2_opnd, target_label_opnd2);
-                break;
-            case WRAP(JLE):
-                la_bge(zero_ir2_opnd, itemp, target_label_opnd2);
-                break;
-            case WRAP(JG):
-                la_blt(zero_ir2_opnd, itemp, target_label_opnd2);
-                break;
-            case WRAP(JNO):
-                /*
-                * OF = 0
-                * For compatibility with bcc+b.
-                */
-                la_b(target_label_opnd2);
-                break;
-            case WRAP(JO):
-                /* OF = 1 */
-    #ifdef CONFIG_LATX_TU
-                is_branch = false;
-    #endif
-                break;
-            case WRAP(JB):
-                /* CF = 1 */
-    #ifdef CONFIG_LATX_TU
-                is_branch = false;
-    #endif
-                break;
-            case WRAP(JBE):
-                /* CF = 1 or ZF = 1 */
-                la_beqz(itemp, target_label_opnd2);
-                break;
-            case WRAP(JA):
-                la_bnez(itemp, target_label_opnd2);
-                /* CF = 0 and ZF = 0 */
-                break;
-            case WRAP(JAE):
-                /*
-                * CF = 0
-                * For compatibility with bcc+b.
-                */
-                la_b(target_label_opnd2);
-                break;
-            default:
-                lsassert(0);
-                break;
-            }
-
-            /* not taken */
-            /* EFLAGS_CACULATE(src_opnd_0, src_opnd_0, curr, 0); */
-            tr_generate_exit_tb(pir1, 0);
-
-            la_label(target_label_opnd2);
-            /* taken */
-            /* EFLAGS_CACULATE(src_opnd_0, src_opnd_0, curr, 1); */
-            tr_generate_exit_tb(pir1, 1);
-
-            /*
-            * the backup of the eflags instruction, which is used
-            * to recover the eflags instruction when unlink a tb.
-            */
-            /* EFLAGS_CACULATE(src_opnd_0, src_opnd_0, curr, EFLAG_BACKUP); */
-
-            return true;
         }
 #endif
+
+        test_xx_jcc_gen_bcc(itemp, target_label_opnd, pir1);
+
         /* not taken */
         EFLAGS_CACULATE(td->ptn_itemp0, td->ptn_itemp1, next, 0, true);
         tr_generate_exit_tb(pir1, 0);
@@ -2003,29 +1718,38 @@ bool translate_bt_xx_jcc(IR1_INST *pir1)
         la_andi(tempi, tempi, 1);
 
         IR2_OPND target_label_opnd = ra_alloc_label();
-#ifdef CONFIG_LATX_TU
-        IR2_OPND tu_reset_label_opnd = ra_alloc_label();
-        la_label(tu_reset_label_opnd);
-#endif
 
-        switch (ir1_opcode(curr)) {
-        case WRAP(JB):   /*CF=1*/
-            la_bne(tempi, zero_ir2_opnd, target_label_opnd);
-            break;
-        case WRAP(JAE):  /*CF=0*/
-            la_beq(tempi, zero_ir2_opnd, target_label_opnd);
-            break;
-        default:
-            lsassert(0);
-            break;
-        }
 #ifdef CONFIG_LATX_TU
-        if (judge_tu_eflag_gen(lsenv->tr_data->curr_tb)) {
-            TranslationBlock *tb = lsenv->tr_data->curr_tb;
-            tu_jcc_nop_gen(tb);
-            la_label(target_label_opnd);
-            /*tb->jmp_target_arg[0] = target_label_opnd._label_id;*/
+        TranslationBlock *tb = lsenv->tr_data->curr_tb;
+        if (judge_tu_eflag_gen(tb)) {
+            TranslationBlock *tb_next = tb->s_data->next_tb[TU_TB_INDEX_NEXT];
+            TranslationBlock *tb_target = tb->s_data->next_tb[TU_TB_INDEX_TARGET];
+            IR2_OPND tu_reset_label_opnd = ra_alloc_label();
+
+            if (tb_next->eflag_use && tb_target->eflag_use) {
+                generate_eflag_calculation(td->ptn_itemp0, td->ptn_itemp0,
+                        td->ptn_itemp1, next, true);
+            }
+
+            la_label(tu_reset_label_opnd);
             tb->tu_jmp[TU_TB_INDEX_TARGET] = tu_reset_label_opnd._label_id;
+            switch (ir1_opcode(curr)) {
+                case WRAP(JB):   /*CF=1*/
+                    la_bne(tempi, zero_ir2_opnd, target_label_opnd);
+                    break;
+                case WRAP(JAE):  /*CF=0*/
+                    la_beq(tempi, zero_ir2_opnd, target_label_opnd);
+                    break;
+                default:
+                    lsassert(0);
+                    break;
+            }
+            tu_jcc_nop_gen(tb);
+
+            if (tb_next->eflag_use && !tb_target->eflag_use) {
+                generate_eflag_calculation(td->ptn_itemp0, td->ptn_itemp0,
+                        td->ptn_itemp1, next, true);
+            }
             if (tb->tu_jmp[TU_TB_INDEX_NEXT] != TB_JMP_RESET_OFFSET_INVALID) {
                 IR2_OPND translated_label_opnd = ra_alloc_label();
                 /* la_code_align(2, 0x03400000); */
@@ -2039,29 +1763,21 @@ bool translate_bt_xx_jcc(IR1_INST *pir1)
             la_label(unlink_label_opnd);
             tb->tu_unlink.stub_offset = unlink_label_opnd._label_id;
             set_use_tu_jmp(tb);
-
-            IR2_OPND target_label_opnd2 = ra_alloc_label();
-            switch (ir1_opcode(curr)) {
-                case WRAP(JB):   /*CF=1*/
-                    la_bne(tempi, zero_ir2_opnd, target_label_opnd2);
-                    break;
-                case WRAP(JAE):  /*CF=0*/
-                    la_beq(tempi, zero_ir2_opnd, target_label_opnd2);
-                    break;
-                default:
-                    lsassert(0);
-                    break;
-            }
-
-            tr_generate_exit_tb(curr, 0);
-
-            la_label(target_label_opnd2);
-
-            tr_generate_exit_tb(curr, 1);
-
-            return true;
         }
 #endif
+
+        switch (ir1_opcode(curr)) {
+            case WRAP(JB):   /*CF=1*/
+                la_bne(tempi, zero_ir2_opnd, target_label_opnd);
+                break;
+            case WRAP(JAE):  /*CF=0*/
+                la_beq(tempi, zero_ir2_opnd, target_label_opnd);
+                break;
+            default:
+                lsassert(0);
+                break;
+        }
+
         EFLAGS_CACULATE(td->ptn_itemp0, td->ptn_itemp1, next, 0, true);
         tr_generate_exit_tb(curr, 0);
 
@@ -2122,31 +1838,38 @@ static bool translate_shr_jcc(IR1_INST *pir1)
         return true;
     }
 
+    IR2_OPND src1 = ir2_opnd_new(IR2_OPND_IMM, shift);
     IR2_OPND target_label_opnd = ra_alloc_label();
 
 #ifdef CONFIG_LATX_TU
-    IR2_OPND tu_reset_label_opnd = ra_alloc_label();
-    la_label(tu_reset_label_opnd);
-#endif
+    TranslationBlock *tb = lsenv->tr_data->curr_tb;
+    if (judge_tu_eflag_gen(tb)) {
+        IR2_OPND tu_reset_label_opnd = ra_alloc_label();
+        TranslationBlock *tb_next = tb->s_data->next_tb[TU_TB_INDEX_NEXT];
+        TranslationBlock *tb_target = tb->s_data->next_tb[TU_TB_INDEX_TARGET];
 
-    switch (ir1_opcode(next)) {
-        case WRAP(JNE): //dest!=0
-            la_bnez(dest, target_label_opnd);
-            break;
-        default:
-            lsassert(0);
-            break;
-    }
-#ifdef CONFIG_LATX_TU
-    if (judge_tu_eflag_gen(lsenv->tr_data->curr_tb)) {
-        TranslationBlock *tb = lsenv->tr_data->curr_tb;
-        tu_jcc_nop_gen(tb);
-        la_label(target_label_opnd);
-        /* tb->jmp_target_arg[0] = target_label_opnd._label_id; */
+        if (shift && tb_next->eflag_use && tb_target->eflag_use) {
+            generate_eflag_calculation(src, src, src1, curr, can_use_imm);
+        }
+
+        la_label(tu_reset_label_opnd);
         tb->tu_jmp[TU_TB_INDEX_TARGET] = tu_reset_label_opnd._label_id;
+        switch (ir1_opcode(next)) {
+            case WRAP(JNE): //dest!=0
+                la_bnez(dest, target_label_opnd);
+                break;
+            default:
+                lsassert(0);
+                break;
+        }
+        tu_jcc_nop_gen(tb);
+
+        if (shift && tb_next->eflag_use && !tb_target->eflag_use) {
+            generate_eflag_calculation(src, src, src1, curr, can_use_imm);
+        }
+
         if (tb->tu_jmp[TU_TB_INDEX_NEXT] != TB_JMP_RESET_OFFSET_INVALID) {
             IR2_OPND translated_label_opnd = ra_alloc_label();
-            /* la_code_align(2, 0x03400000); */
             la_label(translated_label_opnd);
             la_b(ir2_opnd_new(IR2_OPND_IMM, 0));
             la_nop();
@@ -2157,35 +1880,17 @@ static bool translate_shr_jcc(IR1_INST *pir1)
         la_label(unlink_label_opnd);
         tb->tu_unlink.stub_offset = unlink_label_opnd._label_id;
         set_use_tu_jmp(tb);
+    }
+#endif
 
-        IR2_OPND target_label_opnd2 = ra_alloc_label();
-        switch (ir1_opcode(next)) {
+    switch (ir1_opcode(next)) {
         case WRAP(JNE): //dest!=0
-            la_bnez(dest, target_label_opnd2);
+            la_bnez(dest, target_label_opnd);
             break;
         default:
             lsassert(0);
             break;
-        }
-        /* not taken */
-        /* EFLAGS_CACULATE(src_opnd_0, src_opnd_0, curr, 0); */
-        tr_generate_exit_tb(next, 0);
-
-        la_label(target_label_opnd2);
-        /* taken */
-        /* EFLAGS_CACULATE(src_opnd_0, src_opnd_0, curr, 1); */
-        tr_generate_exit_tb(next, 1);
-
-        /*
-         * the backup of the eflags instruction, which is used
-         * to recover the eflags instruction when unlink a tb.
-         */
-        /* EFLAGS_CACULATE(src_opnd_0, src_opnd_0, curr, EFLAG_BACKUP); */
-
-        return true;
     }
-#endif
-    IR2_OPND src1 = ir2_opnd_new(IR2_OPND_IMM, shift);
 
     if (shift) {
         EFLAGS_CACULATE(src, src1, curr, 0, can_use_imm);
@@ -2322,30 +2027,36 @@ static bool translate_and_jcc(IR1_INST *pir1)
     }
 
     IR2_OPND target_label_opnd = ra_alloc_label();
-#ifdef CONFIG_LATX_TU
-    IR2_OPND tu_reset_label_opnd = ra_alloc_label();
-    la_label(tu_reset_label_opnd);
-#endif
-
-    switch (ir1_opcode(next)) {
-    case WRAP(JNE):
-        la_bnez(dest, target_label_opnd);
-        break;
-    default:
-        lsassert(0);
-        break;
-    }
 
 #ifdef CONFIG_LATX_TU
-    if (judge_tu_eflag_gen(lsenv->tr_data->curr_tb)) {
-        TranslationBlock *tb = lsenv->tr_data->curr_tb;
-        tu_jcc_nop_gen(tb);
-        la_label(target_label_opnd);
-        /* tb->jmp_target_arg[0] = target_label_opnd._label_id; */
+    TranslationBlock *tb = lsenv->tr_data->curr_tb;
+    if (judge_tu_eflag_gen(tb)) {
+        IR2_OPND tu_reset_label_opnd = ra_alloc_label();
+        TranslationBlock *tb_next = tb->s_data->next_tb[TU_TB_INDEX_NEXT];
+        TranslationBlock *tb_target = tb->s_data->next_tb[TU_TB_INDEX_TARGET];
+
+        if (tb_next->eflag_use && tb_target->eflag_use) {
+            generate_eflag_calculation(src0, src0, src1, curr, true);
+        }
+
+        la_label(tu_reset_label_opnd);
         tb->tu_jmp[TU_TB_INDEX_TARGET] = tu_reset_label_opnd._label_id;
+        switch (ir1_opcode(next)) {
+            case WRAP(JNE): //dest!=0
+                la_bnez(dest, target_label_opnd);
+                break;
+            default:
+                lsassert(0);
+                break;
+        }
+        tu_jcc_nop_gen(tb);
+
+        if (tb_next->eflag_use && !tb_target->eflag_use) {
+            generate_eflag_calculation(src0, src0, src1, curr, true);
+        }
+
         if (tb->tu_jmp[TU_TB_INDEX_NEXT] != TB_JMP_RESET_OFFSET_INVALID) {
             IR2_OPND translated_label_opnd = ra_alloc_label();
-            /* la_code_align(2, 0x03400000); */
             la_label(translated_label_opnd);
             la_b(ir2_opnd_new(IR2_OPND_IMM, 0));
             la_nop();
@@ -2356,33 +2067,17 @@ static bool translate_and_jcc(IR1_INST *pir1)
         la_label(unlink_label_opnd);
         tb->tu_unlink.stub_offset = unlink_label_opnd._label_id;
         set_use_tu_jmp(tb);
-
-        IR2_OPND target_label_opnd2 = ra_alloc_label();
-        switch (ir1_opcode(next)) {
-        case WRAP(JNE):
-            la_bnez(dest, target_label_opnd2);
-            break;
-        default:
-            lsassert(0);
-            break;
-        }
-        /* not taken */
-        /* EFLAGS_CACULATE(src_opnd_0, src_opnd_1, curr, 0); */
-        tr_generate_exit_tb(next, 0);
-
-        la_label(target_label_opnd2);
-        /* taken */
-        /* EFLAGS_CACULATE(src_opnd_0, src_opnd_1, curr, 1); */
-        tr_generate_exit_tb(next, 1);
-
-        /*
-         * the backup of the eflags instruction, which is used
-         * to recover the eflags instruction when unlink a tb.
-         */
-        /* EFLAGS_CACULATE(src_opnd_0, src_opnd_1, curr, EFLAG_BACKUP); */
-        return true;
     }
 #endif
+
+    switch (ir1_opcode(next)) {
+    case WRAP(JNE):
+        la_bnez(dest, target_label_opnd);
+        break;
+    default:
+        lsassert(0);
+        break;
+    }
 
     /* not taken */
     EFLAGS_CACULATE(src0, src1, curr, 0, true);
@@ -2453,55 +2148,56 @@ static inline bool xcomisx_xx_jcc(IR1_INST *pir1, bool is_jcc, bool is_double, b
     } else {
 
         IR2_OPND target_label_opnd = ra_alloc_label();
+
 #ifdef CONFIG_LATX_TU
-        IR2_OPND tu_reset_label_opnd = ra_alloc_label();
-        la_label(tu_reset_label_opnd);
+        TranslationBlock *tb = lsenv->tr_data->curr_tb;
+        if (judge_tu_eflag_gen(tb)) {
+            IR2_OPND tu_reset_label_opnd = ra_alloc_label();
+            /* TranslationBlock *tb_next = tb->s_data->next_tb[TU_TB_INDEX_NEXT]; */
+            /* TranslationBlock *tb_target = tb->s_data->next_tb[TU_TB_INDEX_TARGET]; */
+
+            /* if (tb_next->eflag_use && tb_target->eflag_use) { */
+            /*     translate_xcomisx(curr); */
+            /* } */
+
+            la_label(tu_reset_label_opnd);
+            tb->tu_jmp[TU_TB_INDEX_TARGET] = tu_reset_label_opnd._label_id;
+            if (ir1_opcode(curr) == WRAP(JGE)) {
+                la_b(target_label_opnd);
+            } else if (ir1_opcode(curr) == WRAP(JL)) {
+                /* Just for unlink. */
+                la_nop();
+            } else {
+                la_bcnez(fcc0_ir2_opnd, target_label_opnd);
+            }
+            tu_jcc_nop_gen(tb);
+
+            /* if (tb_next->eflag_use && !tb_target->eflag_use) { */
+            /*     translate_xcomisx(curr); */
+            /* } */
+
+            if (tb->tu_jmp[TU_TB_INDEX_NEXT] != TB_JMP_RESET_OFFSET_INVALID) {
+                IR2_OPND translated_label_opnd = ra_alloc_label();
+                la_label(translated_label_opnd);
+                la_b(ir2_opnd_new(IR2_OPND_IMM, 0));
+                la_nop();
+                tb->tu_jmp[TU_TB_INDEX_NEXT] = translated_label_opnd._label_id;
+            }
+
+            IR2_OPND unlink_label_opnd = ra_alloc_label();
+            la_label(unlink_label_opnd);
+            tb->tu_unlink.stub_offset = unlink_label_opnd._label_id;
+            set_use_tu_jmp(tb);
+        }
 #endif
+
         if (ir1_opcode(curr) == WRAP(JGE)) {
             la_b(target_label_opnd);
         } else if (ir1_opcode(curr) == WRAP(JL)) {
         } else {
             la_bcnez(fcc0_ir2_opnd, target_label_opnd);
         }
-#ifdef CONFIG_LATX_TU
-    if (judge_tu_eflag_gen(lsenv->tr_data->curr_tb)) {
-        TranslationBlock *tb = lsenv->tr_data->curr_tb;
-        tu_jcc_nop_gen(tb);
-        la_label(target_label_opnd);
-        /*tb->jmp_target_arg[0] = target_label_opnd._label_id;*/
-        tb->tu_jmp[TU_TB_INDEX_TARGET] = tu_reset_label_opnd._label_id;
-        if (tb->tu_jmp[TU_TB_INDEX_NEXT] != TB_JMP_RESET_OFFSET_INVALID) {
-            IR2_OPND translated_label_opnd = ra_alloc_label();
-            /* la_code_align(2, 0x03400000); */
-            la_label(translated_label_opnd);
-            la_b(ir2_opnd_new(IR2_OPND_IMM, 0));
-            la_nop();
-            tb->tu_jmp[TU_TB_INDEX_NEXT] = translated_label_opnd._label_id;
-        }
 
-        IR2_OPND unlink_label_opnd = ra_alloc_label();
-        la_label(unlink_label_opnd);
-        tb->tu_unlink.stub_offset = unlink_label_opnd._label_id;
-        set_use_tu_jmp(tb);
-
-        IR2_OPND target_label_opnd2 = ra_alloc_label();
-        if (ir1_opcode(curr) == WRAP(JGE)) {
-            la_b(target_label_opnd2);
-        } else if (ir1_opcode(curr) == WRAP(JL)) {
-        } else {
-            la_bcnez(fcc0_ir2_opnd, target_label_opnd2);
-        }
-
-        /* not taken */
-        tr_generate_exit_tb(curr, 0);
-
-        la_label(target_label_opnd2);
-        /* taken */
-        tr_generate_exit_tb(curr, 1);
-
-        return true;
-    }
-#endif
         /* not taken */
         tr_generate_exit_tb(curr, 0);
 
