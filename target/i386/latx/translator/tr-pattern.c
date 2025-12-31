@@ -1154,6 +1154,8 @@ static bool translate_cmp_xxcc(IR1_INST *ir1)
     IR2_OPND src1 = load_ireg_from_ir1(cmp_opnd1, em, false);
     generate_eflag_calculation(src0, src0, src1, curr, true);
 
+    lsenv->tr_data->curr_ir1_inst = next;
+    lsenv->tr_data->curr_ir1_count++;
     IR1_OPND *next_opnd0 = ir1_get_opnd(next, 0);
     IR2_OPND next_dest, next_src;
     if (is_cmovcc) {
@@ -1326,6 +1328,8 @@ static bool translate_test_xxcc(IR1_INST *pir1)
         la_and(temp, src0, src1);
     }
 
+    lsenv->tr_data->curr_ir1_inst = next;
+    lsenv->tr_data->curr_ir1_count++;
     IR1_OPND *next_opnd0 = ir1_get_opnd(next, 0);
     IR2_OPND next_dest, next_src;
     if (is_cmovcc) {
@@ -1501,6 +1505,8 @@ static bool translate_ucomisd_seta(IR1_INST *pir1)
     /* 4. mov flag to EFLAGS */
     la_x86mtflag(flag, 0x3f);
 
+    lsenv->tr_data->curr_ir1_inst = next;
+    lsenv->tr_data->curr_ir1_count++;
     switch (ir1_opcode(next)) {
     case WRAP(SETA):
         la_fcmp_cond_d(fcc0_ir2_opnd, src, dest, FCMP_COND_CLT);
@@ -1534,6 +1540,8 @@ static bool translate_neg_cmovcc(IR1_INST *pir1)
 
     if (is_lock) {
         translate_neg(curr);
+        lsenv->tr_data->curr_ir1_inst = next;
+        lsenv->tr_data->curr_ir1_count++;
         translate_cmovcc(next);
         return true;
     }
@@ -1566,6 +1574,8 @@ static bool translate_neg_cmovcc(IR1_INST *pir1)
     if (ir1_opcode(next) == WRAP(CMOVNS))
         la_xori(dest, dest, 1);
 
+    lsenv->tr_data->curr_ir1_inst = next;
+    lsenv->tr_data->curr_ir1_count++;
     IR1_OPND *next_opnd0 = ir1_get_opnd(next, 0);
     IR1_OPND *next_opnd1 = ir1_get_opnd(next, 1);
 
