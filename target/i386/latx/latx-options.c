@@ -3,6 +3,7 @@
 #include "qemu/cutils.h"
 #include "reg-alloc.h"
 #include "latx-debug.h"
+#include "translate.h"
 
 #if defined(CONFIG_LATX_KZT)
 int option_kzt = 0;
@@ -156,7 +157,10 @@ void options_init(void)
 
     option_set_rounding_opt = 1;
     option_cvt_opt = 1;
-    option_fast_atomic = 1;
+    if (have_scq())
+        option_fast_atomic = 1;
+    else
+        option_fast_atomic = 0;
 }
 
 #define OPTIONS_IMM_REG 0
