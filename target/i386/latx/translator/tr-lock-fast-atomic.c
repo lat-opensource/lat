@@ -339,8 +339,8 @@ bool translate_lock_xadd_fast_atomic(IR1_INST *pir1)
     src1 = load_ireg_from_ir1(opnd1, UNKNOWN_EXTENSION, false);
 
     amadd_inst(src0, src1, mem_opnd);
-    store_ireg_to_ir1(src0, opnd1, false);
     generate_eflag_calculation(dest, src0, src1, pir1, true);
+    store_ireg_to_ir1(src0, opnd1, false);
 
     return true;
 }
@@ -381,7 +381,7 @@ bool translate_lock_cmpxchg_fast_atomic(IR1_INST *pir1)
     IR1_OPND *opnd0 = ir1_get_opnd(pir1, 0);
     IR1_OPND *opnd1 = ir1_get_opnd(pir1, 1);
 
-    IR2_OPND src0, src1, eax_opnd;
+    IR2_OPND src0, src1;
     IR1_OPND *reg_ir1 = NULL;
     int opnd0_size = ir1_opnd_size(opnd0);
 
@@ -407,15 +407,19 @@ bool translate_lock_cmpxchg_fast_atomic(IR1_INST *pir1)
     if (CODEIS64 && opnd0_size == 64) {
 	    /* amcas always change rd to rj (change gpr_eax_opnd to *mem_addr),
          * so we need to generate EFLAGS.ZF by comparing old eax and new eax(src0_mem_addr) */
-        if (ir1_need_calculate_any_flag(pir1)) {
-            eax_opnd = ra_alloc_itemp();
-            load_ireg_from_ir1_2(eax_opnd, reg_ir1, SIGN_EXTENSION, false);
-        }
-        la_amcas_db_d(gpr_eax_opnd, src1, mem_opnd);
-        if (ir1_need_calculate_any_flag(pir1)) {
-            generate_eflag_calculation(src0, gpr_eax_opnd, eax_opnd, pir1, true);
-        }
+        IR2_OPND mem_val = ra_alloc_itemp();
+        load_ireg_from_ir1_2(mem_val, reg_ir1, SIGN_EXTENSION, false);
 
+        la_amcas_db_d(mem_val, src1, mem_opnd);
+        if (ir1_need_calculate_any_flag(pir1)) {
+            generate_eflag_calculation(src0, gpr_eax_opnd, mem_val, pir1, true);
+        }
+        IR2_OPND temp1 = ra_alloc_itemp();
+        IR2_OPND temp2 = ra_alloc_itemp();
+        la_xor(temp1, mem_val, gpr_eax_opnd);
+        la_masknez(temp2, gpr_eax_opnd, temp1);
+        la_maskeqz(temp1, mem_val, temp1);
+        la_or(gpr_eax_opnd, temp2, temp1);
         return true;
     }
 
@@ -448,13 +452,14 @@ bool translate_lock_cmpxchg_fast_atomic(IR1_INST *pir1)
     if (opnd0_size == 32) {
 	    /* amcas always change rd to rj (change gpr_eax_opnd to *mem_addr),
          * so we need to generate EFLAGS.ZF by comparing old eax and new eax(src0_mem_addr) */
+        IR2_OPND eax_opnd;
         if (ir1_need_calculate_any_flag(pir1)) {
             eax_opnd = ra_alloc_itemp();
             load_ireg_from_ir1_2(eax_opnd, reg_ir1, SIGN_EXTENSION, false);
         }
         la_amcas_db_w(gpr_eax_opnd, src1, mem_opnd);
         if (ir1_need_calculate_any_flag(pir1)) {
-            generate_eflag_calculation(src0, gpr_eax_opnd, eax_opnd, pir1, true);
+            generate_eflag_calculation(src0, eax_opnd, gpr_eax_opnd, pir1, true);
         }
 
         return true;
@@ -476,6 +481,13 @@ bool translate_lock_cmpxchg_fast_atomic(IR1_INST *pir1)
     }
 
     generate_eflag_calculation(src0, old_eax_opnd, temp1, pir1, true);
+
+    IR2_OPND temp2 = ra_alloc_itemp();
+    la_xor(temp2, temp1, old_eax_opnd);
+    la_masknez(old_eax_opnd, old_eax_opnd, temp2);
+    la_maskeqz(temp1, temp1, temp2);
+    la_or(temp1, old_eax_opnd, temp1);
+
     store_ireg_to_ir1(temp1, reg_ir1, false);
 
     return true;
