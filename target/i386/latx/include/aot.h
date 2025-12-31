@@ -83,36 +83,8 @@ typedef struct aot_segment {
 } aot_segment;
 
 typedef struct aot_tb {
-    /* inner segment offset of this basic block */
-    uint32_t offset_in_segment;
-
-#ifdef CONFIG_LATX_TU
-    /*tu_id is the first tb pc in TU */
-    uint32_t tu_id;
-    uint32_t offset_in_tu;
-#endif
-    /* Translation Code Cache offset in AOT. */
     void *tb_cache_addr;
-    uint32_t tb_cache_offset;
-    uint32_t tb_cache_size;
-    union {
-        uint32_t is_first_tb;
-        uint32_t tu_size;
-    };
-    /* int tb_num; */
-    uint16_t icount;
-    /* qemu TranslationBlock fields which should be recorded. */
-    uint32_t size;
-    uint32_t flags;
-    uint32_t cflags;
-    union {
-        uint16_t jmp_reset_offset[2];
-        uint16_t tu_jmp[2];
-    };
-    union {
-        uint16_t jmp_stub_reset_offset[2];
-        uint32_t tu_search_addr_offset;
-    };
+    int64_t lazypc[2];
     union {
         uintptr_t jmp_target_arg[2];
         struct tu_unlink tu_unlink;
@@ -121,22 +93,40 @@ typedef struct aot_tb {
         uintptr_t jmp_stub_target_arg[2];
         uintptr_t jmp_indirect;
     };
-    uint16_t eflags_target_arg[3];
-    uint8_t  eflag_use;
-    uint16_t bool_flags;
-    int32_t rel_start_index;
-    int32_t rel_end_index;
-
-    /* segment index of curr tb, its fallthrough tb, and its target tb */
-    int segment_idx;
-    int fallthru_segment_idx;
-    int target_segment_idx;
-    uint16_t first_jmp_align;
-    uint8_t last_ir1_type;
+    /* Translation Code Cache offset in AOT. */
     uintptr_t return_target_ptr_offset;
     unsigned long next_86_pc_offset;
-
-    int64_t lazypc[2];
+    /* inner segment offset of this basic block */
+    uint32_t offset_in_segment;
+#ifdef CONFIG_LATX_TU
+    /*tu_id is the first tb pc in TU */
+    uint32_t tu_id;
+    uint32_t offset_in_tu;
+#endif
+    uint32_t tb_cache_offset;
+    uint32_t tb_cache_size;
+    union {
+        uint32_t is_first_tb;
+        uint32_t tu_size;
+    };
+    uint32_t size;
+    uint32_t flags;
+    uint32_t cflags;
+    uint32_t tu_search_addr_offset;
+    int32_t rel_start_index;
+    int32_t rel_end_index;
+    union {
+        uint16_t jmp_reset_offset[2];
+        uint16_t tu_jmp[2];
+    };
+    uint16_t jmp_stub_reset_offset[2];
+    /* int tb_num; */
+    uint16_t icount;
+    uint16_t eflags_target_arg[3];
+    uint16_t bool_flags;
+    uint16_t first_jmp_align;
+    uint8_t last_ir1_type;
+    uint8_t eflag_use;
     int8_t canlink[2];
 } aot_tb;
 

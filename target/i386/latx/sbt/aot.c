@@ -331,7 +331,6 @@ static inline int create_aot_tb(aot_tb *curr_aot_tb, TranslationBlock *tb,
     curr_aot_tb->cflags = tb->cflags;
     curr_aot_tb->rel_start_index = tb->s_data->rel_start;
     curr_aot_tb->rel_end_index = tb->s_data->rel_end;
-    curr_aot_tb->segment_idx = curr_seg - p_segments;
     curr_aot_tb->first_jmp_align = tb->first_jmp_align;
     curr_aot_tb->last_ir1_type = tb->s_data->last_ir1_type;
     curr_aot_tb->bool_flags = tb->bool_flags | IS_AOT_TB;
