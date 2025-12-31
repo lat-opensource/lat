@@ -679,6 +679,9 @@ static void *query_tu_tbm_table(TBMini *tbm, uintptr_t tc_ptr)
     uintptr_t curr_pos = ROUND_UP(((uintptr_t)tbm + (tb_num + 1) *
                             sizeof(struct TBMini)), qemu_icache_linesize);
     do {
+        if (!tb_num--) {
+            return NULL;
+        }
         tbm += 1;
         curr_pos += tbm->mtbp_struct.magic;
     } while(curr_pos <= tc_ptr);
