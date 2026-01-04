@@ -346,6 +346,8 @@ static int inst_pattern(TranslationBlock *tb,
     case WRAP(MOVDQA): {
         SCAN_CHECK(scan, 0);
         instptn_check_movaps_vst_x4_0();
+        if (!tb_use_smc_opt(tb))
+            return 0;
         if (scan[0] >= 0 && scan[1] >= 0 && scan[2] >= 0) {
             ir1 = SCAN_IR1(tb, scan, 0);
             IR1_INST *ir2 = SCAN_IR1(tb, scan, 1);
