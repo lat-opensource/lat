@@ -109,9 +109,9 @@ static int ra_alloc_##name##_num(void)                                  \
     asm("cto.w %0, %1\n\t"                                              \
     : "=r"(cto_num)                                                     \
     : "r"(lsenv->tr_data->name##_status));                              \
-    lsassertm(cto_num < name##_status_num,                              \
-              "\n%s:%d alloc " #name " failed, cto_num %d\n",           \
-              __func__, __LINE__, cto_num);                             \
+    if (unlikely(cto_num >= name##_status_num)) {                       \
+        return -1;                                                      \
+    }                                                                   \
     name##_num = reg_##name##_map[cto_num];                             \
     BITS_SET(lsenv->tr_data->name##_status, 1 << cto_num);              \
     return name##_num;                                                  \
