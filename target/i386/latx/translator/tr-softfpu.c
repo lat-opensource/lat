@@ -1585,12 +1585,7 @@ static bool translate_fist_softfpu(IR1_INST *pir1)
         }
 
         /* v0 */
-        if (option_mem_test) {
-            la_mov64(itemp, a0_ir2_opnd);
-            store_ireg_to_ir1(itemp, opnd0, false);
-        } else {
-            store_ireg_to_ir1(a0_ir2_opnd, opnd0, false);
-        }
+        store_ireg_to_ir1(a0_ir2_opnd, opnd0, false);
 
         la_label(label_exit);
 
@@ -1604,13 +1599,7 @@ static bool translate_fist_softfpu(IR1_INST *pir1)
         gen_softfpu_helper_epilogue(pir1);
 
         /* v0 */
-        if (option_mem_test) {
-            IR2_OPND itemp = ra_alloc_itemp();
-            la_mov64(itemp, a0_ir2_opnd);
-            store_ireg_to_ir1(itemp, opnd0, false);
-        } else {
-            store_ireg_to_ir1(a0_ir2_opnd, opnd0, false);
-        }
+        store_ireg_to_ir1(a0_ir2_opnd, opnd0, false);
     }
     return true;
 }
@@ -1686,12 +1675,7 @@ static bool translate_fistp_softfpu(IR1_INST *pir1)
         }
 
         /* v0 */
-        if (option_mem_test) {
-            la_mov64(itemp, a0_ir2_opnd);
-            store_ireg_to_ir1(itemp, opnd0, false);
-        } else {
-            store_ireg_to_ir1(a0_ir2_opnd, opnd0, false);
-        }
+        store_ireg_to_ir1(a0_ir2_opnd, opnd0, false);
         la_fpu_pop();
 
         la_label(label_exit);
@@ -1711,13 +1695,7 @@ static bool translate_fistp_softfpu(IR1_INST *pir1)
 
         /* v0 */
         restore_gpr();
-        if (option_mem_test) {
-            IR2_OPND itemp = ra_alloc_itemp();
-            la_mov64(itemp, a0_ir2_opnd);
-            store_ireg_to_ir1(itemp, opnd0, false);
-        } else {
-            store_ireg_to_ir1(a0_ir2_opnd, opnd0, false);
-        }
+        store_ireg_to_ir1(a0_ir2_opnd, opnd0, false);
         save_gpr();
 
         gen_softfpu_helper1((ADDR)helper_fpop);
@@ -1742,13 +1720,7 @@ static bool translate_fisttp_softfpu(IR1_INST *pir1)
 
     /* v0 */
     restore_gpr();
-    if (option_mem_test) {
-        IR2_OPND itemp = ra_alloc_itemp();
-        la_mov64(itemp, a0_ir2_opnd);
-        store_ireg_to_ir1(itemp, opnd0, false);
-    } else {
-        store_ireg_to_ir1(a0_ir2_opnd, opnd0, false);
-    }
+    store_ireg_to_ir1(a0_ir2_opnd, opnd0, false);
     save_gpr();
 
     gen_softfpu_helper1((ADDR)helper_fpop);
@@ -2465,13 +2437,7 @@ static bool translate_fnstcw_softfpu(IR1_INST *pir1)
             IR2_OPND mem_opnd = convert_mem(opnd0, &mem_imm);
             la_st_h(a0_ir2_opnd, mem_opnd, mem_imm);
         } else {
-            if (option_mem_test) {
-                IR2_OPND itemp = ra_alloc_itemp();
-                la_mov64(itemp, a0_ir2_opnd);
-                store_ireg_to_ir1(itemp, opnd0, false);
-            } else {
-                store_ireg_to_ir1(a0_ir2_opnd, opnd0, false);
-            }
+            store_ireg_to_ir1(a0_ir2_opnd, opnd0, false);
         }
     }
     return true;
@@ -2520,13 +2486,7 @@ static bool translate_fnstsw_softfpu(IR1_INST *pir1)
             IR2_OPND mem_opnd = convert_mem(opnd0, &mem_imm);
             la_st_h(a0_ir2_opnd, mem_opnd, mem_imm);
         } else {
-            if (option_mem_test) {
-                IR2_OPND itemp = ra_alloc_itemp();
-                la_mov64(itemp, a0_ir2_opnd);
-                store_ireg_to_ir1(itemp, opnd0, false);
-            } else {
-                store_ireg_to_ir1(a0_ir2_opnd, opnd0, false);
-            }
+            store_ireg_to_ir1(a0_ir2_opnd, opnd0, false);
         }
     }
     return true;
@@ -2720,13 +2680,7 @@ static bool translate_fst_softfpu(IR1_INST *pir1)
         gen_softfpu_helper_epilogue(pir1);
 
         /* v0 */
-        if (option_mem_test) {
-            IR2_OPND itemp = ra_alloc_itemp();
-            la_mov64(itemp, a0_ir2_opnd);
-            store_ireg_to_ir1(itemp, opnd0, false);
-        } else {
-            store_ireg_to_ir1(a0_ir2_opnd, opnd0, false);
-        }
+        store_ireg_to_ir1(a0_ir2_opnd, opnd0, false);
     }
     return true;
 }
@@ -2766,13 +2720,7 @@ static bool translate_fstp_softfpu(IR1_INST *pir1)
             gen_softfpu_helper1((ADDR)helper_fstl_ST0);
         }
         restore_gpr();
-        if (option_mem_test) {
-            IR2_OPND itemp = ra_alloc_itemp();
-            la_mov64(itemp, a0_ir2_opnd);
-            store_ireg_to_ir1(itemp, opnd0, false);
-        } else {
-            store_ireg_to_ir1(a0_ir2_opnd, opnd0, false);
-        }
+        store_ireg_to_ir1(a0_ir2_opnd, opnd0, false);
         save_gpr();
         gen_softfpu_helper1((ADDR)helper_fpop);
         gen_softfpu_helper_epilogue(pir1);

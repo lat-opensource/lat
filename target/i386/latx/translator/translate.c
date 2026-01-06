@@ -3910,41 +3910,60 @@ void gen_test_page_flag(IR2_OPND mem_opnd, int mem_imm, uint32_t flag)
     IR2_OPND label0 = ra_alloc_label();
     IR2_OPND label1 = ra_alloc_label();
     IR2_OPND label2 = ra_alloc_label();
+    bool need_restore0 = false;
+    bool need_restore1 = false;
+    bool need_restore2 = false;
+    IR2_OPND itemp0 = ra_alloc_itemp();
+    IR2_OPND itemp1 = ra_alloc_itemp();
+    IR2_OPND itemp2 = ra_alloc_itemp();
+    if (ir2_opnd_base_reg_num(&itemp0) == -1) {
+       need_restore0 = true;
+       itemp0 = a0_ir2_opnd;
+       helper_save_reg(itemp0);
+    }
+    if (ir2_opnd_base_reg_num(&itemp1) == -1) {
+       need_restore1 = true;
+       itemp1 = a1_ir2_opnd;
+       helper_save_reg(itemp1);
+    }
+    if (ir2_opnd_base_reg_num(&itemp2) == -1) {
+       need_restore2 = true;
+       itemp2 = a2_ir2_opnd;
+       helper_save_reg(itemp2);
+    }
 
-    helper_save_reg(a7_ir2_opnd);
     IR2_OPND mem_addr = ra_alloc_statics(S_UD1);
     la_addi_d(mem_addr, mem_opnd, mem_imm);
-    aot_load_host_addr(a0_ir2_opnd, (ADDR)&pageflags_root,
+    aot_load_host_addr(itemp0, (ADDR)&pageflags_root,
         LOAD_PAGEFLAGS_ROOT, 0);
-    la_addi_d(a0_ir2_opnd, a0_ir2_opnd,
+    la_addi_d(itemp0, itemp0,
             offsetof(IntervalTreeRoot, rb_root) + offsetof(RBRoot, rb_node));
-    la_ld_d(a0_ir2_opnd, a0_ir2_opnd, 0);
-    la_beq(a0_ir2_opnd, zero_ir2_opnd, label_exit);
-
+    la_ld_d(itemp0, itemp0, 0);
+    la_beq(itemp0, zero_ir2_opnd, label_exit);
 
     la_label(label0);
-    la_ld_d(a1_ir2_opnd, a0_ir2_opnd, 0x10);
-    la_beq(a1_ir2_opnd, zero_ir2_opnd, label1);
-    la_ld_d(a7_ir2_opnd, a1_ir2_opnd, 0x28);
-    la_bltu(a7_ir2_opnd, mem_addr, label1);
-    la_mov64(a0_ir2_opnd, a1_ir2_opnd);
+    la_ld_d(itemp1, itemp0, 0x10);
+    la_beq(itemp1, zero_ir2_opnd, label1);
+    la_ld_d(itemp2, itemp1, 0x28);
+    la_bltu(itemp2, mem_addr, label1);
+    la_mov64(itemp0, itemp1);
     la_b(label0);
 
     la_label(label1);
-    la_ld_d(a1_ir2_opnd, a0_ir2_opnd, 0x18);
-    la_bltu(mem_addr, a1_ir2_opnd, label_exit);
-    la_ld_d(a1_ir2_opnd, a0_ir2_opnd, 0x20);
-    la_bgeu(a1_ir2_opnd, mem_addr, label2);
-    la_ld_d(a0_ir2_opnd, a0_ir2_opnd, 0x8);
-    la_beq(a0_ir2_opnd, zero_ir2_opnd, label_exit);
-    la_ld_d(a1_ir2_opnd, a0_ir2_opnd, 0x28);
-    la_bgeu(a1_ir2_opnd, mem_addr, label0);
+    la_ld_d(itemp1, itemp0, 0x18);
+    la_bltu(mem_addr, itemp1, label_exit);
+    la_ld_d(itemp1, itemp0, 0x20);
+    la_bgeu(itemp1, mem_addr, label2);
+    la_ld_d(itemp0, itemp0, 0x8);
+    la_beq(itemp0, zero_ir2_opnd, label_exit);
+    la_ld_d(itemp1, itemp0, 0x28);
+    la_bgeu(itemp1, mem_addr, label0);
     la_b(label_exit);
 
     la_label(label2);
-    la_ld_w(a0_ir2_opnd, a0_ir2_opnd, 0x30);
-    la_andi(a0_ir2_opnd, a0_ir2_opnd, flag & 0xff);
-    la_bne(a0_ir2_opnd, zero_ir2_opnd, label_exit);
+    la_ld_w(itemp0, itemp0, 0x30);
+    la_andi(itemp0, itemp0, flag & 0xff);
+    la_bne(itemp0, zero_ir2_opnd, label_exit);
 
     IR2_OPND s_env = ra_alloc_statics(S_ENV);
 #ifdef TARGET_X86_64
@@ -3952,6 +3971,9 @@ void gen_test_page_flag(IR2_OPND mem_opnd, int mem_imm, uint32_t flag)
 #else
     la_st_w(mem_addr, s_env, offsetof(CPUX86State, cr[2]));
 #endif
+    if (need_restore1) {
+        helper_restore_reg(itemp1);
+    }
     /* Raise a SIGSEGV. */
     if (flag & PAGE_WRITE) {
         la_st_w(a1_ir2_opnd, zero_ir2_opnd, 0);
@@ -3960,7 +3982,22 @@ void gen_test_page_flag(IR2_OPND mem_opnd, int mem_imm, uint32_t flag)
     }
     la_code_align(4, 0x03400000);
     la_label(label_exit);
-    helper_restore_reg(a7_ir2_opnd);
+
+    if (need_restore0) {
+        helper_restore_reg(itemp0);
+    } else {
+        ra_free_temp(itemp0);
+    }
+    if (need_restore1) {
+        helper_restore_reg(itemp1);
+    } else {
+        ra_free_temp(itemp1);
+    }
+    if (need_restore2) {
+        helper_restore_reg(itemp2);
+    } else {
+        ra_free_temp(itemp2);
+    }
 }
 
 void tr_gen_call_to_helper_vfll(ADDR func, IR2_OPND arg1, IR2_OPND arg2, int use_fp)
