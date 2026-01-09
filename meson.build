@@ -209,7 +209,7 @@ config_host_data.set('CONFIG_GETTID', has_gettid)
 config_host_data.set('CONFIG_MALLOC_TRIM', has_malloc_trim)
 
 config_host_data.set('HAVE_LIBDRM_H', cc.has_header('libdrm/drm.h'))
-config_host_data.set('HAVE_DRM_H', cc.has_header('libdrm/drm.h') or cc.has_header('drm/drm.h'))
+config_host_data.set('HAVE_DRM_H', cc.has_header('drm/drm.h'))
 
 config_host_data.set('CONFIG_PREADV', cc.has_function('preadv', prefix: '#include <sys/uio.h>'))
 

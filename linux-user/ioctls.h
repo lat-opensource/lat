@@ -717,7 +717,7 @@
   IOCTL_SPECIAL(SIOCDELRT, IOC_W, do_ioctl_rt,
                 MK_PTR(MK_STRUCT(STRUCT_rtentry)))
 
-#ifdef HAVE_DRM_H
+#if defined(HAVE_LIBDRM_H) || defined(HAVE_DRM_H)
 
   IOCTL_SPECIAL(DRM_IOCTL_VERSION, IOC_RW, do_ioctl_drm,
                 MK_PTR(MK_STRUCT(STRUCT_drm_version)))

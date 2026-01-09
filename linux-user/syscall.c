@@ -6272,7 +6272,7 @@ static abi_long do_ioctl_tiocgptpeer(const IOCTLEntry *ie, uint8_t *buf_temp,
 }
 #endif
 
-#ifdef HAVE_DRM_H
+#if defined(HAVE_LIBDRM_H) || defined(HAVE_DRM_H)
 
 static void unlock_drm_version(struct drm_version *host_ver,
                                struct target_drm_version *target_ver,
