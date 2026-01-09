@@ -139,6 +139,48 @@ void tu_reset_tb(TranslationBlock *tb);
     result; \
 })  /* EXPAND_TO_64BIT */
 
+static __thread GTree *mem_test_retrans_tree;
+static gint pc_cmp(gconstpointer ap, gconstpointer bp)
+{
+    const target_ulong *a = ap;
+    const target_ulong *b = bp;
+    if (*a > *b) {
+        return 1;
+    } else if (*a < *b) {
+        return -1;
+    }
+    return 0;
+}
+
+static inline void mem_test_retrans_tree_init(void)
+{
+    if (mem_test_retrans_tree) return;
+    mem_test_retrans_tree = g_tree_new(pc_cmp);
+}
+
+static inline void *mem_test_retrans_lookup(uint64_t pc)
+{
+    if ((option_mem_test != 1)|| !mem_test_retrans_tree)
+        return NULL;
+    pc &= TARGET_PAGE_MASK;
+    return g_tree_lookup(mem_test_retrans_tree, &pc);
+}
+
+bool mem_test_retrans_insert(target_ulong pc)
+{
+    if (option_mem_test != 1)
+        return false;
+    pc &= TARGET_PAGE_MASK;
+    mem_test_retrans_tree_init();
+    target_ulong *key = malloc(sizeof(target_ulong));
+    *key = pc;
+    if (!mem_test_retrans_lookup(pc)) {
+        g_tree_insert(mem_test_retrans_tree, key, key);
+        return true;
+    }
+    return false;
+}
+
 #ifdef CONFIG_LATX_SMC_OPT
 
 /*
@@ -465,6 +507,9 @@ static int cpu_restore_state_from_tb(CPUState *cpu, TranslationBlock *tb,
     return -1;
 
  found:
+    if ((option_mem_test == 1) && !(tb->bool_flags & IS_MT_TB)) {
+        env->segv_tb = tb;
+    }
     if (reset_icount && (tb_cflags(tb) & CF_USE_ICOUNT)) {
         assert(icount_enabled());
         /* Reset the cycle counter to the start of the block
@@ -2190,6 +2235,10 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
     }
 #endif
 #endif
+
+    if (mem_test_retrans_lookup(pc)) {
+        tb->bool_flags |= IS_MT_TB;
+    }
 
 #ifndef CONFIG_LATX
 #ifdef CONFIG_PROFILER
