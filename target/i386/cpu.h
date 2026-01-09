@@ -1662,6 +1662,7 @@ typedef struct CPUX86State {
     ucontext_t *puc;
     uintptr_t insn_save[2];
 #endif
+    TranslationBlock *segv_tb;
 } CPUX86State;
 
 struct kvm_msrs;

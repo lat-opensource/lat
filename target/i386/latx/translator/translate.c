@@ -3898,13 +3898,20 @@ static inline void helper_restore_reg(IR2_OPND opnd)
 
 void gen_test_page_flag(IR2_OPND mem_opnd, int mem_imm, uint32_t flag)
 {
-    if (!option_mem_test) {
+    if (!option_mem_test || !(flag & PAGE_WRITE)) {
         return;
     }
-    TranslationBlock *tb __attribute__((unused)) = NULL;
-    if (option_aot) {
-        tb = (TranslationBlock *)lsenv->tr_data->curr_tb;
+
+    TranslationBlock *tb = (TranslationBlock *)lsenv->tr_data->curr_tb;
+    CPUX86State *cpu = (CPUX86State *)lsenv->cpu_state;
+    if ((option_mem_test == 1) &&
+        (!cpu->segv_tb || (cpu->segv_tb->pc != tb->pc))) {
+        if ((tb->pc & ~TARGET_PAGE_MASK) != 0x259) {
+            return;
+        }
     }
+
+    tb->bool_flags |= IS_MT_TB;
 
     IR2_OPND label_exit = ra_alloc_label();
     IR2_OPND label0 = ra_alloc_label();

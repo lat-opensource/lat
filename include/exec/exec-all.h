@@ -66,6 +66,8 @@ void restore_state_to_opc(CPUArchState *env, TranslationBlock *tb,
                           target_ulong *data);
 int encode_search(TranslationBlock *tb, uint8_t *block);
 
+bool mem_test_retrans_insert(target_ulong pc);
+
 /**
  * cpu_restore_state:
  * @cpu: the vCPU state is to be restore to
@@ -647,8 +649,9 @@ struct TranslationBlock {
 #define SIGNAL_RELINK0    0x200
 #define SIGNAL_UNLINK1    0x400
 #define SIGNAL_RELINK1    0x800
-#define IS_CODE64        0x1000
-#define IS_TU_SPLIT        0x2000
+#define IS_CODE64         0x1000
+#define IS_TU_SPLIT       0x2000
+#define IS_MT_TB          0x4000
     uint16_t bool_flags;
     uint8_t  eflag_use;
 #ifdef CONFIG_LATX_INSTS_PATTERN
