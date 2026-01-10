@@ -1606,7 +1606,7 @@ void aot_exit_entry(CPUState *cpu, int is_end)
     pid_t pid = fork();
     if (pid) {
         if (pid > 0) {
-            wait(NULL);
+            waitpid(pid, NULL, 0);
             if (old_sa.sa_handler != SIG_DFL) {
                 sigaction(signum, &old_sa, NULL);
             }
