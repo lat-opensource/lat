@@ -182,4 +182,24 @@ void imm_cache_free_temp_helper(IR2_OPND dest_op);
 IR2_OPND ra_alloc_st(int);
 IR2_OPND ra_alloc_mda(void);
 
+#define _IFC_REG(n)				\
+	".ifc	\\r, $r" #n "\n\t"		\
+	"\\var	= " #n "\n\t"			\
+	".endif\n\t"
+
+    __asm__(".macro	parse_r var r, imm\n\t"
+	"\\var	= -1\n\t"
+	_IFC_REG(0)  _IFC_REG(1)  _IFC_REG(2)  _IFC_REG(3)
+	_IFC_REG(4)  _IFC_REG(5)  _IFC_REG(6)  _IFC_REG(7)
+	_IFC_REG(8)  _IFC_REG(9)  _IFC_REG(10) _IFC_REG(11)
+	_IFC_REG(12) _IFC_REG(13) _IFC_REG(14) _IFC_REG(15)
+	_IFC_REG(16) _IFC_REG(17) _IFC_REG(18) _IFC_REG(19)
+	_IFC_REG(20) _IFC_REG(21) _IFC_REG(22) _IFC_REG(23)
+	_IFC_REG(24) _IFC_REG(25) _IFC_REG(26) _IFC_REG(27)
+	_IFC_REG(28) _IFC_REG(29) _IFC_REG(30) _IFC_REG(31)
+	".iflt	\\var\n\t"
+	".error	\"Unable to parse register name \\r\"\n\t"
+	".endif\n\t"
+	".endm");
+
 #endif

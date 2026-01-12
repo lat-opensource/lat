@@ -2714,49 +2714,53 @@ void opt_instptn_fix(CPUState *cpu, TranslationBlock *tb, int index)
                 {
                 case 8:
                     asm volatile (
-                        /* r4 = a0, r5 = a1 */
-                        "x86sub.b   %[dst], %[src]\n\t"   /* a0 = a0 - a1 (byte) */
-                        "x86mfflag  %[flags], %[csr]\n\t"  /* read x86 EFLAGS */
+                        "parse_r __src, %[src]  \n\t"
+                        "parse_r __dst, %[dst]  \n\t"
+                        ".word (0x003f0008 | (__src << 10) | (__dst << 5))\n\t" /*x86sub.b*/
+                        "parse_r __flags, %[flags]  \n\t"
+                        ".word (0x005c0000 | (0x3f << 10) | __flags)\n\t"  /*x86mfflag*/
                         : [dst]"+r"(a0),
                         [flags]"=r"(eflags)
-                        : [src]"r"(a1),
-                        [csr]"i"(0x3f)
+                        : [src]"r"(a1)
                         : "cc"
                     );
                 break;
                 case 16:
                     asm volatile (
-                        /* r4 = a0, r5 = a1 */
-                        "x86sub.h   %[dst], %[src]\n\t"   /* a0 = a0 - a1 (byte) */
-                        "x86mfflag  %[flags], %[csr]\n\t"  /* read x86 EFLAGS */
+                        "parse_r __src, %[src]  \n\t"
+                        "parse_r __dst, %[dst]  \n\t"
+                        ".word (0x003f0009 | (__src << 10) | (__dst << 5))\n\t" /*x86sub.h*/
+                        "parse_r __flags, %[flags]  \n\t"
+                        ".word (0x005c0000 | (0x3f << 10) | __flags)\n\t"  /*x86mfflag*/
                         : [dst]"+r"(a0),
                         [flags]"=r"(eflags)
-                        : [src]"r"(a1),
-                        [csr]"i"(0x3f)
+                        : [src]"r"(a1)
                         : "cc"
                     );
                 break;
                 case 32:
                     asm volatile (
-                        /* r4 = a0, r5 = a1 */
-                        "x86sub.w   %[dst], %[src]\n\t"   /* a0 = a0 - a1 (byte) */
-                        "x86mfflag  %[flags], %[csr]\n\t"  /* read x86 EFLAGS */
+                        "parse_r __src, %[src]  \n\t"
+                        "parse_r __dst, %[dst]  \n\t"
+                        ".word (0x003f000a | (__src << 10) | (__dst << 5))\n\t" /*x86sub.w*/
+                        "parse_r __flags, %[flags]  \n\t"
+                        ".word (0x005c0000 | (0x3f << 10) | __flags)\n\t"  /*x86mfflag*/
                         : [dst]"+r"(a0),
                         [flags]"=r"(eflags)
-                        : [src]"r"(a1),
-                        [csr]"i"(0x3f)
+                        : [src]"r"(a1)
                         : "cc"
                     );
                 break;
                 case 64:
                     asm volatile (
-                        /* r4 = a0, r5 = a1 */
-                        "x86sub.d   %[dst], %[src]\n\t"   /* a0 = a0 - a1 (byte) */
-                        "x86mfflag  %[flags], %[csr]\n\t"  /* read x86 EFLAGS */
+                        "parse_r __src, %[src]  \n\t"
+                        "parse_r __dst, %[dst]  \n\t"
+                        ".word (0x003f000b | (__src << 10) | (__dst << 5))\n\t" /*x86sub.d*/
+                        "parse_r __flags, %[flags]  \n\t"
+                        ".word (0x005c0000 | (0x3f << 10) | __flags)\n\t"  /*x86mfflag*/
                         : [dst]"+r"(a0),
                         [flags]"=r"(eflags)
-                        : [src]"r"(a1),
-                        [csr]"i"(0x3f)
+                        : [src]"r"(a1)
                         : "cc"
                     );
                 break;
@@ -2781,49 +2785,53 @@ void opt_instptn_fix(CPUState *cpu, TranslationBlock *tb, int index)
                 {
                 case 8:
                     asm volatile (
-                        /* r4 = a0, r5 = a1 */
-                        "x86and.b   %[dst], %[src]\n\t"   /* a0 = a0 - a1 (byte) */
-                        "x86mfflag  %[flags], %[csr]\n\t"  /* read x86 EFLAGS */
+                        "parse_r __src, %[src]  \n\t"
+                        "parse_r __dst, %[dst]  \n\t"
+                        ".word (0x003f8010 | (__src << 10) | (__dst << 5))\n\t" /*x86and.b*/
+                        "parse_r __flags, %[flags]  \n\t"
+                        ".word (0x005c0000 | (0x3f << 10) | __flags)\n\t"  /*x86mfflag*/
                         : [dst]"+r"(a0),
                         [flags]"=r"(eflags)
-                        : [src]"r"(a1),
-                        [csr]"i"(0x3f)
+                        : [src]"r"(a1)
                         : "cc"
                     );
                 break;
                 case 16:
                     asm volatile (
-                        /* r4 = a0, r5 = a1 */
-                        "x86and.h   %[dst], %[src]\n\t"   /* a0 = a0 - a1 (byte) */
-                        "x86mfflag  %[flags], %[csr]\n\t"  /* read x86 EFLAGS */
+                        "parse_r __src, %[src]  \n\t"
+                        "parse_r __dst, %[dst]  \n\t"
+                        ".word (0x003f8011 | (__src << 10) | (__dst << 5))\n\t" /*x86and.h*/
+                        "parse_r __flags, %[flags]  \n\t"
+                        ".word (0x005c0000 | (0x3f << 10) | __flags)\n\t"  /*x86mfflag*/
                         : [dst]"+r"(a0),
                         [flags]"=r"(eflags)
-                        : [src]"r"(a1),
-                        [csr]"i"(0x3f)
+                        : [src]"r"(a1)
                         : "cc"
                     );
                 break;
                 case 32:
                     asm volatile (
-                        /* r4 = a0, r5 = a1 */
-                        "x86and.w   %[dst], %[src]\n\t"   /* a0 = a0 - a1 (byte) */
-                        "x86mfflag  %[flags], %[csr]\n\t"  /* read x86 EFLAGS */
+                        "parse_r __src, %[src]  \n\t"
+                        "parse_r __dst, %[dst]  \n\t"
+                        ".word (0x003f8012 | (__src << 10) | (__dst << 5))\n\t" /*x86and.w*/
+                        "parse_r __flags, %[flags]  \n\t"
+                        ".word (0x005c0000 | (0x3f << 10) | __flags)\n\t"  /*x86mfflag*/
                         : [dst]"+r"(a0),
                         [flags]"=r"(eflags)
-                        : [src]"r"(a1),
-                        [csr]"i"(0x3f)
+                        : [src]"r"(a1)
                         : "cc"
                     );
                 break;
                 case 64:
                     asm volatile (
-                        /* r4 = a0, r5 = a1 */
-                        "x86and.d   %[dst], %[src]\n\t"   /* a0 = a0 - a1 (byte) */
-                        "x86mfflag  %[flags], %[csr]\n\t"  /* read x86 EFLAGS */
+                        "parse_r __src, %[src]  \n\t"
+                        "parse_r __dst, %[dst]  \n\t"
+                        ".word (0x003f8013 | (__src << 10) | (__dst << 5))\n\t" /*x86and.d*/
+                        "parse_r __flags, %[flags]  \n\t"
+                        ".word (0x005c0000 | (0x3f << 10) | __flags)\n\t"  /*x86mfflag*/
                         : [dst]"+r"(a0),
                         [flags]"=r"(eflags)
-                        : [src]"r"(a1),
-                        [csr]"i"(0x3f)
+                        : [src]"r"(a1)
                         : "cc"
                     );
                 break;
