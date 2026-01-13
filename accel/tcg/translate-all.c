@@ -5994,6 +5994,37 @@ int shared_private_interpret(siginfo_t *info, ucontext_t *uc)
       }
       goto end;
 #endif
+    case 0x70b2: /* amcas.w */
+    case 0x70b6: /* amcas.db.w */
+        /* set old value */
+        if (no_right(real_guest_addr, 4, PAGE_WRITE, &siaddr)) {
+            info->si_addr = (void *)siaddr;
+            return 1;
+        }
+        SMC_SHMM_INTERPRET_FALLBACK(shadow_pd);
+        value = over_page_read(real_guest_addr, 4);
+        if ((uint32_t)value == (uint32_t)UC_GR(uc)[rd]) {
+            /* set new value */
+            over_page_write(real_guest_addr, new_value, 4);
+        }
+        value = value << 32 >> 32;
+        UC_GR(uc)[rd] = value;
+        break;
+    case 0x70b3: /* amcas.d */
+    case 0x70b7: /* amcas.db.d */
+        if (no_right(real_guest_addr, 8, PAGE_WRITE, &siaddr)) {
+            info->si_addr = (void *)siaddr;
+            return 1;
+        }
+        SMC_SHMM_INTERPRET_FALLBACK(shadow_pd);
+        /* set old value */
+        value = over_page_read(real_guest_addr, 8);
+        if (value == UC_GR(uc)[rd]) {
+            /* set new value */
+            over_page_write(real_guest_addr, new_value, 8);
+        }
+        UC_GR(uc)[rd] = value;
+        break;
     case 0x70c0: /* AMSWAP.W */
     case 0x70d2: /* AMSWAP_DB.W */
         /* set old value */
