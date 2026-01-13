@@ -1024,7 +1024,7 @@ static void page_lock_pair(PageDesc **ret_p1, tb_page_addr_t phys1,
 #elif defined(__s390x__)
   /* We have a +- 4GB range on the branches; leave some slop.  */
 # define MAX_CODE_GEN_BUFFER_SIZE  (3 * GiB)
-#elif defined(__mips__) || defined(__loongarch__)
+#elif defined(__loongarch__)
   /* We have a 256MB branch region, but leave room to make sure the
      main executable is also within that region.  */
 #ifdef CONFIG_LATX_LARGE_CC
@@ -1096,33 +1096,6 @@ static size_t size_code_gen_buffer(size_t tb_size)
     return tb_size;
 }
 
-#ifdef __mips__
-/* In order to use J and JAL within the code_gen_buffer, we require
-   that the buffer not cross a 256MB boundary.  */
-static inline bool cross_256mb(void *addr, size_t size)
-{
-    return ((uintptr_t)addr ^ ((uintptr_t)addr + size)) & ~0x0ffffffful;
-}
-
-/* We weren't able to allocate a buffer without crossing that boundary,
-   so make do with the larger portion of the buffer that doesn't cross.
-   Returns the new base of the buffer, and adjusts code_gen_buffer_size.  */
-static inline void *split_cross_256mb(void *buf1, size_t size1)
-{
-    void *buf2 = (void *)(((uintptr_t)buf1 + size1) & ~0x0ffffffful);
-    size_t size2 = buf1 + size1 - buf2;
-
-    size1 = buf2 - buf1;
-    if (size1 < size2) {
-        size1 = size2;
-        buf1 = buf2;
-    }
-
-    tcg_ctx->code_gen_buffer_size = size1;
-    return buf1;
-}
-#endif
-
 #ifdef USE_STATIC_CODE_GEN_BUFFER
 static uint8_t static_code_gen_buffer[DEFAULT_CODE_GEN_BUFFER_SIZE]
     __attribute__((aligned(CODE_GEN_ALIGN)));
@@ -1150,13 +1123,6 @@ static bool alloc_code_gen_buffer(size_t tb_size, int splitwx, Error **errp)
         size = QEMU_ALIGN_DOWN(tb_size, qemu_real_host_page_size);
     }
     tcg_ctx->code_gen_buffer_size = size;
-
-#ifdef __mips__
-    if (cross_256mb(buf, size)) {
-        buf = split_cross_256mb(buf, size);
-        size = tcg_ctx->code_gen_buffer_size;
-    }
-#endif
 
     if (qemu_mprotect_rwx(buf, size)) {
         error_setg_errno(errp, errno, "mprotect of jit buffer");
@@ -1203,40 +1169,6 @@ static bool alloc_code_gen_buffer_anon(size_t size, int prot,
     }
     tcg_ctx->code_gen_buffer_size = size;
 
-#ifdef __mips__
-    if (cross_256mb(buf, size)) {
-        /*
-         * Try again, with the original still mapped, to avoid re-acquiring
-         * the same 256mb crossing.
-         */
-        size_t size2;
-        void *buf2 = mmap(NULL, size, prot, flags, -1, 0);
-        switch ((int)(buf2 != MAP_FAILED)) {
-        case 1:
-            if (!cross_256mb(buf2, size)) {
-                /* Success!  Use the new buffer.  */
-                munmap(buf, size);
-                break;
-            }
-            /* Failure.  Work with what we had.  */
-            munmap(buf2, size);
-            /* fallthru */
-        default:
-            /* Split the original buffer.  Free the smaller half.  */
-            buf2 = split_cross_256mb(buf, size);
-            size2 = tcg_ctx->code_gen_buffer_size;
-            if (buf == buf2) {
-                munmap(buf + size2, size - size2);
-            } else {
-                munmap(buf, size - size2);
-            }
-            size = size2;
-            break;
-        }
-        buf = buf2;
-    }
-#endif
-
     /* Request large pages for the buffer.  */
 #ifdef LOW_MEM_MODE_0
     qemu_madvise(buf, size, QEMU_MADV_NOHUGEPAGE);
@@ -1279,35 +1211,15 @@ static bool alloc_code_gen_buffer_splitwx_memfd(size_t size, Error **errp)
     void *buf_rw = NULL, *buf_rx = MAP_FAILED;
     int fd = -1;
 
-#ifdef __mips__
-    /* Find space for the RX mapping, vs the 256MiB regions. */
-    if (!alloc_code_gen_buffer_anon(size, PROT_NONE,
-                                    MAP_PRIVATE | MAP_ANONYMOUS |
-                                    MAP_NORESERVE, errp)) {
-        return false;
-    }
-    /* The size of the mapping may have been adjusted. */
-    size = tcg_ctx->code_gen_buffer_size;
-    buf_rx = tcg_ctx->code_gen_buffer;
-#endif
-
     buf_rw = qemu_memfd_alloc("tcg-jit", size, 0, &fd, errp);
     if (buf_rw == NULL) {
         goto fail;
     }
 
-#ifdef __mips__
-    void *tmp = mmap(buf_rx, size, PROT_READ | PROT_EXEC,
-                     MAP_SHARED | MAP_FIXED, fd, 0);
-    if (tmp != buf_rx) {
-        goto fail_rx;
-    }
-#else
     buf_rx = mmap(NULL, size, PROT_READ | PROT_EXEC, MAP_SHARED, fd, 0);
     if (buf_rx == MAP_FAILED) {
         goto fail_rx;
     }
-#endif
 
     close(fd);
     tcg_ctx->code_gen_buffer = buf_rw;
@@ -7394,130 +7306,6 @@ int lock_interpret(siginfo_t *info, ucontext_t *uc)
     }
 
     return LOCKINT_BAD;
-}
-#elif defined(__mips__)
-int shared_private_interpret(siginfo_t *info, ucontext_t *uc)
-{
-    uint32_t inst, rt, ft, wd;
-    int64_t mem_addr, value, siaddr;
-
-    siaddr = (int64_t)info->si_addr;
-    if ((page_get_flags(h2g(siaddr)) & PAGE_BITS) == PROT_NONE) {
-#ifdef CONFIG_SHDWRT_DBGMSG
-        qemu_log_mask(LAT_LOG_MEM, "[LATX_16K] %s inst 0x%x epc 0x%llx "
-                "siaddr 0x%lx PROT_NONE return 1\n", __func__,
-                *(uint32_t *)uc->uc_mcontext.pc, uc->uc_mcontext.pc, siaddr);
-#endif
-        return 1;
-    }
-
-    ShadowPageDesc *shadow_pd = page_get_target_data(h2g(siaddr));
-    assert(shadow_pd != NULL);
-
-    /* extract inst info */
-    inst = *(uint32_t *)uc->uc_mcontext.pc;
-    rt = (inst >> 16) & 0x1f;
-    ft = (inst >> 16) & 0x1f;
-    wd = (inst >> 6) & 0x1f;
-
-    /* calculate the address */
-    mem_addr = h2g(siaddr) + shadow_pd->access_off;
-
-#ifdef CONFIG_SHDWRT_DBGMSG
-    qemu_log_mask(LAT_LOG_MEM, "[LATX_16K] %s inst 0x%x epc 0x%llx "
-            "siaddr 0x%lx h2g(siaddr) 0x%x shadow page 0x%lx\n",
-            __func__, inst, uc->uc_mcontext.pc, siaddr,
-            h2g(siaddr), mem_addr);
-#endif
-    switch (inst >> 26)
-    {
-	case 0x20: // LB
-            value = *(char *)mem_addr;
-            value = value << 56 >> 56;
-            uc->uc_mcontext.gregs[rt] = value;
-            break;
-	case 0x21: // LH
-            value = *(short *)mem_addr;
-            value = value << 48 >> 48;
-            uc->uc_mcontext.gregs[rt] = value;
-            break;
-	case 0x23: // LW
-            value = *(int *)mem_addr;
-            value = value << 32 >> 32;
-            uc->uc_mcontext.gregs[rt] = value;
-            break;
-	case 0x37: // LD
-            value = *(int64_t *)mem_addr;
-            uc->uc_mcontext.gregs[rt] = value;
-            break;
-        case 0x28: // SB
-            value = uc->uc_mcontext.gregs[rt];
-            *(char *)mem_addr = (char)value;
-            break;
-        case 0x29: // SH
-            value = uc->uc_mcontext.gregs[rt];
-            *(short *)mem_addr = (short)value;
-            break;
-        case 0x2b: // SW
-            value = uc->uc_mcontext.gregs[rt];
-            *(int *)mem_addr = (int)value;
-            break;
-        case 0x3f: // SD
-            value = uc->uc_mcontext.gregs[rt];
-            *(int64_t *)mem_addr = (int64_t)value;
-            break;
-	case 0x24: // LBU
-            value = *(char *)mem_addr;
-            value = (uint64_t)value << 56 >> 56;
-            uc->uc_mcontext.gregs[rt] = value;
-            break;
-	case 0x25: // LHU
-            value = *(short *)mem_addr;
-            value = (uint64_t)value << 48 >> 48;
-            uc->uc_mcontext.gregs[rt] = value;
-            break;
-	case 0x27: // LWU
-            value = *(int *)mem_addr;
-            value = (uint64_t)value << 32 >> 32;
-            uc->uc_mcontext.gregs[rt] = value;
-            break;
-	case 0x31: // LWC1
-	    uc->uc_mcontext.fpregs.fp_r.fp_fregs[ft]._fp_fregs = *(int32_t *)mem_addr;
-	    break;
-	case 0x35: // LDC1
-	    uc->uc_mcontext.fpregs.fp_r.fp_dregs[ft] = *(int64_t *)mem_addr;
-	    break;
-	case 0x39: // SWC1
-	    *(int32_t *)mem_addr = uc->uc_mcontext.fpregs.fp_r.fp_fregs[ft]._fp_fregs;
-	    break;
-	case 0x3d: // SDC1
-	    *(int64_t *)mem_addr = uc->uc_mcontext.fpregs.fp_r.fp_dregs[ft];
-	    break;
-    case 0x1e:
-        /*
-         * 656 : offset of (ucontext_t, uc_extcontext)
-         * uc_extcontext : msa_extcontext
-         * 0x784d5341 : magic word of msa_extcontext
-         * sizeof(ucontext_t) has difference with kernel due to sizeof(sigset_t)
-         */
-        assert(*((int*)((void*)uc + 656)) == 0x784d5341);
-        if ((inst & 0x3f) == 0x20) { //ldb
-            uc->uc_mcontext.fpregs.fp_r.fp_dregs[wd] = *(int64_t *)mem_addr;
-            *((int64_t*)((void*)uc + 656 + 8 + (wd << 3))) = *((int64_t *)mem_addr + 1);
-        } else if ((inst & 0x3f) == 0x24){  //stb
-            *(int64_t *)mem_addr = uc->uc_mcontext.fpregs.fp_r.fp_dregs[wd];
-            *((int64_t *)mem_addr + 1) = *((int64_t*)((void*)uc + 656 + 8 + (wd << 3))) ;
-        } else {
-            printf("error: %s:%d unsupport inst 0x%x\n", __func__, __LINE__, inst);
-            assert(0);
-        }
-        break;
-    default:
-        printf("error: %s:%d unsupport inst 0x%x\n", __func__, __LINE__, inst);
-        assert(0);
-    }
-    uc->uc_mcontext.pc += 4;
-    return 0;
 }
 #else
 # error "Not support yet!"
