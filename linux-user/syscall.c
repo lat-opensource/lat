@@ -14218,35 +14218,125 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
 #endif /* TARGET_NR_getdents */
 #if defined(TARGET_NR_getdents64) && defined(__NR_getdents64)
     case TARGET_NR_getdents64:
-        {
-            struct linux_dirent64 *dirp;
-            abi_long count = arg3;
-            if (!(dirp = lock_user(VERIFY_WRITE, arg2, count, 0)))
-                return -TARGET_EFAULT;
-            ret = get_errno(sys_getdents64(arg1, dirp, count));
-            if (!is_error(ret)) {
-                struct linux_dirent64 *de;
-                int len = ret;
-                int reclen;
+    {
+        char proc_path[PATH_MAX];
+        char real_path[PATH_MAX];
+        int fd = arg1;
+        bool is_task_dir = false;
+
+        snprintf(proc_path, sizeof(proc_path), "/proc/self/fd/%d", fd);
+
+        ssize_t path_len = readlink(proc_path, real_path, sizeof(real_path) - 1);
+
+        if (path_len > 0) {
+            real_path[path_len] = '\0';
+            int pid;
+            char extra[2];
+
+            if (sscanf(real_path, "/proc/%d/task%1s", &pid, extra) == 1) {
+#ifdef CONFIG_LATX_DEBUG
+                fprintf(stderr, "latx: Detected task directory: %s\n", real_path);
+#endif
+                is_task_dir = true;
+            }
+        }
+
+        struct linux_dirent64 *dirp;
+        abi_long count = arg3;
+
+        if (!(dirp = lock_user(VERIFY_WRITE, arg2, count, 0)))
+            return -TARGET_EFAULT;
+        ret = get_errno(sys_getdents64(arg1, dirp, count));
+        if (!is_error(ret)) {
+            struct linux_dirent64 *de;
+            int len = ret;
+            /*
+            * Filter ghost threads only for /proc/<pid>/task
+            */
+            if (is_task_dir) {
+
+                int valid_tids[512];
+                int valid_count = 0;
+                CPUState *cpu_iter;
+
+                CPU_FOREACH(cpu_iter) {
+                    TaskState *ts = (TaskState *)cpu_iter->opaque;
+                    if (ts && valid_count < 512) {
+                        valid_tids[valid_count++] = ts->ts_tid;
+                    }
+                }
+
                 de = dirp;
+
                 while (len > 0) {
-                    reclen = de->d_reclen;
-                    if (reclen > len)
+                    int reclen = tswap16(de->d_reclen);
+                    if (reclen <= 0 || reclen > len)
                         break;
-                    de->d_reclen = tswap16(reclen);
-                    tswap64s((uint64_t *)&de->d_ino);
-                    tswap64s((uint64_t *)&de->d_off);
-                    #if TARGET_ABI_BITS == 32
-                    de->d_off = (int32_t)de->d_off;/*int32; Fix for ext4 filesystem*/
-                    de->d_ino = tswap32(de->d_ino);/*uint32; Fix for ext4 filesystem*/
-                    #endif
-                    de = (struct linux_dirent64 *)((char *)de + reclen);
+                    bool should_hide = true;
+
+                    if (!strcmp(de->d_name, ".") ||
+                        !strcmp(de->d_name, "..")) {
+                        should_hide = false;
+                    } else {
+                        char *endptr;
+                        long curr_tid = strtol(de->d_name, &endptr, 10);
+
+                        if (*endptr == '\0') {
+                            for (int i = 0; i < valid_count; i++) {
+                                if (curr_tid == valid_tids[i]) {
+                                    should_hide = false;
+                                    break;
+                                }
+                            }
+                        } else {
+                            should_hide = false;
+                        }
+                    }
+
+                    if (should_hide) {
+#ifdef CONFIG_LATX_DEBUG
+                        fprintf(stderr, "latx: Hiding ghost thread " "TID: %s\n", de->d_name);
+#endif
+                        int remaining_len = len - reclen;
+
+                        if (remaining_len > 0) {
+                            memmove(de, (char *)de + reclen, remaining_len);
+                        }
+                        ret -= reclen;
+                        len -= reclen;
+                        continue;
+                    }
+
+                    de = (struct linux_dirent64 *) ((char *)de + reclen);
                     len -= reclen;
                 }
             }
-            unlock_user(dirp, arg2, ret);
+
+            /*
+            * Common endian conversion
+            */
+            de = dirp;
+            len = ret;
+
+            while (len > 0) {
+                int reclen = de->d_reclen;
+                if (reclen > len || reclen <= 0)
+                    break;
+                de->d_reclen = tswap16(reclen);
+                tswap64s((uint64_t *)&de->d_ino);
+                tswap64s((uint64_t *)&de->d_off);
+#if TARGET_ABI_BITS == 32
+                de->d_off = (int32_t)de->d_off;
+                de->d_ino = tswap32(de->d_ino);
+#endif
+                de = (struct linux_dirent64 *) ((char *)de + reclen);
+                len -= reclen;
+            }
         }
-        return ret;
+
+        unlock_user(dirp, arg2, ret);
+    }
+    return ret;
 #endif /* TARGET_NR_getdents64 */
 #if defined(TARGET_NR__newselect)
     case TARGET_NR__newselect:
