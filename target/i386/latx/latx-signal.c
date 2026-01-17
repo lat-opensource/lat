@@ -72,6 +72,13 @@ void clear_signal_link_flag(TranslationBlock *tb, int index)
 
 void unlink_direct_jmp(TranslationBlock *tb) /* TODO */
 {
+#ifdef CONFIG_LATX_TU
+    if (use_tu_jmp(tb)) {
+        assert(tb->tu_jmp[TU_TB_INDEX_TARGET] != TB_JMP_RESET_OFFSET_INVALID);
+        unlink_tu_jmp(tb);
+        return;
+    }
+#endif
     if (tb->jmp_reset_offset[0] != TB_JMP_RESET_OFFSET_INVALID) {
         tb_reset_jump(tb, 0);
         qatomic_and(&tb->jmp_dest[0], (uintptr_t)NULL);
@@ -209,14 +216,7 @@ bool signal_in_glue(CPUArchState *env, ucontext_t *uc)
         if (use_indirect_jmp(tb) && tb->jmp_indirect != TB_JMP_RESET_OFFSET_INVALID) {
             unlink_indirect_jmp(env, tb, uc);
         } else {
-#ifdef CONFIG_LATX_TU
-            if (use_tu_jmp(tb)) {
-                unlink_tu_jmp(tb);
-            } else
-#endif
-            {
-                unlink_direct_jmp(tb);
-            }
+            unlink_direct_jmp(tb);
         }
     }
 
