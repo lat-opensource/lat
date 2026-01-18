@@ -466,6 +466,7 @@ struct tb_tc {
 struct tu_unlink {
     uint32_t stub_offset; /* The offset of the unlink instruction used by TU. */
     uint32_t ins;
+    uint8_t  rel_num; /* num of pcaddi to be reloacted in unlink stub */
 };
 
 typedef struct TBProfile

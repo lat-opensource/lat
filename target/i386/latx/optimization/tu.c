@@ -873,6 +873,53 @@ static void fix_rel_table(uint32_t tb_num_in_tu, TranslationBlock **tb_list)
 }
 #endif
 
+static void relocate_tu_unlink_stub(TranslationBlock *tb)
+{
+    assert(use_tu_jmp(tb));
+    assert(tb->tu_unlink.rel_num);
+
+    uintptr_t tu_b_ptr = (uintptr_t)tb->tc.ptr + tb->tu_jmp[TU_TB_INDEX_TARGET];
+    uintptr_t stub = (uintptr_t)tb->tc.ptr + tb->tu_unlink.stub_offset;
+    uint32_t *sptr = (void *)stub;
+    int rel_count = 0;
+
+    /*
+     *     -------------------------
+     *     ...    : first tb codes
+     * <1> jcc    : bne condition <----+--+
+     *     -------------------------   |  |
+     *     ...    : next tb codes      |  |
+     *     -------------------------   |  |
+     *     ...    : target tb codes    |  |
+     *     -------------------------   |  |
+     * <2> unlink : bne condition      |  |
+     *     stub   : pcaddi offset -----+  |
+     *     for    : to context switch     |
+     *     first  : pcaddi offset --------+
+     *     tb     : to context switch
+     *     -----------------------
+     *
+     * tu unlink : rewtire <1> to "b to <2>"
+     * tu relink : restore original <1>
+     */
+
+    /* scan to find pcaddi 0x18000000 */
+    while (rel_count < tb->tu_unlink.rel_num) {
+        if ((*sptr >> 25) == 0xc) { /* PCADDI */
+            rel_count += 1;
+            /* calculate new offset */
+            int64_t diff = ((int64_t)(tu_b_ptr) + 4) - (int64_t)(sptr);
+            diff = diff >> 2;
+            /* update the instruction */
+            uint32_t ins = (*sptr);
+            ins &=  ~(0xfffff << 5);
+            ins |= (diff & 0xfffff) << 5; /* set new offset */
+            *sptr = ins;
+        }
+        sptr += 1;
+    }
+}
+
 static void mov_unlink_stub_to_end(uint32_t tb_num_in_tu, TranslationBlock **tb_list)
 {
     if (tb_num_in_tu <= 1) {
@@ -928,6 +975,8 @@ static void mov_unlink_stub_to_end(uint32_t tb_num_in_tu, TranslationBlock **tb_
         if (use_tu_jmp(tb)) {
             tb->tu_unlink.stub_offset = curr_pos  + tb->tu_unlink.stub_offset
                 - (uintptr_t)tb->tc.ptr;
+            /* relocate pcaddi in unlink stub */
+            relocate_tu_unlink_stub(tb);
         }
     }
 

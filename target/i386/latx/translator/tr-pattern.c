@@ -116,6 +116,7 @@ static bool translate_cmp_jcc(IR1_INST *ir1)
         IR2_OPND unlink_label_opnd = ra_alloc_label();
         la_label(unlink_label_opnd);
         tb->tu_unlink.stub_offset = unlink_label_opnd._label_id;
+        tb->tu_unlink.rel_num = 2;
         set_use_tu_jmp(tb);
     }
 #endif
@@ -323,6 +324,7 @@ static bool translate_sub_jcc(IR1_INST *ir1)
         IR2_OPND unlink_label_opnd = ra_alloc_label();
         la_label(unlink_label_opnd);
         tb->tu_unlink.stub_offset = unlink_label_opnd._label_id;
+        tb->tu_unlink.rel_num = 2;
         set_use_tu_jmp(tb);
     }
 #endif
@@ -464,6 +466,7 @@ static inline bool xcomisx_jcc(IR1_INST *ir1, bool is_double, bool qnan_exp)
         IR2_OPND unlink_label_opnd = ra_alloc_label();
         la_label(unlink_label_opnd);
         tb->tu_unlink.stub_offset = unlink_label_opnd._label_id;
+        tb->tu_unlink.rel_num = 2;
         set_use_tu_jmp(tb);
     }
 #endif
@@ -601,6 +604,7 @@ static bool translate_bt_jcc(IR1_INST *ir1)
         IR2_OPND unlink_label_opnd = ra_alloc_label();
         la_label(unlink_label_opnd);
         tb->tu_unlink.stub_offset = unlink_label_opnd._label_id;
+        tb->tu_unlink.rel_num = 2;
         set_use_tu_jmp(tb);
     }
 #endif
@@ -841,6 +845,7 @@ static bool translate_test_jcc(IR1_INST *ir1)
 	IR2_OPND unlink_label_opnd = ra_alloc_label();
 	la_label(unlink_label_opnd);
 	tb->tu_unlink.stub_offset = unlink_label_opnd._label_id;
+	tb->tu_unlink.rel_num = 2;
 	set_use_tu_jmp(tb);
     }
 #endif
@@ -1498,6 +1503,7 @@ bool translate_cmp_xx_jcc(IR1_INST *pir1)
             IR2_OPND unlink_label_opnd = ra_alloc_label();
             la_label(unlink_label_opnd);
             tb->tu_unlink.stub_offset = unlink_label_opnd._label_id;
+            tb->tu_unlink.rel_num = 2;
             set_use_tu_jmp(tb);
         }
 #endif
@@ -1644,6 +1650,7 @@ bool translate_test_xx_jcc(IR1_INST *pir1)
             IR2_OPND unlink_label_opnd = ra_alloc_label();
             la_label(unlink_label_opnd);
             tb->tu_unlink.stub_offset = unlink_label_opnd._label_id;
+            tb->tu_unlink.rel_num = 2;
             set_use_tu_jmp(tb);
         }
 #endif
@@ -1772,6 +1779,7 @@ bool translate_bt_xx_jcc(IR1_INST *pir1)
             IR2_OPND unlink_label_opnd = ra_alloc_label();
             la_label(unlink_label_opnd);
             tb->tu_unlink.stub_offset = unlink_label_opnd._label_id;
+            tb->tu_unlink.rel_num = 2;
             set_use_tu_jmp(tb);
         }
 #endif
@@ -1889,6 +1897,7 @@ static bool translate_shr_jcc(IR1_INST *pir1)
         IR2_OPND unlink_label_opnd = ra_alloc_label();
         la_label(unlink_label_opnd);
         tb->tu_unlink.stub_offset = unlink_label_opnd._label_id;
+        tb->tu_unlink.rel_num = 2;
         set_use_tu_jmp(tb);
     }
 #endif
@@ -2076,6 +2085,7 @@ static bool translate_and_jcc(IR1_INST *pir1)
         IR2_OPND unlink_label_opnd = ra_alloc_label();
         la_label(unlink_label_opnd);
         tb->tu_unlink.stub_offset = unlink_label_opnd._label_id;
+        tb->tu_unlink.rel_num = 2;
         set_use_tu_jmp(tb);
     }
 #endif
@@ -2197,6 +2207,7 @@ static inline bool xcomisx_xx_jcc(IR1_INST *pir1, bool is_jcc, bool is_double, b
             IR2_OPND unlink_label_opnd = ra_alloc_label();
             la_label(unlink_label_opnd);
             tb->tu_unlink.stub_offset = unlink_label_opnd._label_id;
+            tb->tu_unlink.rel_num = 2;
             set_use_tu_jmp(tb);
         }
 #endif

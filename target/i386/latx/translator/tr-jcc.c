@@ -37,6 +37,7 @@ bool translate_jcc(IR1_INST *pir1)
         IR2_OPND unlink_label_opnd = ra_alloc_label();
         la_label(unlink_label_opnd);
         tb->tu_unlink.stub_offset = unlink_label_opnd._label_id;
+        tb->tu_unlink.rel_num = 2;
         set_use_tu_jmp(tb);
     } else {
         tb->tu_jmp[TU_TB_INDEX_TARGET] = TB_JMP_RESET_OFFSET_INVALID;
@@ -82,6 +83,7 @@ bool translate_jcxz(IR1_INST *pir1)
         IR2_OPND unlink_label_opnd = ra_alloc_label();
         la_label(unlink_label_opnd);
         tb->tu_unlink.stub_offset = unlink_label_opnd._label_id;
+        tb->tu_unlink.rel_num = 2;
         set_use_tu_jmp(tb);
         /* return true; */
     } else {
@@ -129,6 +131,7 @@ bool translate_jecxz(IR1_INST *pir1)
         IR2_OPND unlink_label_opnd = ra_alloc_label();
         la_label(unlink_label_opnd);
         tb->tu_unlink.stub_offset = unlink_label_opnd._label_id;
+        tb->tu_unlink.rel_num = 2;
         set_use_tu_jmp(tb);
         /* return true; */
     } else {
@@ -174,6 +177,7 @@ bool translate_jrcxz(IR1_INST *pir1)
         IR2_OPND unlink_label_opnd = ra_alloc_label();
         la_label(unlink_label_opnd);
         tb->tu_unlink.stub_offset = unlink_label_opnd._label_id;
+        tb->tu_unlink.rel_num = 2;
         set_use_tu_jmp(tb);
         /* return true; */
     } else {

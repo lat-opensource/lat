@@ -955,6 +955,7 @@ bool translate_jmp(IR1_INST *pir1)
         IR2_OPND unlink_label_opnd = ra_alloc_label();
         la_label(unlink_label_opnd);
         tb->tu_unlink.stub_offset = unlink_label_opnd._label_id;
+        tb->tu_unlink.rel_num = 1;
         set_use_tu_jmp(tb);
         /* return true; */
     } else {
@@ -1497,6 +1498,7 @@ bool translate_loopnz(IR1_INST *pir1)
         IR2_OPND unlink_label_opnd = ra_alloc_label();
         la_label(unlink_label_opnd);
         tb->tu_unlink.stub_offset = unlink_label_opnd._label_id;
+        tb->tu_unlink.rel_num = 2;
         set_use_tu_jmp(tb);
         /* return true; */
     } else {
@@ -1565,6 +1567,7 @@ bool translate_loopz(IR1_INST *pir1)
         IR2_OPND unlink_label_opnd = ra_alloc_label();
         la_label(unlink_label_opnd);
         tb->tu_unlink.stub_offset = unlink_label_opnd._label_id;
+        tb->tu_unlink.rel_num = 2;
         set_use_tu_jmp(tb);
         /* return true; */
     } else {
@@ -1627,6 +1630,7 @@ bool translate_loop(IR1_INST *pir1)
         IR2_OPND unlink_label_opnd = ra_alloc_label();
         la_label(unlink_label_opnd);
         tb->tu_unlink.stub_offset = unlink_label_opnd._label_id;
+        tb->tu_unlink.rel_num = 2;
         set_use_tu_jmp(tb);
         /* return true; */
     } else {

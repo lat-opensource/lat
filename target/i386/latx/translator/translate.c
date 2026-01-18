@@ -2671,10 +2671,24 @@ direct_jmp:
         set_tb_canlink(branch, succ_id, succ_x86_addr);
         if (succ_id) {
             la_data_li(target, context_switch_native_to_bt_ret_id_1);
-            aot_la_append_ir2_jmp_epilogue(target, base, JIRL_EPILOGUE_RET_ID_1, 0);
+            if (use_tu_jmp(tb)) {
+                /* for unlink stub */
+                assert(tb->tu_unlink.rel_num);
+                la_pcaddi(a0_ir2_opnd, 0x0);
+                aot_la_append_ir2_jmp_far(target, base, B_EPILOGUE_RET_ID_1, 0);
+            } else {
+                aot_la_append_ir2_jmp_epilogue(target, base, JIRL_EPILOGUE_RET_ID_1, 0);
+            }
         } else {
             la_data_li(target, context_switch_native_to_bt_ret_id_0);
-            aot_la_append_ir2_jmp_epilogue(target, base, JIRL_EPILOGUE_RET_ID_0, 0);
+            if (use_tu_jmp(tb)) {
+                /* for unlink stub */
+                assert(tb->tu_unlink.rel_num);
+                la_pcaddi(a0_ir2_opnd, 0x0);
+                aot_la_append_ir2_jmp_far(target, base, B_EPILOGUE_RET_ID_0, 0);
+            } else {
+                aot_la_append_ir2_jmp_epilogue(target, base, JIRL_EPILOGUE_RET_ID_0, 0);
+            }
         }
         break;
 
