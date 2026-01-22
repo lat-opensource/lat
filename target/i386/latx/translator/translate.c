@@ -400,6 +400,10 @@ int label_dispose(TranslationBlock *tb, TRANSLATION_DATA *lat_ctx)
             if (label_id != TB_JMP_RESET_OFFSET_INVALID) {
                 tb->jmp_indirect = ir2_label[label_id];
             }
+            label_id = tb->s_data->indirect_exit[0];
+            if (label_id != TB_JMP_RESET_OFFSET_INVALID) {
+                tb->s_data->indirect_exit[0] = ir2_label[label_id];
+            }
         } else if (!use_tu_jmp(tb)) {
             for (i = 0; i < 2; ++i) {
                 label_id = tb->jmp_reset_offset[i];
@@ -430,6 +434,12 @@ int label_dispose(TranslationBlock *tb, TRANSLATION_DATA *lat_ctx)
             if (use_tu_jmp(tb)) {
                 label_id = tb->tu_unlink.stub_offset;
                 tb->tu_unlink.stub_offset = ir2_label[label_id];
+            }
+        }
+        if (tb->bool_flags & IS_TU_LAST_TB) {
+            label_id = tb->s_data->indirect_exit[1];
+            if (label_id != TB_JMP_RESET_OFFSET_INVALID) {
+                tb->s_data->indirect_exit[1] = ir2_label[label_id];
             }
         }
 #endif
@@ -2238,6 +2248,16 @@ int tr_ir2_generate(struct TranslationBlock *tb)
 
         pir1++;
     }
+    if ((tb->bool_flags & IS_TU_LAST_TB) && tu_get_generate_indirext_exit()) {
+        IR2_OPND tu_indirect_exit = ra_alloc_label();
+        IR2_OPND target = ra_alloc_data();
+        IR2_OPND base = ra_alloc_data();
+        la_data_li(target, context_switch_native_to_bt_ret_0);
+        la_data_li(base, (ADDR)tb->tc.ptr);
+        la_label(tu_indirect_exit);
+        aot_la_append_ir2_jmp_far(target, base, B_EPILOGUE_RET_0, 0);
+        tb->s_data->indirect_exit[1] = ir2_opnd_label_id(&tu_indirect_exit);
+    }
 #ifdef CONFIG_LATX_DEBUG
     if (option_dump_ir1) {
         pir1 = tb_ir1_inst(tb, 0);
@@ -2429,7 +2449,7 @@ int tr_translate_tb(struct TranslationBlock *tb)
  * ra_alloc_dbt_arg2: next x86 ip
  */
 
-static void generate_indirect_goto(void *code_buf)
+void generate_indirect_goto(void *code_buf, IR2_OPND jirl_rd, IR2_OPND next_tb)
 {
     /*
      * WARNING!!!
@@ -2440,12 +2460,12 @@ static void generate_indirect_goto(void *code_buf)
     IR2_OPND base = ra_alloc_data();
     la_data_li(base, (ADDR)code_buf);
     IR2_OPND label_miss = ra_alloc_label();
+    TranslationBlock *tb = lsenv->tr_data->curr_tb;
 
     /* indirect jmp */
     IR2_OPND jmp_entry = ra_alloc_itemp();
     IR2_OPND jmp_cache_addr = ra_alloc_static0();
 
-    IR2_OPND next_tb = V0_RENAME_OPND;
     /*
      * lookup HASH_JMP_CACHE
      * Step 1: calculate HASH = (x86_addr >> 12) ^ (x86_addr & 0xfff)
@@ -2474,7 +2494,15 @@ static void generate_indirect_goto(void *code_buf)
 #else
     la_alsl_d(next_tb, next_tb, jmp_cache_addr, 3);
     la_ld_d(jmp_entry, next_tb, 0);
-    la_bne(jmp_entry, next_x86_addr, label_miss);
+    if (tb && is_tu_tb(tb)) {
+        IR2_OPND label_bcc = ra_alloc_label();
+        la_label(label_bcc);
+        tb->s_data->indirect_exit[0] = ir2_opnd_label_id(&label_bcc);
+        la_bne(jmp_entry, next_x86_addr, label_miss);
+        tu_jcc_nop_gen(tb);
+    } else {
+        la_bne(jmp_entry, next_x86_addr, label_miss);
+    }
     la_ld_d(next_tb, next_tb, 8);
 #endif
     la_jirl(zero_ir2_opnd, next_tb, 0);
@@ -2513,6 +2541,13 @@ static void generate_indirect_goto(void *code_buf)
 
 #endif
     la_label(label_miss);
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+    if (tb && is_tu_tb(tb)) {
+        tb->bool_flags |= IS_INDIRECT_TB;
+        tu_set_generate_indirext_exit();
+        return;
+    }
+#endif
     la_data_li(target, context_switch_native_to_bt_ret_0);
     aot_la_append_ir2_jmp_far(target, base, B_EPILOGUE_RET_0, 0);
 
@@ -2558,6 +2593,30 @@ static inline void set_tb_canlink(IR1_INST *branch, int succ_id, ADDR succ_x86_a
 
     if (qemu_loglevel_mask(CPU_LOG_TB_NOCHAIN) || self_jmp) {
         tb->canlink[succ_id] = 0;
+    }
+}
+
+void set_tb_jmp_indirect_label(TranslationBlock *tb)
+{
+    IR2_OPND old_jmp_label = ra_alloc_label();
+    la_label(old_jmp_label);
+    tb->jmp_indirect = ir2_opnd_label_id(&old_jmp_label);
+}
+
+void generate_indirect_exit_stub(void)
+{
+    TranslationBlock *tb = lsenv->tr_data->curr_tb;
+    IR2_OPND base = ra_alloc_data();
+    IR2_OPND target = ra_alloc_data();
+    la_data_li(base, (ADDR)tb->tc.ptr);
+
+    tb->bool_flags |= IS_INDIRECT_JMP;
+    if (qemu_loglevel_mask(CPU_LOG_TB_NOCHAIN)) {
+        la_data_li(target, context_switch_native_to_bt_ret_0);
+        aot_la_append_ir2_jmp_far(target, base, B_EPILOGUE_RET_0, 0);
+    } else {
+        set_tb_jmp_indirect_label(tb);
+        generate_indirect_goto((void *)tb->tc.ptr, zero_ir2_opnd, V0_RENAME_OPND);
     }
 }
 
@@ -2664,9 +2723,7 @@ direct_jmp:
 #endif
         }
 
-#ifdef CONFIG_LATX_PROFILER
         la_profile_begin();
-#endif
         tb->lazypc[succ_id] = succ_x86_addr - tb->pc;
         set_tb_canlink(branch, succ_id, succ_x86_addr);
         if (succ_id) {
@@ -2690,6 +2747,7 @@ direct_jmp:
                 aot_la_append_ir2_jmp_epilogue(target, base, JIRL_EPILOGUE_RET_ID_0, 0);
             }
         }
+        la_profile_end();
         break;
 
     case dt_X86_INS_RET:
@@ -2698,33 +2756,11 @@ direct_jmp:
     case dt_X86_INS_IRETD:
     case dt_X86_INS_IRETQ:
 indirect_jmp:
-        tb->bool_flags |= IS_INDIRECT_JMP;
-        /*
-         * If option_lsfpu is open, LATX do not need to fpu_rotate, therefore
-         * do not save the TB pointer.
-         *
-         * If using tb_link, LATX will jmp to jmp_glue finding the next TB.
-         */
-        if (!qemu_loglevel_mask(CPU_LOG_TB_NOCHAIN)) {
-            IR2_OPND old_jmp_label = ra_alloc_label();
-            la_label(old_jmp_label);
-            tb->jmp_indirect = ir2_opnd_label_id(&old_jmp_label);
-            generate_indirect_goto((void *)tb->tc.ptr);
-        } else {
-            la_data_li(target, context_switch_native_to_bt_ret_0);
-            aot_la_append_ir2_jmp_far(target, base, B_EPILOGUE_RET_0, 0);
-        }
-#ifdef CONFIG_LATX_PROFILER
-        la_profile_begin();
-#endif
+        generate_indirect_exit_stub();
         break;
     default:
         lsassertm(0, "not implement %d.\n", opcode);
     }
-
-#ifdef CONFIG_LATX_PROFILER
-    la_profile_end();
-#endif
 }
 
 void tr_generate_goto_tb(void) /* TODO */
@@ -2858,7 +2894,7 @@ static int generate_indirect_jmp_glue(void *code_buf)
     int ins_num;
     tr_init(NULL);
 
-    generate_indirect_goto(code_buf);
+    generate_indirect_goto(code_buf, zero_ir2_opnd, V0_RENAME_OPND);
 
     TRANSLATION_DATA *lat_ctx = lsenv->tr_data;
     label_dispose(NULL, lat_ctx);

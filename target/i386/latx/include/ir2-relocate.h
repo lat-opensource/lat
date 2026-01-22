@@ -158,8 +158,13 @@ IR2_INST *la_data_st_rel_table(uint32_t table_index,
  */
 #define PROFILE_BEGIN (0)
 #define PROFILE_END (1)
+#ifdef CONFIG_LATX_PROFILER
 IR2_INST *la_profile_begin(void);
 IR2_INST *la_profile_end(void);
+#else
+void la_profile_begin(void);
+void la_profile_end(void);
+#endif
 
 /**
  * @brief ir2 relocate worker
