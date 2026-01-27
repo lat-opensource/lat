@@ -17,6 +17,15 @@
 
 extern void *helper_tb_lookup_ptr(CPUArchState *);
 static int ss_generate_match_fail_native_code(void* code_buf);
+#if defined(CONFIG_LATX_KZT)
+uintptr_t kzt_get_alternate_pc(uintptr_t addr)
+{
+    if (!option_kzt || addr < reserved_va) {
+        return addr;
+    }
+    return (uintptr_t)getAlternate((void *)addr);
+}
+#endif
 
 /*To reuse qemu's tb chaining code, we take the same way of epilogue treating,
  *context_switch_native_to_bt_ret_0 and context_switch_native_to_bt share code.
@@ -2513,6 +2522,21 @@ static void generate_indirect_goto(void *code_buf)
 
 #endif
     la_label(label_miss);
+#if defined(CONFIG_LATX_KZT)
+    {
+        IR2_OPND label_skip = ra_alloc_label();
+        IR2_OPND reserved = ra_alloc_itemp();
+        li_d(reserved, (ADDR)reserved_va);
+        la_bltu(next_x86_addr, reserved, label_skip);
+        IR2_OPND helper_addr = ra_alloc_itemp();
+        aot_load_host_addr(helper_addr, (ADDR)kzt_get_alternate_pc,
+                           LOAD_HELPER_KZT_GET_ALTERNATE, 0);
+        la_mov64(a0_ir2_opnd, next_x86_addr);
+        la_jirl(ra_ir2_opnd, helper_addr, 0);
+        la_mov64(next_x86_addr, a0_ir2_opnd);
+        la_label(label_skip);
+    }
+#endif
     la_data_li(target, context_switch_native_to_bt_ret_0);
     aot_la_append_ir2_jmp_far(target, base, B_EPILOGUE_RET_0, 0);
 
@@ -2666,6 +2690,14 @@ direct_jmp:
 
 #ifdef CONFIG_LATX_PROFILER
         la_profile_begin();
+#endif
+#if defined(CONFIG_LATX_KZT)
+        if (option_kzt && succ_x86_addr >= reserved_va) {
+            uintptr_t alt_pc = (uintptr_t)getAlternate((void *)(uintptr_t)succ_x86_addr);
+            if (alt_pc != (uintptr_t)succ_x86_addr) {
+                succ_x86_addr = (ADDR)alt_pc;
+            }
+        }
 #endif
         tb->lazypc[succ_id] = succ_x86_addr - tb->pc;
         set_tb_canlink(branch, succ_id, succ_x86_addr);

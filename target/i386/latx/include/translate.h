@@ -11,6 +11,13 @@
 
 #include "aot.h"
 
+#if defined(CONFIG_LATX_KZT)
+#ifndef __BRIDGE_H_
+void *getAlternate(void *addr);
+#endif
+uintptr_t kzt_get_alternate_pc(uintptr_t addr);
+#endif
+
 //#define LATX_DEBUG_SOFTFPU
 
 #define TRANS_FUNC(name) glue(translate_, name)

@@ -43,6 +43,7 @@
 #include "library.h"
 #include "fileutils.h"
 #include "bridge_private.h"
+void *getAlternate(void *addr);
 extern const char *interp_prefix;
 extern struct elfheader_s * elf_header;
 #endif
@@ -284,6 +285,14 @@ cpu_tb_exec(CPUState *cpu, TranslationBlock *itb, int *tb_exit)
                 ret |= (uint64_t)rettb;
             }
             lazypc = rettb->pc + rettb->lazypc[0];
+#if defined(CONFIG_LATX_KZT)
+            if (option_kzt && lazypc >= reserved_va) {
+                uintptr_t alt_pc = (uintptr_t)getAlternate((void *)(uintptr_t)lazypc);
+                if (alt_pc != (uintptr_t)lazypc) {
+                    lazypc = alt_pc;
+                }
+            }
+#endif
         }
         env->eip = lazypc;
     }

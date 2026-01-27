@@ -1202,6 +1202,9 @@ static void* relkind_to_fixup_addr[] = {
     [LOAD_HELPER_SMC_ST] = smc_store_helper_st,
     [LOAD_HELPER_SMC_VST] = smc_store_helper_vst,
     [LOAD_HELPER_SMC_VST_X4] = smc_store_helper_vst_x4,
+#if defined(CONFIG_LATX_KZT)
+    [LOAD_HELPER_KZT_GET_ALTERNATE] = (void *)kzt_get_alternate_pc,
+#endif
 
     [LOAD_HOST_POW] = pow,
     [LOAD_HOST_SIN] = sin,
