@@ -1091,6 +1091,24 @@ static inline void cpu_loop_exec_tb(CPUState *cpu, TranslationBlock *tb,
 #endif
 }
 
+static void retranslation_segv_tb(CPUState *cpu)
+{
+    if (option_mem_test != 1) {
+        return;
+    }
+    CPUX86State *env = (CPUX86State *)cpu->env_ptr;
+    TranslationBlock *tb = env->segv_tb;
+    if (!tb || (tb->bool_flags & IS_MT_TB)) {
+        return;
+    }
+    mmap_lock();
+    tb_phys_invalidate(tb, tb->pc & TARGET_PAGE_MASK);
+    mem_test_retrans_insert(tb->pc);
+    tb_gen_code(cpu, tb->pc, 0, tb->flags, tb->cflags  & ~CF_INVALID);
+    env->segv_tb = NULL;
+    mmap_unlock();
+}
+
 /* main execution loop */
 int cpu_exec(CPUState *cpu)
 {
@@ -1187,6 +1205,10 @@ int cpu_exec(CPUState *cpu)
                if the guest is in advance */
             align_clocks(&sc, cpu);
         }
+    }
+
+    if (ret == EXCP0E_PAGE) {
+        retranslation_segv_tb(cpu);
     }
 
     cpu_exec_exit(cpu);
