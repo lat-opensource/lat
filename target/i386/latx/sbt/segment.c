@@ -4,6 +4,7 @@
  * @brief AOT optimization
  */
 #include "segment.h"
+#include "ts.h"
 #include "latx-options.h"
 
 #ifdef CONFIG_LATX_AOT
@@ -72,16 +73,24 @@ static void wine_sec_tree_remove(wine_sec_info *sec)
     g_tree_remove(wine_sec_tree, sec);
 }
 
-uint64_t deal_seg(wine_sec_info *wine_sec, uint64_t aot_offset, char *buf,
-        int fd, int target_prot, abi_long len, abi_long start)
+uint64_t deal_seg(wine_sec_info *wine_sec, bool is_pread, uint64_t aot_offset,
+        char *buf, int fd, int target_prot, abi_long len, abi_long start)
 {
     char path[PATH_MAX];
     int pathname_len;
+
+    if (fd <= 2) {
+       return aot_offset;
+    }
 
     sprintf(path, "/proc/self/fd/%d", fd);
     pathname_len = readlink(path, buf, PATH_MAX);
     assert(pathname_len >= 0 && pathname_len + 1 <= PATH_MAX);
     buf[pathname_len] = '\0';
+
+    if (is_pread && !is_pe_file(buf)) {
+        return aot_offset;
+    }
 
     if (wine_sec) {
 	if (strcmp(buf, wine_sec->file_name)) {

@@ -192,6 +192,23 @@ int is_pe_file(const char *filename) {
     return (signature[0] == 'M' && signature[1] == 'Z');
 }
 
+#define ELF_MAGIC 0x464C457F  // "\x7FELF"
+int is_elf_file(const char *filename)
+{
+    FILE *file = fopen(filename, "rb");
+    if (!file) {
+        perror("Error opening file");
+        return 0;
+    }
+    uint32_t magic;
+    size_t bytes_read = fread(&magic, sizeof(uint32_t), 1, file);
+    fclose(file);
+    if (bytes_read != 1) {
+        return 0;
+    }
+    return (magic == ELF_MAGIC);
+}
+
 void ts_push_back(TranslationBlock *tb)
 {
     if (tb_num_in_ts >= ts_vector_capacity) {

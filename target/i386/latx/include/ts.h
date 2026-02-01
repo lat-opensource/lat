@@ -23,6 +23,7 @@ void get_dynamic_message(TranslationBlock **tb_list, int tb_num,
         seg_info **seg_info_vector, int *seg_info_num);
 char is_pe(char *file_name);
 int is_pe_file(const char *filename);
+int is_elf_file(const char *filename);
 void ts_push_back(TranslationBlock *tb);
 void pop_back(void);
 char is_bad_tb(TranslationBlock *tb);
