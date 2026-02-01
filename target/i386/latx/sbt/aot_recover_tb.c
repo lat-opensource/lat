@@ -255,6 +255,24 @@ void do_recover_segment(aot_segment *p_segment,
     recover_tb_range(0, p_aot_tbs, num, start, end);
 }
 
+static bool check_ir1(target_ulong seg_begin, struct aot_tb *p_aot_tbs, int num,
+        void *curr_aot_buffer)
+{
+    uintptr_t pc;
+    aot_tb *tb;
+    uintptr_t p_ir1;
+    assert(curr_aot_buffer);
+    for (int i = 0; i < num; i++) {
+        tb = &p_aot_tbs[i];
+        pc = seg_begin + tb->offset_in_segment;
+        p_ir1 = (uintptr_t)curr_aot_buffer + tb->ir1_code_offset;
+        if (memcmp((void *)pc, (void *)p_ir1, tb->size)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 #include<sys/syscall.h>
 
 /* static int load_sum_tb; */
@@ -316,22 +334,29 @@ int load_page(target_ulong pc, uint32_t cflags)
     }
 
     target_ulong p1 = pc & TARGET_PAGE_MASK;
-    target_ulong p2 = 
-	    (p_aot_tbs[tb_num_in_page - 1].offset_in_segment + info->seg_begin
-            + p_aot_tbs[tb_num_in_page - 1].size) & TARGET_PAGE_MASK;
 
-    while ((p1 != p2) && (page_get_page_state(p2) == PAGE_SMC)) {
-#ifdef CONFIG_LATX_TU
-	while (tb_num_in_page && !p_aot_tbs[tb_num_in_page - 1].is_first_tb) {
-	    tb_num_in_page--;
-	}
-#endif
-        tb_num_in_page--; 
-        if (tb_num_in_page <= 0) {
+    if (p_segment->is_pe) {
+        if (!check_ir1(info->seg_begin, p_aot_tbs, tb_num_in_page, aot_buffer)) {
+            page_set_page_state(pc, PAGE_SMC);
             return 0;
         }
-        p2 = (p_aot_tbs[tb_num_in_page - 1].offset_in_segment + info->seg_begin
-                + p_aot_tbs[tb_num_in_page - 1].size) & TARGET_PAGE_MASK;
+    } else {
+        target_ulong p2 =
+            (p_aot_tbs[tb_num_in_page - 1].offset_in_segment + info->seg_begin
+             + p_aot_tbs[tb_num_in_page - 1].size) & TARGET_PAGE_MASK;
+        while ((p1 != p2) && (page_get_page_state(p2) == PAGE_SMC)) {
+#ifdef CONFIG_LATX_TU
+            while (tb_num_in_page && !p_aot_tbs[tb_num_in_page - 1].is_first_tb) {
+                tb_num_in_page--;
+            }
+#endif
+            tb_num_in_page--;
+            if (tb_num_in_page <= 0) {
+                return 0;
+            }
+            p2 = (p_aot_tbs[tb_num_in_page - 1].offset_in_segment + info->seg_begin
+                    + p_aot_tbs[tb_num_in_page - 1].size) & TARGET_PAGE_MASK;
+        }
     }
 
     tcg_ctx->tb_cflags = cflags;

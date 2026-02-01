@@ -67,8 +67,8 @@ bool wine_dll_handle(char *file_name, int name_len, int target_prot,
 void wine_sec_tree_init(void);
 wine_sec_info *wine_sec_tree_lookup(target_ulong pc);
 void segment_tree_init(void);
-uint64_t deal_seg(wine_sec_info *wine_sec, uint64_t aot_offset, char *buf,
-        int fd, int target_prot, abi_long len, abi_long start);
+uint64_t deal_seg(wine_sec_info *wine_sec, bool is_pread, uint64_t aot_offset,
+        char *buf, int fd, int target_prot, abi_long len, abi_long start);
 void segment_tree_insert(char *name, target_ulong offset, target_ulong begin,
         target_ulong end);
 seg_info *segment_tree_lookup(target_ulong pc);

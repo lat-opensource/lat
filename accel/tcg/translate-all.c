@@ -3654,7 +3654,7 @@ void page_set_flags(target_ulong start, target_ulong end, int flags)
                     page_set_page_state(addr, PAGE_SMC);
                 } else if ((p->flags & PAGE_EXEC) && p_info) {
                     aot_segment *p_segment = (aot_segment *)(p_info->p_segment);
-                    if ((p_info->is_running || (p_segment && !(p_segment->is_pe)))) {
+                    if ((p_segment && !(p_segment->is_pe))) {
                         page_set_page_state(addr, PAGE_SMC);
                     }
                 }

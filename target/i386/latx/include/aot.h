@@ -93,6 +93,10 @@ typedef struct aot_tb {
         uintptr_t jmp_stub_target_arg[2];
         uintptr_t jmp_indirect;
     };
+    union {
+        target_ulong curr_pc;
+        uint32_t ir1_code_offset;
+    };
     /* Translation Code Cache offset in AOT. */
     uintptr_t return_target_ptr_offset;
     unsigned long next_86_pc_offset;
@@ -271,7 +275,7 @@ extern seg_info **seg_info_vector;
 void mk_aot_dir(char * pathname);
 void dump_aot_buffer(aot_header *p_header);
 void dump_seg(aot_segment *p_segment, aot_header *p_header);
-lib_info *aot_load(char *lib_name);
+lib_info *aot_load(char *lib_name, void **curr_aot_buffer);
 void aot_tb_register(TranslationBlock *tb);
 void aot_do_tb_reloc(TranslationBlock *tb, struct aot_tb *stb,
     target_ulong seg_begin, target_ulong seg_end);
@@ -289,7 +293,8 @@ void recover_aot_tb(char *lib_name, uint64_t aot_offset,
         abi_long start, abi_long len);
 
 void do_generate_aot(int first_seg_in_lib, int end_seg_in_lib);
-struct aot_segment *aot_find_segment(char *path, int offset);
+struct aot_segment *aot_find_segment(char *path, int offset,
+        void *curr_aot_buffer);
 
 void recover_tb(char *buf, uint64_t aot_offset, abi_long start,
         abi_long len);

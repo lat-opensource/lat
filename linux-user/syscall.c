@@ -14809,6 +14809,18 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
         }
         ret = get_errno(pread64(arg1, p, arg3, target_offset64(arg4, arg5)));
         unlock_user_remap(p, arg2, ret);
+
+        if (option_aot && (arg1 > 2)) {
+            char buf[PATH_MAX];
+            int target_prot = page_get_flags(arg2) & (PAGE_READ | PAGE_WRITE | PAGE_EXEC);
+            if (target_prot & PAGE_EXEC) {
+                uint64_t aot_offset = target_offset64(arg4, arg5);
+                aot_offset = deal_seg(NULL, true, aot_offset, buf, arg1,
+                        target_prot, arg3, arg2);
+                recover_aot_tb(buf, aot_offset, arg2, arg3);
+            }
+        }
+
         return ret;
     case TARGET_NR_pwrite64:
         if (regpairs_aligned(cpu_env, num)) {

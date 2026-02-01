@@ -174,6 +174,29 @@ static gboolean merge_dump_rel_table_tree_node(gpointer key, gpointer val,
         case B_PROLOGUE:
             assert(((*pinsn) & 0xfc000000) == 0x50000000);
             break;
+        case B_EPILOGUE_RET_ID_3:
+            lsassert(((*pinsn) & 0xfc000000) == 0x50000000 ||
+            (((*pinsn) & 0xfe000000) == 0x1e000000 &&/* pcaddu18i */
+            (*(pinsn + 1) & 0xfc000000) == 0x4c000000));
+            break;
+        case B_EPILOGUE_RET_ID_1:
+            lsassert(((*pinsn) & 0xfc000000) == 0x50000000 ||
+            (((*pinsn) & 0xfe000000) == 0x1e000000 &&/* pcaddu18i */
+            (*(pinsn + 1) & 0xfc000000) == 0x4c000000));
+            break;
+        case B_EPILOGUE_RET_ID_0:
+            lsassert(((*pinsn) & 0xfc000000) == 0x50000000 ||
+            (((*pinsn) & 0xfe000000) == 0x1e000000 &&/* pcaddu18i */
+            (*(pinsn + 1) & 0xfc000000) == 0x4c000000));
+            break;
+        case JIRL_EPILOGUE_RET_ID_1:
+            lsassert((((*pinsn) & 0xfe000000) == 0x1e000000 &&/* pcaddu18i */
+            (*(pinsn + 1) & 0xfc000000) == 0x4c000000));
+            break;
+        case JIRL_EPILOGUE_RET_ID_0:
+            lsassert((((*pinsn) & 0xfe000000) == 0x1e000000 &&/* pcaddu18i */
+            (*(pinsn + 1) & 0xfc000000) == 0x4c000000));
+            break;
         case B_EPILOGUE:
             lsassert(((*pinsn) & 0xfc000000) == 0x50000000 ||
               (((*pinsn) & 0xfe000000) == 0x1e000000 &&/* pcaddu18i */
@@ -426,7 +449,7 @@ static void merge_aot_generate(void)
     char *aot_x86_lib_names = (char *)(aot_page_table + page_count);
     char *last_name = aot_x86_lib_names;
     char *curr_name = aot_x86_lib_names;
-    bool is_pe = is_pe_file(merge_seg_info_vector[0]->file_name);
+    bool is_pe = !is_elf_file(merge_seg_info_vector[0]->file_name);
     p_header->is_pe |= is_pe;
     int page_index = 0;
     for (int i = 0; i < seg_info_num; i++) {

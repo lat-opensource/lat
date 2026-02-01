@@ -1072,11 +1072,9 @@ abi_long target_mmap(abi_ulong start, abi_ulong len, int target_prot,
     }
     if (option_aot && ((fd > 2 && (target_prot & PROT_EXEC)) || wine_sec)) {
         char buf[PATH_MAX];
-        aot_offset = deal_seg(wine_sec, aot_offset, buf, fd, 
+        aot_offset = deal_seg(wine_sec, false, aot_offset, buf, fd,
                 target_prot, len, start);
-        if (option_load_aot) {
-            recover_aot_tb(buf, aot_offset, start, len);
-        }
+        recover_aot_tb(buf, aot_offset, start, len);
     }
 #endif
 #if defined(CONFIG_LATX_KZT) && defined(TARGET_X86_64)
