@@ -408,7 +408,7 @@ static bool tu_split_tb(TranslationBlock *pre_tb, TranslationBlock *tb)
     }
 
     if (spilt_success) {
-        /* tb->tu_start_mode = TU_TB_START_NORMAL; */
+        pre_tb->s_data->last_ir1_type = IR1_TYPE_NORMAL;
         pre_tb->s_data->next_tb[TU_TB_INDEX_NEXT] = NULL;
         pre_tb->s_data->next_tb[TU_TB_INDEX_TARGET] = NULL;
         pre_tb->size -= tb->size;
@@ -544,10 +544,17 @@ static inline void get_tu_queue(CPUState *cpu,
 void solve_tb_overlap(uint tb_num_in_tu,
 		TranslationBlock **tb_list, int max_insns)
 {
-    TranslationBlock *pre_tb = tb_list[0];
+    TranslationBlock *pre_tb = NULL;
     TranslationBlock *tb;
-    for (int i = 1; i < tb_num_in_tu; i++) {
+    for (int i = 0; i < tb_num_in_tu; i++) {
         tb = tb_list[i];
+        if (tb->s_data->tu_tb_mode == TU_TB_MODE_STATIC) {
+            continue;
+        }
+        if (!pre_tb) {
+            pre_tb = tb;
+            continue;
+        }
         if (pre_tb->s_data->tu_tb_mode == TU_TB_MODE_BROKEN
                 || pre_tb->s_data->tu_tb_mode == BAD_TB) {
             assert(0);
