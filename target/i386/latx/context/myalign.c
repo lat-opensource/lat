@@ -2725,6 +2725,30 @@ static my_foundfd_t m_f_fd[2] = {
     },
 };
 
+static int kzt_is_wine_basename(const char *base)
+{
+    if (!base) {
+        return 0;
+    }
+    return !strcmp(base, "wine") || !strcmp(base, "wine64") ||
+           !strcmp(base, "wine-preloader") || !strcmp(base, "wine64-preloader");
+}
+
+static int kzt_is_ld_basename(const char *base)
+{
+    if (!base) {
+        return 0;
+    }
+    if (!strcmp(base, "ld-linux-x86-64.so.2")) {
+        return 1;
+    }
+    /* glibc real filename often looks like ld-2.xx.so */
+    if (!strncmp(base, "ld-2.", 5) && strstr(base, ".so")) {
+        return 1;
+    }
+    return 0;
+}
+
 void kzt_wine_bridge(abi_ulong start, int fd)
 {
     if (!option_kzt && !wine_option_kzt) {
@@ -2740,11 +2764,20 @@ void kzt_wine_bridge(abi_ulong start, int fd)
             len = 0;
         }
         file_name[len] = '\0';
+        const char *base = basename(file_name);
         for (int i = 0; i < sizeof(m_f_fd)/sizeof(my_foundfd_t);i++) {
             if (m_f_fd[i].inited) {
                 continue;
             }
-            if(strstr(basename(file_name), m_f_fd[i].match)) {
+            int match = 0;
+            if (m_f_fd[i].type == M_F_FD_WINE) {
+                match = kzt_is_wine_basename(base);
+            } else if (m_f_fd[i].type == M_F_FD_LD) {
+                match = kzt_is_ld_basename(base);
+            } else {
+                match = (base && strstr(base, m_f_fd[i].match));
+            }
+            if(match) {
                 m_f_fd[i].inited = 1;
                 m_f_fd[i].mhanle(file_name, start);
             }
