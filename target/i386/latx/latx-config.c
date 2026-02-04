@@ -462,6 +462,10 @@ void latx_fast_jmp_cache_clear(CPUState *cs, int h)
     CPUX86State *env = &cpu->env;
     FastTB *fast_jmp_cache = (FastTB *)env->tb_jmp_cache_ptr;
     qatomic_set(&fast_jmp_cache[h].pc, 0);
+    uint32_t *target_ptr = (uint32_t *)qatomic_read(&fast_jmp_cache[h].ptr);
+    if (target_ptr) {
+        qatomic_set(target_ptr, 0x88888888);
+    }
 }
 
 void latx_fast_jmp_cache_clear_all(CPUState *cs)

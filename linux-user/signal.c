@@ -42,7 +42,9 @@
 #if defined(CONFIG_LATX_KZT) && defined(CONFIG_LATX_DEBUG)
 #include "debug.h"
 #endif
-
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+#include "exec/fasttb.h"
+#endif
 static pthread_mutex_t sigact_mutex = PTHREAD_MUTEX_INITIALIZER;
 static __thread int sigact_lock_count;
 static void sigact_lock(void)
@@ -1085,6 +1087,20 @@ static void host_signal_handler(int host_signum, siginfo_t *info,
     if (host_signum == SIGILL && jrra_handle_sigill(env, uc)) {
         return;
     }
+
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+    if (host_signum == SIGILL &&
+        *(unsigned int *)UC_PC(uc) == FASTTB_ILLINST_MAGIC) {
+            TranslationBlock *current_tb = tcg_tb_lookup(UC_PC(uc));
+            if (current_tb) {
+                /* set the next TB and point the epc to the epilogue */
+                UC_GR(uc)[reg_statics_map[S_UD1]] = current_tb->pc;
+                UC_PC(uc) = context_switch_native_to_bt_ret_0;
+            }
+            return;
+        }
+#endif
+
 #ifdef CONFIG_LATX
     /*
      * store ucontext_t to env for context switch.
