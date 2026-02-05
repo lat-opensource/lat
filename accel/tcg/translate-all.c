@@ -1856,7 +1856,7 @@ static void do_tb_phys_invalidate(TranslationBlock *tb, bool rm_from_page_list)
     CPU_FOREACH(cpu) {
         if (qatomic_read(&cpu->tb_jmp_cache[h]) == tb) {
 #ifdef CONFIG_LATX_FAST_JMPCACHE
-            latx_fast_jmp_cache_clear(cpu, h);
+            latx_fast_jmp_cache_clear(cpu, h, tb->cflags & CF_INVALID);
 #endif
             qatomic_set(&cpu->tb_jmp_cache[h], NULL);
         }

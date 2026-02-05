@@ -1093,6 +1093,9 @@ static void host_signal_handler(int host_signum, siginfo_t *info,
         *(unsigned int *)UC_PC(uc) == FASTTB_ILLINST_MAGIC) {
             TranslationBlock *current_tb = tcg_tb_lookup(UC_PC(uc));
             if (current_tb) {
+#if defined(CONFIG_LATX_DEBUG)
+                fprintf(stderr, "[FAST_JMPCACHE] SIGILL handled\n");
+#endif
                 /* set the next TB and point the epc to the epilogue */
                 UC_GR(uc)[reg_statics_map[S_UD1]] = current_tb->pc;
                 UC_PC(uc) = context_switch_native_to_bt_ret_0;

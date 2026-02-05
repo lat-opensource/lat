@@ -456,15 +456,17 @@ void latx_fast_jmp_cache_add(CPUState *cs, int h, struct TranslationBlock *tb)
     qatomic_set(&fast_jmp_cache[h].pc, tb->pc);
 }
 
-void latx_fast_jmp_cache_clear(CPUState *cs, int h)
+void latx_fast_jmp_cache_clear(CPUState *cs, int h, bool set_illinst)
 {
     X86CPU *cpu = X86_CPU(cs);
     CPUX86State *env = &cpu->env;
     FastTB *fast_jmp_cache = (FastTB *)env->tb_jmp_cache_ptr;
     qatomic_set(&fast_jmp_cache[h].pc, 0);
-    uint32_t *target_ptr = (uint32_t *)qatomic_read(&fast_jmp_cache[h].ptr);
-    if (target_ptr) {
-        qatomic_set(target_ptr, 0x88888888);
+    if (set_illinst) {
+        uint32_t *target_ptr = (uint32_t *)qatomic_read(&fast_jmp_cache[h].ptr);
+        if (target_ptr) {
+            qatomic_set(target_ptr, FASTTB_ILLINST_MAGIC);
+        }
     }
 }
 

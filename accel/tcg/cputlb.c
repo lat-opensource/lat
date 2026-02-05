@@ -104,7 +104,7 @@ static void tb_jmp_cache_clear_page(CPUState *cpu, target_ulong page_addr)
 
     for (i = 0; i < TB_JMP_PAGE_SIZE; i++) {
 #ifdef CONFIG_LATX_FAST_JMPCACHE
-        latx_fast_jmp_cache_clear(cpu, i0 + i);
+        latx_fast_jmp_cache_clear(cpu, i0 + i, true);
 #endif
         qatomic_set(&cpu->tb_jmp_cache[i0 + i], NULL);
     }
