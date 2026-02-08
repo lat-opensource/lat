@@ -2529,12 +2529,16 @@ static void generate_indirect_goto(void *code_buf)
         IR2_OPND reserved = ra_alloc_itemp();
         li_d(reserved, (ADDR)reserved_va);
         la_bltu(next_x86_addr, reserved, label_skip);
+        ra_free_temp(reserved);
+        tr_save_x64_8_registers_to_env(0xff, 0);
         IR2_OPND helper_addr = ra_alloc_itemp();
         aot_load_host_addr(helper_addr, (ADDR)kzt_get_alternate_pc,
                            LOAD_HELPER_KZT_GET_ALTERNATE, 0);
         la_mov64(a0_ir2_opnd, next_x86_addr);
         la_jirl(ra_ir2_opnd, helper_addr, 0);
+        ra_free_temp(helper_addr);
         la_mov64(next_x86_addr, a0_ir2_opnd);
+        tr_load_x64_8_registers_from_env(0xff, 0);
         la_label(label_skip);
     }
 #endif
