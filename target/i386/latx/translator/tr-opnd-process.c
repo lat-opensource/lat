@@ -617,30 +617,54 @@ void store_ireg_to_ir1_seg(IR2_OPND seg_value_opnd, IR1_OPND *opnd1)
     la_st_w(seg_value_opnd, env_ir2_opnd,
                       lsenv_offset_of_seg_selector(lsenv, seg_num));
 
-    /* 2. update seg cache : read data in GDT and store into seg cache */
-    /* TI = 0 : GDT, TI = 1 : LDT */
-    IR2_OPND label_ldt = ra_alloc_label();
-    IR2_OPND label_base_end = ra_alloc_label();
-    IR2_OPND is_ldt = ra_alloc_itemp_internal(); /* [51:48] [15: 0] limit */
-    IR2_OPND dt_opnd = ra_alloc_itemp_internal();
+
 #ifdef TARGET_X86_64
     if (seg_num == cs_index) {
         IR2_OPND ir2_tmp = ra_alloc_itemp();
+        IR2_OPND mask_tmp = ra_alloc_itemp();
         IR2_OPND label_x64 = ra_alloc_label();
         IR2_OPND label_csend = ra_alloc_label();//if (cs == 0x23) isx86 ; else is x64;
         li_d(ir2_tmp, 0x23);
         la_bne(seg_value_opnd, ir2_tmp,label_x64);
         la_st_w(zero_ir2_opnd, env_ir2_opnd,
             offsetof(CPUX86State, sys.codemode));
+
+        li_w(mask_tmp, ~HF_CS64_MASK);
+        la_ld_w(ir2_tmp, env_ir2_opnd,
+                offsetof(CPUX86State, hflags));
+        la_and(ir2_tmp, ir2_tmp, mask_tmp);
+        li_w(mask_tmp, HF_CS32_MASK);
+        la_or(ir2_tmp, ir2_tmp, mask_tmp);
+        la_st_w(ir2_tmp, env_ir2_opnd,
+                offsetof(CPUX86State, hflags));
+
         la_b(label_csend);
         la_label(label_x64);
         li_d(ir2_tmp, 1);
         la_st_w(ir2_tmp, env_ir2_opnd,
             offsetof(CPUX86State, sys.codemode));
+
+        li_w(mask_tmp, HF_CS32_MASK | HF_SS32_MASK | HF_CS64_MASK);
+        la_ld_w(ir2_tmp, env_ir2_opnd,
+                offsetof(CPUX86State, hflags));
+        la_or(ir2_tmp, ir2_tmp, mask_tmp);
+        li_w(mask_tmp, ~HF_ADDSEG_MASK);
+        la_and(ir2_tmp, ir2_tmp, mask_tmp);
+        la_st_w(ir2_tmp, env_ir2_opnd,
+                offsetof(CPUX86State, hflags));
+
         la_label(label_csend);
         ra_free_temp(ir2_tmp);
+        ra_free_temp(mask_tmp);
     }
 #endif
+
+    /* 2. update seg cache : read data in GDT and store into seg cache */
+    /* TI = 0 : GDT, TI = 1 : LDT */
+    IR2_OPND label_ldt = ra_alloc_label();
+    IR2_OPND label_base_end = ra_alloc_label();
+    IR2_OPND is_ldt = ra_alloc_itemp_internal(); /* [51:48] [15: 0] limit */
+    IR2_OPND dt_opnd = ra_alloc_itemp_internal();
     la_andi(is_ldt, seg_value_opnd, 0x4);
     la_bne(is_ldt, zero_ir2_opnd, label_ldt);
     ra_free_temp(is_ldt);
