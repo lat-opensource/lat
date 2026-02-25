@@ -117,7 +117,7 @@ static void recover_tb_range(target_ulong page, struct aot_tb *p_aot_tbs,
             continue;
         }
         qatomic_set(&tcg_ctx->code_gen_ptr, (void *)
-				ROUND_UP((uintptr_t)(tcg_ctx->code_gen_ptr), CODE_GEN_ALIGN));
+				ROUND_UP((uintptr_t)(tcg_ctx->code_gen_ptr), qemu_icache_linesize));
         void *tb_buff = (void *)tcg_splitwx_to_rx(tcg_ctx->code_gen_ptr);
 #if defined(CONFIG_LATX_TBMINI_ENABLE)
         /* set TBMini */
