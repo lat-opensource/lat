@@ -280,7 +280,8 @@ static inline void create_dynamic_tb(seg_info *seg, CPUState *cpu,
     TranslationBlock *tb;
     for (int i = seg->first_tb_id; i <= seg->last_tb_id; i++) {
         target_ulong pc = dynamic_tb_message_vector[i].pc;
-		int cflags = dynamic_tb_message_vector[i].cflags;
+        int cflags = dynamic_tb_message_vector[i].cflags;
+        cpu->tcg_cflags = cflags;
         assert(pc >= seg->seg_begin && pc < seg->seg_end);
         if (aot_tb_lookup(pc, cflags)) {
             continue;
