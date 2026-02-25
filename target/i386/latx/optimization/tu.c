@@ -129,6 +129,9 @@ void tu_enough_space(CPUState *cpu)
 
 void tu_reset_tb(TranslationBlock *tb)
 {
+#ifdef CONFIG_LATX_SMC_OPT
+    tb->smc_data = 0;
+#endif
     qemu_spin_init(&tb->jmp_lock);
     tb->jmp_dest[0] = (uintptr_t)NULL;
     tb->jmp_dest[1] = (uintptr_t)NULL;
