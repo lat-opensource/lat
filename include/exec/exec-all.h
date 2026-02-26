@@ -661,6 +661,7 @@ struct TranslationBlock {
      */
     #define EFLAG_BACKUP 2
     uint16_t eflags_target_arg[EFLAG_BACKUP + 1];
+    bool has_jcc_end_ptn;
 #endif
 #ifdef CONFIG_LATX_PROFILER
     TBProfile profile __attribute__((aligned(8)));
@@ -691,6 +692,10 @@ struct TranslationBlock {
 static inline int tb_use_smc_opt(TranslationBlock *tb)
 {
     if (tb) {
+#ifdef CONFIG_LATX_INSTS_PATTERN
+        if (tb->has_jcc_end_ptn)
+            return 0;
+#endif
         return tb->smc_data & TBSMC_OPTED_MASK;
     } else {
         return 0;

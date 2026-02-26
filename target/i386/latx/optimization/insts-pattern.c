@@ -463,6 +463,7 @@ bool insts_pattern_scan_jcc_end(TranslationBlock *tb, IR1_INST *pir1, int pir1_i
                 pir1->instptn.next = ir1_jcc;
                 ir1_jcc->instptn.opc  = INSTPTN_OPC_CMP_XX_JCC;
                 ir1_jcc->instptn.next = tb_ir1_inst(tb, pir1_index);
+                tb->has_jcc_end_ptn = true;
             }
             return false;
         default:
@@ -502,6 +503,7 @@ bool insts_pattern_scan_jcc_end(TranslationBlock *tb, IR1_INST *pir1, int pir1_i
                 pir1->instptn.next = ir1_jcc;
                 ir1_jcc->instptn.opc  = INSTPTN_OPC_TEST_XX_JCC;
                 ir1_jcc->instptn.next = tb_ir1_inst(tb, pir1_index);
+                tb->has_jcc_end_ptn = true;
             }
             return false;
         default:
@@ -528,6 +530,7 @@ bool insts_pattern_scan_jcc_end(TranslationBlock *tb, IR1_INST *pir1, int pir1_i
                 pir1->instptn.next = ir1_jcc;
                 ir1_jcc->instptn.opc  = INSTPTN_OPC_BT_XX_JCC;
                 ir1_jcc->instptn.next = tb_ir1_inst(tb, pir1_index);
+                tb->has_jcc_end_ptn = true;
             }
             return false;
         default:
@@ -620,6 +623,7 @@ bool insts_pattern_scan_jcc_end(TranslationBlock *tb, IR1_INST *pir1, int pir1_i
                 pir1->instptn.next = ir1_jcc;
                 ir1_jcc->instptn.opc  = INSTPTN_OPC_COMISD_XX_JCC;
                 ir1_jcc->instptn.next = tb_ir1_inst(tb, pir1_index);
+                tb->has_jcc_end_ptn = true;
             }
             return false;
         default:
@@ -651,6 +655,7 @@ bool insts_pattern_scan_jcc_end(TranslationBlock *tb, IR1_INST *pir1, int pir1_i
                 pir1->instptn.next = ir1_jcc;
                 ir1_jcc->instptn.opc  = INSTPTN_OPC_COMISS_XX_JCC;
                 ir1_jcc->instptn.next = tb_ir1_inst(tb, pir1_index);
+                tb->has_jcc_end_ptn = true;
             }
             return false;
         default:
@@ -682,6 +687,7 @@ bool insts_pattern_scan_jcc_end(TranslationBlock *tb, IR1_INST *pir1, int pir1_i
                 pir1->instptn.next = ir1_jcc;
                 ir1_jcc->instptn.opc  = INSTPTN_OPC_UCOMISD_XX_JCC;
                 ir1_jcc->instptn.next = tb_ir1_inst(tb, pir1_index);
+                tb->has_jcc_end_ptn = true;
             }
             return false;
         default:
@@ -713,6 +719,7 @@ bool insts_pattern_scan_jcc_end(TranslationBlock *tb, IR1_INST *pir1, int pir1_i
                 pir1->instptn.next = ir1_jcc;
                 ir1_jcc->instptn.opc  = INSTPTN_OPC_UCOMISS_XX_JCC;
                 ir1_jcc->instptn.next = tb_ir1_inst(tb, pir1_index);
+                tb->has_jcc_end_ptn = true;
             }
             return false;
         default:

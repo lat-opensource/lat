@@ -2136,6 +2136,7 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
     tb->eflags_target_arg[0] = TB_JMP_RESET_OFFSET_INVALID;
     tb->eflags_target_arg[1] = TB_JMP_RESET_OFFSET_INVALID;
     tb->eflags_target_arg[2] = TB_JMP_RESET_OFFSET_INVALID;
+    tb->has_jcc_end_ptn = false;
 #endif
 #ifdef CONFIG_LATX_TU
     tu_reset_tb(tb);
