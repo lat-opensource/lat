@@ -207,10 +207,7 @@ TranslationBlock* tb_create(CPUState *cpu, target_ulong pc,
     tb->s_data = &tmp_s_data;
     tu_reset_tb(tb);
     tb->pc = pc;
-    /* tb->cs_base = cs_base; */
-    tb->flags = flags;
     tb->cflags = cflags;
-    /* tb->tu_start_mode = mode; */
     tcg_ctx->tb_cflags = cflags;
     tcg_ctx->tb_jmp_reset_offset = tb->jmp_reset_offset;
     if (TCG_TARGET_HAS_direct_jump) {
@@ -220,25 +217,26 @@ TranslationBlock* tb_create(CPUState *cpu, target_ulong pc,
         tcg_ctx->tb_jmp_insn_offset = NULL;
         tcg_ctx->tb_jmp_target_addr = tb->jmp_target_arg;
     }
-
     if (in_pre_translate) {
         X86CPU *x86cpu = X86_CPU(cpu);
         CPUX86State *env = &x86cpu->env;
         if (tb_is_code64 && !CODEIS64) {
-            env->hflags |= HF_LMA_MASK;
             cpu_x86_load_seg_cache(env, R_CS, 0xf000, 0xffff0000, 0xffff,
                     DESC_P_MASK | DESC_S_MASK | DESC_CS_MASK |
                     DESC_R_MASK | DESC_A_MASK | DESC_L_MASK);
         } else if (!tb_is_code64 && CODEIS64) {
-            env->hflags &= ~HF_LMA_MASK;
             cpu_x86_load_seg_cache(env, R_CS, 0xf000, 0xffff0000, 0xffff,
                     DESC_P_MASK | DESC_S_MASK | DESC_CS_MASK |
-                    DESC_R_MASK | DESC_A_MASK);
+                    DESC_R_MASK | DESC_A_MASK | DESC_B_MASK);
         }
         if (tb_is_code64) {
             tb->bool_flags |= IS_CODE64;
         }
+        env->segs[R_CS].base = 0;
+        env->eip = pc;
+        cpu_get_tb_cpu_state(env, &pc, &cs_base, &flags);
     }
+    tb->flags = flags;
 
     target_disasm(tb, max_insns);
 
