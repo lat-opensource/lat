@@ -317,9 +317,9 @@ static void smc_store_shadow_page(int64_t mem_addr, int64_t value, int deal_byte
 }
 
 static int smc_store_interpret(siginfo_t *info, ucontext_t *uc,
-        uint64_t real_guest_addr)
+        uint64_t real_guest_addr, uint32_t inst)
 {
-    uint32_t inst, rd, fd;
+    uint32_t rd, fd;
     int64_t value, mem_addr;
 #ifndef CONFIG_LOONGARCH_NEW_WORLD
     uint32_t rj;
@@ -335,7 +335,6 @@ static int smc_store_interpret(siginfo_t *info, ucontext_t *uc,
     parse_extcontext(uc, &extctx);
 #endif
 
-    inst = *(uint32_t *)UC_PC(uc);
     rd = inst & 0x1f;
     mem_addr = real_guest_addr;
 
@@ -600,6 +599,8 @@ static inline int handle_cpu_signal(uintptr_t pc, siginfo_t *info,
                 emu = &emu_store;
             }
         }
+        uint32_t inst = *(uint32_t *)UC_PC(uc);
+
         switch (page_unprotect(guest_store_address, pc, emu)) {
 #else
         switch (page_unprotect(h2g(address), pc, NULL)) {
@@ -628,7 +629,7 @@ static inline int handle_cpu_signal(uintptr_t pc, siginfo_t *info,
                  * So the offset will be 0x0.
                  */
                 mmap_lock();
-                size = smc_store_interpret(info, uc, guest_store_address);
+                size = smc_store_interpret(info, uc, guest_store_address, inst);
                 UC_PC(uc) += size;
                 mmap_unlock();
             }
