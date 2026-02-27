@@ -404,6 +404,9 @@ static TranslationBlock* create_static_tb(CPUState *cpu, target_ulong pc,
         exit(-1);
     }
     tu_reset_tb(tb);
+#ifdef CONFIG_LATX_SMC_OPT
+    tb->smc_data = 0;
+#endif
     tb->pc = pc;
     /* tb->cs_base = cs_base; */
     tb->flags = flags;

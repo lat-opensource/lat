@@ -129,9 +129,6 @@ void tu_enough_space(CPUState *cpu)
 
 void tu_reset_tb(TranslationBlock *tb)
 {
-#ifdef CONFIG_LATX_SMC_OPT
-    tb->smc_data = 0;
-#endif
     qemu_spin_init(&tb->jmp_lock);
     tb->jmp_dest[0] = (uintptr_t)NULL;
     tb->jmp_dest[1] = (uintptr_t)NULL;
@@ -209,6 +206,9 @@ TranslationBlock* tb_create(CPUState *cpu, target_ulong pc,
     tb->canlink[1] = 1;
     tb->s_data = &tmp_s_data;
     tu_reset_tb(tb);
+#ifdef CONFIG_LATX_SMC_OPT
+    tb->smc_data = 0;
+#endif
     tb->pc = pc;
     tb->cflags = cflags;
     tcg_ctx->tb_cflags = cflags;
