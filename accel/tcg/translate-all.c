@@ -1837,9 +1837,6 @@ static void do_tb_phys_invalidate(TranslationBlock *tb, bool rm_from_page_list)
     qemu_spin_lock(&tb->jmp_lock);
     qatomic_set(&tb->cflags, tb->cflags | CF_INVALID);
     qemu_spin_unlock(&tb->jmp_lock);
-#ifdef CONFIG_LATX_FAST_JMPCACHE
-    qatomic_set((uint32_t *)tb->tc.ptr, FASTTB_ILLINST_MAGIC);
-#endif
 
     /* remove the TB from the hash list */
     phys_pc = tb_page_addr0(tb);
@@ -2604,6 +2601,11 @@ foreach_tb_start:
             bool inst_saved = jrra_preserve_current_tb_head(tb, current_tb,
                                     current_tb_modified, &inst);
             tb_phys_invalidate__locked(tb);
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+            if (current_tb != tb) {
+                qatomic_set((uint32_t *)tb->tc.ptr, FASTTB_ILLINST_MAGIC);
+            }
+#endif
             if (inst_saved) {
                 jrra_restore_current_tb_head(tb, current_tb,
                                     current_tb_modified, inst);
