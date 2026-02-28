@@ -152,7 +152,7 @@ void options_init(void)
 #endif
 
 #ifdef CONFIG_LATX_SMC_OPT
-    option_smc_opt = latx_smc_default();
+    option_smc_opt = 0;//latx_smc_default();
 #endif
 
     option_set_rounding_opt = 1;
