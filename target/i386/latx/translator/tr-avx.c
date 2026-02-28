@@ -3001,7 +3001,8 @@ bool translate_xsetbv(IR1_INST *pir1)
 
     la_bstrins_d(temp_rfbm, eax_opnd, 31, 0);
     la_bstrins_d(temp_rfbm, edx_opnd, 63, 32);
-    tr_gen_call_to_helper_vfll((ADDR)helper_xsetbv, ecx_opnd, temp_rfbm, 0);
+    tr_gen_call_to_helper_vfll((ADDR)helper_xsetbv, ecx_opnd, temp_rfbm, 0,
+            LOAD_HELPER_XSETBV);
     return true;
 }
 
@@ -3015,7 +3016,8 @@ bool translate_xsave(IR1_INST *pir1)
 
     la_bstrins_d(temp_rfbm, eax_opnd, 31, 0);
     la_bstrins_d(temp_rfbm, edx_opnd, 63, 32);
-    tr_gen_call_to_helper_vfll((ADDR)helper_xsave, mem_opnd, temp_rfbm, 1);
+    tr_gen_call_to_helper_vfll((ADDR)helper_xsave, mem_opnd, temp_rfbm, 1,
+            LOAD_HELPER_XSAVE);
     return true;
 }
 
@@ -3029,7 +3031,8 @@ bool translate_xsaveopt(IR1_INST *pir1)
 
     la_bstrins_d(temp_rfbm, eax_opnd, 31, 0);
     la_bstrins_d(temp_rfbm, edx_opnd, 63, 32);
-    tr_gen_call_to_helper_vfll((ADDR)helper_xsaveopt, mem_opnd, temp_rfbm, 1);
+    tr_gen_call_to_helper_vfll((ADDR)helper_xsaveopt, mem_opnd, temp_rfbm, 1,
+            LOAD_HELPER_XSAVEOPT);
     return true;
 }
 
@@ -3043,7 +3046,8 @@ bool translate_xrstor(IR1_INST *pir1)
 
     la_bstrins_d(temp_rfbm, eax_opnd, 31, 0);
     la_bstrins_d(temp_rfbm, edx_opnd, 63, 32);
-    tr_gen_call_to_helper_vfll((ADDR)helper_xrstor, mem_opnd, temp_rfbm, 1);
+    tr_gen_call_to_helper_vfll((ADDR)helper_xrstor, mem_opnd, temp_rfbm, 1,
+            LOAD_HELPER_XRSTOR);
     return true;
 }
 
@@ -4986,14 +4990,15 @@ bool translate_vpcmpestrm(IR1_INST *pir1)
 #endif
     if (ir1_opnd_is_xmm(opnd1)) {
         int s = ir1_opnd_base_reg_num(opnd1);
-        tr_gen_call_to_helper_pcmpxstrx((ADDR)helper_pcmpestrm_xmm, d, s, imm);
+        tr_gen_call_to_helper_pcmpxstrx((ADDR)helper_pcmpestrm_xmm, d, s, imm,
+                LOAD_HELPER_PCMPESTRM_XMM);
     } else {
         IR2_OPND temp = ra_alloc_ftemp();
         IR2_OPND src = ra_alloc_xmm((d + 1) % 7 + 1);
         la_xvor_v(temp, src, src);
         load_freg128_from_ir1_mem(src, opnd1);
          tr_gen_call_to_helper_pcmpxstrx((ADDR)helper_pcmpestrm_xmm, d,
-                                                        (d + 1) % 7 + 1, imm);
+                 (d + 1) % 7 + 1, imm, LOAD_HELPER_PCMPESTRM_XMM);
         la_xvor_v(src, temp, temp);
     }
     set_high128_xreg_to_zero(ra_alloc_xmm(0));
@@ -5010,14 +5015,15 @@ bool translate_vpcmpistrm(IR1_INST *pir1)
     int imm = ir1_opnd_uimm(opnd2);
     if (ir1_opnd_is_xmm(opnd1)) {
         int s = ir1_opnd_base_reg_num(opnd1);
-        tr_gen_call_to_helper_pcmpxstrx((ADDR)helper_pcmpistrm_xmm, d, s, imm);
+        tr_gen_call_to_helper_pcmpxstrx((ADDR)helper_pcmpistrm_xmm, d, s, imm,
+                LOAD_HELPER_PCMPISTRM_XMM);
     } else {
         IR2_OPND temp = ra_alloc_ftemp();
         IR2_OPND src = ra_alloc_xmm((d + 1) % 7 + 1);
         la_xvor_v(temp, src, src);
         load_freg128_from_ir1_mem(src, opnd1);
          tr_gen_call_to_helper_pcmpxstrx((ADDR)helper_pcmpistrm_xmm, d,
-                                                        (d + 1) % 7 + 1, imm);
+                 (d + 1) % 7 + 1, imm, LOAD_HELPER_PCMPISTRM_XMM);
         la_xvor_v(src, temp, temp);
     }
     set_high128_xreg_to_zero(ra_alloc_xmm(0));
@@ -5038,15 +5044,19 @@ bool translate_vpclmulqdq(IR1_INST * pir1) {
 
     ADDR helper_func;
 
+    int helper_kind = 0;
     if (ir1_opnd_is_ymm(opnd0)) {
         helper_func = (ADDR)helper_vpclmulqdq_ymm;
+        helper_kind = LOAD_HELPER_VPCLMULQDQ_YMM;
     } else {
         helper_func = (ADDR)helper_vpclmulqdq_xmm;
+        helper_kind = LOAD_HELPER_VPCLMULQDQ_XMM;
     }
 
     if (!ir1_opnd_is_mem(opnd2)) {
         int s2 = ir1_opnd_base_reg_num(opnd2);
-        tr_gen_call_to_helper_pclmulqdq((ADDR)helper_func, s0, s1, s2, ctrl, 0);
+        tr_gen_call_to_helper_pclmulqdq((ADDR)helper_func, s0, s1, s2, ctrl, 0,
+                helper_kind);
     } else {
         int s2 = 0;
         while (s2 < 8) {
@@ -5063,7 +5073,8 @@ bool translate_vpclmulqdq(IR1_INST * pir1) {
         } else {
             load_freg256_from_ir1_mem(src, opnd2);
         }
-        tr_gen_call_to_helper_pclmulqdq((ADDR)helper_func, s0, s1, s2, ctrl, 0);
+        tr_gen_call_to_helper_pclmulqdq((ADDR)helper_func, s0, s1, s2, ctrl, 0,
+                helper_kind);
         la_xvor_v(src, temp_mem, temp_mem);
     }
     if (ir1_opnd_size(opnd2) == 128)
@@ -5107,16 +5118,20 @@ bool translate_vaesdec(IR1_INST *pir1)
     int s1 = ir1_opnd_base_reg_num(opnd1);
 
     ADDR helper_func;
+    int helper_kind;
 
     if (ir1_opnd_is_ymm(opnd0)) {
         helper_func = (ADDR)helper_vaesdec_ymm;
+        helper_kind = LOAD_HELPER_VAESDEC_YMM;
     } else {
         helper_func = (ADDR)helper_vaesdec_xmm;
+        helper_kind = LOAD_HELPER_VAESDEC_XMM;
     }
 
     if (!ir1_opnd_is_mem(opnd2)) {
         int s2 = ir1_opnd_base_reg_num(opnd2);
-        tr_gen_call_to_helper_aes((ADDR)helper_func, d, s1, s2);
+        tr_gen_call_to_helper_aes((ADDR)helper_func, d, s1, s2,
+                helper_kind);
     } else {
         int s2 = 0;
         while (s2 < 8) {
@@ -5133,7 +5148,8 @@ bool translate_vaesdec(IR1_INST *pir1)
         } else {
             load_freg256_from_ir1_mem(src, opnd2);
         }
-        tr_gen_call_to_helper_aes((ADDR)helper_func, d, s1, s2);
+        tr_gen_call_to_helper_aes((ADDR)helper_func, d, s1, s2,
+                helper_kind);
         la_xvor_v(src, temp, temp);
     }
     if (!ir1_opnd_is_ymm(opnd0)) {
@@ -5152,16 +5168,19 @@ bool translate_vaesdeclast(IR1_INST *pir1)
     int s1 = ir1_opnd_base_reg_num(opnd1);
 
     ADDR helper_func;
+    int helper_kind;
 
     if (ir1_opnd_is_ymm(opnd0)) {
         helper_func = (ADDR)helper_vaesdeclast_ymm;
+        helper_kind = LOAD_HELPER_VAESDECLAST_YMM;
     } else {
         helper_func = (ADDR)helper_vaesdeclast_xmm;
+        helper_kind = LOAD_HELPER_VAESDECLAST_XMM;
     }
 
     if (!ir1_opnd_is_mem(opnd2)) {
         int s2 = ir1_opnd_base_reg_num(opnd2);
-        tr_gen_call_to_helper_aes((ADDR)helper_func, d, s1, s2);
+        tr_gen_call_to_helper_aes((ADDR)helper_func, d, s1, s2, helper_kind);
     } else {
         int s2 = 0;
         while (s2 < 8) {
@@ -5178,7 +5197,7 @@ bool translate_vaesdeclast(IR1_INST *pir1)
         } else {
             load_freg256_from_ir1_mem(src, opnd2);
         }
-        tr_gen_call_to_helper_aes((ADDR)helper_func, d, s1, s2);
+        tr_gen_call_to_helper_aes((ADDR)helper_func, d, s1, s2, helper_kind);
         la_xvor_v(src, temp, temp);
     }
     if (!ir1_opnd_is_ymm(opnd0)) {
@@ -5197,16 +5216,19 @@ bool translate_vaesenc(IR1_INST *pir1)
     int s1 = ir1_opnd_base_reg_num(opnd1);
 
     ADDR helper_func;
+    int helper_kind;
 
     if (ir1_opnd_is_ymm(opnd0)) {
         helper_func = (ADDR)helper_vaesenc_ymm;
+        helper_kind = LOAD_HELPER_VAESENC_YMM;
     } else {
         helper_func = (ADDR)helper_vaesenc_xmm;
+        helper_kind = LOAD_HELPER_VAESENC_XMM;
     }
 
     if (!ir1_opnd_is_mem(opnd2)) {
         int s2 = ir1_opnd_base_reg_num(opnd2);
-        tr_gen_call_to_helper_aes((ADDR)helper_func, d, s1, s2);
+        tr_gen_call_to_helper_aes((ADDR)helper_func, d, s1, s2, helper_kind);
     } else {
         int s2 = 0;
         while (s2 < 8) {
@@ -5223,7 +5245,7 @@ bool translate_vaesenc(IR1_INST *pir1)
         } else {
             load_freg256_from_ir1_mem(src, opnd2);
         }
-        tr_gen_call_to_helper_aes((ADDR)helper_func, d, s1, s2);
+        tr_gen_call_to_helper_aes((ADDR)helper_func, d, s1, s2, helper_kind);
         la_xvor_v(src, temp, temp);
     }
     if (!ir1_opnd_is_ymm(opnd0)) {
@@ -5242,16 +5264,19 @@ bool translate_vaesenclast(IR1_INST *pir1)
     int s1 = ir1_opnd_base_reg_num(opnd1);
 
     ADDR helper_func;
+    int helper_kind;
 
     if (ir1_opnd_is_ymm(opnd0)) {
         helper_func = (ADDR)helper_vaesenclast_ymm;
+        helper_kind = LOAD_HELPER_VAESENCLAST_YMM;
     } else {
         helper_func = (ADDR)helper_vaesenclast_xmm;
+        helper_kind = LOAD_HELPER_VAESENCLAST_XMM;
     }
 
     if (!ir1_opnd_is_mem(opnd2)) {
         int s2 = ir1_opnd_base_reg_num(opnd2);
-        tr_gen_call_to_helper_aes((ADDR)helper_func, d, s1, s2);
+        tr_gen_call_to_helper_aes((ADDR)helper_func, d, s1, s2, helper_kind);
     } else {
         int s2 = 0;
         while (s2 < 8) {
@@ -5268,7 +5293,7 @@ bool translate_vaesenclast(IR1_INST *pir1)
         } else {
             load_freg256_from_ir1_mem(src, opnd2);
         }
-        tr_gen_call_to_helper_aes((ADDR)helper_func, d, s1, s2);
+        tr_gen_call_to_helper_aes((ADDR)helper_func, d, s1, s2, helper_kind);
         la_xvor_v(src, temp, temp);
     }
     if (!ir1_opnd_is_ymm(opnd0)) {
@@ -5285,14 +5310,15 @@ bool translate_vaesimc(IR1_INST *pir1)
     int d = ir1_opnd_base_reg_num(opnd0);
     if (ir1_opnd_is_xmm(opnd1)) {
         int s = ir1_opnd_base_reg_num(opnd1);
-        tr_gen_call_to_helper_pcmpxstrx((ADDR)helper_aesimc_xmm, d, s, 0);
+        tr_gen_call_to_helper_pcmpxstrx((ADDR)helper_aesimc_xmm, d, s, 0,
+                LOAD_HELPER_AESIMC_XMM);
     } else {
         IR2_OPND temp = ra_alloc_ftemp();
         IR2_OPND src = ra_alloc_xmm((d + 1) % 7 + 1);
         la_xvor_v(temp, src, src);
         load_freg128_from_ir1_mem(src, opnd1);
          tr_gen_call_to_helper_pcmpxstrx((ADDR)helper_aesimc_xmm, d,
-                                                    (d + 1) % 7 + 1, 0);
+                 (d + 1) % 7 + 1, 0, LOAD_HELPER_AESIMC_XMM);
         la_xvor_v(src, temp, temp);
     }
     set_high128_xreg_to_zero(ra_alloc_xmm(d));
@@ -5309,14 +5335,15 @@ bool translate_vaeskeygenassist(IR1_INST *pir1)
     int imm = ir1_opnd_uimm(opnd2);
     if (ir1_opnd_is_xmm(opnd1)) {
         int s = ir1_opnd_base_reg_num(opnd1);
-        tr_gen_call_to_helper_pcmpxstrx((ADDR)helper_aeskeygenassist_xmm, d, s, imm);
+        tr_gen_call_to_helper_pcmpxstrx((ADDR)helper_aeskeygenassist_xmm, d, s, imm,
+                LOAD_HELPER_AESKEYGENASSIST_XMM);
     } else {
         IR2_OPND temp = ra_alloc_ftemp();
         IR2_OPND src = ra_alloc_xmm((d + 1) % 7 + 1);
         la_xvor_v(temp, src, src);
         load_freg128_from_ir1_mem(src, opnd1);
         tr_gen_call_to_helper_pcmpxstrx((ADDR)helper_aeskeygenassist_xmm, d,
-                                                            (d + 1) % 7 + 1, imm);
+                (d + 1) % 7 + 1, imm, LOAD_HELPER_AESKEYGENASSIST_XMM);
         la_xvor_v(src, temp, temp);
     }
     set_high128_xreg_to_zero(ra_alloc_xmm(d));

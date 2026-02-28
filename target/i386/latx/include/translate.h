@@ -1354,11 +1354,12 @@ void rotate_fpu_to_bias(int bias);
 void tr_gen_call_to_helper1(ADDR func, int use_fp, enum aot_rel_kind);
 void tr_gen_call_to_helper2(ADDR, IR2_OPND, int, enum aot_rel_kind);
 void tr_gen_call_to_helper_xgetbv(void);
-void tr_gen_call_to_helper_vfll(ADDR, IR2_OPND, IR2_OPND, int);
-void tr_gen_call_to_helper_pcmpxstrx(ADDR, int, int, int);
-void tr_gen_call_to_helper_cvttpd2pi(ADDR, int, int);
-void tr_gen_call_to_helper_pclmulqdq(ADDR, int, int, int, int ,int );
-void tr_gen_call_to_helper_aes(ADDR, int, int, int);
+void tr_gen_call_to_helper_vfll(ADDR, IR2_OPND, IR2_OPND, int, enum aot_rel_kind);
+void tr_gen_call_to_helper_pcmpxstrx(ADDR, int, int, int, enum aot_rel_kind);
+void tr_gen_call_to_helper_cvttpd2pi(ADDR, int, int, enum aot_rel_kind);
+void tr_gen_call_to_helper_pclmulqdq(ADDR, int, int, int, int ,int,
+        enum aot_rel_kind );
+void tr_gen_call_to_helper_aes(ADDR, int, int, int, enum aot_rel_kind);
 void tr_load_top_from_env(void);
 void tr_gen_top_mode_init(void);
 

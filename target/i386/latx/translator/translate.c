@@ -3910,8 +3910,8 @@ void tr_gen_call_to_helper_xgetbv(void)
 
     /* load func_addr and jmp */
     IR2_OPND func_addr_opnd = ra_alloc_dbt_arg2();
-    li_d(func_addr_opnd, (ADDR)helper_xgetbv);
-
+    aot_load_host_addr(func_addr_opnd, (ADDR)helper_xgetbv,
+            LOAD_HELPER_XGETBV, 0);
     /* prologue, jmp and epilogue */
     IR2_OPND eax_opnd = ra_alloc_gpr(eax_index);
     IR2_OPND ecx_opnd = ra_alloc_gpr(ecx_index);
@@ -4051,7 +4051,8 @@ void gen_test_page_flag(IR2_OPND mem_opnd, int mem_imm, uint32_t flag)
     }
 }
 
-void tr_gen_call_to_helper_vfll(ADDR func, IR2_OPND arg1, IR2_OPND arg2, int use_fp)
+void tr_gen_call_to_helper_vfll(ADDR func, IR2_OPND arg1, IR2_OPND arg2, int use_fp,
+        enum aot_rel_kind REL_KIND)
 {
     /* aot relocation requires the tb struct */
     TranslationBlock *tb __attribute__((unused)) = NULL;
@@ -4071,13 +4072,14 @@ void tr_gen_call_to_helper_vfll(ADDR func, IR2_OPND arg1, IR2_OPND arg2, int use
 
     /* load the helper addr */
     IR2_OPND func_addr_opnd = ra_alloc_dbt_arg2();
-    li_d(func_addr_opnd, (ADDR)func);
+    aot_load_host_addr(func_addr_opnd, (ADDR)func, REL_KIND, 0);
     la_jirl(ra_ir2_opnd, func_addr_opnd, 0);
 
     tr_gen_call_to_helper_epilogue(use_fp);
 }
 
-void tr_gen_call_to_helper_cvttpd2pi(ADDR func, int dest_xmm_num, int src_xmm_num)
+void tr_gen_call_to_helper_cvttpd2pi(ADDR func, int dest_xmm_num, int src_xmm_num,
+        enum aot_rel_kind REL_KIND)
 {
     /* prologue */
     tr_save_registers_to_env(0xff, FPR_USEDEF_TO_SAVE, 0xff, options_to_save());
@@ -4104,7 +4106,7 @@ void tr_gen_call_to_helper_cvttpd2pi(ADDR func, int dest_xmm_num, int src_xmm_nu
 
     /* load func_addr and jmp */
     IR2_OPND func_addr_opnd = ra_alloc_dbt_arg2();
-    li_d(func_addr_opnd, (ADDR)func);
+    aot_load_host_addr(func_addr_opnd, (ADDR)func, REL_KIND, 0);
     la_jirl(ra_ir2_opnd, func_addr_opnd, 0);
 
     /* prologue, jmp and epilogue */
@@ -4115,7 +4117,8 @@ void tr_gen_call_to_helper_cvttpd2pi(ADDR func, int dest_xmm_num, int src_xmm_nu
 
 }
 
-void tr_gen_call_to_helper_pcmpxstrx(ADDR func, int dest_xmm_num, int src_xmm_num, int ctrl)
+void tr_gen_call_to_helper_pcmpxstrx(ADDR func, int dest_xmm_num, int src_xmm_num, int ctrl,
+        enum aot_rel_kind REL_KIND)
 {
     /* prologue */
     tr_save_registers_to_env(0xff, FPR_USEDEF_TO_SAVE, 0xff, options_to_save());
@@ -4143,7 +4146,7 @@ void tr_gen_call_to_helper_pcmpxstrx(ADDR func, int dest_xmm_num, int src_xmm_nu
 
     /* load func_addr and jmp */
     IR2_OPND func_addr_opnd = ra_alloc_dbt_arg2();
-    li_d(func_addr_opnd, (ADDR)func);
+    aot_load_host_addr(func_addr_opnd, (ADDR)func, REL_KIND, 0);
     la_jirl(ra_ir2_opnd, func_addr_opnd, 0);
 
     /* prologue, jmp and epilogue */
@@ -4153,7 +4156,8 @@ void tr_gen_call_to_helper_pcmpxstrx(ADDR func, int dest_xmm_num, int src_xmm_nu
 #endif
 }
 
-void tr_gen_call_to_helper_pclmulqdq(ADDR func, int  d, int s1, int s2, int ctrl,int use_fp)
+void tr_gen_call_to_helper_pclmulqdq(ADDR func, int  d, int s1, int s2, int ctrl,int use_fp,
+        enum aot_rel_kind REL_KIND)
 {
     /* aot relocation requires the tb struct */
     TranslationBlock *tb __attribute__((unused)) = NULL;
@@ -4188,13 +4192,14 @@ void tr_gen_call_to_helper_pclmulqdq(ADDR func, int  d, int s1, int s2, int ctrl
 
     /* load func_addr and jmp */
     IR2_OPND func_addr_opnd = ra_alloc_dbt_arg2();
-    li_d(func_addr_opnd, (ADDR)func);
+    aot_load_host_addr(func_addr_opnd, (ADDR)func, REL_KIND, 0);
     la_jirl(ra_ir2_opnd, func_addr_opnd, 0);
 
     tr_gen_call_to_helper_epilogue(use_fp);
 }
 
-void tr_gen_call_to_helper_aes(ADDR func, int dest_xmm_num, int src1_xmm_num, int src2_xmm_num)
+void tr_gen_call_to_helper_aes(ADDR func, int dest_xmm_num, int src1_xmm_num, int src2_xmm_num,
+        enum aot_rel_kind REL_KIND)
 {
     /* prologue */
     tr_save_registers_to_env(0xff, FPR_USEDEF_TO_SAVE, 0xff, options_to_save());
@@ -4223,7 +4228,7 @@ void tr_gen_call_to_helper_aes(ADDR func, int dest_xmm_num, int src1_xmm_num, in
 #endif
     /* load func_addr and jmp */
     IR2_OPND func_addr_opnd = ra_alloc_dbt_arg2();
-    li_d(func_addr_opnd, (ADDR)func);
+    aot_load_host_addr(func_addr_opnd, (ADDR)func, REL_KIND, 0);
     la_jirl(ra_ir2_opnd, func_addr_opnd, 0);
     /* prologue, jmp and epilogue */
     tr_load_registers_from_env(0xff, FPR_USEDEF_TO_SAVE, 0xff, options_to_save());

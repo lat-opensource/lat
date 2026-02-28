@@ -1167,6 +1167,7 @@ struct aot_segment *aot_find_segment(char *path, int offset)
 extern void trace_session_begin(uint64_t ins_length, uint64_t reg_store_addr,
     uint64_t eip, uint64_t mem_access_count);
 static void* relkind_to_fixup_addr[] = {
+    [LOAD_PAGEFLAGS_ROOT] = &pageflags_root,
     [LOAD_HELPER_TRACE_SESSION_BEGIN] = trace_session_begin,
     [LOAD_HELPER_UPDATE_MXCSR_STATUS] = update_mxcsr_status,
     [LOAD_HELPER_FPATAN] = helper_fpatan,
@@ -1218,7 +1219,44 @@ static void* relkind_to_fixup_addr[] = {
     [LOAD_HOST_RAISE_EX] = helper_raise_exception,
     [LOAD_HELPER_XGETBV] = helper_xgetbv,
     [LOAD_HELPER_EFLAGTF] = helper_eflagtf,
-    [LOAD_PAGEFLAGS_ROOT] = &pageflags_root,
+    [LOAD_HELPER_PCMPESTRI_XMM] = helper_pcmpestri_xmm,
+    [LOAD_HELPER_PCMPESTRM_XMM] = helper_pcmpestrm_xmm,
+    [LOAD_HELPER_PCMPISTRI_XMM] = helper_pcmpistri_xmm,
+    [LOAD_HELPER_PCMPISTRM_XMM] = helper_pcmpistrm_xmm,
+    [LOAD_HELPER_AESIMC_XMM] = helper_aesimc_xmm,
+    [LOAD_HELPER_AESKEYGENASSIST_XMM] = helper_aeskeygenassist_xmm,
+    [LOAD_HELPER_AESDEC_XMM] = helper_aesdec_xmm,
+    [LOAD_HELPER_AESDECLAST_XMM] = helper_aesdeclast_xmm,
+    [LOAD_HELPER_AESENC_XMM] = helper_aesenc_xmm,
+    [LOAD_HELPER_AESENCLAST_XMM] = helper_aesenclast_xmm,
+    [LOAD_HELPER_SHA1NEXTE] = helper_sha1nexte,
+    [LOAD_HELPER_SHA1MSG1] = helper_sha1msg1,
+    [LOAD_HELPER_SHA1MSG2] = helper_sha1msg2,
+    [LOAD_HELPER_SHA256MSG1] = helper_sha256msg1,
+    [LOAD_HELPER_SHA256MSG2] = helper_sha256msg2,
+    [LOAD_HELPER_SHA1RNDS4_F0] = helper_sha1rnds4_f0,
+    [LOAD_HELPER_SHA1RNDS4_F1] = helper_sha1rnds4_f1,
+    [LOAD_HELPER_SHA1RNDS4_F2] = helper_sha1rnds4_f2,
+    [LOAD_HELPER_SHA1RNDS4_F3] = helper_sha1rnds4_f3,
+    [LOAD_HELPER_SHA256RNDS2_XMM0] = helper_sha256rnds2_xmm0,
+    [LOAD_HELPER_XSETBV] = helper_xsetbv,
+    [LOAD_HELPER_XSAVE] = helper_xsave,
+    [LOAD_HELPER_XSAVEOPT] = helper_xsaveopt,
+    [LOAD_HELPER_XRSTOR] = helper_xrstor,
+#ifdef CONFIG_LATX_AVX_OPT
+    [LOAD_HELPER_VPCLMULQDQ_YMM] = helper_vpclmulqdq_ymm,
+    [LOAD_HELPER_VPCLMULQDQ_XMM] = helper_vpclmulqdq_xmm,
+    [LOAD_HELPER_VAESDEC_YMM] = helper_vaesdec_ymm,
+    [LOAD_HELPER_VAESDEC_XMM] = helper_vaesdec_xmm,
+    [LOAD_HELPER_VAESDECLAST_YMM] = helper_vaesdeclast_ymm,
+    [LOAD_HELPER_VAESDECLAST_XMM] = helper_vaesdeclast_xmm,
+    [LOAD_HELPER_VAESENC_YMM] = helper_vaesenc_ymm,
+    [LOAD_HELPER_VAESENC_XMM] = helper_vaesenc_xmm,
+    [LOAD_HELPER_VAESENCLAST_YMM] = helper_vaesenclast_ymm,
+    [LOAD_HELPER_VAESENCLAST_XMM] = helper_vaesenclast_xmm,
+#endif
+
+
 };
 
 void aot_do_tb_reloc(TranslationBlock *tb, struct aot_tb *stb,
