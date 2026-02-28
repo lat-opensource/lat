@@ -4399,6 +4399,14 @@ int page_unprotect(target_ulong address, uintptr_t pc, int *emu)
         }
     }
 
+
+    /* can NOT use shmm if guest page is not MAP_ANON */
+    int unuse_prot;
+    if (emu && smc_shmm_check_page_anon(address, &unuse_prot)) {
+        force_inv_host_page = 0;
+        inv_one_tb = 0;
+    }
+
     target_ulong address2 = address + size - 1;
     int is_cross = (address  & TARGET_PAGE_MASK) !=
                    (address2 & TARGET_PAGE_MASK);
