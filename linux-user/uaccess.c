@@ -23,6 +23,19 @@ void *lock_user(int type, abi_ulong guest_addr, ssize_t len, bool copy)
     return host_addr;
 }
 
+static bool is_range_clean_of_shadows(abi_ulong guest_addr, ssize_t len) {
+    abi_ulong cur = guest_addr & qemu_host_page_mask;
+    abi_ulong last_byte = guest_addr + len - 1;
+    abi_ulong end = last_byte & qemu_host_page_mask;
+
+    for (; cur <= end; cur += qemu_host_page_size) {
+        if (hostpage_exist_shadow_page(cur) != 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
 void *lock_user_remap(int type, abi_ulong guest_addr, ssize_t len, bool copy)
 {
     void *host_addr;
@@ -34,6 +47,10 @@ void *lock_user_remap(int type, abi_ulong guest_addr, ssize_t len, bool copy)
     host_addr = g2h_untagged(guest_addr);
 
     if (TARGET_PAGE_SIZE < qemu_host_page_size) {
+        if (is_range_clean_of_shadows(guest_addr, len)) {
+            return host_addr;
+        }
+
         void *host_addr_temp = NULL;
         if(posix_memalign(&host_addr_temp, qemu_host_page_size, len)) {
             assert(0);
