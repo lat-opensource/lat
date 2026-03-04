@@ -4405,6 +4405,7 @@ int page_unprotect(target_ulong address, uintptr_t pc, int *emu)
     if (emu && smc_shmm_check_page_anon(address, &unuse_prot)) {
         force_inv_host_page = 0;
         inv_one_tb = 0;
+        size = 1;
     }
 
     target_ulong address2 = address + size - 1;
