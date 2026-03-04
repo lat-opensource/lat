@@ -598,6 +598,11 @@ static inline int handle_cpu_signal(uintptr_t pc, siginfo_t *info,
                 emu_store = size;
                 emu = &emu_store;
             }
+            if (guest_store_address != h2g(address)) {
+                guest_store_address = h2g(address);
+                emu = NULL;
+                emu_store = 0;
+            }
         }
         uint32_t inst = *(uint32_t *)UC_PC(uc);
 
