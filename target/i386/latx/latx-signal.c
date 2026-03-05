@@ -231,21 +231,21 @@ void tb_exit_to_qemu(CPUArchState *env, ucontext_t *uc)
     current_tb = tcg_tb_lookup(pc);
     if (current_tb) {
 #ifdef CONFIG_LATX_TU
+        if (current_tb->bool_flags & IS_TU_SPLIT) {
+            TranslationBlock *next_tb = current_tb;
+            /* The split TB cannot be unlinked, so we need to found an unsplit TB. */
+            while (next_tb && (next_tb->bool_flags & IS_TU_SPLIT)) {
+                uintptr_t next_pc = (uintptr_t) current_tb->tc.ptr + current_tb->tc.size + 1;
+                next_tb = tcg_tb_lookup(next_pc);
+                if (next_tb) {
+                    current_tb = next_tb;
+                }
+            }
+        }
         if (use_tu_jmp(current_tb)) {
             assert(current_tb->tu_jmp[TU_TB_INDEX_TARGET] != TB_JMP_RESET_OFFSET_INVALID);
             unlink_tu_jmp(current_tb);
             return;
-        } else if (current_tb->bool_flags & IS_TU_SPLIT) {
-            TranslationBlock *next_tb = current_tb;
-            while (next_tb->bool_flags & IS_TU_SPLIT) {
-                for (uintptr_t next_pc = pc; ; next_pc += 4) {
-                    next_tb = tcg_tb_lookup(next_pc);
-                    if (next_tb->pc != current_tb->pc) {
-                        break;
-                    }
-                }
-            }
-            current_tb = next_tb;
         }
 #endif
         if (use_indirect_jmp(current_tb) &&
