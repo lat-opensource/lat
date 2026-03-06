@@ -326,6 +326,12 @@ static bool translate_sub_jcc(IR1_INST *ir1)
         tb->tu_unlink.stub_offset = unlink_label_opnd._label_id;
         tb->tu_unlink.rel_num = 2;
         set_use_tu_jmp(tb);
+        /* For unlink. */
+        cmp_jcc_gen_bcc(bcc_src0, bcc_src1, target_label_opnd, next);
+        tr_generate_exit_tb(next, 0);
+        la_label(target_label_opnd);
+        tr_generate_exit_tb(next, 1);
+        return true;
     }
 #endif
 
