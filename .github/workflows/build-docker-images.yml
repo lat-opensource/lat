@@ -66,7 +66,7 @@ jobs:
         if: (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/master'
 
       - name: Build (and push if master) docker image
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8  # v6.19.2
+        uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294  # v7.0.0
         id: docker-build
         with:
           context: ${{ matrix.IMAGE.DOCKERFILE_PATH }}
