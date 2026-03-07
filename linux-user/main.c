@@ -1033,10 +1033,17 @@ static void usage(int exitcode)
 }
 #endif
 
-static int parse_args(int argc, char **argv)
+struct ParseOption {
+    const char *opt_name;
+    const char *opt_arg;
+};
+
+static struct ParseOption parse_options[128];
+static int arg_count = 0;
+
+static void options_set(void)
 {
     const char *r;
-    int optind;
     const struct qemu_argument *arginfo;
 
     for (arginfo = arg_table; arginfo->handle_opt != NULL; arginfo++) {
@@ -1049,6 +1056,26 @@ static int parse_args(int argc, char **argv)
             arginfo->handle_opt(r);
         }
     }
+
+    for (int i = 0; i < arg_count; i++) {
+        for (arginfo = arg_table; arginfo->handle_opt != NULL; arginfo++) {
+            if (!strcmp(parse_options[i].opt_name, arginfo->argv)) {
+                if (arginfo->has_arg) {
+                    arginfo->handle_opt(parse_options[i].opt_arg);
+                } else {
+                    arginfo->handle_opt(NULL);
+                }
+                break;
+            }
+        }
+    }
+}
+
+static int parse_args(int argc, char **argv)
+{
+    const char *r;
+    int optind;
+    const struct qemu_argument *arginfo;
 
     optind = 1;
     for (;;) {
@@ -1077,11 +1104,14 @@ static int parse_args(int argc, char **argv)
                             "missing argument for option '%s'\n", r);
                         exit(EXIT_FAILURE);
                     }
-                    arginfo->handle_opt(argv[optind]);
+                    parse_options[arg_count].opt_name = arginfo->argv;
+                    parse_options[arg_count].opt_arg = argv[optind];
                     optind++;
                 } else {
-                    arginfo->handle_opt(NULL);
+                    parse_options[arg_count].opt_name = arginfo->argv;
+                    parse_options[arg_count].opt_arg = NULL;
                 }
+                arg_count++;
                 break;
             }
         }
@@ -1151,6 +1181,7 @@ int main(int argc, char **argv, char **envp)
     }
 
     optind = parse_args(argc, argv);
+    options_set();
 
     error_init(argv[0]);
     module_call_init(MODULE_INIT_TRACE);
