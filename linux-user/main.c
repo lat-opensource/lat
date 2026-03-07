@@ -1041,11 +1041,28 @@ struct ParseOption {
 static struct ParseOption parse_options[128];
 static int arg_count = 0;
 
+void find_option(const char* key, const char* val)
+{
+#define ENVFUN(NAME, name) \
+    else if (!strcmp(key, #NAME)) { \
+        name(val); \
+    }
+    if (0);
+    ENVS
+    else {
+        printf("no option %s\n", key);
+    }
+}
+
 static void options_set(void)
 {
+    /* set latx.conf */
+    conf_init(exec_path);
+
     const char *r;
     const struct qemu_argument *arginfo;
 
+    /* set env */
     for (arginfo = arg_table; arginfo->handle_opt != NULL; arginfo++) {
         if (arginfo->env == NULL) {
             continue;
@@ -1057,6 +1074,7 @@ static void options_set(void)
         }
     }
 
+    /* set argv */
     for (int i = 0; i < arg_count; i++) {
         for (arginfo = arg_table; arginfo->handle_opt != NULL; arginfo++) {
             if (!strcmp(parse_options[i].opt_name, arginfo->argv)) {
