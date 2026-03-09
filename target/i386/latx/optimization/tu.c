@@ -188,7 +188,7 @@ static __thread uint32_t search_buff_offset[MAX_TB_IN_CACHE];
 #include<sys/syscall.h>
 TranslationBlock* tb_create(CPUState *cpu, target_ulong pc,
         target_ulong cs_base, uint32_t flags, int cflags,
-        int max_insns, bool tb_is_code64, TU_TB_START_TYPE mode)
+        int max_insns, uint16_t bool_flags, TU_TB_START_TYPE mode)
 {
     TranslationBlock* tb;
     if (unlikely(pc == 0)) {
@@ -206,9 +206,7 @@ TranslationBlock* tb_create(CPUState *cpu, target_ulong pc,
     tb->canlink[1] = 1;
     tb->s_data = &tmp_s_data;
     tu_reset_tb(tb);
-#ifdef CONFIG_LATX_SMC_OPT
-    tb->smc_data = 0;
-#endif
+
     tb->pc = pc;
     tb->cflags = cflags;
     tcg_ctx->tb_cflags = cflags;
@@ -223,22 +221,27 @@ TranslationBlock* tb_create(CPUState *cpu, target_ulong pc,
     if (in_pre_translate) {
         X86CPU *x86cpu = X86_CPU(cpu);
         CPUX86State *env = &x86cpu->env;
-        if (tb_is_code64 && !CODEIS64) {
+        if ((bool_flags & IS_CODE64) && !CODEIS64) {
             cpu_x86_load_seg_cache(env, R_CS, 0xf000, 0xffff0000, 0xffff,
                     DESC_P_MASK | DESC_S_MASK | DESC_CS_MASK |
                     DESC_R_MASK | DESC_A_MASK | DESC_L_MASK);
-        } else if (!tb_is_code64 && CODEIS64) {
+        } else if (!(bool_flags & IS_CODE64) && CODEIS64) {
             cpu_x86_load_seg_cache(env, R_CS, 0xf000, 0xffff0000, 0xffff,
                     DESC_P_MASK | DESC_S_MASK | DESC_CS_MASK |
                     DESC_R_MASK | DESC_A_MASK | DESC_B_MASK);
-        }
-        if (tb_is_code64) {
-            tb->bool_flags |= IS_CODE64;
         }
         env->segs[R_CS].base = 0;
         env->eip = pc;
         cpu_get_tb_cpu_state(env, &pc, &cs_base, &flags);
     }
+    tb->bool_flags |= (bool_flags & (IS_CODE64 | TBSMC_OPTED));
+#ifdef CONFIG_LATX_SMC_OPT
+    if (bool_flags & TBSMC_OPTED) {
+        tb->smc_data = TBSMC_OPTED_MASK;
+    } else {
+        tb->smc_data = 0;
+    }
+#endif
     tb->flags = flags;
 
     target_disasm(tb, max_insns);
@@ -450,7 +453,7 @@ static inline void get_tu_queue(CPUState *cpu,
                 }
                 if (!next_tb) {
                     next_tb = tb_create(cpu, ir1_next_pc, cs_base, flags,
-                                   cflags, max_insns, CODEIS64, TU_TB_START_NORMAL);
+                                   cflags, max_insns, 0, TU_TB_START_NORMAL);
                     tu_push_back(next_tb);
                 }
                 if (next_tb && next_tb->tc.ptr != NULL) {
@@ -474,7 +477,7 @@ static inline void get_tu_queue(CPUState *cpu,
                 }
                 if (!target_tb) {
                     target_tb = tb_create(cpu, ir1_target_pc, cs_base, flags,
-                                     cflags, max_insns, CODEIS64, TU_TB_START_JMP);
+                                     cflags, max_insns, 0, TU_TB_START_JMP);
                     tu_push_back(target_tb);
                 }
                 if (target_tb && target_tb->tc.ptr != NULL) {
@@ -499,7 +502,7 @@ static inline void get_tu_queue(CPUState *cpu,
                 }
                 if (get_page(tb->pc) == get_page(ir1_target_pc) && !target_tb) {
                     target_tb = tb_create(cpu, ir1_target_pc, cs_base, flags,
-                                     cflags, max_insns, CODEIS64, TU_TB_START_JMP);
+                                     cflags, max_insns, 0, TU_TB_START_JMP);
                     tu_push_back(target_tb);
                 }
                 tb->s_data->next_tb[TU_TB_INDEX_TARGET] = target_tb;
@@ -520,7 +523,7 @@ static inline void get_tu_queue(CPUState *cpu,
                 }
                 if (!next_tb) {
                     next_tb = tb_create(cpu, ir1_next_pc, cs_base, flags,
-                                   cflags, max_insns, CODEIS64, TU_TB_START_NORMAL);
+                                   cflags, max_insns, 0, TU_TB_START_NORMAL);
                     tu_push_back(next_tb);
                 }
                 tb->s_data->next_tb[TU_TB_INDEX_NEXT] = next_tb;
@@ -646,7 +649,7 @@ static TranslationBlock *tb_explore(CPUState *cpu,
 
     /* the entry used as return value*/
     TranslationBlock *entry = tb_create(cpu, pc, cs_base,
-            flags, cflags, max_insns, CODEIS64 , TU_TB_START_ENTRY);
+            flags, cflags, max_insns, 0 , TU_TB_START_ENTRY);
     tu_push_back(entry);
 
     /* search all tbs we can get */

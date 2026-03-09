@@ -444,10 +444,9 @@ static inline void get_next_tb(TranslationBlock *curr_tb, CPUState *cpu,
     if (tb_id >= 0) {
         /* Get dynamic tb. */
         next_tb = aot_tb_lookup(next_tb_pc, cflags);
-        bool tb_is_code64 = !!(curr_tb_message_vector[tb_id].bool_flags & IS_CODE64);
         if (!next_tb) {
-            next_tb = tb_create(cpu, next_tb_pc, cs_base, flags,
-                    cflags, max_insns, tb_is_code64, TU_TB_START_NORMAL);
+            next_tb = tb_create(cpu, next_tb_pc, cs_base, flags, cflags, max_insns,
+                    curr_tb_message_vector[tb_id].bool_flags, TU_TB_START_NORMAL);
             if (is_bad_tb(next_tb)) {
                 next_tb = NULL;
             }
@@ -489,10 +488,9 @@ static inline void get_target_tb(TranslationBlock *curr_tb, CPUState *cpu,
     if (tb_id >= 0) {
         /* Get dynamic tb. */
         target_tb = aot_tb_lookup(target_tb_pc, cflags);
-        bool tb_is_code64 = !!(curr_tb_message_vector[tb_id].bool_flags & IS_CODE64);
         if (!target_tb) {
-            target_tb = tb_create(cpu, target_tb_pc, cs_base, flags,
-                    cflags, max_insns, tb_is_code64, TU_TB_START_NORMAL);
+            target_tb = tb_create(cpu, target_tb_pc, cs_base, flags, cflags, max_insns,
+                    curr_tb_message_vector[tb_id].bool_flags, TU_TB_START_NORMAL);
             if (is_bad_tb(target_tb)) {
                 target_tb = NULL;
             }
@@ -537,9 +535,8 @@ static inline void get_ts_queue(CPUState *cpu, target_ulong cs_base,
 	if(curr_tb_message_vector[untr_tb_id].tb) {
             continue;
         }
-        bool tb_is_code64 = !!(curr_tb_message_vector[untr_tb_id].bool_flags & IS_CODE64);
-        tb = tb_create(cpu, curr_tb_pc, cs_base, flags,
-                curr_tb_cflags, max_insns, tb_is_code64 , TU_TB_START_ENTRY);
+        tb = tb_create(cpu, curr_tb_pc, cs_base, flags, curr_tb_cflags, max_insns,
+                curr_tb_message_vector[untr_tb_id].bool_flags , TU_TB_START_ENTRY);
         tu_push_back(tb);
         untr_tb_id++;
         for (; tb_id <  *tb_num_in_tu && *tb_num_in_tu < MAX_TB_IN_TS;  tb_id++) {

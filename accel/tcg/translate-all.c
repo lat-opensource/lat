@@ -2090,6 +2090,10 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
     CLN_TB_PROFILE(tb);
 #endif
     jrra_tb_reset(tb);
+#ifdef CONFIG_LATX_TU
+    tu_reset_tb(tb);
+    tb->s_data->tu_tb_mode = TB_GEN_CODE;
+#endif
 #ifdef CONFIG_LATX_SMC_OPT
     tb->smc_data = 0;
 #ifdef CONFIG_LATX_AOT
@@ -2099,6 +2103,7 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
 #endif
     if (smc_retrans_lookup(pc)) {
         tb->smc_data |= TBSMC_OPTED_MASK;
+        tb->bool_flags |= TBSMC_OPTED;
         smc_retrans_remove(pc);
     }
 #endif
@@ -2138,10 +2143,6 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
     tb->eflags_target_arg[1] = TB_JMP_RESET_OFFSET_INVALID;
     tb->eflags_target_arg[2] = TB_JMP_RESET_OFFSET_INVALID;
     tb->has_jcc_end_ptn = false;
-#endif
-#ifdef CONFIG_LATX_TU
-    tu_reset_tb(tb);
-    tb->s_data->tu_tb_mode = TB_GEN_CODE;
 #endif
 #ifdef CONFIG_LATX
     clear_signal_link_flag(tb, 0);

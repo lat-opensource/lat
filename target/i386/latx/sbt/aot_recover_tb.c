@@ -89,6 +89,13 @@ inline static TranslationBlock *creat_tb(aot_tb *p_aot_tb, abi_ulong start,
     tb->eflags_target_arg[2] = p_aot_tb->eflags_target_arg[2];
 #endif
     tb->eflag_use = p_aot_tb->eflag_use;
+#ifdef CONFIG_LATX_SMC_OPT
+    if (tb->bool_flags & TBSMC_OPTED_MASK) {
+        tb->smc_data = TBSMC_OPTED_MASK;
+    } else {
+        tb->smc_data = 0;
+    }
+#endif
     return tb;
 }
 
