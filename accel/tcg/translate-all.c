@@ -4148,6 +4148,11 @@ static void smc_retrans_triger(TranslationBlock *ctb)
     if (!latx_smc_use_store_helper()) return;
 
     if (!ctb) return;
+
+    if (is_tu_tb(ctb)) {
+        return;
+    }
+
     /* already optomized for SMC */
     if (ctb->smc_data & TBSMC_OPTED_MASK) return;
 
