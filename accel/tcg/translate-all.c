@@ -4088,6 +4088,7 @@ static int smc_create_shadow_page_shmm(uint64_t start)
     /* alloc the shmm space */
     shmm_offset = smc_shmm_alloc_page();
     if (shmm_offset == -1ULL) {
+        exit(-1);
         return -1;
     }
 
@@ -4411,6 +4412,7 @@ int page_unprotect(target_ulong address, uintptr_t pc, int *emu)
     if (emu && smc_shmm_check_page_anon(address, &unuse_prot)) {
         force_inv_host_page = 0;
         inv_one_tb = 0;
+        size = 1;
     }
 
     target_ulong address2 = address + size - 1;
@@ -5265,7 +5267,15 @@ int shared_private_interpret(siginfo_t *info, ucontext_t *uc)
             return 1;
         }
         value = UC_GR(uc)[rd];
-        over_page_write(real_guest_addr, value, 2);
+        if (shadow_pd->is_shmm) {
+            qemu_log_mask(LAT_LOG_SMC, "%s:%d shmm st.h %lx val %lx\n", __func__, __LINE__, siaddr, value);
+            if ((real_guest_addr & 0x3fff) == 0x3fff) {
+                return 1;
+            } else {
+                *((uint16_t*)mem_addr) = value & 0xffff;
+            }
+        } else
+            over_page_write(real_guest_addr, value, 2);
         goto end;
     case 0xa6: /* ST.W */
         if (no_right(real_guest_addr, 4, PAGE_WRITE, &siaddr)) {
@@ -5273,7 +5283,15 @@ int shared_private_interpret(siginfo_t *info, ucontext_t *uc)
             return 1;
         }
         value = UC_GR(uc)[rd];
-        over_page_write(real_guest_addr, value, 4);
+        if (shadow_pd->is_shmm) {
+            qemu_log_mask(LAT_LOG_SMC, "%s:%d shmm st.w %lx val %lx\n", __func__, __LINE__, siaddr, value);
+            if ((real_guest_addr & 0x3fff) > 0x3ffc) {
+                return 1;
+            } else {
+                *((uint32_t*)mem_addr) = value & 0xffffffff;
+            }
+        } else
+            over_page_write(real_guest_addr, value, 4);
         goto end;
     case 0xa7: /* ST.D */
         if (no_right(real_guest_addr, 8, PAGE_WRITE, &siaddr)) {
@@ -5281,7 +5299,15 @@ int shared_private_interpret(siginfo_t *info, ucontext_t *uc)
             return 1;
         }
         value = UC_GR(uc)[rd];
-        over_page_write(real_guest_addr, value, 8);
+        if (shadow_pd->is_shmm) {
+            qemu_log_mask(LAT_LOG_SMC, "%s:%d shmm st.d %lx val %lx\n", __func__, __LINE__, siaddr, value);
+            if ((real_guest_addr & 0x3fff) > 0x3ff8) {
+                return 1;
+            } else {
+                *((uint64_t*)mem_addr) = value;
+            }
+        } else
+            over_page_write(real_guest_addr, value, 8);
         goto end;
     case 0xa8: /* LD.BU */
         if (no_right(real_guest_addr, 1, PAGE_READ, &siaddr)) {
@@ -5929,12 +5955,12 @@ int shared_private_interpret(siginfo_t *info, ucontext_t *uc)
 #endif
     case 0x70b2: /* amcas.w */
     case 0x70b6: /* amcas.db.w */
+        SMC_SHMM_INTERPRET_FALLBACK(shadow_pd);
         /* set old value */
         if (no_right(real_guest_addr, 4, PAGE_WRITE, &siaddr)) {
             info->si_addr = (void *)siaddr;
             return 1;
         }
-        SMC_SHMM_INTERPRET_FALLBACK(shadow_pd);
         value = over_page_read(real_guest_addr, 4);
         if ((uint32_t)value == (uint32_t)UC_GR(uc)[rd]) {
             /* set new value */
@@ -5945,11 +5971,11 @@ int shared_private_interpret(siginfo_t *info, ucontext_t *uc)
         break;
     case 0x70b3: /* amcas.d */
     case 0x70b7: /* amcas.db.d */
+        SMC_SHMM_INTERPRET_FALLBACK(shadow_pd);
         if (no_right(real_guest_addr, 8, PAGE_WRITE, &siaddr)) {
             info->si_addr = (void *)siaddr;
             return 1;
         }
-        SMC_SHMM_INTERPRET_FALLBACK(shadow_pd);
         /* set old value */
         value = over_page_read(real_guest_addr, 8);
         if (value == UC_GR(uc)[rd]) {
@@ -5960,12 +5986,12 @@ int shared_private_interpret(siginfo_t *info, ucontext_t *uc)
         break;
     case 0x70c0: /* AMSWAP.W */
     case 0x70d2: /* AMSWAP_DB.W */
+        SMC_SHMM_INTERPRET_FALLBACK(shadow_pd);
         /* set old value */
         if (no_right(real_guest_addr, 4, PAGE_WRITE, &siaddr)) {
             info->si_addr = (void *)siaddr;
             return 1;
         }
-        SMC_SHMM_INTERPRET_FALLBACK(shadow_pd);
         value = over_page_read(real_guest_addr, 4);
         value = value << 32 >> 32;
         UC_GR(uc)[rd] = value;
@@ -5974,11 +6000,11 @@ int shared_private_interpret(siginfo_t *info, ucontext_t *uc)
         break;
     case 0x70c1: /* AMSWAP.D */
     case 0x70d3: /* AMSWAP_DB.D */
+        SMC_SHMM_INTERPRET_FALLBACK(shadow_pd);
         if (no_right(real_guest_addr, 8, PAGE_WRITE, &siaddr)) {
             info->si_addr = (void *)siaddr;
             return 1;
         }
-        SMC_SHMM_INTERPRET_FALLBACK(shadow_pd);
         /* set old value */
         value = over_page_read(real_guest_addr, 8);
         UC_GR(uc)[rd] = value;
@@ -5987,12 +6013,12 @@ int shared_private_interpret(siginfo_t *info, ucontext_t *uc)
         break;
     case 0x70c2: /* AMADD.W */
     case 0x70d4: /* AMADD_DB.W */
+        SMC_SHMM_INTERPRET_FALLBACK(shadow_pd);
         /* set old value */
         if (no_right(real_guest_addr, 4, PAGE_WRITE, &siaddr)) {
             info->si_addr = (void *)siaddr;
             return 1;
         }
-        SMC_SHMM_INTERPRET_FALLBACK(shadow_pd);
         value = over_page_read(real_guest_addr, 4);
         value = value << 32 >> 32;
         UC_GR(uc)[rd] = value;
@@ -6003,11 +6029,11 @@ int shared_private_interpret(siginfo_t *info, ucontext_t *uc)
         break;
     case 0x70c3: /* AMADD.D */
     case 0x70d5: /* AMADD_DB.D */
+        SMC_SHMM_INTERPRET_FALLBACK(shadow_pd);
         if (no_right(real_guest_addr, 8, PAGE_WRITE, &siaddr)) {
             info->si_addr = (void *)siaddr;
             return 1;
         }
-        SMC_SHMM_INTERPRET_FALLBACK(shadow_pd);
         /* set old value */
         value = over_page_read(real_guest_addr, 8);
         UC_GR(uc)[rd] = value;
@@ -6018,11 +6044,11 @@ int shared_private_interpret(siginfo_t *info, ucontext_t *uc)
         break;
     case 0x70c4: /* AMAND.W */
     case 0x70d6: /* AMAND_DB.W */
+        SMC_SHMM_INTERPRET_FALLBACK(shadow_pd);
         if (no_right(real_guest_addr, 4, PAGE_WRITE, &siaddr)) {
             info->si_addr = (void *)siaddr;
             return 1;
         }
-        SMC_SHMM_INTERPRET_FALLBACK(shadow_pd);
         /* set old value */
         value = over_page_read(real_guest_addr, 4);
         value = value << 32 >> 32;
@@ -6034,11 +6060,11 @@ int shared_private_interpret(siginfo_t *info, ucontext_t *uc)
         break;
     case 0x70c5: /* AMAND.D */
     case 0x70d7: /* AMAND_DB.D */
+        SMC_SHMM_INTERPRET_FALLBACK(shadow_pd);
         if (no_right(real_guest_addr, 8, PAGE_WRITE, &siaddr)) {
             info->si_addr = (void *)siaddr;
             return 1;
         }
-        SMC_SHMM_INTERPRET_FALLBACK(shadow_pd);
         /* set old value */
         value = over_page_read(real_guest_addr, 8);
         UC_GR(uc)[rd] = value;
@@ -6049,11 +6075,11 @@ int shared_private_interpret(siginfo_t *info, ucontext_t *uc)
         break;
     case 0x70c6: /* AMOR.W */
     case 0x70d8: /* AMOR_DB.W */
+        SMC_SHMM_INTERPRET_FALLBACK(shadow_pd);
         if (no_right(real_guest_addr, 4, PAGE_WRITE, &siaddr)) {
             info->si_addr = (void *)siaddr;
             return 1;
         }
-        SMC_SHMM_INTERPRET_FALLBACK(shadow_pd);
         /* set old value */
         value = over_page_read(real_guest_addr, 4);
         value = value << 32 >> 32;
@@ -6065,11 +6091,11 @@ int shared_private_interpret(siginfo_t *info, ucontext_t *uc)
         break;
     case 0x70c7: /* AMOR.D */
     case 0x70d9: /* AMOR_DB.D */
+        SMC_SHMM_INTERPRET_FALLBACK(shadow_pd);
         if (no_right(real_guest_addr, 8, PAGE_WRITE, &siaddr)) {
             info->si_addr = (void *)siaddr;
             return 1;
         }
-        SMC_SHMM_INTERPRET_FALLBACK(shadow_pd);
         /* set old value */
         value = over_page_read(real_guest_addr, 8);
         UC_GR(uc)[rd] = value;
@@ -6080,11 +6106,11 @@ int shared_private_interpret(siginfo_t *info, ucontext_t *uc)
         break;
     case 0x70c8: /* AMXOR.W */
     case 0x70da: /* AMXOR_DB.W */
+        SMC_SHMM_INTERPRET_FALLBACK(shadow_pd);
         if (no_right(real_guest_addr, 4, PAGE_WRITE, &siaddr)) {
             info->si_addr = (void *)siaddr;
             return 1;
         }
-        SMC_SHMM_INTERPRET_FALLBACK(shadow_pd);
         /* set old value */
         value = over_page_read(real_guest_addr, 4);
         value = value << 32 >> 32;
@@ -6096,11 +6122,11 @@ int shared_private_interpret(siginfo_t *info, ucontext_t *uc)
         break;
     case 0x70c9: /* AMXOR.D */
     case 0x70db: /* AMXOR_DB.D */
+        SMC_SHMM_INTERPRET_FALLBACK(shadow_pd);
         if (no_right(real_guest_addr, 8, PAGE_WRITE, &siaddr)) {
             info->si_addr = (void *)siaddr;
             return 1;
         }
-        SMC_SHMM_INTERPRET_FALLBACK(shadow_pd);
         /* set old value */
         value = over_page_read(real_guest_addr, 8);
         UC_GR(uc)[rd] = value;
@@ -6111,11 +6137,11 @@ int shared_private_interpret(siginfo_t *info, ucontext_t *uc)
         break;
     case 0x70ca: /* AMMAX.W */
     case 0x70dc: /* AMMAX_DB.W */
+        SMC_SHMM_INTERPRET_FALLBACK(shadow_pd);
         if (no_right(real_guest_addr, 4, PAGE_WRITE, &siaddr)) {
             info->si_addr = (void *)siaddr;
             return 1;
         }
-        SMC_SHMM_INTERPRET_FALLBACK(shadow_pd);
         /* set old value */
         value = over_page_read(real_guest_addr, 4);
         value = value << 32 >> 32;
@@ -6130,11 +6156,11 @@ int shared_private_interpret(siginfo_t *info, ucontext_t *uc)
     case 0x70cf: /* AMMAX.DU */
     case 0x70dd: /* AMMAX_DB.D */
     case 0x70e1: /* AMMAX_DB.DU */
+        SMC_SHMM_INTERPRET_FALLBACK(shadow_pd);
         if (no_right(real_guest_addr, 8, PAGE_WRITE, &siaddr)) {
             info->si_addr = (void *)siaddr;
             return 1;
         }
-        SMC_SHMM_INTERPRET_FALLBACK(shadow_pd);
         /* set old value */
         value = over_page_read(real_guest_addr, 8);
         UC_GR(uc)[rd] = value;
@@ -6145,11 +6171,11 @@ int shared_private_interpret(siginfo_t *info, ucontext_t *uc)
         break;
     case 0x70cc: /* AMMIN.W */
     case 0x70de: /* AMMIN_DB.W */
+        SMC_SHMM_INTERPRET_FALLBACK(shadow_pd);
         if (no_right(real_guest_addr, 4, PAGE_WRITE, &siaddr)) {
             info->si_addr = (void *)siaddr;
             return 1;
         }
-        SMC_SHMM_INTERPRET_FALLBACK(shadow_pd);
         /* set old value */
         value = over_page_read(real_guest_addr, 4);
         value = value << 32 >> 32;
@@ -6164,11 +6190,11 @@ int shared_private_interpret(siginfo_t *info, ucontext_t *uc)
     case 0x70d1: /* AMMIN.DU */
     case 0x70df: /* AMMIN_DB.D */
     case 0x70e3: /* AMMIN_DB.DU */
+        SMC_SHMM_INTERPRET_FALLBACK(shadow_pd);
         if (no_right(real_guest_addr, 8, PAGE_WRITE, &siaddr)) {
             info->si_addr = (void *)siaddr;
             return 1;
         }
-        SMC_SHMM_INTERPRET_FALLBACK(shadow_pd);
         /* set old value */
         value = over_page_read(real_guest_addr, 8);
         UC_GR(uc)[rd] = value;
@@ -6179,11 +6205,11 @@ int shared_private_interpret(siginfo_t *info, ucontext_t *uc)
         break;
     case 0x70ce: /* AMMAX.WU */
     case 0x70e0: /* AMMAX_DB.WU */
+        SMC_SHMM_INTERPRET_FALLBACK(shadow_pd);
         if (no_right(real_guest_addr, 4, PAGE_WRITE, &siaddr)) {
             info->si_addr = (void *)siaddr;
             return 1;
         }
-        SMC_SHMM_INTERPRET_FALLBACK(shadow_pd);
         /* set old value */
         value = over_page_read(real_guest_addr, 4);
         value = (uint64_t)value << 32 >> 32;
@@ -6196,11 +6222,11 @@ int shared_private_interpret(siginfo_t *info, ucontext_t *uc)
         break;
     case 0x70d0: /* AMMIN.WU */
     case 0x70e2: /* AMMIN_DB.WU */
+        SMC_SHMM_INTERPRET_FALLBACK(shadow_pd);
         if (no_right(real_guest_addr, 4, PAGE_WRITE, &siaddr)) {
             info->si_addr = (void *)siaddr;
             return 1;
         }
-        SMC_SHMM_INTERPRET_FALLBACK(shadow_pd);
         /* set old value */
         value = over_page_read(real_guest_addr, 4);
         value = (uint64_t)value << 32 >> 32;
@@ -6284,8 +6310,10 @@ int shared_private_interpret(siginfo_t *info, ucontext_t *uc)
         printf("error: %s:%d unsupport inst STLE.D\n", __func__, __LINE__);
         goto end;
     default:
-        printf("error: %s:%d unsupport inst 0x%x\n", __func__, __LINE__, inst);
-        assert(0);
+        printf("error: %s:%d unsupport inst 0x%x siaddr %lx\n", __func__, __LINE__, inst, siaddr);
+        if (shadow_pd->is_shmm) {
+            return 1;
+        }
     }
 end:
     UC_PC(uc) += 4;

@@ -325,7 +325,10 @@ static int mmap_frag(abi_ulong real_start,
         if (shadow_mask == page_mask) {
             shadow_page_munmap(start, end);
         } else {
-            update_shadow_page_chunk(start, end, prot, flags, fd, offset);
+            ShadowPageDesc *spd = page_get_target_data(start);
+            if (!spd || !spd->is_shmm) {
+                update_shadow_page_chunk(start, end, prot, flags, fd, offset);
+            }
             return 1;
         }
     }
@@ -450,6 +453,12 @@ static abi_ulong mmap_find_vma_reserved(abi_ulong start, abi_ulong size,
  * It must be called with mmap_lock() held.
  * Return -1 if error.
  */
+static bool is_shadow_page_shmm(target_ulong address)
+{
+    ShadowPageDesc *spd = page_get_target_data(address);
+    return spd && spd->is_shmm;
+}
+
 abi_ulong mmap_find_vma(abi_ulong start, abi_ulong size, abi_ulong align)
 {
     void *ptr, *prev;
@@ -536,6 +545,9 @@ abi_ulong mmap_find_vma(abi_ulong start, abi_ulong size, abi_ulong align)
         }
 
         /* Unmap and try again.  */
+        if (is_shadow_page_shmm(h2g(ptr))) {
+            fprintf(stderr, "%s:%d, should not happen\n", __func__, __LINE__);
+        }
         munmap(ptr, size);
 
         /* ENOMEM if we checked the whole of the target address space.  */
@@ -824,6 +836,9 @@ abi_long target_mmap(abi_ulong start, abi_ulong len, int target_prot,
             p = mmap(g2h_untagged(start), host_len, host_prot,
                      flags | MAP_FIXED, fd, host_offset);
             if (p == MAP_FAILED) {
+                if (is_shadow_page_shmm(start)) {
+                    fprintf(stderr, "%s:%d, should not happen\n", __func__, __LINE__);
+                }
                 munmap(g2h_untagged(start), host_len);
                 goto fail;
             }
@@ -1174,6 +1189,9 @@ int target_munmap(abi_ulong start, abi_ulong len, int rlimit_as_account)
         if (reserved_va) {
             mmap_reserve(real_start, real_end - real_start);
         } else {
+            if (is_shadow_page_shmm(real_start)) {
+                fprintf(stderr, "%s:%d, should not happen\n", __func__, __LINE__);
+            }
             ret = munmap(g2h_untagged(real_start), real_end - real_start);
         }
     }
@@ -1286,6 +1304,9 @@ abi_long target_mremap(abi_ulong old_addr, abi_ulong old_size,
         }
         if (prot == 0) {
             if (reserved_va && new_size > old_size && num_pages)
+                if (is_shadow_page_shmm(TARGET_PAGE_ALIGN(old_addr + old_size))) {
+                    fprintf(stderr, "%s:%d, should not happen\n", __func__, __LINE__);
+                }
                 munmap(g2h_untagged(TARGET_PAGE_ALIGN(old_addr + old_size)),
                                         num_pages*TARGET_PAGE_SIZE);
             host_addr = mremap(g2h_untagged(old_addr),

@@ -207,7 +207,7 @@ static uint64_t parse_guest_store(siginfo_t *info, ucontext_t *uc, int *size)
     int64_t imm, real_guest_addr;
     static uint64_t unsup = 0, unsup_sc = 0;
     int s = -1; /* unsupport inst */
-    int check_cross_host = 0;
+    int check_cross_host = 1;
 
     /* sc.w/d/q can not be interpreted here in a sample way.
      * Treat as unsupport inst and profile this case
@@ -323,8 +323,8 @@ static int smc_store_interpret(siginfo_t *info, ucontext_t *uc,
     int64_t value, mem_addr;
 #ifndef CONFIG_LOONGARCH_NEW_WORLD
     uint32_t rj;
-    ShadowPageDesc *spd;
 #endif
+    ShadowPageDesc *spd;
     /* UC_PC(uc) += size after interpret */
     int size = 0x4;
 
@@ -361,22 +361,32 @@ static int smc_store_interpret(siginfo_t *info, ucontext_t *uc,
         break;
     }
 
+    spd = page_get_target_data(mem_addr);
+    if (!spd || !spd->is_shmm) {
+        printf("%s:%d\n",__func__, __LINE__);
+        exit(-1);
+    }
+
     switch (inst >> 22) {
     case 0xa4: /* ST.B */
         value = UC_GR(uc)[rd];
-        smc_store_shadow_page(mem_addr, value, 1);
+        mem_addr += spd->access_off;
+        *((uint8_t*)mem_addr) = value & 0xff;
         break;
     case 0xa5: /* ST.H */
         value = UC_GR(uc)[rd];
-        smc_store_shadow_page(mem_addr, value, 2);
+        mem_addr += spd->access_off;
+        *((uint16_t*)mem_addr) = value & 0xffff;
         break;
     case 0xa6: /* ST.W */
         value = UC_GR(uc)[rd];
-        smc_store_shadow_page(mem_addr, value, 4);
+        mem_addr += spd->access_off;
+        *((uint32_t*)mem_addr) = value & 0xffffffff;
         break;
     case 0xa7: /* ST.D */
         value = UC_GR(uc)[rd];
-        smc_store_shadow_page(mem_addr, value, 8);
+        mem_addr += spd->access_off;
+        *((uint64_t*)mem_addr) = value;
         break;
 #ifndef CONFIG_LOONGARCH_NEW_WORLD
     case 0xad: /* FST.S */
@@ -597,6 +607,11 @@ static inline int handle_cpu_signal(uintptr_t pc, siginfo_t *info,
             } else {
                 emu_store = size;
                 emu = &emu_store;
+            }
+            if (guest_store_address != h2g(address)) {
+                guest_store_address = h2g(address);
+                emu = NULL;
+                emu_store = 0;
             }
         }
         uint32_t inst = *(uint32_t *)UC_PC(uc);
