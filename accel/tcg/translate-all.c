@@ -5953,6 +5953,38 @@ int shared_private_interpret(siginfo_t *info, ucontext_t *uc)
       }
       goto end;
 #endif
+    case 0x70b0: /* amcas.b */
+    case 0x70b4: /* amcas.db.b */
+        SMC_SHMM_INTERPRET_FALLBACK(shadow_pd);
+        /* set old value */
+        if (no_right(real_guest_addr, 1, PAGE_WRITE, &siaddr)) {
+            info->si_addr = (void *)siaddr;
+            return 1;
+        }
+        value = *(char *)real_guest_addr;
+        if ((uint8_t)value == (uint8_t)UC_GR(uc)[rd]) {
+            /* set new value */
+            *(char *)real_guest_addr = (char)new_value;
+        }
+        value = value << 56 >> 56;
+        UC_GR(uc)[rd] = value;
+        break;
+    case 0x70b1: /* amcas.h */
+    case 0x70b5: /* amcas.db.h */
+        SMC_SHMM_INTERPRET_FALLBACK(shadow_pd);
+        /* set old value */
+        if (no_right(real_guest_addr, 2, PAGE_WRITE, &siaddr)) {
+            info->si_addr = (void *)siaddr;
+            return 1;
+        }
+        value = over_page_read(real_guest_addr, 2);
+        if ((uint16_t)value == (uint16_t)UC_GR(uc)[rd]) {
+            /* set new value */
+            over_page_write(real_guest_addr, new_value, 2);
+        }
+        value = value << 48 >> 48;
+        UC_GR(uc)[rd] = value;
+        break;
     case 0x70b2: /* amcas.w */
     case 0x70b6: /* amcas.db.w */
         SMC_SHMM_INTERPRET_FALLBACK(shadow_pd);
