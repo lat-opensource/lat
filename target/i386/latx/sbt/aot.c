@@ -1254,6 +1254,10 @@ static void* relkind_to_fixup_addr[] = {
     [LOAD_HELPER_VAESENC_XMM] = helper_vaesenc_xmm,
     [LOAD_HELPER_VAESENCLAST_YMM] = helper_vaesenclast_ymm,
     [LOAD_HELPER_VAESENCLAST_XMM] = helper_vaesenclast_xmm,
+    [LOAD_HELPER_CVTPH2PS_YMM] = helper_cvtph2ps_ymm,
+    [LOAD_HELPER_CVTPH2PS_XMM] = helper_cvtph2ps_xmm,
+    [LOAD_HELPER_CVTPS2PH_YMM] = helper_cvtps2ph_ymm,
+    [LOAD_HELPER_CVTPS2PH_XMM] = helper_cvtps2ph_xmm,
 #endif
 
 
