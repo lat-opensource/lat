@@ -277,46 +277,27 @@ static bool check_ir1(target_ulong seg_begin, struct aot_tb *p_aot_tbs, int num,
 
 /* static int load_sum_tb; */
 
-int load_page_4(target_ulong pc, uint32_t cflags) {
-    int ret = load_page(pc, cflags);
+int load_page_4(target_ulong pc, uint32_t cflags, seg_info *info) {
+    int ret = load_page(pc, cflags, info);
     pc += TARGET_PAGE_SIZE;
-    load_page(pc, cflags);
+    load_page(pc, cflags, info);
     pc += TARGET_PAGE_SIZE;
-    load_page(pc, cflags);
+    load_page(pc, cflags, info);
     pc += TARGET_PAGE_SIZE;
-    load_page(pc, cflags);
+    load_page(pc, cflags, info);
     return ret;
 }
 
-int load_page(target_ulong pc, uint32_t cflags)
+inline int load_page(target_ulong pc, uint32_t cflags, seg_info *info)
 {
-    if (in_pre_translate) {
-        return 0;
-    }
-    if (page_get_page_state(pc) >= PAGE_LOADED) {
-        return 0;
-    }
-    seg_info *info = segment_tree_lookup(pc);
-    if (info == NULL || info->buffer == NULL) {
-        if (info) {
-            info->is_running = true;
-        }
-        page_set_page_state(pc, PAGE_NOINFO);
-        return 0;
-    }
-    info->is_running = true;
-    page_set_page_state(pc, PAGE_LOADED);
     aot_buffer = info->buffer;
     aot_segment *p_segment = (aot_segment *)info->p_segment;
     page_table_info *pt = (page_table_info *)
         (p_segment->page_table_offset + (uintptr_t)aot_buffer);
 
     int pt_id = (pc - info->seg_begin) / TARGET_PAGE_SIZE;
-    int max_pt_id =
-        (p_segment->details.seg_end - p_segment->details.seg_begin) / TARGET_PAGE_SIZE;
-    if (pt_id >= max_pt_id) {
-        return 0;
-    }
+    assert(pt_id < ((p_segment->details.seg_end
+                    - p_segment->details.seg_begin) / TARGET_PAGE_SIZE));
 
     int tb_num_in_page;
     struct aot_tb *p_aot_tbs;
@@ -364,4 +345,39 @@ int load_page(target_ulong pc, uint32_t cflags)
     recover_tb_range(p1, p_aot_tbs, tb_num_in_page, info->seg_begin, info->seg_end);
     return 1;
 }
+
+int load_aot(target_ulong pc, uint32_t cflags)
+{
+    if (in_pre_translate) {
+        return 0;
+    }
+
+    int page_state = page_get_page_state(pc);
+    if (page_state >= PAGE_LOADED) {
+        return 0;
+    }
+
+    seg_info *info = segment_tree_lookup(pc);
+    if (info == NULL || info->buffer == NULL) {
+        page_set_page_state(pc, PAGE_NOINFO);
+        return 0;
+    }
+
+    if (option_aot == 2 &&
+            (info->is_running == false || page_state == PAGE_FLUSH)) {
+        info->is_running = true;
+        page_set_page_state_range(info->seg_begin & TARGET_PAGE_MASK,
+                info->seg_end & TARGET_PAGE_MASK, PAGE_LOADED);
+        for (target_ulong addr = info->seg_begin; addr < info->seg_end;
+                addr += TARGET_PAGE_SIZE) {
+            load_page(addr, cflags, info);
+        }
+        return 1;
+    } else {
+        page_set_page_state(pc, PAGE_LOADED);
+        return load_page(pc, cflags, info);
+    }
+    return 0;
+}
+
 #endif
