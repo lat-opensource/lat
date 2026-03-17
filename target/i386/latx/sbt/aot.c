@@ -304,6 +304,8 @@ static inline int create_aot_tb(aot_tb *curr_aot_tb, TranslationBlock *tb,
     curr_aot_tb->canlink[1] = tb->canlink[1];
     curr_aot_tb->jmp_stub_target_arg[0] = tb->jmp_stub_target_arg[0];
     curr_aot_tb->jmp_stub_target_arg[1] = tb->jmp_stub_target_arg[1];
+    curr_aot_tb->next_tb_pc_offset = -1;
+    curr_aot_tb->target_tb_pc_offset = -1;
     if (use_tu_jmp(tb)) {
         curr_aot_tb->tu_jmp[0] = tb->tu_jmp[0];
         curr_aot_tb->tu_jmp[1] = tb->tu_jmp[1];
@@ -317,6 +319,23 @@ static inline int create_aot_tb(aot_tb *curr_aot_tb, TranslationBlock *tb,
         curr_aot_tb->jmp_reset_offset[1] = tb->jmp_reset_offset[1];
         curr_aot_tb->jmp_stub_reset_offset[0] = tb->jmp_stub_reset_offset[0];
         curr_aot_tb->jmp_stub_reset_offset[1] = tb->jmp_stub_reset_offset[1];
+        if (!use_indirect_jmp(tb)) {
+            uint8_t last_ir1_type = tb->s_data->last_ir1_type;
+            if ((last_ir1_type == IR1_TYPE_BRANCH)
+                    && tb->s_data->next_pc < curr_seg->details.seg_end
+                    && tb->s_data->next_pc >= curr_seg->details.seg_begin) {
+                curr_aot_tb->next_tb_pc_offset =
+                    tb->s_data->next_pc - curr_seg->details.seg_begin;
+            }
+            if ((last_ir1_type == IR1_TYPE_BRANCH
+                        || last_ir1_type == IR1_TYPE_CALL
+                        || last_ir1_type == IR1_TYPE_JUMP)
+                    && tb->s_data->target_pc < curr_seg->details.seg_end
+                    && tb->s_data->target_pc >= curr_seg->details.seg_begin) {
+                curr_aot_tb->target_tb_pc_offset =
+                    tb->s_data->target_pc - curr_seg->details.seg_begin;
+            }
+        }
     }
 
     curr_aot_tb->icount = tb->icount;
@@ -1393,19 +1412,7 @@ void aot_do_tb_reloc(TranslationBlock *tb, struct aot_tb *stb,
             break;
         case LOAD_CALL_TARGET:
             lsassert((seg_begin <= tb->pc) && (seg_end >= tb->pc));
-            uintptr_t call_target = aot_rel_table[i].extra_addend +
-                seg_begin;
-            if (!use_tu_jmp(tb) && ((*pinsn) & 0x1f) == 21) {
-                for (int j = 0; j < 2; j++) {
-                    if ((tb->jmp_reset_offset[j] != TB_JMP_RESET_OFFSET_INVALID) &&
-                            (aot_rel_table[i].tc_offset == 
-                             (tb->jmp_target_arg[j] + 20))) {
-                        aot_link_tree_insert(thread_cpu, tb, (target_ulong)call_target,
-                                (uint32_t *)(tb->tc.ptr + tb->jmp_target_arg[j]),
-                                tb->flags, tb->flags, AOT_LINK_TYPE_TB_LINK);
-                    }
-                }
-            }
+            uintptr_t call_target = aot_rel_table[i].extra_addend + seg_begin;
             lsassert((*pinsn & 0xfe000000) == 0x14000000); /* lu12i.w */
             *pinsn &= 0xfe00001f;
             *pinsn |= ((call_target >> 12) & 0xfffff) << 5;

@@ -281,51 +281,6 @@ static inline int tb_sort_cmp(const void *ap, const void *bp)
     return a->pc < b->pc ? -1 : a->pc > b->pc;
 }
 
-static inline void tb_add_jump(TranslationBlock *tb, int n,
-                               TranslationBlock *tb_next)
-{
-    uintptr_t old;
-
-    qemu_thread_jit_write();
-    lsassert(n < ARRAY_SIZE(tb->jmp_list_next));
-    qemu_spin_lock(&tb_next->jmp_lock);
-
-    /* make sure the destination TB is valid */
-    if (tb_next->cflags & CF_INVALID) {
-        goto out_unlock_next;
-    }
-    /* Atomically claim the jump destination slot only if it was NULL */
-    old = qatomic_cmpxchg(&tb->jmp_dest[n], (uintptr_t)NULL,
-                          (uintptr_t)tb_next);
-    if (old) {
-        goto out_unlock_next;
-    }
-
-#ifdef CONFIG_LATX
-    /* check fpu rotate and patch the native jump address */
-    latx_tb_set_jmp_target(tb, n, tb_next);
-#else
-    /* patch the native jump address */
-    tb_set_jmp_target(tb, n, (uintptr_t)tb_next->tc.ptr);
-#endif
-
-    /* add in TB jmp list */
-    tb->jmp_list_next[n] = tb_next->jmp_list_head;
-    tb_next->jmp_list_head = (uintptr_t)tb | n;
-
-    qemu_spin_unlock(&tb_next->jmp_lock);
-
-    qemu_log_mask_and_addr(CPU_LOG_EXEC, tb->pc,
-                           "Linking TBs %p [" TARGET_FMT_lx
-                           "] index %d -> %p [" TARGET_FMT_lx "]\n",
-                           tb->tc.ptr, tb->pc, n,
-                           tb_next->tc.ptr, tb_next->pc);
-    return;
-
- out_unlock_next:
-    qemu_spin_unlock(&tb_next->jmp_lock);
-    return;
-}
 static void generate_tu_switch_native_tb(TranslationBlock *broken_tb)
 {
     ADDR succ_x86_addr = broken_tb->pc;

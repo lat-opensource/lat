@@ -163,6 +163,8 @@ static void recover_tb_range(target_ulong page, struct aot_tb *p_aot_tbs,
 
 #if defined(CONFIG_LATX_JRRA) || defined(CONFIG_LATX_JRRA_STACK)
         if (p_aot_tbs[i].return_target_ptr_offset) {
+            tb->return_target_ptr = p_aot_tbs[i].return_target_ptr_offset
+                + tb->tc.ptr;
             aot_link_tree_insert(thread_cpu,
                 tb, tb->next_86_pc, (uint32_t *)(tb->tc.ptr +
                 p_aot_tbs[i].return_target_ptr_offset), tb->flags,
@@ -224,25 +226,38 @@ static void recover_tb_range(target_ulong page, struct aot_tb *p_aot_tbs,
                 ROUND_UP(new_buf_ptr, CODE_GEN_ALIGN));
         for (int k = i; k < j; k++) {
             TranslationBlock *tb = tb_in_order[k - i];
-            tb->tc.ptr = tu_begin_ptr + p_aot_tbs[k].offset_in_tu;
+            aot_tb *curr_aot_tb = &p_aot_tbs[k];
+            tb->tc.ptr = tu_begin_ptr + curr_aot_tb->offset_in_tu;
             assert((tb->pc & TARGET_PAGE_MASK) == page);
             assert((tb->cflags & CF_PARALLEL) == (tcg_ctx->tb_cflags & CF_PARALLEL));
-            aot_do_tb_reloc(tb, &p_aot_tbs[k], start, end);
-            aot_tb_register(tb);
-
+            aot_do_tb_reloc(tb, curr_aot_tb, start, end);
+            target_ulong next_pc = 0, target_pc = 0;
+            if (curr_aot_tb->next_tb_pc_offset != -1) {
+               next_pc = curr_aot_tb->next_tb_pc_offset + start;
+            }
+            if (curr_aot_tb->target_tb_pc_offset != -1) {
+               target_pc = curr_aot_tb->target_tb_pc_offset + start;
+            }
+            if (next_pc || target_pc) {
+                assert(!use_tu_jmp(tb) && !use_indirect_jmp(tb));
+                if (curr_aot_tb->last_ir1_type == IR1_TYPE_CALL) {
+                    aot_link_tree_insert(tb, target_pc, 0);
+                } else {
+                    aot_link_tree_insert(tb, next_pc, target_pc);
+                }
+            }
 #if defined(CONFIG_LATX_JRRA) || defined(CONFIG_LATX_JRRA_STACK)
-            if (p_aot_tbs[k].return_target_ptr_offset) {
-                aot_link_tree_insert(thread_cpu,
-                    tb, tb->next_86_pc, (uint32_t *)(tb->tc.ptr +
-                        p_aot_tbs[k].return_target_ptr_offset), tb->flags,
-                        tb->cflags, AOT_LINK_TYPE_JRRA);
+            else if (curr_aot_tb->return_target_ptr_offset) {
+                tb->return_target_ptr =
+                (unsigned long *)(curr_aot_tb->return_target_ptr_offset + tb->tc.ptr);
+                aot_link_tree_insert(tb, 0, 0);
             }
 #endif
+            aot_tb_register(tb);
         }
         i = j;
     }
 #endif
-    try_aot_link();
 }
 
 void do_recover_segment(aot_segment *p_segment,
@@ -277,7 +292,8 @@ static bool check_ir1(target_ulong seg_begin, struct aot_tb *p_aot_tbs, int num,
 
 /* static int load_sum_tb; */
 
-int load_page_4(target_ulong pc, uint32_t cflags, seg_info *info) {
+int load_page_4(target_ulong pc, uint32_t cflags, seg_info *info)
+{
     int ret = load_page(pc, cflags, info);
     pc += TARGET_PAGE_SIZE;
     load_page(pc, cflags, info);
@@ -372,10 +388,15 @@ int load_aot(target_ulong pc, uint32_t cflags)
                 addr += TARGET_PAGE_SIZE) {
             load_page(addr, cflags, info);
         }
+        try_aot_link();
         return 1;
     } else {
         page_set_page_state(pc, PAGE_LOADED);
-        return load_page(pc, cflags, info);
+        int ret = load_page(pc, cflags, info);
+        if (ret) {
+            try_aot_link();
+            return ret;
+        }
     }
     return 0;
 }

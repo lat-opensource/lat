@@ -102,6 +102,8 @@ typedef struct aot_tb {
     unsigned long next_86_pc_offset;
     /* inner segment offset of this basic block */
     uint32_t offset_in_segment;
+    int32_t next_tb_pc_offset;
+    int32_t target_tb_pc_offset;
 #ifdef CONFIG_LATX_TU
     /*tu_id is the first tb pc in TU */
     uint32_t tu_id;

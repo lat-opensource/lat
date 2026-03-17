@@ -9,22 +9,14 @@
 #include "qemu-def.h"
 #include "qemu.h"
 
-typedef enum AOT_LINK_TYPE {
-    AOT_LINK_TYPE_TB_LINK,
-    AOT_LINK_TYPE_JRRA,
-} AOT_LINK_TYPE;
 typedef struct aot_link_info {
     TranslationBlock *curr;
-    target_ulong pc;
-    const void *addr;
-    uint32_t flags;
-    uint32_t cflags;
-    CPUState *cpu;
-    AOT_LINK_TYPE type;
+    target_ulong aim1_pc;
+    target_ulong aim2_pc;
 } aot_link_info;
 
 void aot_link_tree_init(void);
-void aot_link_tree_insert(CPUState *cpu, TranslationBlock *curr,
-    target_ulong pc, const void *addr, uint32_t flags, uint32_t cflags, AOT_LINK_TYPE type);
+void aot_link_tree_insert(TranslationBlock *curr,
+        target_ulong aim1_pc, target_ulong aim2_pc);
 void try_aot_link(void);
 #endif

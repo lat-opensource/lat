@@ -8,8 +8,9 @@
 #include "aot.h"
 void do_recover_segment(aot_segment *p_segment, abi_long start, 
         abi_long end);
-int load_page(target_ulong pc, uint32_t cflags);
-int load_page_4(target_ulong pc, uint32_t cflags);
+int load_page(target_ulong pc, uint32_t cflags, seg_info *info);
+int load_page_4(target_ulong pc, uint32_t cflags, seg_info *info);
+int load_aot(target_ulong pc, uint32_t cflags);
 /* void print_tb(TranslationBlock *tb); */
 
 #endif

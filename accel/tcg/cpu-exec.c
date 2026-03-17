@@ -660,7 +660,7 @@ void tu_relink(TranslationBlock *tb) {
 }
 #endif
 
-static inline void tb_add_jump(TranslationBlock *tb, int n,
+inline void tb_add_jump(TranslationBlock *tb, int n,
                                TranslationBlock *tb_next)
 {
     uintptr_t old;
@@ -738,7 +738,7 @@ static inline TranslationBlock *tb_find(CPUState *cpu,
 #ifdef CONFIG_LATX_AOT
     if (tb == NULL && option_aot) {
         mmap_lock();
-        if (load_page_4(pc, cflags)) {
+        if (load_aot(pc, cflags)) {
             tb = tb_lookup(cpu, pc, cs_base, flags, cflags);
         }
         mmap_unlock();
