@@ -11421,7 +11421,14 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
         if (block_signals()) {
             return -TARGET_ERESTARTSYS;
         }
-
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+        {
+            CPUX86State *x86env = env;
+            if (x86env->tb_jmp_cache_ptr) {
+                free(x86env->tb_jmp_cache_ptr);
+            }
+        }
+#endif
         pthread_mutex_lock(&clone_lock);
 #ifdef CONFIG_LATX_AOT
         if(current_cpu->cpu_index == 0) {
@@ -12200,6 +12207,14 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
         if (arg1 == getpid())
         {
             aot_exit_entry(cpu, true);
+        }
+#endif
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+        {
+            CPUX86State *x86env = env;
+            if (arg1 == getpid() && x86env->tb_jmp_cache_ptr) {
+                free(x86env->tb_jmp_cache_ptr);
+            }
         }
 #endif
         return get_errno(safe_kill(arg1, target_to_host_signal(arg2)));
@@ -13841,6 +13856,14 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
         /* dump basic block here. TODO */
 #ifdef CONFIG_LATX_AOT
         aot_exit_entry(cpu, true);
+#endif
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+        {
+            CPUX86State *x86env = env;
+            if (x86env->tb_jmp_cache_ptr) {
+                free(x86env->tb_jmp_cache_ptr);
+            }
+        }
 #endif
         return get_errno(exit_group(arg1));
 #endif
@@ -16107,6 +16130,14 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
         if (arg2 == syscall(SYS_gettid))
         {
             aot_exit_entry(cpu, true);
+        }
+#endif
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+        {
+            CPUX86State *x86env = env;
+            if (arg2 == syscall(SYS_gettid) && x86env->tb_jmp_cache_ptr) {
+                free(x86env->tb_jmp_cache_ptr);
+            }
         }
 #endif
         return get_errno(safe_tgkill((int)arg1, (int)arg2,
