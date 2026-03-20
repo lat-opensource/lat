@@ -2313,7 +2313,7 @@ static bool translate_ucomiss_xx_jcc(IR1_INST *pir1)
     }
 }
 #endif
-#undef WRAP
+
 
 bool try_translate_instptn(IR1_INST *pir1)
 {
@@ -2418,7 +2418,7 @@ void opt_instptn_fix(CPUState *cpu, TranslationBlock *tb, int index)
 
             switch (ir1_opcode(pir1))
             {
-            case dt_X86_INS_CMP:
+            case WRAP(CMP):
             {
                 uint64_t a0 = UC_GR(uc)[4];
                 uint64_t a1 = UC_GR(uc)[5];
@@ -2484,7 +2484,7 @@ void opt_instptn_fix(CPUState *cpu, TranslationBlock *tb, int index)
                 env->eflags = env->eflags | (eflags & 0b100011010101);
             }
             break;
-            case dt_X86_INS_TEST:
+            case WRAP(TEST):
             {
                 IR1_OPND *opnd0 = ir1_get_opnd(pir1, 0);
                 IR1_OPND *opnd1 = ir1_get_opnd(pir1, 1);
@@ -2555,13 +2555,28 @@ void opt_instptn_fix(CPUState *cpu, TranslationBlock *tb, int index)
                 env->eflags = env->eflags | (eflags & 0b100011000101);
             }
             break;
-            case dt_X86_INS_BT:
+            case WRAP(BT):
             {
                 uint64_t a0 = UC_GR(uc)[4];
                 uint64_t a1 = UC_GR(uc)[5];
                 env->eflags = env->eflags & ~(1); // clear CF
                 env->eflags = env->eflags | ((a0 >> a1) & 1); // set CF
             }
+            break;
+            case WRAP(JB):
+            case WRAP(JAE):
+            case WRAP(JE):
+            case WRAP(JNE):
+            case WRAP(JBE):
+            case WRAP(JA):
+            case WRAP(JL):
+            case WRAP(JGE):
+            case WRAP(JLE):
+            case WRAP(JG):
+            case WRAP(JS):
+            case WRAP(JNS):
+            case WRAP(JNO):
+            case WRAP(JO):
             break;
             default:
                 lsassert(0);
@@ -2571,5 +2586,5 @@ void opt_instptn_fix(CPUState *cpu, TranslationBlock *tb, int index)
         }
     }
 }
-
+#undef WRAP
 #endif
