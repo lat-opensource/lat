@@ -381,24 +381,9 @@ static void handle_arg_latx_unlink(const char *arg)
     options_parse_latx_unlink(arg);
 }
 
-static void handle_arg_latx_em_debug(const char *arg)
-{
-    option_em_debug = 1;
-}
-
 static void handle_arg_latx_trace(const char *arg)
 {
     options_parse_trace(arg);
-}
-
-static void handle_arg_latx_check(const char *arg)
-{
-    option_check = 1;
-}
-
-static void handle_arg_latx_tb_dump(const char *arg)
-{
-    option_dump_all_tb = 1;
 }
 
 static void handle_arg_latx_disassemble_trace_cmp(const char *arg)
@@ -810,7 +795,7 @@ struct qemu_argument {
 
 static const struct qemu_argument arg_table[] = {
 #ifdef CONFIG_LATX
-    {"latx-optimize",   "LAT_OPTIMIZE",      false, handle_arg_optimize,
+    {"latx-optimize",   "LATX_OPTIMIZE",      false, handle_arg_optimize,
     "",           "specify enabled optimize type"},
     {"latx-smc",        "LATX_SMC",         true,   handle_arg_latx_smc,
     "",           "smc strategy: 0 (page) 1 (tb) 2(+shmm) 6(+helper,default)"},
@@ -889,14 +874,8 @@ static const struct qemu_argument arg_table[] = {
     "",           "enable all exception bit in fcsr"},
     {"latx-unlink",     "LATX_UNLINK",       true,  handle_arg_latx_unlink,
     "",           "unlink_count[,cpu_index]"},
-    {"latx-em-debug",    "",                 false,  handle_arg_latx_em_debug,
-    "",           ""},
     {"latx-trace",       "",                 true,  handle_arg_latx_trace,
     "bitmap",           "LATX-trace-TB-execution: 2 bits each for TB,ir1,ir2"},
-    {"latx-check",       "",                 false, handle_arg_latx_check,
-    "",                 "LATX-enable-check"},
-    {"latx-tb-dump",     "",                 false, handle_arg_latx_tb_dump,
-    "",                 "LATX dump all the run times of all TB"},
     {"latx-disassemble-trace-cmp",     "LATX_DISASSEMBLE_TRACE_CMP",
         true, handle_arg_latx_disassemble_trace_cmp,
         "", "LATX Compare different disassemble."},

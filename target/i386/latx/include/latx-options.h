@@ -6,7 +6,6 @@
 #include "latx-disassemble-trace.h"
 #include "latx-debug.h"
 
-extern int option_em_debug;
 #ifdef CONFIG_LATX_INSTS_PATTERN
 extern int option_instptn;
 #endif
@@ -29,9 +28,7 @@ extern int option_dump_ir2;
 extern int option_dump_profile;
 extern int option_trace_tb;
 extern int option_trace_ir1;
-extern int option_check;
 extern int option_enable_fcsr_exc;
-extern int option_dump_all_tb;
 extern int option_latx_disassemble_trace_cmp;
 extern int option_jr_ra;
 #define SMC_ILL_INST 0x1
@@ -92,10 +89,9 @@ extern unsigned long long counter_tb_tr;
 extern unsigned long long counter_ir1_tr;
 extern unsigned long long counter_mips_tr;
 
-
 #ifdef CONFIG_LATX
 #define ENVSUP_LATX \
-    ENVFUN(LAT_OPTIMIZE, handle_arg_optimize) \
+    ENVFUN(LATX_OPTIMIZE, handle_arg_optimize) \
     ENVFUN(LATX_SMC, handle_arg_latx_smc) \
     ENVFUN(LATX_CLOSE_PARALLEL, handle_arg_latx_parallel) \
     ENVFUN(LATX_SOFTFPU, handle_arg_latx_softfpu) \

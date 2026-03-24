@@ -57,9 +57,6 @@ int option_dump_ir2;
 int option_dump_profile;
 int option_trace_tb;
 int option_trace_ir1;
-int option_check;
-int option_em_debug;
-int option_dump_all_tb;
 int option_latx_disassemble_trace_cmp;
 int option_debug_lative;
 int option_aot;
@@ -198,8 +195,6 @@ void options_init(void)
     option_dump = 0;
     option_trace_tb = 0;
     option_trace_ir1 = 0;
-    option_check = 0;
-    option_dump_all_tb = 0;
     option_latx_disassemble_trace_cmp = 0;
     option_enable_lasx = 1;
 
