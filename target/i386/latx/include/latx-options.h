@@ -29,7 +29,6 @@ extern int option_dump_profile;
 extern int option_trace_tb;
 extern int option_trace_ir1;
 extern int option_enable_fcsr_exc;
-extern int option_latx_disassemble_trace_cmp;
 extern int option_jr_ra;
 #define SMC_ILL_INST 0x1
 /* ld.w      $a1,$zero,0 */
@@ -175,8 +174,7 @@ extern unsigned long long counter_mips_tr;
     ENVFUN(LATX_BREAK_INSN, handle_arg_latx_break_insn) \
     ENVFUN(LATX_DEBUG_LATIVE, handle_arg_debug_lative) \
     ENVFUN(LATX_ENABLE_FCSR_EXC, handle_arg_enable_fcsr_exc) \
-    ENVFUN(LATX_UNLINK, handle_arg_latx_unlink) \
-    ENVFUN(LATX_DISASSEMBLE_TRACE_CMP, handle_arg_latx_disassemble_trace_cmp)
+    ENVFUN(LATX_UNLINK, handle_arg_latx_unlink)
 #else
 #define ENVSUP_LATX_DEBUG
 #endif

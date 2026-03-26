@@ -57,7 +57,6 @@ int option_dump_ir2;
 int option_dump_profile;
 int option_trace_tb;
 int option_trace_ir1;
-int option_latx_disassemble_trace_cmp;
 int option_debug_lative;
 int option_aot;
 int option_load_aot;
@@ -195,7 +194,6 @@ void options_init(void)
     option_dump = 0;
     option_trace_tb = 0;
     option_trace_ir1 = 0;
-    option_latx_disassemble_trace_cmp = 0;
     option_enable_lasx = 1;
 
     counter_tb_exec = 0;
@@ -429,49 +427,6 @@ void options_parse_trace(const char *bits)
     }
 }
 
-void options_parse_latx_disassemble_trace_cmp(const char *args)
-{
-    if (!args) {
-        return;
-    }
-    char *findSpil = strstr(args, ":");
-    if (!findSpil) {
-        lsassertm(0, "Can't find \':\' from args.\n");
-        return;
-    }
-    char strtmp[100] = {0};
-    option_latx_disassemble_trace_cmp = 0;
-    lsassert(findSpil - args <= 100);
-    strncpy(strtmp, args, findSpil - args);
-    if (!strcmp(strtmp, "lacapstone")) {
-        option_latx_disassemble_trace_cmp |= OPT_V1LACAPSTONE;
-    } else if (!strcmp(strtmp, "nextcapstone")) {
-        option_latx_disassemble_trace_cmp |= OPT_V1NEXTCAPSTONE;
-    } else if (!strcmp(strtmp, "laxed")) {
-        option_latx_disassemble_trace_cmp |= OPT_V1LAXED;
-    } else if (!strcmp(strtmp, "lazydis")) {
-        option_latx_disassemble_trace_cmp |= OPT_V1LAZYDIS;
-    } else {
-        lsassertm(0, "V1 must be lacapstone, lazydis, "
-            "nextcapstone or laxed, but this V1=%s\n", strtmp);
-        return;
-    }
-    strncpy(strtmp, findSpil + 1, 99);
-    if (!strcmp(strtmp, "lacapstone")) {
-        option_latx_disassemble_trace_cmp |= OPT_V2LACAPSTONE;
-    } else if (!strcmp(strtmp, "nextcapstone")) {
-        option_latx_disassemble_trace_cmp |= OPT_V2NEXTCAPSTONE;
-    } else if (!strcmp(strtmp, "laxed")) {
-        option_latx_disassemble_trace_cmp |= OPT_V2LAXED;
-    } else if (!strcmp(strtmp, "lazydis")) {
-        option_latx_disassemble_trace_cmp |= OPT_V2LAZYDIS;
-    } else if (strlen(strtmp) == 0) {
-        /*Only want to choose la_disa_v1, No cmp.*/
-    } else {
-        lsassertm(0, "V2 must be lacapstone, lazydis, "
-            "nextcapstone, laxed or NULL, but this V2=%s\n", strtmp);
-    }
-}
 uint8 options_to_save(void)
 {
     uint8 option_bitmap = 0;

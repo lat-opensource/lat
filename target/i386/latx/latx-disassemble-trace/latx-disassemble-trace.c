@@ -7,52 +7,6 @@ int (*la_disa_v2)(const uint8_t *code, size_t code_size,
         uint64_t address,
         size_t count, struct la_dt_insn **insn,
         int ir1_num, void *pir1_base, int mode) = NULL;
-void disassemble_trace_init(int abi_bits, int args)
-{
-    dt_mode = abi_bits;
-    switch (args & 0xffff) {
-    case 0:
-        break;
-    case OPT_V1NEXTCAPSTONE:
-        la_disa_v1 = &gitcapstone_get;
-        break;
-    case OPT_V1LACAPSTONE:
-        la_disa_v1 = &gitcapstone_get;
-        break;
-    case OPT_V1LAXED:
-        la_disa_v1 = &laxed_get;
-        break;
-    case OPT_V1LAZYDIS:
-        la_disa_v1 = &lazydis_get;
-        break;
-    default:
-        lsassertm(0, "invalid V1.");
-    }
-    switch (args & 0xffff0000) {
-    case 0:
-        break;
-    case OPT_V2LACAPSTONE:
-        la_disa_v2 = &gitcapstone_get;
-        break;
-    case OPT_V2NEXTCAPSTONE:
-        la_disa_v2 = &gitcapstone_get;
-        break;
-    case OPT_V2LAXED:
-        la_disa_v2 = &laxed_get;
-        break;
-    case OPT_V2LAZYDIS:
-        la_disa_v2 = &lazydis_get;
-        break;
-    default:
-        dtassert(0);
-    }
-    if (la_disa_v2) {
-        disassemble_trace_cmp = &disassemble_trace_loop;
-    }
-    gitcapstone_init(abi_bits);
-    laxed_init(abi_bits);
-    lazydis_init(abi_bits);
-}
 static int64_t imm_cast(int64_t imm, uint32_t size)
 {
     switch (size) {

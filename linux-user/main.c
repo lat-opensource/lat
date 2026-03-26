@@ -386,10 +386,6 @@ static void handle_arg_latx_trace(const char *arg)
     options_parse_trace(arg);
 }
 
-static void handle_arg_latx_disassemble_trace_cmp(const char *arg)
-{
-    options_parse_latx_disassemble_trace_cmp(arg);
-}
 
 #endif
 
@@ -876,9 +872,6 @@ static const struct qemu_argument arg_table[] = {
     "",           "unlink_count[,cpu_index]"},
     {"latx-trace",       "",                 true,  handle_arg_latx_trace,
     "bitmap",           "LATX-trace-TB-execution: 2 bits each for TB,ir1,ir2"},
-    {"latx-disassemble-trace-cmp",     "LATX_DISASSEMBLE_TRACE_CMP",
-        true, handle_arg_latx_disassemble_trace_cmp,
-        "", "LATX Compare different disassemble."},
 #endif
     {"h",          "",                 false, handle_arg_help,
      "",           "print this help"},

@@ -504,14 +504,10 @@ void latx_guest_stack_init(CPUArchState *env)
 #endif
 void latx_dt_init(void)
 {
-#ifdef CONFIG_LATX_DEBUG
-    disassemble_trace_init(TARGET_ABI_BITS, option_latx_disassemble_trace_cmp);
-#else
 #ifdef CONFIG_LATX_CAPSTONE_GIT
     gitcapstone_init(TARGET_ABI_BITS);
 #else
     lacapstone_init(TARGET_ABI_BITS);
-#endif
 #endif
 }
 
