@@ -10482,6 +10482,76 @@ out:
     return ret;
 }
 
+#ifndef CONFIG_LOONGARCH_NEW_WORLD
+static uint64_t convert_sigcgt_host_to_x86(const char *hex128)
+{
+    uint64_t words[2] = {0, 0};
+
+    sscanf(hex128, "%16lx%16lx", &words[1], &words[0]);
+
+    uint64_t result = 0;
+
+    for (int sig = 1; sig < 128; sig++) {
+        int idx = (sig - 1) / 64;
+        int bit = (sig - 1) % 64;
+
+        if (words[idx] & (1ULL << bit)) {
+
+            int tsig = host_to_target_signal(sig);
+
+            if (tsig >= 1 && tsig <= 64) {
+                result |= (1ULL << (tsig - 1));
+            }
+        }
+    }
+
+    return result;
+}
+
+static void convert_sigcgt_line(const char *src, char *dst, size_t dstsz)
+{
+    const char *hex = src + 7;
+
+    while (*hex == ' ' || *hex == '\t') hex++;
+
+    char buf[512];
+    snprintf(buf, sizeof(buf), "%s", hex);
+
+    char *nl = strchr(buf, '\n');
+    if (nl) *nl = '\0';
+
+    uint64_t result= convert_sigcgt_host_to_x86(buf);
+
+    snprintf(dst, dstsz, "SigCgt:\t%016lx\n", result);
+}
+
+static int open_proc_status_other(void *cpu_env, int fd, const char *path)
+{
+    char line[512];
+
+    FILE *fp = fopen(path, "r");
+    if (!fp) {
+        return -1;
+    }
+
+    while (fgets(line, sizeof(line), fp)) {
+        if (strncmp(line, "SigPnd:", 7) == 0 ||
+            strncmp(line, "ShdPnd:", 7) == 0 ||
+            strncmp(line, "SigBlk:", 7) == 0 ||
+            strncmp(line, "SigIgn:", 7) == 0 ||
+            strncmp(line, "SigCgt:", 7) == 0) {
+            char new_line[512];
+            convert_sigcgt_line(line, new_line, sizeof(new_line));
+            dprintf(fd, "%s", new_line);
+        } else {
+            dprintf(fd, "%s", line);
+        }
+    }
+
+    fclose(fp);
+    return 0;
+}
+#endif
 struct open_self_maps_data {
     TaskState *ts;
     IntervalTreeRoot *host_maps;
@@ -11139,6 +11209,9 @@ static int do_openat(void *cpu_env, int dirfd, const char *pathname, int flags, 
         { "auxv", open_self_auxv, is_proc_myself },
         { "cmdline", open_self_cmdline, is_proc_myself },
         { "cmdline", open_other_cmdline, is_proc_other},
+#ifndef CONFIG_LOONGARCH_NEW_WORLD
+        { "status", open_proc_status_other, is_proc_other },
+#endif
 #if defined(HOST_WORDS_BIGENDIAN) != defined(TARGET_WORDS_BIGENDIAN)
         { "/proc/net/route", open_net_route, is_proc },
 #endif
