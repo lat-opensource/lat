@@ -11199,6 +11199,21 @@ static int open_hardware(void *cpu_env, int fd, const char *oldpath)
 }
 #endif
 
+static int has_x_permission(struct stat *st) {
+    uid_t uid = getuid();
+    gid_t gid = getgid();
+
+    if (uid == 0) {
+        return 1;
+    } else if (uid == st->st_uid) {
+        return st->st_mode & S_IXUSR;
+    } else if (gid == st->st_gid) {
+        return st->st_mode & S_IXGRP;
+    } else {
+        return st->st_mode & S_IXOTH;
+    }
+}
+
 static int do_openat(void *cpu_env, int dirfd, const char *pathname, int flags, mode_t mode)
 {
     struct fake_open {
@@ -11277,7 +11292,17 @@ static int do_openat(void *cpu_env, int dirfd, const char *pathname, int flags, 
         unlink(filename);
         return fd;
     }
+    const char *realpath = path(pathname);
+    struct stat st;
 
+    if (fstatat(dirfd, realpath, &st, 0) == 0) {
+        if (S_ISDIR(st.st_mode)) {
+            if (!has_x_permission(&st)) {
+                errno = EACCES;
+                return -1;
+            }
+        }
+    }
     return safe_openat(dirfd, path(pathname), flags, mode);
 }
 
