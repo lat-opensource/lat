@@ -332,7 +332,7 @@ inline int load_page(target_ulong pc, uint32_t cflags, seg_info *info)
 
     target_ulong p1 = pc & TARGET_PAGE_MASK;
 
-    if (p_segment->is_pe) {
+    if (p_segment->aot_file_type & (PE_AOT_FILE | CACHE_AOT_FILE)) {
         if (!check_ir1(info->seg_begin, p_aot_tbs, tb_num_in_page, aot_buffer)) {
             page_set_page_state(pc, PAGE_SMC);
             return 0;
@@ -368,20 +368,22 @@ int load_aot(target_ulong pc, uint32_t cflags)
         return 0;
     }
 
-    int page_state = page_get_page_state(pc);
-    if (page_state >= PAGE_LOADED) {
-        return 0;
-    }
-
     seg_info *info = segment_tree_lookup(pc);
     if (info == NULL || info->buffer == NULL) {
         page_set_page_state(pc, PAGE_NOINFO);
         return 0;
     }
 
+    int page_state = page_get_page_state(pc);
+
+    if (page_state >= PAGE_LOADED || ((page_state == PAGE_SMC)
+                && (((aot_header *)info->buffer)->aot_file_type == ELF_AOT_FILE))) {
+        return 0;
+    }
+
     if (option_aot == 2 &&
-            (info->is_running == false || page_state == PAGE_FLUSH)) {
-        info->is_running = true;
+            (!(info->seg_flag & SEG_RUNNING) || page_state == PAGE_FLUSH)) {
+        info->seg_flag |= SEG_RUNNING;
         page_set_page_state_range(info->seg_begin & TARGET_PAGE_MASK,
                 info->seg_end & TARGET_PAGE_MASK, PAGE_LOADED);
         for (target_ulong addr = info->seg_begin; addr < info->seg_end;

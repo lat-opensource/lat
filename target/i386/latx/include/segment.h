@@ -19,7 +19,9 @@ typedef struct seg_info {
         uint64_t last_tb_id;
         void *p_segment;
     };
-    bool is_running;
+#define SEG_RUNNING     0x1
+#define IS_ELF_SEG      0x2
+    uint8_t seg_flag;
 } seg_info;
 
 typedef struct wine_sec_info {

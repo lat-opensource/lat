@@ -148,7 +148,10 @@ void segment_tree_insert(char *name, target_ulong offset, target_ulong begin,
     seg->lib_size = statbuf.st_size;
     seg->buffer = NULL;
     seg->p_segment = NULL;
-    seg->is_running = false;
+    seg->seg_flag = 0;
+    if (is_elf_file(name)) {
+       seg->seg_flag = IS_ELF_SEG;
+    }
     seg_info * old_seg_info = segment_tree_lookup2(begin, end);
     while(old_seg_info) {
        segment_tree_remove(old_seg_info);

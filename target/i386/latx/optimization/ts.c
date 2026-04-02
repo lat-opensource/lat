@@ -177,7 +177,7 @@ char is_pe(char *file_name)
 }
 
 #define SIGNATURE_LENGTH 4
-int is_pe_file(const char *filename) {
+uint8_t is_pe_file(const char *filename) {
     FILE *file = fopen(filename, "rb");
     if (!file) {
         perror("Error opening file");
@@ -193,11 +193,10 @@ int is_pe_file(const char *filename) {
 }
 
 #define ELF_MAGIC 0x464C457F  // "\x7FELF"
-int is_elf_file(const char *filename)
+uint8_t is_elf_file(const char *filename)
 {
     FILE *file = fopen(filename, "rb");
     if (!file) {
-        perror("Error opening file");
         return 0;
     }
     uint32_t magic;
@@ -207,6 +206,45 @@ int is_elf_file(const char *filename)
         return 0;
     }
     return (magic == ELF_MAGIC);
+}
+
+#include <libgen.h>
+uint8_t is_deepinwine_cache(const char *file_name)
+{
+    if (!file_name) {
+        return false;
+    }
+    static char *deepinwine_cache_path = NULL;
+    if (deepinwine_cache_path == NULL) {
+        deepinwine_cache_path = (char *)malloc(PATH_MAX);
+        assert(deepinwine_cache_path);
+        char *home = getenv("HOME");
+        if (likely(home)) {
+            snprintf(deepinwine_cache_path, PATH_MAX,
+                    "%s%s", home, "/.deepinwine");
+        } else {
+            snprintf(deepinwine_cache_path, PATH_MAX,
+                    "%s", "/.deepinwine");
+        }
+    }
+    int deepinwine_path_len = strlen(deepinwine_cache_path);
+    if (strncmp(file_name, deepinwine_cache_path, deepinwine_path_len) == 0) {
+        return true;
+    }
+    return false;
+}
+
+uint8_t get_file_type(const char *file_name)
+{
+    if (is_elf_file(file_name)) {
+        return ELF_AOT_FILE;
+    } else if (is_pe_file(file_name)) {
+        return PE_AOT_FILE;
+    } else {
+        /* WARNING: Not only deepinwine cache return CACHE_AOT_FILE. */
+        return CACHE_AOT_FILE;
+    }
+    return 0;
 }
 
 void ts_push_back(TranslationBlock *tb)

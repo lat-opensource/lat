@@ -221,8 +221,7 @@ static struct aot_header *get_aot_buffer(int first_seg_in_lib,
 static void fill_seg_table(int seg_info_begin, int seg_info_end,
         struct aot_header *p_header, struct aot_segment *p_segments)
 {
-    bool is_pe = !is_elf_file(curr_lib_name);
-    p_header->is_pe |= is_pe;
+    uint8_t aot_file_type = p_header->aot_file_type;
     int seg_num_in_file = seg_info_end - seg_info_begin;
     p_header->segments_num = seg_num_in_file;
     p_header->segment_table_offset =
@@ -257,7 +256,7 @@ static void fill_seg_table(int seg_info_begin, int seg_info_end,
             curr_name += strlen(curr_seg_info->file_name) + 1;
         }
 
-        p_segments[seg_id_in_lib].is_pe = is_pe;
+        p_segments[seg_id_in_lib].aot_file_type = aot_file_type;
         p_segments[seg_id_in_lib].lib_name_offset =
             (uintptr_t)last_name - (uintptr_t)p_header;
         p_segments[seg_id_in_lib].segment_tbs_num = 0;
@@ -722,21 +721,27 @@ void do_generate_aot(int first_seg_in_lib, int end_seg_in_lib)
             curr_lib_name);
         return;
     }
-    struct stat statbuf;
-    if (stat(curr_lib_name, &statbuf)) {
-        qemu_log_mask(LAT_LOG_AOT, "ERROT stat %s failed\n", curr_lib_name);
-        return;
-    }
-    for (int i = first_seg_in_lib; i < end_seg_in_lib; i++) {
-        seg_info *seg = seg_info_vector[i];
-        if (seg->lib_size != statbuf.st_size ||
-                seg->tv_sec != statbuf.st_mtim.tv_sec) {
-            fprintf(stderr, "error, orignal lib changed %s\n", curr_lib_name);
+
+    p_header->aot_file_type = get_file_type(curr_lib_name);
+
+    if (p_header->aot_file_type & (ELF_AOT_FILE | PE_AOT_FILE)) {
+        struct stat statbuf;
+        if (stat(curr_lib_name, &statbuf)) {
+            qemu_log_mask(LAT_LOG_AOT, "ERROR stat %s failed\n", curr_lib_name);
             return;
         }
+        for (int i = first_seg_in_lib; i < end_seg_in_lib; i++) {
+            seg_info *seg = seg_info_vector[i];
+            if (seg->lib_size != statbuf.st_size ||
+                    seg->tv_sec != statbuf.st_mtim.tv_sec) {
+                fprintf(stderr, "error, orignal lib changed %s\n", curr_lib_name);
+                return;
+            }
+        }
+        p_header->lib_size = statbuf.st_size;
+        p_header->last_modify_time = statbuf.st_mtim;
     }
-    p_header->lib_size = statbuf.st_size;
-    p_header->last_modify_time = statbuf.st_mtim;
+
     struct aot_segment *p_segments;
     p_segments =
         (struct aot_segment *)ROUND_UP((uintptr_t)(p_header + 1), 8);
@@ -849,10 +854,11 @@ static int get_tb_num(char *lib_name, CPUState *cpu) {
     aot_header *p_header = (aot_header *)buffer;
     /* dump_aot_buffer(p_header); */
     struct stat statbuf;
-    if (stat(lib_name, &statbuf)
+    if ((p_header->aot_file_type & (ELF_AOT_FILE | PE_AOT_FILE))
+            && (stat(lib_name, &statbuf)
             || p_header->lib_size != statbuf.st_size
             || p_header->last_modify_time.tv_sec != statbuf.st_mtim.tv_sec
-            || p_header->last_modify_time.tv_nsec != statbuf.st_mtim.tv_nsec) {
+            || p_header->last_modify_time.tv_nsec != statbuf.st_mtim.tv_nsec)) {
         qemu_log_mask(LAT_LOG_AOT, "need remove old aot file. %s lib_size %d %ld\n",
                 aot_file_path, p_header->lib_size, statbuf.st_size);
         remove(aot_file_path);
@@ -1178,14 +1184,16 @@ lib_info *aot_load(char *lib_name, void **curr_aot_buffer)
     aot_header *p_header = (aot_header *)buffer;
 
     /* Test original file state. */
-    if (stat(lib_name, &statbuf)
-            || p_header->lib_size != statbuf.st_size
-            || p_header->last_modify_time.tv_sec != statbuf.st_mtim.tv_sec
-            || p_header->last_modify_time.tv_nsec != statbuf.st_mtim.tv_nsec) {
-        qemu_log_mask(LAT_LOG_AOT, "need remove old aot file. %s lib_size %d %ld\n",
-                aot_file_path, p_header->lib_size, statbuf.st_size);
-        remove_curr_aot_file();
-        goto exit_aot_load;
+    if (p_header->aot_file_type & (ELF_AOT_FILE | PE_AOT_FILE)) {
+        if (stat(lib_name, &statbuf)
+                || p_header->lib_size != statbuf.st_size
+                || p_header->last_modify_time.tv_sec != statbuf.st_mtim.tv_sec
+                || p_header->last_modify_time.tv_nsec != statbuf.st_mtim.tv_nsec) {
+            qemu_log_mask(LAT_LOG_AOT, "need remove old aot file. %s lib_size %d %ld\n",
+                    aot_file_path, p_header->lib_size, statbuf.st_size);
+            remove_curr_aot_file();
+            goto exit_aot_load;
+        }
     }
 
     /* dump_aot_buffer(p_header); */
@@ -1496,15 +1504,10 @@ static aot_segment *get_segment(char *lib_name, uint64_t aot_offset,
     if (p_segment == NULL) {
         return NULL;
     }
-    if (p_segment->is_pe) {
-        if (p_segment->details.seg_begin == start) {
-            if (lib->is_unmapped) {
-                return NULL;
-            }
-        } else {
-            /* assert(lib); */
-            /* lib->is_unmapped = 1; */
-            /* return NULL; */
+    if (p_segment->aot_file_type & PE_AOT_FILE) {
+        if (p_segment->details.seg_begin != start) {
+            lib->is_unmapped = 1;
+            return NULL;
         }
     }
     if ((p_segment->details.seg_begin >> 31 == 0)
@@ -1590,7 +1593,7 @@ void recover_aot_tb(char *lib_name, uint64_t aot_offset, abi_long start,
         seg->buffer = curr_aot_buffer;
         seg->p_segment = p_segment;
     }
-    if (!p_segment->is_pe) {
+    if (p_segment->aot_file_type & ELF_AOT_FILE) {
         aot_guest_code_protect(start, start + len, p_segment, curr_aot_buffer);
     }
 }

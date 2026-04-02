@@ -69,7 +69,6 @@ void page_tree_insert(target_ulong start, target_ulong end,
     page->buffer = buffer;
     page->p_segment = p_segment;
     page->is_running = false;
-    page->is_pe = p_segment->is_pe;
     g_tree_replace(page_tree, page, page);
 }
 

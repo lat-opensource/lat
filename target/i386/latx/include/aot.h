@@ -46,7 +46,11 @@ typedef struct aot_header {
     uint32_t rel_entry_num; /* relocation entries num. */
     uint32_t parallel_tb_num;
     uint32_t unparallel_tb_num;
-    uint8_t is_pe;
+#define ELF_AOT_FILE        1
+#define PE_AOT_FILE         2
+#define CACHE_AOT_FILE      4
+#define HASH_AOT_FILE       8
+    uint8_t aot_file_type;
 } aot_header;
 
 typedef struct aot_file_info {
@@ -79,7 +83,7 @@ typedef struct aot_segment {
     uint32_t segment_tbs_num;
     /* Offset of page_table in AOT. */
     uint32_t page_table_offset;
-    bool is_pe;
+    uint8_t aot_file_type;
 } aot_segment;
 
 typedef struct aot_tb {
@@ -315,7 +319,6 @@ void fix_rel_entry(int fix_id, uint32_t tc_offset);
             (tb)->s_data->rel_end = rel_index;              \
         }                                           \
     } while (0)
-
 
 extern void *aot_buffer;
 extern char *aot_file_path;

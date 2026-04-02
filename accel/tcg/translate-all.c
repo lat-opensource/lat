@@ -3583,9 +3583,6 @@ bool pageflags_set_clear(target_ulong start, target_ulong last,
     return inval_tb;
 }
 
-#ifdef CONFIG_LATX_AOT
-static seg_info *p_info;
-#endif
 /* Modify the flags of a page and invalidate the code if necessary.
    The flag PAGE_WRITE_ORG is positioned automatically depending
    on PAGE_WRITE.  The mmap_lock should already be held.  */
@@ -3636,27 +3633,18 @@ void page_set_flags(target_ulong start, target_ulong end, int flags)
     }
 
 #ifdef CONFIG_LATX_AOT
-    if (option_aot && (flags & PAGE_WRITE)) {
-        p_info = segment_tree_lookup2(start, end);
-
-    }
-#endif
-
-#ifdef CONFIG_LATX_AOT
     target_ulong addr, len;
     if (option_aot && (flags & PAGE_WRITE)) {
-        for (addr = start, len = end - start;
-             len != 0;
+        seg_info *seg_info = segment_tree_lookup2(start, end);
+        for (addr = start, len = end - start; len != 0;
              len -= TARGET_PAGE_SIZE, addr += TARGET_PAGE_SIZE) {
             PageFlagsNode *p = pageflags_find(addr, addr);
             if (p && !(p->flags & PAGE_WRITE)) {
                 if (foreach_tb_first(addr, addr + TARGET_PAGE_SIZE)) {
                     page_set_page_state(addr, PAGE_SMC);
-                } else if ((p->flags & PAGE_EXEC) && p_info) {
-                    aot_segment *p_segment = (aot_segment *)(p_info->p_segment);
-                    if ((p_segment && !(p_segment->is_pe))) {
-                        page_set_page_state(addr, PAGE_SMC);
-                    }
+                } else if ((p->flags & PAGE_EXEC) && seg_info &&
+                        (seg_info->seg_flag & IS_ELF_SEG)) {
+                    page_set_page_state(addr, PAGE_SMC);
                 }
             }
         }

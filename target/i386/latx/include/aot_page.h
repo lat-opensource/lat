@@ -11,10 +11,12 @@
 typedef enum page_state_type{
     PAGE_UNLOAD = 0,
     PAGE_FLUSH,
+    PAGE_SMC,
     PAGE_LOADED,
     CANNOT_OVERLOAD,
-    PAGE_SMC,
-    PAGE_NOINFO
+    PAGE_NOINFO,
+    HASH_PAGE_LOADED,
+    HASH_PAGE_NOINFO,
 }page_state_type;
 
 typedef struct PageDesc {
@@ -43,7 +45,6 @@ typedef struct page_info {
     void *buffer;
     aot_segment *p_segment;
     char *seg_name;
-    bool is_pe;
     bool is_running;
 } page_info;
 

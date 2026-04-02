@@ -449,8 +449,8 @@ static void merge_aot_generate(void)
     char *aot_x86_lib_names = (char *)(aot_page_table + page_count);
     char *last_name = aot_x86_lib_names;
     char *curr_name = aot_x86_lib_names;
-    bool is_pe = !is_elf_file(merge_seg_info_vector[0]->file_name);
-    p_header->is_pe |= is_pe;
+    uint8_t aot_file_type = get_file_type(merge_seg_info_vector[0]->file_name);
+    p_header->aot_file_type = aot_file_type;
     int page_index = 0;
     for (int i = 0; i < seg_info_num; i++) {
         seg_info *curr_seg_info = merge_seg_info_vector[i]->s_info;
@@ -473,7 +473,7 @@ static void merge_aot_generate(void)
             curr_name += strlen(file_name) + 1;
         }
 
-        p_segments[i].is_pe = is_pe;
+        p_segments[i].aot_file_type = aot_file_type;
         p_segments[i].lib_name_offset =
             (uintptr_t)last_name - (uintptr_t)p_header;
         p_segments[i].segment_tbs_num = 0;
