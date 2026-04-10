@@ -10510,22 +10510,27 @@ static uint64_t convert_sigcgt_host_to_x86(const char *hex128)
 
 static void convert_sigcgt_line(const char *src, char *dst, size_t dstsz)
 {
-    const char *hex = src + 7;
+    char key[8];
+    memcpy(key, src, 7);
+    key[7] = '\0';
 
+    const char *hex = src + 7;
     while (*hex == ' ' || *hex == '\t') hex++;
 
-    char buf[512];
-    snprintf(buf, sizeof(buf), "%s", hex);
+    char buf[128];
+    size_t len = strcspn(hex, "\n");
+    if (len >= sizeof(buf))
+        len = sizeof(buf) - 1;
 
-    char *nl = strchr(buf, '\n');
-    if (nl) *nl = '\0';
+    memcpy(buf, hex, len);
+    buf[len] = '\0';
 
-    uint64_t result= convert_sigcgt_host_to_x86(buf);
+    uint64_t result = convert_sigcgt_host_to_x86(buf);
 
-    snprintf(dst, dstsz, "SigCgt:\t%016lx\n", result);
+    snprintf(dst, dstsz, "%s\t%016lx\n", key, result);
 }
 
-static int open_proc_status_other(void *cpu_env, int fd, const char *path)
+static int open_proc_status(void *cpu_env, int fd, const char *path)
 {
     char line[512];
 
@@ -11210,7 +11215,8 @@ static int do_openat(void *cpu_env, int dirfd, const char *pathname, int flags, 
         { "cmdline", open_self_cmdline, is_proc_myself },
         { "cmdline", open_other_cmdline, is_proc_other},
 #ifndef CONFIG_LOONGARCH_NEW_WORLD
-        { "status", open_proc_status_other, is_proc_other },
+        { "status", open_proc_status, is_proc_other },
+        { "status", open_proc_status, is_proc_myself },
 #endif
 #if defined(HOST_WORDS_BIGENDIAN) != defined(TARGET_WORDS_BIGENDIAN)
         { "/proc/net/route", open_net_route, is_proc },
@@ -11259,7 +11265,6 @@ static int do_openat(void *cpu_env, int dirfd, const char *pathname, int flags, 
         if (fd < 0) {
             return fd;
         }
-        unlink(filename);
 
         if ((r = fake_open->fill(cpu_env, fd, pathname))) {
             int e = errno;
@@ -11267,8 +11272,9 @@ static int do_openat(void *cpu_env, int dirfd, const char *pathname, int flags, 
             errno = e;
             return r;
         }
-        lseek(fd, 0, SEEK_SET);
-
+        close(fd);
+        fd = safe_openat(-1, path(filename), flags, mode);
+        unlink(filename);
         return fd;
     }
 
