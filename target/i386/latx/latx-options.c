@@ -262,7 +262,7 @@ void options_init(void)
 
     option_set_rounding_opt = 1;
     option_cvt_opt = 1;
-    if (have_scq())
+    if (have_am())
         option_fast_atomic = 1;
     else
         option_fast_atomic = 0;

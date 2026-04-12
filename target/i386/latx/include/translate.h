@@ -1260,6 +1260,7 @@ bool si12_overflow(long si12);
 
 /* Loongarch V1.1 */
 int have_scq(void);
+int have_am(void);
 
 /* operand conversion */
 IR2_OPND convert_mem(IR1_OPND *, int *);
