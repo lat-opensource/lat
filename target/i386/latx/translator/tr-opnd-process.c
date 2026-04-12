@@ -11,6 +11,13 @@ int have_scq(void)
     return (__cpucfg(0x2) & (1 << 30));
 }
 
+int have_am(void)
+{
+    return (__cpucfg(0x2) & (1 << 28)) &&
+           (__cpucfg(0x2) & (1 << 27)) &&
+           (__cpucfg(0x2) & (1 << 22));
+}
+
 bool si12_overflow(long si12)
 {
     if (si12 >= -2048 && si12 <= 2047) {
