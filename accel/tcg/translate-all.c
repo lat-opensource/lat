@@ -80,6 +80,7 @@
 #include "accel/tcg/internal.h"
 #include "ts.h"
 #include "latx-smc.h"
+#include "smc_reload.h"
 #endif
 #ifdef CONFIG_LATX_FAST_JMPCACHE
 #include "exec/fasttb.h"
@@ -564,7 +565,7 @@ static bool is_shadow_page_shmm(target_ulong address)
     return spd && spd->is_shmm;
 }
 
-static bool is_shadow_page_not_shmm(target_ulong address)
+bool is_shadow_page_not_shmm(target_ulong address)
 {
     ShadowPageDesc *spd = page_get_target_data(address);
     return spd && !(spd->is_shmm);
@@ -1682,6 +1683,10 @@ static void gen_aot_and_flush(CPUState *cpu, run_on_cpu_data tb_flush_count)
 
 void tb_flush(CPUState *cpu)
 {
+    if (option_smc_reload) {
+        reload_tree_clear();
+    }
+
     if (tcg_enabled()) {
         unsigned tb_flush_count = qatomic_mb_read(&tb_ctx.tb_flush_count);
 
@@ -3583,10 +3588,60 @@ bool pageflags_set_clear(target_ulong start, target_ulong last,
     return inval_tb;
 }
 
+static void add_smc_node(tb_page_addr_t start, tb_page_addr_t end)
+{
+    if (!option_smc_reload || !option_aot) {
+        return;
+    }
+    if (segment_tree_lookup2(start, end)) {
+        return;
+    }
+
+    TranslationBlock *tb;
+    PageForEachNext next_tb;
+    int ir1_size;
+    int curr_page_tb_num;
+
+    for (target_ulong curr_page = start; curr_page < end; curr_page += TARGET_PAGE_SIZE) {
+        curr_page_tb_num = 0;
+        ir1_size = 0;
+        PAGE_FOR_EACH_TB(curr_page, curr_page + TARGET_PAGE_SIZE, unused, tb, next_tb) {
+            if ((tb->pc & TARGET_PAGE_MASK) == curr_page) {
+                curr_page_tb_num++;
+                ir1_size += tb->size;
+            }
+        }
+        if (curr_page_tb_num) {
+            reload_info *reload_node = (reload_info *)malloc(sizeof(reload_info));
+            reload_node->tb_num = curr_page_tb_num;
+            reload_node->page_addr = curr_page;
+            assert(reload_node);
+            reload_node->tb_vector =
+                (TranslationBlock **)malloc(curr_page_tb_num * sizeof(TranslationBlock *));
+            assert(reload_node->tb_vector);
+            reload_node->ir1_code_buffer = malloc(ir1_size);
+            assert(reload_node->ir1_code_buffer);
+            int tb_id = 0;
+            ir1_size = 0;
+            PAGE_FOR_EACH_TB(curr_page, curr_page + TARGET_PAGE_SIZE, unused, tb, next_tb) {
+                if ((tb->pc & TARGET_PAGE_MASK) == curr_page) {
+                    memcpy(reload_node->ir1_code_buffer + ir1_size,
+                            (void *)(uintptr_t)tb->pc, tb->size);
+                    reload_node->tb_vector[tb_id++] = tb;
+                    ir1_size += tb->size;
+                }
+            }
+            reload_tree_insert(reload_node);
+        }
+    }
+}
+
 /* Modify the flags of a page and invalidate the code if necessary.
+   Save SMC TB to reload_tree if necessary.
    The flag PAGE_WRITE_ORG is positioned automatically depending
    on PAGE_WRITE.  The mmap_lock should already be held.  */
-void page_set_flags(target_ulong start, target_ulong end, int flags)
+void page_set_flags_tb_reload(target_ulong start, target_ulong end,
+        int flags, bool tb_reload)
 {
 #ifdef CONFIG_LATX_PERF
     latx_timer_start(TIMER_PAGE_FLAGS);
@@ -3657,11 +3712,22 @@ void page_set_flags(target_ulong start, target_ulong end, int flags)
     }
 
     if (inval_tb) {
+        if (tb_reload) {
+            add_smc_node(start, end);
+        }
         tb_invalidate_phys_range(start, end);
     }
 #ifdef CONFIG_LATX_PERF
     latx_timer_stop(TIMER_PAGE_FLAGS);
 #endif
+}
+
+/* Modify the flags of a page and invalidate the code if necessary.
+   The flag PAGE_WRITE_ORG is positioned automatically depending
+   on PAGE_WRITE.  The mmap_lock should already be held.  */
+void page_set_flags(target_ulong start, target_ulong end, int flags)
+{
+    page_set_flags_tb_reload(start, end, flags, false);
 }
 
 typedef struct TargetPageDataNode {

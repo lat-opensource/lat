@@ -23,6 +23,7 @@
 extern void *l1_map[];
 extern IntervalTreeRoot pageflags_root;
 /* translate-all.c */
+bool is_shadow_page_not_shmm(target_ulong address);
 struct page_collection *page_collection_lock(tb_page_addr_t start,
                                              tb_page_addr_t end);
 void page_collection_unlock(struct page_collection *set);

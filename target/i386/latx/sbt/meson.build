@@ -8,4 +8,5 @@ i386_ss.add(when: 'CONFIG_LATX', if_true: files(
   'aot_lib.c',
   'aot_page.c',
   'aot_smc.c',
+  'smc_reload.c',
 ))

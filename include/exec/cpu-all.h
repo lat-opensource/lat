@@ -291,6 +291,8 @@ target_ulong get_first_page(target_ulong start, target_ulong end);
 int page_get_flags(target_ulong address);
 void page_clear_overflow(target_ulong start, target_ulong end);
 void page_set_flags(target_ulong start, target_ulong end, int flags);
+void page_set_flags_tb_reload(target_ulong start, target_ulong end,
+        int flags, bool tb_reload);
 bool pageflags_set_clear(target_ulong start, target_ulong last,
                                 int set_flags, int clear_flags);
 int page_get_page_state(target_ulong address);

@@ -44,6 +44,7 @@ extern int option_tunnel_lib;
 extern uint64_t option_end_trace_addr;
 extern uint64_t option_begin_trace_addr;
 extern int option_aot;
+extern int option_smc_reload;
 extern int option_aot_wine;
 extern int option_load_aot;
 extern int option_debug_aot;

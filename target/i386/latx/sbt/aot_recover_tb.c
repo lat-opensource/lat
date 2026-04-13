@@ -8,8 +8,10 @@
 #include "lsenv.h"
 #include "accel/tcg/internal.h"
 #include "include/exec/cpu-all.h"
+#include "include/exec/translate-all.h"
 #include "aot_page.h"
 #include "aot_smc.h"
+#include "smc_reload.h"
 #ifdef CONFIG_LATX_TU
 #include "tu.h"
 #endif
@@ -383,6 +385,55 @@ inline int load_page(target_ulong pc, uint32_t cflags, seg_info *info)
     return 1;
 }
 
+static int smc_page_reload(target_ulong page_addr, uint32_t cflags)
+{
+    if (!option_smc_reload) {
+        return 0;
+    }
+    reload_info *reload_node = reload_tree_lookup(page_addr);
+    if (!reload_node) {
+        return 0;
+    }
+
+    int p_flags = page_get_flags(page_addr);
+    if (!(p_flags & PAGE_READ)) {
+        return 0;
+    }
+    /*
+     * remove write prot of the page in case of paralell code modification,
+     * but the paired page cross 16K boundary is still not protected.
+     */
+    if ((p_flags & PAGE_WRITE) && !is_shadow_page_not_shmm(page_addr)) {
+        mprotect((void*)(page_addr & qemu_host_page_mask), qemu_host_page_size, PROT_READ);
+    }
+
+    tcg_ctx->tb_cflags = cflags;
+
+    int ir1_offset = 0;
+    for (int tb_id = 0; tb_id < reload_node->tb_num; tb_id++) {
+        TranslationBlock *tb = reload_node->tb_vector[tb_id];
+        if (!memcmp((void *)(uintptr_t)tb->pc,
+                    reload_node->ir1_code_buffer + ir1_offset, tb->size)) {
+            tb->cflags = tb->cflags & ~CF_INVALID;
+            if (tb->jmp_reset_offset[0] != TB_JMP_RESET_OFFSET_INVALID) {
+                tb_reset_jump(tb, 0);
+            }
+            if (tb->jmp_reset_offset[1] != TB_JMP_RESET_OFFSET_INVALID) {
+                tb_reset_jump(tb, 1);
+            }
+            tb->jmp_list_head = (uintptr_t)NULL;
+            tb->jmp_list_next[0] = (uintptr_t)NULL;
+            tb->jmp_list_next[1] = (uintptr_t)NULL;
+            tb->jmp_dest[0] = (uintptr_t)NULL;
+            tb->jmp_dest[1] = (uintptr_t)NULL;
+            aot_tb_register(tb);
+        }
+        ir1_offset += tb->size;
+    }
+    reload_tree_remove(reload_node);
+    return 1;
+}
+
 int load_aot(target_ulong pc, uint32_t cflags)
 {
     if (in_pre_translate) {
@@ -391,6 +442,9 @@ int load_aot(target_ulong pc, uint32_t cflags)
 
     seg_info *info = segment_tree_lookup(pc);
     if (info == NULL || info->buffer == NULL) {
+        if (smc_page_reload(pc & TARGET_PAGE_MASK, cflags)) {
+            return 1;
+        }
         page_set_page_state(pc, PAGE_NOINFO);
         return 0;
     }

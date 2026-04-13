@@ -726,6 +726,14 @@ static void handle_arg_latx_monitor_shared_mem(const char *arg)
     option_monitor_shared_mem = strtol(arg, NULL, 0);
 }
 
+static void handle_arg_smc_reload(const char *arg)
+{
+    option_smc_reload = strtol(arg, NULL, 0);
+    if (option_smc_reload) {
+        option_jr_ra = 0;
+    }
+}
+
 #ifdef CONFIG_LATX_AOT
 static void handle_arg_latx_aot(const char *arg)
 {
@@ -833,6 +841,8 @@ static const struct qemu_argument arg_table[] = {
     "",           "enable get real self maps"},
     {"latx-monitor-shared-mem",    "LATX_MONITOR_SHARED_MEM",     true,  handle_arg_latx_monitor_shared_mem,
     "",           "monitor shared memory, retranslate self modifying page"},
+    {"smc_reload",    "LATX_SMC_RELOAD",     true,  handle_arg_smc_reload,
+    "",           "reload SMC TB"},
 #ifdef CONFIG_LATX_AOT
     {"latx-aot",    "LATX_AOT",     true,  handle_arg_latx_aot,
     "",           "enable aot"},
