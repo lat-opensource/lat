@@ -4,6 +4,7 @@
 #include "translate.h"
 #include "hbr.h"
 #include "tr-vpaes.h"
+#include "pclmul.h"
 
 bool translate_por(IR1_INST *pir1)
 {
@@ -3707,52 +3708,6 @@ bool translate_pcmpistrm(IR1_INST *pir1)
     return true;
 }
 
-static void cal_pclmulqdq(IR2_OPND d, IR2_OPND v, IR2_OPND s, uint8_t ctrl)
-{
-    IR2_OPND ctrlp = ra_alloc_itemp();
-    IR2_OPND a = ra_alloc_itemp();// a = al
-    IR2_OPND b = ra_alloc_itemp();
-    IR2_OPND ftemp = ra_alloc_ftemp();
-
-    /* 选取操作数 */
-    li_d(ctrlp, ctrl);
-    la_andi(a, ctrlp, 1);// ((ctrl  1) != 0)
-    la_vreplve_d( ftemp, v, a);
-    la_vpickve2gr_d( a, ftemp, 0);
-    la_bstrpick_d( b, ctrlp, 4, 4);
-    la_vreplve_d( ftemp, s, b);
-    la_vpickve2gr_d( b, ftemp, 0);
-    ra_free_temp(ctrlp);
-
-    IR2_OPND ah = ra_alloc_itemp();
-    IR2_OPND resl = ra_alloc_itemp();
-    IR2_OPND resh = ra_alloc_itemp();
-    IR2_OPND all_label = ra_alloc_label();
-    IR2_OPND bit_label = ra_alloc_label();
-    IR2_OPND end_label = ra_alloc_label();
-
-    /* 开始运算 */
-    la_and( resl, resl, zero_ir2_opnd);
-    la_and( resh, resh, zero_ir2_opnd);
-    la_and( ah, ah, zero_ir2_opnd);
-    la_beqz( b, end_label);
-    la_label( all_label);
-    la_andi( a0_ir2_opnd, b, 1);// b  1
-    la_srli_d( b, b, 1);
-    la_beqz(a0_ir2_opnd, bit_label);
-    la_xor( resl, resl, a);
-    la_xor( resh, resh, ah);
-    la_label( bit_label);
-    la_slli_d(a1_ir2_opnd, ah, 1);
-    la_bstrpick_d(ah, a, 63, 63);
-    la_or( ah, a1_ir2_opnd, ah);
-    la_slli_d( a, a, 0x1);
-    la_bnez( b, all_label);
-    la_label( end_label);
-    la_vinsgr2vr_d( d, resl, 0);
-    la_vinsgr2vr_d( d, resh, 1);
-}
-
 bool translate_pclmulqdq(IR1_INST * pir1) {
     IR1_OPND * opnd0 = ir1_get_opnd(pir1, 0);
     IR1_OPND * opnd1 = ir1_get_opnd(pir1, 1);
@@ -3762,16 +3717,40 @@ bool translate_pclmulqdq(IR1_INST * pir1) {
     uint8_t ctrl = ir1_opnd_uimm(opnd2);
     IR2_OPND dest = ra_alloc_xmm(s0);
     IR2_OPND src;
+    IR2_OPND dest_copy = dest;
+    IR2_OPND ctrlp = ra_alloc_itemp();
+    IR2_OPND lhs = ra_alloc_itemp();
+    IR2_OPND rhs = ra_alloc_itemp();
+    IR2_OPND res_lo = ra_alloc_itemp();
+    IR2_OPND res_hi = ra_alloc_itemp();
+    IR2_OPND ftemp = ra_alloc_ftemp();
 
     if (!ir1_opnd_is_mem(opnd1)) {
         int s1 = ir1_opnd_base_reg_num(opnd1);
         src = ra_alloc_xmm(s1);
+        if (s0 == s1) {
+            dest_copy = ra_alloc_ftemp();
+            la_vori_b(dest_copy, dest, 0);
+            src = dest_copy;
+        }
     } else {
         src = ra_alloc_ftemp();
         load_freg128_from_ir1_mem(src, opnd1);
     }
 
-    cal_pclmulqdq(dest, dest, src, ctrl);
+    li_d(ctrlp, ctrl);
+    la_andi(lhs, ctrlp, 1);
+    la_vreplve_d(ftemp, dest_copy, lhs);
+    la_vpickve2gr_d(lhs, ftemp, 0);
+    la_bstrpick_d(rhs, ctrlp, 4, 4);
+    la_vreplve_d(ftemp, src, rhs);
+    la_vpickve2gr_d(rhs, ftemp, 0);
+
+    emit_pclmul_ctz_loop(lhs, rhs, res_lo, res_hi);
+    la_vxor_v(dest, dest, dest);
+    la_vinsgr2vr_d(dest, res_lo, 0);
+    la_vinsgr2vr_d(dest, res_hi, 1);
+    ra_free_temp_auto(src);
     return true;
 }
 
