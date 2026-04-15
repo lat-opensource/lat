@@ -689,9 +689,9 @@ struct TranslationBlock {
 #endif
 };
 
-#ifdef CONFIG_LATX_SMC_OPT
 static inline int tb_use_smc_opt(TranslationBlock *tb)
 {
+#ifdef CONFIG_LATX_SMC_OPT
     if (tb) {
 #ifdef CONFIG_LATX_INSTS_PATTERN
         if (tb->has_jcc_end_ptn)
@@ -701,8 +701,10 @@ static inline int tb_use_smc_opt(TranslationBlock *tb)
     } else {
         return 0;
     }
-}
+#else
+    return 0;
 #endif
+}
 
 #define TB_MAGIC 0xbeefUL
 #define HOST_VIRT_ADDR_SPACE_BITS 48

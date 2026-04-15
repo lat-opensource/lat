@@ -19,6 +19,7 @@ static aot_link_info *aot_global_info;
 static int aot_global_info_total;
 static int aot_global_info_index;
 
+#if defined(CONFIG_LATX_JRRA) || defined(CONFIG_LATX_JRRA_STACK)
 static void patch_jrra(aot_link_info *info)
 {
     TranslationBlock *tb = info->curr;
@@ -50,6 +51,7 @@ static void patch_jrra(aot_link_info *info)
     patch[0] = 0x800;
     patch[1] = 0x50000000 | (3 << 10);
 }
+#endif
 
 __inline static void link_aot_tb(aot_link_info *info)
 {
