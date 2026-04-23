@@ -649,13 +649,11 @@ static int write_aot_file(int *lockfd, aot_header *p_header, uint32_t *p_insn,
     char *pathtmp;
     get_aot_path(curr_lib_name, aot_file_path);
     pathtmp = aot_file_path;
+    strcat(pathtmp, "A");
     if (access(pathtmp, 0) >= 0) {
-        strcat(pathtmp, "A");
-        if (access(pathtmp, 0) >= 0) {
-            qemu_log_mask(LAT_LOG_AOT, "ERROR: other process generated aot file %s\n",
+        qemu_log_mask(LAT_LOG_AOT, "ERROR: other process generated aot file %s\n",
                 pathtmp);
-            return -1;
-        }
+        return -1;
     }
 
     /* Write file metadata infomation(aot_buffer) into aot. */
@@ -951,17 +949,30 @@ void pre_translate(int begin_id, int end_id, CPUState *cpu,
     tb_vector = ts_vector;
 }
 
+static void rename_aot_file(char *lib_name)
+{
+    char tmp_file_path[PATH_MAX];
+    get_aot_path(lib_name, aot_file_path);
+    strcpy(tmp_file_path, aot_file_path);
+    strcat(tmp_file_path, "A");
+    if (access(tmp_file_path, 0) < 0) {
+        return;
+    }
+    rename(tmp_file_path, aot_file_path);
+}
+
 static inline void gen_aot_by_lib(int first_seg_id, int end_seg_id,
 		CPUState *cpu, uint32_t tb_count)
 {
     curr_lib_name = seg_info_vector[first_seg_id]->file_name;
     int lockfd = -1;
     if (need_gen_aot(cpu, curr_lib_name, &lockfd, tb_count) >= 0) {
-    	pre_translate(first_seg_id, end_seg_id, cpu, NULL);
+        pre_translate(first_seg_id, end_seg_id, cpu, NULL);
         do_generate_aot(first_seg_id, end_seg_id);
         aot2_merge(curr_lib_name, first_seg_id, end_seg_id, cpu);
-    	flock_set(lockfd, F_UNLCK, true);
-    	close(lockfd);
+        rename_aot_file(curr_lib_name);
+        flock_set(lockfd, F_UNLCK, true);
+        close(lockfd);
     }
 }
 
@@ -1140,13 +1151,6 @@ lib_info *aot_load(char *lib_name, void **curr_aot_buffer)
     if (access(aot_file_path, 0) < 0) {
         return NULL;
     }
-    int lockfd = -1;
-    strcpy(aot_file_lock, aot_file_path);
-    strcat(aot_file_lock, ".lock");
-    if (file_lock(aot_file_lock, &lockfd, F_RDLCK, false) < 0) {
-        close(lockfd);
-        return NULL;
-    }
 
     /* Open aot_file. */
     void *buffer;
@@ -1206,8 +1210,6 @@ exit_aot_load:
         fclose(pf);
     }
     close(fd);
-    flock_set(lockfd, F_UNLCK, true);
-    close(lockfd);
     return curr_lib_info;
 }
 
