@@ -930,17 +930,14 @@ static void aot2_merge_tu(char *curr_lib_name, int first_seg_id,
     }
 #endif
 
-    char tmp_file_path[PATH_MAX]; 
-    strcpy(tmp_file_path, aot_file_path);
-    strcat(tmp_file_path, "A");
-    remove(tmp_file_path);
+    strcat(aot_file_path, "A");
+    remove(aot_file_path);
     /* The second and first AOT files are duplicated. */
     if (curr_tb_num <= tb_num1) {
     	assert(curr_tb_num >= tb_num1);
     	free(tb_message_vector);
     	return;
     }
-    remove(aot_file_path);
     pre_translate(first_seg_id, last_seg_id, cpu, tb_message_vector);
     do_generate_aot(first_seg_id, last_seg_id);
     free(tb_message_vector);
