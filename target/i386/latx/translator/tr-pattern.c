@@ -652,6 +652,10 @@ static bool translate_cqo_idiv(IR1_INST *ir1)
 {
     IR1_INST *next = ir1->instptn.next;
 
+    IR2_OPND ir2_opnd_addr;
+    ir2_opnd_build(&ir2_opnd_addr, IR2_OPND_IMM, ir1_addr(next));
+    la_x86_inst(ir2_opnd_addr);
+
     IR2_OPND src_opnd_0 =
         load_ireg_from_ir1(ir1_get_opnd(next, 0), SIGN_EXTENSION, false);
 
@@ -879,6 +883,10 @@ static bool translate_xor_div(IR1_INST *ir1)
 {
     IR1_INST *next = ir1->instptn.next;
 
+    IR2_OPND ir2_opnd_addr;
+    ir2_opnd_build(&ir2_opnd_addr, IR2_OPND_IMM, ir1_addr(next));
+    la_x86_inst(ir2_opnd_addr);
+
     IR2_OPND src_opnd_0 =
         load_ireg_from_ir1(ir1_get_opnd(next, 0), ZERO_EXTENSION, false);
 
@@ -923,6 +931,10 @@ static bool translate_xor_div(IR1_INST *ir1)
 static bool translate_cdq_idiv(IR1_INST *ir1)
 {
     IR1_INST *next = ir1->instptn.next;
+
+    IR2_OPND ir2_opnd_addr;
+    ir2_opnd_build(&ir2_opnd_addr, IR2_OPND_IMM, ir1_addr(next));
+    la_x86_inst(ir2_opnd_addr);
 
     IR2_OPND src_opnd_0 =
         load_ireg_from_ir1(ir1_get_opnd(next, 0), SIGN_EXTENSION, false);
