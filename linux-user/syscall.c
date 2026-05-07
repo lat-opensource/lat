@@ -12316,7 +12316,7 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
 #ifdef CONFIG_LATX_FAST_JMPCACHE
         {
             CPUX86State *x86env = env;
-            if (arg1 == getpid() && x86env->tb_jmp_cache_ptr) {
+            if (arg1 == getpid() && x86env->tb_jmp_cache_ptr && target_to_host_signal(arg2) == SIGKILL) {
                 free(x86env->tb_jmp_cache_ptr);
             }
         }
@@ -16239,7 +16239,7 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
 #ifdef CONFIG_LATX_FAST_JMPCACHE
         {
             CPUX86State *x86env = env;
-            if (arg2 == syscall(SYS_gettid) && x86env->tb_jmp_cache_ptr) {
+            if (arg2 == syscall(SYS_gettid) && x86env->tb_jmp_cache_ptr && target_to_host_signal(arg3) == SIGKILL) {
                 free(x86env->tb_jmp_cache_ptr);
             }
         }

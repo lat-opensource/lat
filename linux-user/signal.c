@@ -1465,6 +1465,12 @@ static void handle_pending_signal(CPUArchState *cpu_env, int sig,
 #ifdef CONFIG_LATX_AOT
         if (sig == TARGET_SIGTERM) {
             aot_exit_entry(cpu, true);
+
+            CPUArchState *env = cpu->env_ptr;
+            CPUX86State *x86env = env;
+            if (x86env->tb_jmp_cache_ptr) {
+                free(x86env->tb_jmp_cache_ptr);
+            }
         }
 #endif
             dump_core_and_abort(sig);
