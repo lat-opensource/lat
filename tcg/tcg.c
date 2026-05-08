@@ -699,6 +699,9 @@ static void *tcg_tb_lookup_fast(uintptr_t tc_ptr)
                 CODE_GEN_ALIGN));
     while (tbm->mtbp_struct.magic != TB_MAGIC) {
         tbm = (TBMini *)((uint64_t)tbm - CODE_GEN_ALIGN);
+        if (!in_code_gen_buffer((void *)tbm)) {
+            return NULL;
+        }
     }
     void *tb = (void *)(tbm->mtbp_uint64 &
                 MAKE_64BIT_MASK(0, HOST_VIRT_ADDR_SPACE_BITS));
