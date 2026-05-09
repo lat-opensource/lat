@@ -8153,7 +8153,7 @@ static abi_long do_ioctl(int fd, int cmd, abi_ulong arg)
 #endif
     /* slow path to iterate the ioctl_entries */
     if (ie->target_cmd != cmd) {
-        if (TARGET_IOC_TYPE(cmd) == 'H') {
+        if (TARGET_IOC_TYPE(cmd) == 'H' || TARGET_IOC_TYPE(cmd) == 'U') {
             switch(TARGET_IOC_NR(cmd)) {
                 case TARGET_IOC_NR(TARGET_HIDIOCSFEATURE(0)):
                 case TARGET_IOC_NR(TARGET_HIDIOCGFEATURE(0)):
