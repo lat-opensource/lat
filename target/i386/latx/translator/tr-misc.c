@@ -662,6 +662,7 @@ bool translate_callthunk(IR1_INST *pir1)
     return true;
 }
 
+static uint64_t hacking_addr;
 
 bool translate_callin(IR1_INST *pir1)
 {
@@ -669,6 +670,25 @@ bool translate_callin(IR1_INST *pir1)
     IR2_OPND succ_x86_addr_opnd = ra_alloc_dbt_arg2();
     load_ireg_from_ir1_2(succ_x86_addr_opnd, ir1_get_opnd(pir1, 0), ZERO_EXTENSION,
                          false);
+
+    IR1_OPND *opnd0 = ir1_get_opnd(pir1, 0);
+    if (ir1_opnd_is_mem(opnd0) &&
+        !ir1_opnd_has_base(opnd0) &&
+        !ir1_opnd_has_index(opnd0) &&
+        ir1_opnd_uimm_addr(opnd0) == 0x7ffe1000
+        /* && *(uint64_t *)0x7ffe1000 */
+        )
+    {
+        if (!hacking_addr) {
+            hacking_addr = *(uint64_t *)0x7ffe1000;
+        }
+        if (hacking_addr) {
+            IR2_OPND asd = ra_alloc_label();
+            la_bnez(succ_x86_addr_opnd, asd);
+            li_d(succ_x86_addr_opnd, hacking_addr);
+            la_label(asd);
+        }
+    }
 
     /*
      * 2. adjust esp
