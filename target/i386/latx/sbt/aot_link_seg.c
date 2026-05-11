@@ -87,7 +87,11 @@ void try_aot_link(void)
 
 void aot_link_tree_init(void)
 {
-    aot_global_info_total = 100000;
+    if (option_aot & 0x2) {
+        aot_global_info_total = 100000;
+    } else {
+        aot_global_info_total = 128;
+    }
     aot_global_info = malloc(aot_global_info_total * sizeof(aot_link_info));
     aot_global_info_index = 0;
 }
@@ -96,7 +100,7 @@ void aot_link_tree_insert(TranslationBlock *curr,
         target_ulong aim1_pc, target_ulong aim2_pc)
 {
     if (aot_global_info_index >= aot_global_info_total) {
-        aot_global_info_total += 1000;
+        aot_global_info_total <<= 1;
         aot_global_info = realloc(aot_global_info,
             aot_global_info_total * sizeof(aot_link_info));
     }
