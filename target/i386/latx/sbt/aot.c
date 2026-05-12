@@ -19,6 +19,7 @@
 #include "aot_recover_tb.h"
 #include "aot_smc.h"
 #include "aot_page.h"
+#include "../translator/tr-vpaes.h"
 #include<sys/syscall.h>
 #include "exec/translate-all.h"
 #include "latx-smc.h"
@@ -1168,6 +1169,11 @@ extern void trace_session_begin(uint64_t ins_length, uint64_t reg_store_addr,
     uint64_t eip, uint64_t mem_access_count);
 static void* relkind_to_fixup_addr[] = {
     [LOAD_PAGEFLAGS_ROOT] = &pageflags_root,
+    [LOAD_VPAES_ENC_TABLES] = (void *)latx_vpaes_enc_tables,
+    [LOAD_VPAES_DEC_TABLES] = (void *)latx_vpaes_dec_tables,
+    [LOAD_VPAES_KEYGEN_TABLES] = (void *)latx_vpaes_keygen_tables,
+    [LOAD_VPAES_ENC_TABLES_XV] = (void *)latx_vpaes_enc_tables_xv,
+    [LOAD_VPAES_DEC_TABLES_XV] = (void *)latx_vpaes_dec_tables_xv,
     [LOAD_HELPER_TRACE_SESSION_BEGIN] = trace_session_begin,
     [LOAD_HELPER_UPDATE_MXCSR_STATUS] = update_mxcsr_status,
     [LOAD_HELPER_FPATAN] = helper_fpatan,

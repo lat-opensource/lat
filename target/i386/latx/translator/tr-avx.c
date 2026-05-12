@@ -3,6 +3,7 @@
 #include "latx-options.h"
 #include "translate.h"
 #include "hbr.h"
+#include "tr-vpaes.h"
 
 #ifdef CONFIG_LATX_AVX_OPT
 bool translate_vaddpd(IR1_INST * pir1) {
@@ -5111,6 +5112,10 @@ static void adjust_vsib_index(IR2_OPND dest, IR2_OPND base,
 
 bool translate_vaesdec(IR1_INST *pir1)
 {
+    if (option_vpaes) {
+        return latx_translate_vaesdec_vpaes(pir1);
+    }
+
     IR1_OPND *opnd0 = ir1_get_opnd(pir1, 0);
     IR1_OPND *opnd1 = ir1_get_opnd(pir1, 1);
     IR1_OPND *opnd2 = ir1_get_opnd(pir1, 2);
@@ -5161,6 +5166,10 @@ bool translate_vaesdec(IR1_INST *pir1)
 
 bool translate_vaesdeclast(IR1_INST *pir1)
 {
+    if (option_vpaes) {
+        return latx_translate_vaesdeclast_vpaes(pir1);
+    }
+
     IR1_OPND *opnd0 = ir1_get_opnd(pir1, 0);
     IR1_OPND *opnd1 = ir1_get_opnd(pir1, 1);
     IR1_OPND *opnd2 = ir1_get_opnd(pir1, 2);
@@ -5209,6 +5218,10 @@ bool translate_vaesdeclast(IR1_INST *pir1)
 
 bool translate_vaesenc(IR1_INST *pir1)
 {
+    if (option_vpaes) {
+        return latx_translate_vaesenc_vpaes(pir1);
+    }
+
     IR1_OPND *opnd0 = ir1_get_opnd(pir1, 0);
     IR1_OPND *opnd1 = ir1_get_opnd(pir1, 1);
     IR1_OPND *opnd2 = ir1_get_opnd(pir1, 2);
@@ -5228,7 +5241,8 @@ bool translate_vaesenc(IR1_INST *pir1)
 
     if (!ir1_opnd_is_mem(opnd2)) {
         int s2 = ir1_opnd_base_reg_num(opnd2);
-        tr_gen_call_to_helper_aes((ADDR)helper_func, d, s1, s2, helper_kind);
+        tr_gen_call_to_helper_aes((ADDR)helper_func, d, s1, s2,
+                helper_kind);
     } else {
         int s2 = 0;
         while (s2 < 8) {
@@ -5245,7 +5259,8 @@ bool translate_vaesenc(IR1_INST *pir1)
         } else {
             load_freg256_from_ir1_mem(src, opnd2);
         }
-        tr_gen_call_to_helper_aes((ADDR)helper_func, d, s1, s2, helper_kind);
+        tr_gen_call_to_helper_aes((ADDR)helper_func, d, s1, s2,
+                helper_kind);
         la_xvor_v(src, temp, temp);
     }
     if (!ir1_opnd_is_ymm(opnd0)) {
@@ -5257,6 +5272,10 @@ bool translate_vaesenc(IR1_INST *pir1)
 
 bool translate_vaesenclast(IR1_INST *pir1)
 {
+    if (option_vpaes) {
+        return latx_translate_vaesenclast_vpaes(pir1);
+    }
+
     IR1_OPND *opnd0 = ir1_get_opnd(pir1, 0);
     IR1_OPND *opnd1 = ir1_get_opnd(pir1, 1);
     IR1_OPND *opnd2 = ir1_get_opnd(pir1, 2);
@@ -5276,7 +5295,8 @@ bool translate_vaesenclast(IR1_INST *pir1)
 
     if (!ir1_opnd_is_mem(opnd2)) {
         int s2 = ir1_opnd_base_reg_num(opnd2);
-        tr_gen_call_to_helper_aes((ADDR)helper_func, d, s1, s2, helper_kind);
+        tr_gen_call_to_helper_aes((ADDR)helper_func, d, s1, s2,
+                helper_kind);
     } else {
         int s2 = 0;
         while (s2 < 8) {
@@ -5293,7 +5313,8 @@ bool translate_vaesenclast(IR1_INST *pir1)
         } else {
             load_freg256_from_ir1_mem(src, opnd2);
         }
-        tr_gen_call_to_helper_aes((ADDR)helper_func, d, s1, s2, helper_kind);
+        tr_gen_call_to_helper_aes((ADDR)helper_func, d, s1, s2,
+                helper_kind);
         la_xvor_v(src, temp, temp);
     }
     if (!ir1_opnd_is_ymm(opnd0)) {
@@ -5305,6 +5326,10 @@ bool translate_vaesenclast(IR1_INST *pir1)
 
 bool translate_vaesimc(IR1_INST *pir1)
 {
+    if (option_vpaes) {
+        return latx_translate_vaesimc_vpaes(pir1);
+    }
+
     IR1_OPND *opnd0 = ir1_get_opnd(pir1, 0);
     IR1_OPND *opnd1 = ir1_get_opnd(pir1, 1);
     int d = ir1_opnd_base_reg_num(opnd0);
@@ -5317,8 +5342,8 @@ bool translate_vaesimc(IR1_INST *pir1)
         IR2_OPND src = ra_alloc_xmm((d + 1) % 7 + 1);
         la_xvor_v(temp, src, src);
         load_freg128_from_ir1_mem(src, opnd1);
-         tr_gen_call_to_helper_pcmpxstrx((ADDR)helper_aesimc_xmm, d,
-                 (d + 1) % 7 + 1, 0, LOAD_HELPER_AESIMC_XMM);
+        tr_gen_call_to_helper_pcmpxstrx((ADDR)helper_aesimc_xmm, d,
+                (d + 1) % 7 + 1, 0, LOAD_HELPER_AESIMC_XMM);
         la_xvor_v(src, temp, temp);
     }
     set_high128_xreg_to_zero(ra_alloc_xmm(d));
@@ -5328,6 +5353,10 @@ bool translate_vaesimc(IR1_INST *pir1)
 
 bool translate_vaeskeygenassist(IR1_INST *pir1)
 {
+    if (option_vpaes) {
+        return latx_translate_vaeskeygenassist_vpaes(pir1);
+    }
+
     IR1_OPND *opnd0 = ir1_get_opnd(pir1, 0);
     IR1_OPND *opnd1 = ir1_get_opnd(pir1, 1);
     IR1_OPND *opnd2 = ir1_get_opnd(pir1, 2);

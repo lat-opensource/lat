@@ -3,6 +3,7 @@
 #include "latx-options.h"
 #include "translate.h"
 #include "hbr.h"
+#include "tr-vpaes.h"
 
 bool translate_por(IR1_INST *pir1)
 {
@@ -3776,6 +3777,10 @@ bool translate_pclmulqdq(IR1_INST * pir1) {
 
 bool translate_aesdec(IR1_INST *pir1)
 {
+    if (option_vpaes) {
+        return latx_translate_aesdec_vpaes(pir1);
+    }
+
     IR1_OPND *opnd0 = ir1_get_opnd(pir1, 0);
     IR1_OPND *opnd1 = ir1_get_opnd(pir1, 1);
     int d = ir1_opnd_base_reg_num(opnd0);
@@ -3809,6 +3814,10 @@ bool translate_aesdec(IR1_INST *pir1)
 
 bool translate_aesdeclast(IR1_INST *pir1)
 {
+    if (option_vpaes) {
+        return latx_translate_aesdeclast_vpaes(pir1);
+    }
+
     IR1_OPND *opnd0 = ir1_get_opnd(pir1, 0);
     IR1_OPND *opnd1 = ir1_get_opnd(pir1, 1);
     int d = ir1_opnd_base_reg_num(opnd0);
@@ -3842,6 +3851,10 @@ bool translate_aesdeclast(IR1_INST *pir1)
 
 bool translate_aesenc(IR1_INST *pir1)
 {
+    if (option_vpaes) {
+        return latx_translate_aesenc_vpaes(pir1);
+    }
+
     IR1_OPND *opnd0 = ir1_get_opnd(pir1, 0);
     IR1_OPND *opnd1 = ir1_get_opnd(pir1, 1);
     int d = ir1_opnd_base_reg_num(opnd0);
@@ -3875,6 +3888,10 @@ bool translate_aesenc(IR1_INST *pir1)
 
 bool translate_aesenclast(IR1_INST *pir1)
 {
+    if (option_vpaes) {
+        return latx_translate_aesenclast_vpaes(pir1);
+    }
+
     IR1_OPND *opnd0 = ir1_get_opnd(pir1, 0);
     IR1_OPND *opnd1 = ir1_get_opnd(pir1, 1);
     int d = ir1_opnd_base_reg_num(opnd0);
@@ -3908,6 +3925,10 @@ bool translate_aesenclast(IR1_INST *pir1)
 
 bool translate_aesimc(IR1_INST *pir1)
 {
+    if (option_vpaes) {
+        return latx_translate_aesimc_vpaes(pir1);
+    }
+
     IR1_OPND *opnd0 = ir1_get_opnd(pir1, 0);
     IR1_OPND *opnd1 = ir1_get_opnd(pir1, 1);
     int d = ir1_opnd_base_reg_num(opnd0);
@@ -3938,6 +3959,10 @@ bool translate_aesimc(IR1_INST *pir1)
 
 bool translate_aeskeygenassist(IR1_INST *pir1)
 {
+    if (option_vpaes) {
+        return latx_translate_aeskeygenassist_vpaes(pir1);
+    }
+
     IR1_OPND *opnd0 = ir1_get_opnd(pir1, 0);
     IR1_OPND *opnd1 = ir1_get_opnd(pir1, 1);
     IR1_OPND *opnd2 = ir1_get_opnd(pir1, 2);

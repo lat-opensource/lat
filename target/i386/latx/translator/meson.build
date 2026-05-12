@@ -17,6 +17,7 @@ i386_ss.add(when: 'CONFIG_LATX', if_true: files(
   'tr-lock.c',
   'tr-lock-fast-atomic.c',
   'tr-simd.c',
+  'tr-vpaes.c',
   'tr-simd-cmp.c',
   'tr-simd-cvt.c',
   'tr-simd-mov.c',
