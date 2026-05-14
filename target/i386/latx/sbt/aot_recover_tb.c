@@ -290,9 +290,7 @@ static bool check_ir1(target_ulong seg_begin, struct aot_tb *p_aot_tbs, int num,
 
 #include<sys/syscall.h>
 
-/* static int load_sum_tb; */
-
-int load_page_4(target_ulong pc, uint32_t cflags, seg_info *info)
+inline int load_page_4(target_ulong pc, uint32_t cflags, seg_info *info)
 {
     int ret = load_page(pc, cflags, info);
     pc += TARGET_PAGE_SIZE;
@@ -301,11 +299,34 @@ int load_page_4(target_ulong pc, uint32_t cflags, seg_info *info)
     load_page(pc, cflags, info);
     pc += TARGET_PAGE_SIZE;
     load_page(pc, cflags, info);
+    try_aot_link();
     return ret;
+}
+
+
+static int load_all_seg(uint32_t cflags, seg_info *info)
+{
+    info->seg_flag |= SEG_RUNNING;
+    for (target_ulong addr = info->seg_begin; addr < info->seg_end;
+            addr += TARGET_PAGE_SIZE) {
+        load_page(addr, cflags, info);
+    }
+    try_aot_link();
+    return 1;
 }
 
 inline int load_page(target_ulong pc, uint32_t cflags, seg_info *info)
 {
+    if (pc < info->seg_begin || pc >= info->seg_end) {
+        return 0;
+    }
+    int page_state = page_get_page_state(pc);
+    if (page_state >= PAGE_LOADED || ((page_state == PAGE_SMC)
+                && (((aot_header *)info->buffer)->aot_file_type == ELF_AOT_FILE))) {
+        return 0;
+    }
+    page_set_page_state(pc, PAGE_LOADED);
+
     aot_buffer = info->buffer;
     aot_segment *p_segment = (aot_segment *)info->p_segment;
     page_table_info *pt = (page_table_info *)
@@ -374,32 +395,13 @@ int load_aot(target_ulong pc, uint32_t cflags)
         return 0;
     }
 
-    int page_state = page_get_page_state(pc);
-
-    if (page_state >= PAGE_LOADED || ((page_state == PAGE_SMC)
-                && (((aot_header *)info->buffer)->aot_file_type == ELF_AOT_FILE))) {
-        return 0;
-    }
-
-    if (option_aot == 2 &&
-            (!(info->seg_flag & SEG_RUNNING) || page_state == PAGE_FLUSH)) {
-        info->seg_flag |= SEG_RUNNING;
-        page_set_page_state_range(info->seg_begin & TARGET_PAGE_MASK,
-                info->seg_end & TARGET_PAGE_MASK, PAGE_LOADED);
-        for (target_ulong addr = info->seg_begin; addr < info->seg_end;
-                addr += TARGET_PAGE_SIZE) {
-            load_page(addr, cflags, info);
-        }
-        try_aot_link();
-        return 1;
+    if (option_aot == 2 && (!(info->seg_flag & SEG_RUNNING)
+                || (page_get_page_state(pc) == PAGE_FLUSH))) {
+        return load_all_seg(cflags, info);
     } else {
-        page_set_page_state(pc, PAGE_LOADED);
-        int ret = load_page(pc, cflags, info);
-        if (ret) {
-            try_aot_link();
-            return ret;
-        }
+        return load_page_4(pc, cflags, info);
     }
+
     return 0;
 }
 
