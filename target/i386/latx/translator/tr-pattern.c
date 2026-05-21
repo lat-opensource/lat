@@ -2341,7 +2341,7 @@ bool try_translate_instptn(IR1_INST *pir1)
     case INSTPTN_OPC_NONE:
         return false;
     case INSTPTN_OPC_NOP:
-    case INSTPTN_OPC_NOP_FOR_EXP:
+    case INSTPTN_OPC_NOP_DIV:
         return true;
     case INSTPTN_OPC_CMP_JCC:
         return translate_cmp_jcc(pir1);
