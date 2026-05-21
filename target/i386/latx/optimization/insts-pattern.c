@@ -278,7 +278,7 @@ static int inst_pattern(TranslationBlock *tb,
                 return 0;
             pir1->instptn.opc  = INSTPTN_OPC_CQO_IDIV;
             pir1->instptn.next = ir1;
-            ir1->instptn.opc  = INSTPTN_OPC_NOP;
+            ir1->instptn.opc  = INSTPTN_OPC_NOP_DIV;
             // ir1->instptn.next = NULL;
             return 1;
         default:
@@ -304,7 +304,7 @@ static int inst_pattern(TranslationBlock *tb,
                         return 0;
                     pir1->instptn.opc  = INSTPTN_OPC_XOR_DIV;
                     pir1->instptn.next = ir1;
-                    ir1->instptn.opc  = INSTPTN_OPC_NOP;
+                    ir1->instptn.opc  = INSTPTN_OPC_NOP_DIV;
                     // ir1->instptn.next = NULL;
                     return 1;
                 }
@@ -326,7 +326,7 @@ static int inst_pattern(TranslationBlock *tb,
                 return 0;
             pir1->instptn.opc  = INSTPTN_OPC_CDQ_IDIV;
             pir1->instptn.next = ir1;
-            ir1->instptn.opc  = INSTPTN_OPC_NOP;
+            ir1->instptn.opc  = INSTPTN_OPC_NOP_DIV;
             // ir1->instptn.next = NULL;
             return 1;
         default:
@@ -363,11 +363,11 @@ static int inst_pattern(TranslationBlock *tb,
                     ir1_opcode(ir3) == WRAP(MOVAPS)) {
                 pir1->instptn.opc  = INSTPTN_OPC_MOVAPS_VST_X4;
                 pir1->instptn.next = ir1;
-                ir1->instptn.opc  = INSTPTN_OPC_NOP_FOR_EXP;
+                ir1->instptn.opc  = INSTPTN_OPC_NOP;
                 ir1->instptn.next = ir2;
-                ir2->instptn.opc  = INSTPTN_OPC_NOP_FOR_EXP;
+                ir2->instptn.opc  = INSTPTN_OPC_NOP;
                 ir2->instptn.next = ir3;
-                ir3->instptn.opc  = INSTPTN_OPC_NOP_FOR_EXP;
+                ir3->instptn.opc  = INSTPTN_OPC_NOP;
                 return 1;
             }
         }

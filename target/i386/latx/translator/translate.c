@@ -2019,9 +2019,15 @@ static inline void tr_init_for_each_ir1_in_tb(IR1_INST *pir1, int nr, int index)
     lsenv->tr_data->curr_ir1_count = index;
 
     /* TODO: this addr only stored low 32 bits */
-    IR2_OPND ir2_opnd_addr;
-    ir2_opnd_build(&ir2_opnd_addr, IR2_OPND_IMM, ir1_addr(pir1));
-    la_x86_inst(ir2_opnd_addr);
+#ifdef CONFIG_LATX_INSTS_PATTERN
+    if (pir1->instptn.opc == INSTPTN_OPC_NOP_DIV) {}
+    else
+#endif
+    {
+        IR2_OPND ir2_opnd_addr;
+        ir2_opnd_build(&ir2_opnd_addr, IR2_OPND_IMM, ir1_addr(pir1));
+        la_x86_inst(ir2_opnd_addr);
+    }
 }
 
 bool need_trace;
