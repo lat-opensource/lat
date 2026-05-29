@@ -747,6 +747,11 @@ static void handle_arg_latx_wine_pe_fixed_address(const char *arg)
     option_wine_pe_fixed_address = g_strdup(arg);
 }
 
+static void handle_arg_latx_fork_unlink(const char *arg)
+{
+    option_fork_unlink = strtol(arg, NULL, 0);
+}
+
 #ifdef CONFIG_LATX_AOT
 static void handle_arg_latx_aot(const char *arg)
 {
@@ -867,6 +872,8 @@ static const struct qemu_argument arg_table[] = {
     {"latx-wine-pe-fixed-address", "LATX_WINE_PE_FIXED_ADDRESS", true,
     handle_arg_latx_wine_pe_fixed_address, "basename@address",
     "load one relocatable Wine PE image at a specified address"},
+    {"latx-fork-unlink",    "LATX_FORK_UNLINK",     true,  handle_arg_latx_fork_unlink,
+    "",           "unlink running vcpu tb chains before fork"},
 #ifdef CONFIG_LATX_AOT
     {"latx-aot",    "LATX_AOT",     true,  handle_arg_latx_aot,
     "",           "enable aot"},

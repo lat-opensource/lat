@@ -95,6 +95,8 @@ int option_real_maps;
 int option_monitor_shared_mem;
 int option_shadow_file;
 int option_smc_opt;
+/* Disabled by default; LATX_FORK_UNLINK enables the internal signal. */
+int option_fork_unlink;
 int option_set_rounding_opt;
 int option_cvt_opt;
 int option_fast_atomic;

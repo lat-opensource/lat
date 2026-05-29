@@ -20,6 +20,7 @@
 #include "qemu/bitops.h"
 #include <sys/ucontext.h>
 #include <sys/resource.h>
+#include <sys/syscall.h>
 
 #include "qemu.h"
 #include "trace.h"
@@ -1116,7 +1117,21 @@ static void host_signal_handler(int host_signum, siginfo_t *info,
             return;
         }
 #endif
-
+    if (option_fork_unlink && host_signum == SIGRTMIN + 1 &&
+        info->si_code == SI_QUEUE && info->si_int == FORK_UNLINK_MAGIC) {
+        TranslationBlock *current_tb = tcg_tb_lookup(UC_PC(uc));
+#if defined(CONFIG_LATX_DEBUG)
+        fprintf(stderr, "[LAT SIGNAL] receive unlink signal pid=%d tid=%ld sig=%d\n", getpid(), syscall(SYS_gettid), host_signum);
+#endif
+        if (current_tb) {
+            if (use_indirect_jmp(current_tb) && current_tb->jmp_indirect != TB_JMP_RESET_OFFSET_INVALID) {
+                unlink_indirect_jmp(env, current_tb, uc);
+            } else {
+                unlink_direct_jmp(current_tb);
+            }
+        }
+        return;
+    }
 #ifdef CONFIG_LATX
     /*
      * store ucontext_t to env for context switch.

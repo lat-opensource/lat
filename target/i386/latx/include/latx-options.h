@@ -84,6 +84,7 @@ extern int option_real_maps;
 extern int option_monitor_shared_mem;
 extern int option_shadow_file;
 extern int option_smc_opt;
+extern int option_fork_unlink;
 extern int option_set_rounding_opt;
 extern int option_cvt_opt;
 extern int option_fast_atomic;
@@ -118,6 +119,7 @@ extern unsigned long long counter_mips_tr;
     ENVFUN(LATX_MT, handle_arg_latx_mem_test) \
     ENVFUN(LATX_REAL_MAPS, handle_arg_latx_real_maps) \
     ENVFUN(LATX_MONITOR_SHARED_MEM, handle_arg_latx_monitor_shared_mem) \
+    ENVFUN(LATX_FORK_UNLINK, handle_arg_latx_fork_unlink) \
     ENVFUN(LATX_ANONYM, handle_arg_latx_anonym) \
     ENVFUN(LATX_MMAP_START, handle_arg_mmap_start) \
     ENVFUN(LATX_MMAP_FIXED, handle_arg_mmap_fixed) \
