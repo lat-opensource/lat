@@ -35,11 +35,16 @@ parseArgs() {
 
 make_cmd() {
     cd $(dirname $0)/../
+    if [ $make_configure -eq 1 ] ; then
+        rm -rf buildtcg32
+    fi
     mkdir -p buildtcg32
     cd buildtcg32
 
     if [ $make_configure -eq 1 ] ; then
-        ../configure --target-list=i386-linux-user --enable-guest-base-zero --disable-debug-info --static
+        ../configure --target-list=i386-linux-user --enable-guest-base-zero \
+            --disable-capstone --disable-debug-info --disable-docs \
+            --disable-werror --with-git-submodules=ignore --static
     fi
 
     if [ ! -f "/usr/bin/ninja" ]; then
