@@ -25,18 +25,5 @@ gen_vdso_exe = executable('gen-vdso', 'gen-vdso.c',
 gen_vdso = generator(gen_vdso_exe, output: '@BASENAME@.c.inc',
                      arguments: ['-o', '@OUTPUT@', '@EXTRA_ARGS@', '@INPUT@'])
 
-subdir('alpha')
-subdir('arm')
-subdir('hppa')
 subdir('i386')
-subdir('m68k')
-subdir('microblaze')
-subdir('mips64')
-subdir('mips')
-subdir('ppc')
-subdir('s390x')
-subdir('sh4')
-subdir('sparc64')
-subdir('sparc')
 subdir('x86_64')
-subdir('xtensa')
