@@ -242,7 +242,6 @@ config_target_mak = {}
 disassemblers = {
   'i386' : ['CONFIG_I386_DIS'],
   'x86_64' : ['CONFIG_I386_DIS'],
-  'mips' : ['CONFIG_MIPS_DIS'],
   'loongarch' : ['CONFIG_LOONGARCH_DIS']
 }
 
