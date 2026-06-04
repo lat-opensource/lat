@@ -14,6 +14,7 @@
 #include "qemu/units.h"
 #include "qemu/selfmap.h"
 #include "qapi/error.h"
+#include "linux-user/elfload-pagesize.h"
 #include "latx-options.h"
 #include "signal-common.h"
 #include "target_signal.h"
@@ -1636,14 +1637,6 @@ struct exec
 #define QMAGIC 0314
 
 /* Necessary parameters */
-#define TARGET_ELF_EXEC_PAGESIZE \
-        (((eppnt->p_align & ~qemu_host_page_mask) != 0) ? \
-         TARGET_PAGE_SIZE : MAX(qemu_host_page_size, TARGET_PAGE_SIZE))
-#define TARGET_ELF_PAGELENGTH(_v) ROUND_UP((_v), TARGET_ELF_EXEC_PAGESIZE)
-#define TARGET_ELF_PAGESTART(_v) ((_v) & \
-                                 ~(abi_ulong)(TARGET_ELF_EXEC_PAGESIZE-1))
-#define TARGET_ELF_PAGEOFFSET(_v) ((_v) & (TARGET_ELF_EXEC_PAGESIZE-1))
-
 #define DLINFO_ITEMS 16
 
 static inline void memcpy_fromfs(void * to, const void * from, unsigned long n)
@@ -2660,6 +2653,7 @@ static void load_elf_image(const char *image_name, const ImageSource *src,
                            char **pinterp_name)
 {
     g_autofree struct elf_phdr *phdr = NULL;
+    g_autofree ElfLoadMapRange *load_segments = NULL;
     abi_ulong load_addr, load_bias, loaddr, hiaddr, error, len;
     int i, prot_exec;
     Error *err = NULL;
@@ -2689,6 +2683,7 @@ static void load_elf_image(const char *image_name, const ImageSource *src,
         goto exit_errmsg;
     }
     bswap_phdr(phdr, ehdr->e_phnum);
+    load_segments = g_new0(ElfLoadMapRange, ehdr->e_phnum);
 
     info->nsegs = 0;
     info->pt_dynamic_addr = 0;
@@ -2715,6 +2710,10 @@ static void load_elf_image(const char *image_name, const ImageSource *src,
             len += b - a;
             ++info->nsegs;
             info->alignment |= eppnt->p_align;
+            load_segments[i].p_type = eppnt->p_type;
+            load_segments[i].vaddr = eppnt->p_vaddr;
+            load_segments[i].memsz = eppnt->p_memsz;
+            load_segments[i].align = eppnt->p_align;
         } else if (eppnt->p_type == PT_INTERP && pinterp_name) {
             g_autofree char *interp_name = NULL;
 
@@ -2850,6 +2849,7 @@ static void load_elf_image(const char *image_name, const ImageSource *src,
         struct elf_phdr *eppnt = phdr + i;
         if (eppnt->p_type == PT_LOAD) {
             abi_ulong vaddr, vaddr_po, vaddr_ps, vaddr_ef, vaddr_em, vaddr_len;
+            abi_ulong elf_pagesize;
             int elf_prot = 0;
 
             if (eppnt->p_flags & PF_R) {
@@ -2862,8 +2862,11 @@ static void load_elf_image(const char *image_name, const ImageSource *src,
                 elf_prot |= prot_exec;
             }
             vaddr = load_bias + eppnt->p_vaddr;
-            vaddr_po = TARGET_ELF_PAGEOFFSET(vaddr);
-            vaddr_ps = TARGET_ELF_PAGESTART(vaddr);
+            elf_pagesize = elf_load_exec_pagesize(load_segments, ehdr->e_phnum, i,
+                                                  load_bias, qemu_host_page_size,
+                                                  TARGET_PAGE_SIZE);
+            vaddr_po = elf_load_page_offset(vaddr, elf_pagesize);
+            vaddr_ps = elf_load_page_start(vaddr, elf_pagesize);
 
             vaddr_ef = vaddr + eppnt->p_filesz;
             vaddr_em = vaddr + eppnt->p_memsz;
@@ -2873,7 +2876,8 @@ static void load_elf_image(const char *image_name, const ImageSource *src,
              * but no backing file segment.
              */
             if (eppnt->p_filesz != 0) {
-                vaddr_len = TARGET_ELF_PAGELENGTH(eppnt->p_filesz + vaddr_po);
+                vaddr_len = elf_load_page_length(eppnt->p_filesz + vaddr_po,
+                                                 elf_pagesize);
                 error = imgsrc_mmap(vaddr_ps, eppnt->p_filesz + vaddr_po,
                                     elf_prot, MAP_PRIVATE | MAP_FIXED,
                                     src, eppnt->p_offset - vaddr_po);
@@ -2889,7 +2893,8 @@ static void load_elf_image(const char *image_name, const ImageSource *src,
                     zero_bss(vaddr_ef, vaddr_em, elf_prot);
                 }
             } else if (eppnt->p_memsz != 0) {
-                vaddr_len = TARGET_ELF_PAGELENGTH(eppnt->p_memsz + vaddr_po);
+                vaddr_len = elf_load_page_length(eppnt->p_memsz + vaddr_po,
+                                                 elf_pagesize);
                 error = target_mmap(vaddr_ps, vaddr_len, elf_prot,
                                     MAP_PRIVATE | MAP_FIXED | MAP_ANONYMOUS,
                                     -1, 0, 1);
