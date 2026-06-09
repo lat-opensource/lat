@@ -35,6 +35,8 @@ static inline void emit_pclmul_ctz_loop(IR2_OPND lhs, IR2_OPND rhs,
     la_bnez(lhs, loop_label);
 
     la_label(end_label);
+    ra_free_temp(shift);
+    ra_free_temp(tmp);
 }
 
 #endif

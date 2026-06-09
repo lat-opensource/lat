@@ -3718,11 +3718,6 @@ bool translate_pclmulqdq(IR1_INST * pir1) {
     IR2_OPND dest = ra_alloc_xmm(s0);
     IR2_OPND src;
     IR2_OPND dest_copy = dest;
-    IR2_OPND ctrlp = ra_alloc_itemp();
-    IR2_OPND lhs = ra_alloc_itemp();
-    IR2_OPND rhs = ra_alloc_itemp();
-    IR2_OPND res_lo = ra_alloc_itemp();
-    IR2_OPND res_hi = ra_alloc_itemp();
     IR2_OPND ftemp = ra_alloc_ftemp();
 
     if (!ir1_opnd_is_mem(opnd1)) {
@@ -3738,6 +3733,12 @@ bool translate_pclmulqdq(IR1_INST * pir1) {
         load_freg128_from_ir1_mem(src, opnd1);
     }
 
+    IR2_OPND ctrlp = ra_alloc_itemp();
+    IR2_OPND lhs = ra_alloc_itemp();
+    IR2_OPND rhs = ra_alloc_itemp();
+    IR2_OPND res_lo = ra_alloc_itemp();
+    IR2_OPND res_hi = ra_alloc_itemp();
+
     li_d(ctrlp, ctrl);
     la_andi(lhs, ctrlp, 1);
     la_vreplve_d(ftemp, dest_copy, lhs);
@@ -3745,12 +3746,18 @@ bool translate_pclmulqdq(IR1_INST * pir1) {
     la_bstrpick_d(rhs, ctrlp, 4, 4);
     la_vreplve_d(ftemp, src, rhs);
     la_vpickve2gr_d(rhs, ftemp, 0);
+    ra_free_temp(ctrlp);
 
     emit_pclmul_ctz_loop(lhs, rhs, res_lo, res_hi);
     la_vxor_v(dest, dest, dest);
     la_vinsgr2vr_d(dest, res_lo, 0);
     la_vinsgr2vr_d(dest, res_hi, 1);
     ra_free_temp_auto(src);
+    ra_free_temp(ftemp);
+    ra_free_temp(lhs);
+    ra_free_temp(rhs);
+    ra_free_temp(res_lo);
+    ra_free_temp(res_hi);
     return true;
 }
 
