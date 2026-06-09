@@ -13860,6 +13860,26 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
             {
                 if (!lock_user_struct(VERIFY_WRITE, target_value, arg1, 0))
                     return -TARGET_EFAULT;
+#ifndef TARGET_X86_64
+                #define upper_32_bits(n) ((u32)(((n) >> 16) >> 16))
+                if (upper_32_bits(value.totalram) || upper_32_bits(value.totalswap)) {
+                    int bitcount = 0;
+
+                    while (value.mem_unit < TARGET_PAGE_SIZE) {
+                        value.mem_unit <<= 1;
+                        bitcount++;
+                    }
+
+                    value.totalram >>= bitcount;
+                    value.freeram >>= bitcount;
+                    value.sharedram >>= bitcount;
+                    value.bufferram >>= bitcount;
+                    value.totalswap >>= bitcount;
+                    value.freeswap >>= bitcount;
+                    value.totalhigh >>= bitcount;
+                    value.freehigh >>= bitcount;
+                }
+#endif
                 __put_user(value.uptime, &target_value->uptime);
                 __put_user(value.loads[0], &target_value->loads[0]);
                 __put_user(value.loads[1], &target_value->loads[1]);
