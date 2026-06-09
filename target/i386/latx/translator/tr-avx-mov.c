@@ -303,7 +303,7 @@ bool translate_vmovd(IR1_INST *pir1)
         IR2_OPND dest = ra_alloc_xmm(ir1_opnd_base_reg_num(opnd0));
         IR2_OPND src = load_ireg_from_ir1(opnd1, UNKNOWN_EXTENSION, false);
         la_xvandi_b(dest, dest, 0);
-        la_vinsgr2vr_w(dest, src, 0);
+        la_xvinsgr2vr_w(dest, src, 0);
         set_high128_xreg_to_zero(dest);
     } else if (ir1_opnd_is_gpr(opnd0) && ir1_opnd_is_xmm(opnd1)) {
         IR2_OPND dest = load_ireg_from_ir1(opnd0, UNKNOWN_EXTENSION, false);
@@ -429,7 +429,7 @@ bool translate_vmovq(IR1_INST * pir1) {
             IR2_OPND dest = load_freg128_from_ir1(opnd0);
             IR2_OPND src = load_ireg_from_ir1(opnd1, UNKNOWN_EXTENSION, false);
             la_xvandi_b(dest, dest, 0x0);
-            la_vinsgr2vr_d(dest, src, 0x0);
+            la_xvinsgr2vr_d(dest, src, 0x0);
 
         } else if (ir1_opnd_is_gpr(opnd0) && ir1_opnd_is_xmm(opnd1)) {
             IR2_OPND dest = load_ireg_from_ir1(opnd0, UNKNOWN_EXTENSION, false);
