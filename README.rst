@@ -179,6 +179,12 @@ STEP2:
 
     oma install -y gcc nettle pcre2 libffi gnutls glib zlib glib-static libgcrypt-static libgpg-error-static libnfs-static pcre-static zlib-static zstd-static openssl-static pkg-config ninja
 
+- Fedora
+
+.. code-block:: bash
+
+    dnf install gcc g++ make git ninja-build meson openssl-devel glib2-devel
+
 
 STEP3:
 
