@@ -16194,6 +16194,9 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
                 a = lock_user(PAGE_WRITE, arg1, arg2, 0);
             }
             if (!a) {
+                a = lock_user(PAGE_VALID, arg1, arg2, 0);
+            }
+            if (!a) {
                 return -TARGET_ENOMEM;
             }
             p = lock_user_string(arg3);
