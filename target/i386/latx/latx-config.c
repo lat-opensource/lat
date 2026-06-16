@@ -1,6 +1,5 @@
 #include "config-host.h"
 #include "common.h"
-#include "diStorm/distorm.h"
 #include "ir1.h"
 #include "ir2.h"
 #include "lsenv.h"
