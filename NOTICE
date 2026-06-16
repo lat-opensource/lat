@@ -17,7 +17,62 @@ Comment:
  released under the GNU General Public License, version 2. Some QEMU
  files carry compatible file-level license notices. See LICENSE, COPYING,
  COPYING.LIB, and individual source file headers for the original QEMU
- license notices and file-specific terms.
+ license notices and file-specific terms. This stanza does not override
+ more specific file-level or third-party notices.
+
+Files: target/i386/latx/capstone_git/*
+Source: https://www.capstone-engine.org/
+Copyright:
+ Copyright (c) 2013, COSEINC.
+ Copyright (c) Capstone contributors
+License: BSD-3-Clause
+Comment:
+ The bundled Capstone source includes its own license text in
+ target/i386/latx/capstone_git/LICENSE.TXT. Some bundled files also
+ refer to LLVM-derived license terms in LICENSE_LLVM.TXT.
+
+Files: target/i386/latx/include/xed/*
+ target/i386/latx/exlib/libxed.a
+Source: https://intelxed.github.io/
+Copyright:
+ Copyright (c) 2021 Intel Corporation
+License: Apache-2.0
+Comment:
+ The bundled XED headers carry Apache-2.0 notices. The prebuilt static
+ library is listed here because it is linked by LATX debug disassembly
+ support; its exact source and license obligations should be verified
+ against the matching upstream XED release.
+
+Files: target/i386/latx/include/zydisdir/*
+ target/i386/latx/exlib/libZydis.a
+ target/i386/latx/exlib/libZycore.a
+Source: https://github.com/zyantific/zydis
+Copyright:
+ Copyright (c) Zyan Disassembler Library authors
+ Copyright (c) Zycore authors
+License: MIT
+Comment:
+ The bundled Zydis headers carry MIT-style permission notices. The
+ prebuilt static libraries are listed here because they are linked by
+ LATX debug disassembly support; their exact source and license
+ obligations should be verified against the matching upstream Zydis and
+ Zycore releases.
+
+Files: target/i386/latx/include/khash.h
+Source: https://github.com/attractivechaos/klib
+Copyright:
+ Copyright (c) 2008, 2009, 2011 Attractive Chaos <attractor@live.co.uk>
+License: MIT
+
+Files: target/i386/latx/exlib/libmimalloc.a
+Source: https://github.com/microsoft/mimalloc
+Copyright:
+ Copyright (c) Microsoft Corporation
+License: MIT
+Comment:
+ This prebuilt static library is listed because it is distributed in the
+ source tree. Its exact source and license obligations should be verified
+ against the matching upstream mimalloc release.
 
 Files: target/i386/latx/context/*
  target/i386/latx/include/box64context.h
