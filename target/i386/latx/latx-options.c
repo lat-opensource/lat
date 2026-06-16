@@ -479,13 +479,11 @@ void options_parse_latx_disassemble_trace_cmp(const char *args)
         option_latx_disassemble_trace_cmp |= OPT_V1LACAPSTONE;
     } else if (!strcmp(strtmp, "nextcapstone")) {
         option_latx_disassemble_trace_cmp |= OPT_V1NEXTCAPSTONE;
-    } else if (!strcmp(strtmp, "laxed")) {
-        option_latx_disassemble_trace_cmp |= OPT_V1LAXED;
     } else if (!strcmp(strtmp, "lazydis")) {
         option_latx_disassemble_trace_cmp |= OPT_V1LAZYDIS;
     } else {
         lsassertm(0, "V1 must be lacapstone, lazydis, "
-            "nextcapstone or laxed, but this V1=%s\n", strtmp);
+            "or nextcapstone, but this V1=%s\n", strtmp);
         return;
     }
     strncpy(strtmp, findSpil + 1, 99);
@@ -493,15 +491,13 @@ void options_parse_latx_disassemble_trace_cmp(const char *args)
         option_latx_disassemble_trace_cmp |= OPT_V2LACAPSTONE;
     } else if (!strcmp(strtmp, "nextcapstone")) {
         option_latx_disassemble_trace_cmp |= OPT_V2NEXTCAPSTONE;
-    } else if (!strcmp(strtmp, "laxed")) {
-        option_latx_disassemble_trace_cmp |= OPT_V2LAXED;
     } else if (!strcmp(strtmp, "lazydis")) {
         option_latx_disassemble_trace_cmp |= OPT_V2LAZYDIS;
     } else if (strlen(strtmp) == 0) {
         /*Only want to choose la_disa_v1, No cmp.*/
     } else {
         lsassertm(0, "V2 must be lacapstone, lazydis, "
-            "nextcapstone, laxed or NULL, but this V2=%s\n", strtmp);
+            "nextcapstone or NULL, but this V2=%s\n", strtmp);
     }
 }
 uint8 options_to_save(void)
