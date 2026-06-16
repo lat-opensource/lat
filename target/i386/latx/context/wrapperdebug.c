@@ -1,3 +1,11 @@
+/*
+ * This file is derived from Box64.
+ *
+ * SPDX-FileCopyrightText: 2020 ptitSeb
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 #include<unistd.h>
 #include "elfloader_private.h"
 #include "box64context.h"
