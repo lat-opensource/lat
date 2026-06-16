@@ -72,15 +72,6 @@ i386_ss.add(when: 'CONFIG_LATX', if_true: files(
   'latx-signal.c',
 ))
 
-laxed_lib = static_library('laxed',
-                         build_by_default: false,
-                         sources: files('latx-disassemble-trace/xed.c'),
-                         include_directories: include_directories('include/'))
-
-laxed = declare_dependency(link_with: laxed_lib,
-                         link_args: ['-L' + meson.current_source_dir() + '/exlib', '-lxed'],
-                         include_directories: include_directories('include/'))
-
 lazydis_lib = static_library('lazydis',
                          build_by_default: false,
                          sources: files('latx-disassemble-trace/zydis.c'),
@@ -90,7 +81,6 @@ lazydis = declare_dependency(link_with: lazydis_lib,
                          link_args: ['-L' + meson.current_source_dir() + '/exlib', '-lZydis', '-lZycore'],
                          include_directories: include_directories('include/'))
 
-i386_ss.add(when: 'CONFIG_LATX_DEBUG', if_true: laxed)
 i386_ss.add(when: 'CONFIG_LATX_DEBUG', if_true: lazydis)
 
 i386_ss.add(when: 'CONFIG_LATX_DEBUG', if_true: files(
