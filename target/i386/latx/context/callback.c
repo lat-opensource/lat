@@ -1,3 +1,11 @@
+/*
+ * This file is derived from Box64.
+ *
+ * SPDX-FileCopyrightText: 2020 ptitSeb
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 #include <stdarg.h>
 #include "callback.h"
 #include "lsenv.h"

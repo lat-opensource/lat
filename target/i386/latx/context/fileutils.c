@@ -1,3 +1,11 @@
+/*
+ * This file is derived from Box64.
+ *
+ * SPDX-FileCopyrightText: 2020 ptitSeb
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 #define _FILE_OFFSET_BITS 64
 #include <stdio.h>
 #include <stdlib.h>
