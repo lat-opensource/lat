@@ -1,3 +1,11 @@
+/*
+ * This file is derived from Box64.
+ *
+ * SPDX-FileCopyrightText: 2020 ptitSeb
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 #include "config-host.h"
 #define _LARGEFILE_SOURCE 1
 #define _FILE_OFFSET_BITS 64
