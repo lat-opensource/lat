@@ -1,3 +1,9 @@
+/*
+ * SPDX-FileCopyrightText: 2008, 2009, 2011 Attractive Chaos <attractor@live.co.uk>
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
 /* The MIT License
 
    Copyright (c) 2008, 2009, 2011 by Attractive Chaos <attractor@live.co.uk>
