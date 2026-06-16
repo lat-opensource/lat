@@ -1,3 +1,9 @@
+/*
+ * SPDX-FileCopyrightText: 2021-2026 LATX Project Authors
+ *
+ * SPDX-License-Identifier: GPL-2.0-only
+ */
+
 /**
  * @file hbr.c
  * @author wwq <weiwenqiang@mail.ustc.edu.cn>

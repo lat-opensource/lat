@@ -1,3 +1,9 @@
+/*
+ * SPDX-FileCopyrightText: 2021-2026 LATX Project Authors
+ *
+ * SPDX-License-Identifier: GPL-2.0-only
+ */
+
 #include "latx-disassemble-trace.h"
 #ifdef LATX_DISASSEMBLE_TRACE_DEBUG
 int dt_debug_enable = 1;
