@@ -157,11 +157,6 @@ void unlink_indirect_jmp(CPUArchState *env, TranslationBlock *tb, ucontext_t *uc
         insn = qatomic_read((uint32_t *)(jmp_rx + INS_SIZE));
         jmp_rw += INS_SIZE;
     } 
-#ifdef CONFIG_LATX_AOT
-    else {
-        qatomic_set((uint32_t *)(jmp_rw + INS_SIZE), nop);
-    }
-#endif
 #endif
 
 #ifdef CONFIG_LATX_FAST_JMPCACHE
