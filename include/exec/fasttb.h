@@ -1,5 +1,8 @@
 #ifndef FASTTB_H
 #define FASTTB_H
+
+#define FASTTB_INVALID_PC ((unsigned long)-1)
+
 struct FastTB {
     unsigned long pc;
     const void *ptr;    /* pointer to the translated code */

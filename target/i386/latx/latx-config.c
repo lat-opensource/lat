@@ -466,14 +466,19 @@ void latx_fast_jmp_cache_clear(CPUState *cs, int h)
     X86CPU *cpu = X86_CPU(cs);
     CPUX86State *env = &cpu->env;
     FastTB *fast_jmp_cache = (FastTB *)env->tb_jmp_cache_ptr;
-    qatomic_set(&fast_jmp_cache[h].pc, 0);
+    qatomic_set(&fast_jmp_cache[h].pc, FASTTB_INVALID_PC);
 }
 
 void latx_fast_jmp_cache_clear_all(CPUState *cs)
 {
     X86CPU *cpu = X86_CPU(cs);
     CPUX86State *env = &cpu->env;
-    memset(env->tb_jmp_cache_ptr, 0, sizeof(struct FastTB) * TB_JMP_CACHE_SIZE);
+    FastTB *fast_jmp_cache = (FastTB *)env->tb_jmp_cache_ptr;
+
+    for (int i = 0; i < TB_JMP_CACHE_SIZE; i++) {
+        fast_jmp_cache[i].pc = FASTTB_INVALID_PC;
+        fast_jmp_cache[i].ptr = NULL;
+    }
 }
 
 bool latx_fast_jmp_cache_init(void *env)
@@ -484,6 +489,9 @@ bool latx_fast_jmp_cache_init(void *env)
     fast_jmp_cache = calloc(TB_JMP_CACHE_SIZE, sizeof(struct FastTB));
     if (!fast_jmp_cache) {
         return false;
+    }
+    for (int i = 0; i < TB_JMP_CACHE_SIZE; i++) {
+        fast_jmp_cache[i].pc = FASTTB_INVALID_PC;
     }
     x86env->tb_jmp_cache_ptr = fast_jmp_cache;
 
