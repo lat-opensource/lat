@@ -1,3 +1,9 @@
+/*
+ * SPDX-FileCopyrightText: 2021-2026 LATX Project Authors
+ *
+ * SPDX-License-Identifier: GPL-2.0-only
+ */
+
 #ifndef LATX_DISASSEMBLE_FROM_NEXTCAPSTONE_H
 #define LATX_DISASSEMBLE_FROM_NEXTCAPSTONE_H
 #include "latx-disassemble-trace.h"
