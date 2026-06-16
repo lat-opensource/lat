@@ -104,7 +104,6 @@ endif
 r = run_command('python3', 'convert.py', check: true)
 message('convert.py ->', r.stdout().strip(), r.stderr().strip())
 
-subdir('diStorm')
 subdir('ir1')
 subdir('ir2')
 subdir('optimization')
