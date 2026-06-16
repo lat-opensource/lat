@@ -25,9 +25,6 @@ void disassemble_trace_init(int abi_bits, int args)
     case OPT_V1LACAPSTONE:
         la_disa_v1 = &gitcapstone_get;
         break;
-    case OPT_V1LAXED:
-        la_disa_v1 = &laxed_get;
-        break;
     case OPT_V1LAZYDIS:
         la_disa_v1 = &lazydis_get;
         break;
@@ -43,9 +40,6 @@ void disassemble_trace_init(int abi_bits, int args)
     case OPT_V2NEXTCAPSTONE:
         la_disa_v2 = &gitcapstone_get;
         break;
-    case OPT_V2LAXED:
-        la_disa_v2 = &laxed_get;
-        break;
     case OPT_V2LAZYDIS:
         la_disa_v2 = &lazydis_get;
         break;
@@ -56,7 +50,6 @@ void disassemble_trace_init(int abi_bits, int args)
         disassemble_trace_cmp = &disassemble_trace_loop;
     }
     gitcapstone_init(abi_bits);
-    laxed_init(abi_bits);
     lazydis_init(abi_bits);
 }
 static int64_t imm_cast(int64_t imm, uint32_t size)
@@ -194,4 +187,3 @@ void disassemble_trace_loop(const uint8_t *code, size_t code_size,
         disassemble_trace_dump(inputinsn, ret);
     }
 }
-

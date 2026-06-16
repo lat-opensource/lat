@@ -31,18 +31,6 @@ Comment:
  target/i386/latx/capstone_git/LICENSE.TXT. Some bundled files also
  refer to LLVM-derived license terms in LICENSE_LLVM.TXT.
 
-Files: target/i386/latx/include/xed/*
- target/i386/latx/exlib/libxed.a
-Source: https://intelxed.github.io/
-Copyright:
- Copyright (c) 2021 Intel Corporation
-License: Apache-2.0
-Comment:
- The bundled XED headers carry Apache-2.0 notices. The prebuilt static
- library is listed here because it is linked by LATX debug disassembly
- support; its exact source and license obligations should be verified
- against the matching upstream XED release.
-
 Files: target/i386/latx/include/zydisdir/*
  target/i386/latx/exlib/libZydis.a
  target/i386/latx/exlib/libZycore.a

@@ -18,11 +18,9 @@
 
 #define OPT_V1LACAPSTONE        (1 << 0)
 #define OPT_V1NEXTCAPSTONE      (1 << 1)
-#define OPT_V1LAXED             (1 << 2)
 #define OPT_V1LAZYDIS             (1 << 3)
 #define OPT_V2LACAPSTONE        (1 << 16)
 #define OPT_V2NEXTCAPSTONE      (1 << 17)
-#define OPT_V2LAXED             (1 << 18)
 #define OPT_V2LAZYDIS             (1 << 19)
 
 #ifdef CONFIG_LATX_DEBUG
@@ -157,7 +155,6 @@ void disassemble_trace_loop(const uint8_t *code, size_t code_size,
 void lacapstone_init(int abi_bits);
 void nextcapstone_init(int abi_bits);
 void gitcapstone_init(int abi_bits);
-void laxed_init(int abi_bits);
 void lazydis_init(int abi_bits);
 int lacapstone_get(const uint8_t *code, size_t code_size,
         uint64_t address,
@@ -171,10 +168,6 @@ int nextcapstone_get(const uint8_t *code, size_t code_size,
         uint64_t address,
         size_t count, struct la_dt_insn **insn,
         int ir1_num, void *pir1_base);
-int laxed_get(const uint8_t *code, size_t code_size,
-        uint64_t address,
-        size_t count, struct la_dt_insn **insn,
-        int ir1_num, void *pir1_base, int mode);
 int lazydis_get(const uint8_t *code, size_t code_size,
         uint64_t address,
         size_t count, struct la_dt_insn **insn,
