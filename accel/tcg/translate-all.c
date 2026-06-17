@@ -5951,10 +5951,10 @@ int shared_private_interpret(siginfo_t *info, ucontext_t *uc)
             info->si_addr = (void *)siaddr;
             return 1;
         }
-        value = *(char *)real_guest_addr;
+        value = over_page_read(real_guest_addr, 1);
         if ((uint8_t)value == (uint8_t)UC_GR(uc)[rd]) {
             /* set new value */
-            *(char *)real_guest_addr = (char)new_value;
+            over_page_write(real_guest_addr, new_value, 1);
         }
         value = value << 56 >> 56;
         UC_GR(uc)[rd] = value;
