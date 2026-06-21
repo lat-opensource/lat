@@ -555,19 +555,8 @@ bool translate_ficomp(IR1_INST *pir1)
 
 bool translate_ud2(IR1_INST *pir1)
 {
-    IR2_OPND func_addr_opnd = ra_alloc_dbt_arg2();
-    TranslationBlock *tb __attribute__((unused)) = NULL;
-    if (option_aot) {
-        tb = (TranslationBlock *)lsenv->tr_data->curr_tb;
-    }
     la_dbar(0);
-    aot_load_host_addr(func_addr_opnd, (ADDR)helper_raise_exception,
-        LOAD_HOST_RAISE_EX, 0);
-    la_mov64(a0_ir2_opnd, env_ir2_opnd);
-    li_d(a1_ir2_opnd, EXCP06_ILLOP);
-    /* load func_addr and jmp */
-    la_jirl(ra_ir2_opnd, func_addr_opnd, 0);
-    return true;
+    return translate_invalid(pir1);
 }
 
 /**

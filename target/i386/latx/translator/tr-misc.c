@@ -506,6 +506,9 @@ bool translate_invalid(IR1_INST *pir1)
     la_store_addrx(eip_opnd, env_ir2_opnd,
                     lsenv_offset_of_eip(lsenv));
     tr_save_registers_to_env(0xff, 0xff, option_save_xmm, options_to_save());
+#ifdef TARGET_X86_64
+    tr_save_x64_8_registers_to_env(0xff, option_save_xmm);
+#endif
     aot_load_host_addr(tmp_opnd, (ADDR)helper_raise_illop,
         LOAD_HELPER_RAISE_ILLOP, 0);
     la_jirl(zero_ir2_opnd, tmp_opnd, 0);
