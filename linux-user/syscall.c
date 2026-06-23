@@ -9114,12 +9114,6 @@ static void cleanup_guest_thread_resources(CPUArchState *env)
 {
     assert(env->gdt.base);
     target_munmap(env->gdt.base, sizeof(uint64_t) * TARGET_GDT_ENTRIES, 0);
-#ifdef CONFIG_LATX_FAST_JMPCACHE
-    if (env->tb_jmp_cache_ptr) {
-        free(env->tb_jmp_cache_ptr);
-        env->tb_jmp_cache_ptr = NULL;
-    }
-#endif
 }
 
 /* clone_lock is held and at least one other guest thread exists. */
@@ -9127,11 +9121,19 @@ static void QEMU_NORETURN exit_guest_thread_locked(CPUArchState *env)
 {
     CPUState *cpu = env_cpu(env);
     TaskState *ts = cpu->opaque;
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+    CPUX86State *x86env = env;
+    void *fast_jmp_cache = x86env->tb_jmp_cache_ptr;
+#endif
 
     object_property_set_bool(OBJECT(cpu), "realized", false, NULL);
     object_unparent(OBJECT(cpu));
     object_unref(OBJECT(cpu));
     pthread_mutex_unlock(&clone_lock);
+
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+    latx_fast_jmp_cache_free_rcu(fast_jmp_cache);
+#endif
 
     if (ts->child_tidptr) {
         put_user_u32(0, ts->child_tidptr);
@@ -12764,14 +12766,6 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
             aot_exit_entry(cpu, true);
         }
 #endif
-#ifdef CONFIG_LATX_FAST_JMPCACHE
-        {
-            CPUX86State *x86env = env;
-            if (arg1 == getpid() && x86env->tb_jmp_cache_ptr && target_to_host_signal(arg2) == SIGKILL) {
-                free(x86env->tb_jmp_cache_ptr);
-            }
-        }
-#endif
         return get_errno(safe_kill(arg1, target_to_host_signal(arg2)));
 #ifdef TARGET_NR_rename
     case TARGET_NR_rename:
@@ -14431,14 +14425,6 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
         /* dump basic block here. TODO */
 #ifdef CONFIG_LATX_AOT
         aot_exit_entry(cpu, true);
-#endif
-#ifdef CONFIG_LATX_FAST_JMPCACHE
-        {
-            CPUX86State *x86env = env;
-            if (x86env->tb_jmp_cache_ptr) {
-                free(x86env->tb_jmp_cache_ptr);
-            }
-        }
 #endif
         return get_errno(exit_group(arg1));
 #endif
@@ -16822,14 +16808,6 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
         if (arg2 == syscall(SYS_gettid))
         {
             aot_exit_entry(cpu, true);
-        }
-#endif
-#ifdef CONFIG_LATX_FAST_JMPCACHE
-        {
-            CPUX86State *x86env = env;
-            if (arg2 == syscall(SYS_gettid) && x86env->tb_jmp_cache_ptr && target_to_host_signal(arg3) == SIGKILL) {
-                free(x86env->tb_jmp_cache_ptr);
-            }
         }
 #endif
         return get_errno(safe_tgkill((int)arg1, (int)arg2,
