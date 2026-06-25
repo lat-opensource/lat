@@ -85,14 +85,13 @@ void unlink_direct_jmp(TranslationBlock *tb) /* TODO */
         return;
     }
 #endif
+    /* A signal handler cannot safely update the destination jump list. */
     if (tb->jmp_reset_offset[0] != TB_JMP_RESET_OFFSET_INVALID) {
         tb_reset_jump(tb, 0);
-        qatomic_and(&tb->jmp_dest[0], (uintptr_t)NULL);
         set_tb_unlink_flag(tb, 0);
     }
     if (tb->jmp_reset_offset[1] != TB_JMP_RESET_OFFSET_INVALID) {
         tb_reset_jump(tb, 1);
-        qatomic_and(&tb->jmp_dest[1], (uintptr_t)NULL);
         set_tb_unlink_flag(tb, 1);
     }
 }
