@@ -644,7 +644,7 @@ static int getSymbolInSymbolMaps(library_t*lib, const char* name, khint_t pre_k,
             return 0;
         } else 
             AddOffsetSymbol(lib->context->maplib, symbol, name);
-        *addr = AddBridge(lib->priv.w.bridge, kh_value(lib->mysymbolmap, k), symbol, 0, name);
+        *addr = AddCheckBridge(lib->priv.w.bridge, kh_value(lib->mysymbolmap, k), symbol, 0, name);
         *size = sizeof(void*);
         return 1;
     }
@@ -666,7 +666,7 @@ static int getSymbolInSymbolMaps(library_t*lib, const char* name, khint_t pre_k,
             printf_log(LOG_NONE, "\033[31mWarning, function %s not found\033[m\n", buff);
         } else 
             AddOffsetSymbol(lib->context->maplib, symbol, name);
-        *addr = AddBridge(lib->priv.w.bridge, kh_value(lib->stsymbolmap, k), symbol, sizeof(void*), name);
+        *addr = AddCheckBridge(lib->priv.w.bridge, kh_value(lib->stsymbolmap, k), symbol, sizeof(void*), name);
         *size = sizeof(void*);
         return 1;
     }
@@ -697,7 +697,7 @@ static int getSymbolInSymbolMaps(library_t*lib, const char* name, khint_t pre_k,
             return 0;
         } else 
             AddOffsetSymbol(lib->context->maplib, symbol, name);
-        *addr = AddBridge(lib->priv.w.bridge, kh_value(lib->symbolmap, k), symbol, 0, name);
+        *addr = AddCheckBridge(lib->priv.w.bridge, kh_value(lib->symbolmap, k), symbol, 0, name);
         *size = sizeof(void*);
         return 1;
     }
@@ -720,7 +720,7 @@ static int getSymbolInSymbolMaps(library_t*lib, const char* name, khint_t pre_k,
                 printf_log(LOG_NONE, "\033[31mWarning, function %s not found\033[m\n", buff);
             } else 
                 AddOffsetSymbol(lib->context->maplib, symbol, name);
-            *addr = AddBridge(lib->priv.w.bridge, kh_value(lib->wmysymbolmap, k), symbol, 0, name);
+            *addr = AddCheckBridge(lib->priv.w.bridge, kh_value(lib->wmysymbolmap, k), symbol, 0, name);
             *size = sizeof(void*);
             return 1;
         }
@@ -750,7 +750,7 @@ static int getSymbolInSymbolMaps(library_t*lib, const char* name, khint_t pre_k,
                 return 0;
             } else 
                 AddOffsetSymbol(lib->context->maplib, symbol, name);
-            *addr = AddBridge(lib->priv.w.bridge, kh_value(lib->wsymbolmap, k), symbol, 0, name);
+            *addr = AddCheckBridge(lib->priv.w.bridge, kh_value(lib->wsymbolmap, k), symbol, 0, name);
             *size = sizeof(void*);
             return 1;
         }
@@ -774,7 +774,7 @@ static int getSymbolInSymbolMaps(library_t*lib, const char* name, khint_t pre_k,
                 return 0;
             } else 
                 AddOffsetSymbol(lib->context->maplib, symbol, name);
-            *addr = AddBridge(lib->priv.w.bridge, kh_value(lib->symbol2map, k).w, symbol, 0, name);
+            *addr = AddCheckBridge(lib->priv.w.bridge, kh_value(lib->symbol2map, k).w, symbol, 0, name);
             *size = sizeof(void*);
             return 1;
         }
