@@ -3723,6 +3723,29 @@ static void tr_gen_inline_pcmpistri_finish(IR2_OPND res,
     ra_free_temp(tmp);
 }
 
+static void tr_gen_inline_pcmpistr_equal_any_rounds(IR2_OPND vmatch,
+                                                    IR2_OPND vd,
+                                                    IR2_OPND vs,
+                                                    IR2_OPND prefix_d,
+                                                    IR2_OPND vcmp,
+                                                    IR2_OPND vbyte,
+                                                    IR2_OPND vvalid,
+                                                    IR2_OPND valid,
+                                                    int rounds)
+{
+    for (int i = 0; i < rounds; i++) {
+        la_vreplvei_b(vbyte, vd, i);
+        la_vseq_b(vcmp, vs, vbyte);
+
+        la_srli_d(valid, prefix_d, i);
+        la_andi(valid, valid, 1);
+        la_sub_d(valid, zero_ir2_opnd, valid);
+        la_vreplgr2vr_b(vvalid, valid);
+        la_vand_v(vcmp, vcmp, vvalid);
+        la_vor_v(vmatch, vmatch, vcmp);
+    }
+}
+
 static void tr_gen_inline_pcmpistr_equal_any_mask(IR2_OPND res,
                                                   IR2_OPND vd,
                                                   IR2_OPND vs,
@@ -3733,30 +3756,31 @@ static void tr_gen_inline_pcmpistr_equal_any_mask(IR2_OPND res,
     IR2_OPND vcmp = ra_alloc_ftemp();
     IR2_OPND vbyte = ra_alloc_ftemp();
     IR2_OPND vvalid = ra_alloc_ftemp();
-    IR2_OPND byte = ra_alloc_itemp();
     IR2_OPND valid = ra_alloc_itemp();
+    IR2_OPND limit = ra_alloc_itemp();
+    IR2_OPND label_long = ra_alloc_label();
+    IR2_OPND label_done = ra_alloc_label();
 
     la_vxor_v(vmatch, vmatch, vmatch);
-    for (int i = 0; i < 16; i++) {
-        la_vpickve2gr_bu(byte, vd, i);
-        la_vreplgr2vr_b(vbyte, byte);
-        la_vseq_b(vcmp, vs, vbyte);
+    li_d(limit, 0x100);
+    la_bgeu(prefix_d, limit, label_long);
 
-        la_srli_d(valid, prefix_d, i);
-        la_andi(valid, valid, 1);
-        la_sub_d(valid, zero_ir2_opnd, valid);
-        la_vreplgr2vr_b(vvalid, valid);
-        la_vand_v(vcmp, vcmp, vvalid);
-        la_vor_v(vmatch, vmatch, vcmp);
-    }
+    tr_gen_inline_pcmpistr_equal_any_rounds(vmatch, vd, vs, prefix_d, vcmp,
+                                            vbyte, vvalid, valid, 8);
+    la_b(label_done);
 
+    la_label(label_long);
+    tr_gen_inline_pcmpistr_equal_any_rounds(vmatch, vd, vs, prefix_d, vcmp,
+                                            vbyte, vvalid, valid, 16);
+
+    la_label(label_done);
     la_vmsknz_b(vmatch, vmatch);
     la_vpickve2gr_wu(res, vmatch, 0);
     la_bstrpick_d(res, res, 15, 0);
     la_and(res, res, prefix_s);
 
+    ra_free_temp(limit);
     ra_free_temp(valid);
-    ra_free_temp(byte);
     ra_free_temp(vvalid);
     ra_free_temp(vbyte);
     ra_free_temp(vcmp);
