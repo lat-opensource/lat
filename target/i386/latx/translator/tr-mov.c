@@ -682,6 +682,12 @@ static bool tr_emit_fast_rep_movsb(IR1_INST *pir1, IR2_OPND rsi_opnd,
     }
 
     IR2_OPND label_slow = ra_alloc_label();
+    IR2_OPND label_backward = ra_alloc_label();
+    IR2_OPND label_backward_no_overlap = ra_alloc_label();
+    IR2_OPND label_backward_qword_done = ra_alloc_label();
+    IR2_OPND label_backward_qword_loop = ra_alloc_label();
+    IR2_OPND label_backward_tail_done = ra_alloc_label();
+    IR2_OPND label_backward_tail_loop = ra_alloc_label();
     IR2_OPND label_no_overlap = ra_alloc_label();
     IR2_OPND label_block_done = ra_alloc_label();
     IR2_OPND label_block_loop = ra_alloc_label();
@@ -698,7 +704,11 @@ static bool tr_emit_fast_rep_movsb(IR1_INST *pir1, IR2_OPND rsi_opnd,
     IR2_OPND vec2 = ra_alloc_ftemp();
     IR2_OPND vec3 = ra_alloc_ftemp();
 
-    tr_emit_rep_string_df_guard(label_slow);
+    IR2_OPND df_opnd = ra_alloc_itemp();
+    IR2_OPND eflags_opnd = ra_alloc_eflags();
+    la_andi(df_opnd, eflags_opnd, 1 << DF_BIT_INDEX);
+    la_bne(df_opnd, zero_ir2_opnd, label_backward);
+    ra_free_temp(df_opnd);
 
     la_bgeu(rsi_opnd, rdi_opnd, label_no_overlap);
     la_sub_d(overlap, rdi_opnd, rsi_opnd);
@@ -747,6 +757,37 @@ static bool tr_emit_fast_rep_movsb(IR1_INST *pir1, IR2_OPND rsi_opnd,
     la_bne(tail, zero_ir2_opnd, label_tail_loop);
 
     la_label(label_tail_done);
+    tr_emit_finish_fast_rep_string(rcx_opnd, label_exit);
+
+    la_label(label_backward);
+    la_bgeu(rdi_opnd, rsi_opnd, label_backward_no_overlap);
+    la_sub_d(overlap, rsi_opnd, rdi_opnd);
+    la_bltu(overlap, rcx_opnd, label_slow);
+
+    la_label(label_backward_no_overlap);
+    la_srli_d(qwords, rcx_opnd, 3);
+    la_andi(tail, rcx_opnd, 7);
+
+    la_beq(qwords, zero_ir2_opnd, label_backward_qword_done);
+    la_label(label_backward_qword_loop);
+    la_ld_d(value, rsi_opnd, -7);
+    la_st_d(value, rdi_opnd, -7);
+    la_addi_d(rsi_opnd, rsi_opnd, -8);
+    la_addi_d(rdi_opnd, rdi_opnd, -8);
+    la_addi_d(qwords, qwords, -1);
+    la_bne(qwords, zero_ir2_opnd, label_backward_qword_loop);
+
+    la_label(label_backward_qword_done);
+    la_beq(tail, zero_ir2_opnd, label_backward_tail_done);
+    la_label(label_backward_tail_loop);
+    la_ld_bu(value, rsi_opnd, 0);
+    la_st_b(value, rdi_opnd, 0);
+    la_addi_d(rsi_opnd, rsi_opnd, -1);
+    la_addi_d(rdi_opnd, rdi_opnd, -1);
+    la_addi_d(tail, tail, -1);
+    la_bne(tail, zero_ir2_opnd, label_backward_tail_loop);
+
+    la_label(label_backward_tail_done);
     tr_emit_finish_fast_rep_string(rcx_opnd, label_exit);
 
     la_label(label_slow);
