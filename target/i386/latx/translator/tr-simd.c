@@ -3667,9 +3667,9 @@ static void tr_gen_inline_pcmpistri_prefix_mask(IR2_OPND prefix,
     la_bstrpick_d(prefix, prefix, 15, 0);
 }
 
-static void tr_gen_inline_pcmpistri_finish(IR2_OPND res,
-                                           IR2_OPND prefix_d,
-                                           IR2_OPND prefix_s)
+static void tr_gen_inline_pcmpistr_set_flags(IR2_OPND res,
+                                             IR2_OPND prefix_d,
+                                             IR2_OPND prefix_s)
 {
     IR2_OPND tmp = ra_alloc_itemp();
     IR2_OPND flags = ra_alloc_itemp();
@@ -3698,6 +3698,19 @@ static void tr_gen_inline_pcmpistri_finish(IR2_OPND res,
     la_x86mtflag(flags, CF_USEDEF_BIT | PF_USEDEF_BIT | AF_USEDEF_BIT |
                         ZF_USEDEF_BIT | SF_USEDEF_BIT | OF_USEDEF_BIT);
 
+    ra_free_temp(flags);
+    ra_free_temp(tmp);
+}
+
+static void tr_gen_inline_pcmpistri_finish(IR2_OPND res,
+                                           IR2_OPND prefix_d,
+                                           IR2_OPND prefix_s)
+{
+    tr_gen_inline_pcmpistr_set_flags(res, prefix_d, prefix_s);
+
+    IR2_OPND tmp = ra_alloc_itemp();
+    IR2_OPND flags = ra_alloc_itemp();
+
     /* ECX = res ? ctz(res) : 16 */
     la_ctz_w(tmp, res);
     la_addi_d(flags, zero_ir2_opnd, 16);
@@ -3708,6 +3721,46 @@ static void tr_gen_inline_pcmpistri_finish(IR2_OPND res,
 
     ra_free_temp(flags);
     ra_free_temp(tmp);
+}
+
+static void tr_gen_inline_pcmpistr_equal_any_mask(IR2_OPND res,
+                                                  IR2_OPND vd,
+                                                  IR2_OPND vs,
+                                                  IR2_OPND prefix_d,
+                                                  IR2_OPND prefix_s)
+{
+    IR2_OPND vmatch = ra_alloc_ftemp();
+    IR2_OPND vcmp = ra_alloc_ftemp();
+    IR2_OPND vbyte = ra_alloc_ftemp();
+    IR2_OPND vvalid = ra_alloc_ftemp();
+    IR2_OPND byte = ra_alloc_itemp();
+    IR2_OPND valid = ra_alloc_itemp();
+
+    la_vxor_v(vmatch, vmatch, vmatch);
+    for (int i = 0; i < 16; i++) {
+        la_vpickve2gr_bu(byte, vd, i);
+        la_vreplgr2vr_b(vbyte, byte);
+        la_vseq_b(vcmp, vs, vbyte);
+
+        la_srli_d(valid, prefix_d, i);
+        la_andi(valid, valid, 1);
+        la_sub_d(valid, zero_ir2_opnd, valid);
+        la_vreplgr2vr_b(vvalid, valid);
+        la_vand_v(vcmp, vcmp, vvalid);
+        la_vor_v(vmatch, vmatch, vcmp);
+    }
+
+    la_vmsknz_b(vmatch, vmatch);
+    la_vpickve2gr_wu(res, vmatch, 0);
+    la_bstrpick_d(res, res, 15, 0);
+    la_and(res, res, prefix_s);
+
+    ra_free_temp(valid);
+    ra_free_temp(byte);
+    ra_free_temp(vvalid);
+    ra_free_temp(vbyte);
+    ra_free_temp(vcmp);
+    ra_free_temp(vmatch);
 }
 
 static void tr_gen_inline_pcmpistri_equal_each_negative(IR2_OPND vd,
@@ -3749,6 +3802,36 @@ static void tr_gen_inline_pcmpistri_equal_each_negative(IR2_OPND vd,
     ra_free_temp(eq_mask);
 }
 
+static void tr_gen_inline_pcmpistri_equal_any(IR2_OPND vd, IR2_OPND vs,
+                                              int ctrl)
+{
+    IR2_OPND vd_nz = ra_alloc_ftemp();
+    IR2_OPND vs_nz = ra_alloc_ftemp();
+    IR2_OPND prefix_d = ra_alloc_itemp();
+    IR2_OPND prefix_s = ra_alloc_itemp();
+    IR2_OPND res = ra_alloc_itemp();
+    IR2_OPND tmp = ra_alloc_itemp();
+
+    tr_gen_inline_pcmpistri_prefix_mask(prefix_d, vd, vd_nz, tmp);
+    tr_gen_inline_pcmpistri_prefix_mask(prefix_s, vs, vs_nz, tmp);
+    ra_free_temp(vs_nz);
+    ra_free_temp(vd_nz);
+
+    tr_gen_inline_pcmpistr_equal_any_mask(res, vd, vs, prefix_d, prefix_s);
+    if (ctrl == 0x12) {
+        li_d(tmp, 0xffff);
+        la_xor(res, res, tmp);
+        la_bstrpick_d(res, res, 15, 0);
+    }
+
+    tr_gen_inline_pcmpistri_finish(res, prefix_d, prefix_s);
+
+    ra_free_temp(res);
+    ra_free_temp(prefix_s);
+    ra_free_temp(prefix_d);
+    ra_free_temp(tmp);
+}
+
 static void tr_gen_inline_pcmpistri_self_nul_probe(IR2_OPND vd)
 {
     IR2_OPND vtmp = ra_alloc_ftemp();
@@ -3778,6 +3861,9 @@ static void tr_gen_inline_pcmpistri_self_nul_probe(IR2_OPND vd)
  *   pcmpistri xmm, xmm, 0x3a
  *     Equal Each, masked negative polarity, least-significant index.  glibc
  *     uses only the self-compare form as a NUL-position probe.
+ *   pcmpistri xmm, xmm/m128, 0x02/0x12
+ *     Equal Any, positive/negative polarity, least-significant index.  glibc
+ *     uses these for strcspn/strpbrk/strspn delimiter-set scans.
  *
  * Other modes have different aggregation/polarity/index semantics and stay on
  * the helper path.
@@ -3787,6 +3873,11 @@ static bool tr_gen_inline_pcmpistri(IR1_INST *pir1, IR2_OPND vd, IR2_OPND vs,
 {
     if (ctrl == 0x18 || ctrl == 0x1a) {
         tr_gen_inline_pcmpistri_equal_each_negative(vd, vs);
+        return true;
+    }
+
+    if (ctrl == 0x02 || ctrl == 0x12) {
+        tr_gen_inline_pcmpistri_equal_any(vd, vs, ctrl);
         return true;
     }
 
@@ -3806,7 +3897,7 @@ static bool tr_gen_inline_pcmpistri(IR1_INST *pir1, IR2_OPND vd, IR2_OPND vs,
 
 static bool tr_pcmpistri_mem_can_inline(int ctrl)
 {
-    return ctrl == 0x18 || ctrl == 0x1a;
+    return ctrl == 0x02 || ctrl == 0x12 || ctrl == 0x18 || ctrl == 0x1a;
 }
 
 #ifndef CONFIG_LATX_AVX_OPT
@@ -3855,6 +3946,44 @@ bool translate_vpcmpistri(IR1_INST *pir1)
     return true;
 }
 
+static bool tr_gen_inline_pcmpistrm(IR2_OPND vd, IR2_OPND vs, int ctrl)
+{
+    if (ctrl != 0x02 && ctrl != 0x12) {
+        return false;
+    }
+
+    IR2_OPND vd_nz = ra_alloc_ftemp();
+    IR2_OPND vs_nz = ra_alloc_ftemp();
+    IR2_OPND prefix_d = ra_alloc_itemp();
+    IR2_OPND prefix_s = ra_alloc_itemp();
+    IR2_OPND res = ra_alloc_itemp();
+    IR2_OPND tmp = ra_alloc_itemp();
+
+    tr_gen_inline_pcmpistri_prefix_mask(prefix_d, vd, vd_nz, tmp);
+    tr_gen_inline_pcmpistri_prefix_mask(prefix_s, vs, vs_nz, tmp);
+    ra_free_temp(vs_nz);
+    ra_free_temp(vd_nz);
+
+    tr_gen_inline_pcmpistr_equal_any_mask(res, vd, vs, prefix_d, prefix_s);
+    if (ctrl == 0x12) {
+        li_d(tmp, 0xffff);
+        la_xor(res, res, tmp);
+        la_bstrpick_d(res, res, 15, 0);
+    }
+
+    tr_gen_inline_pcmpistr_set_flags(res, prefix_d, prefix_s);
+
+    IR2_OPND xmm0 = ra_alloc_xmm(0);
+    la_vxor_v(xmm0, xmm0, xmm0);
+    la_vinsgr2vr_d(xmm0, res, 0);
+
+    ra_free_temp(res);
+    ra_free_temp(prefix_s);
+    ra_free_temp(prefix_d);
+    ra_free_temp(tmp);
+    return true;
+}
+
 bool translate_pcmpistrm(IR1_INST *pir1)
 {
     IR1_OPND *opnd0 = ir1_get_opnd(pir1, 0);
@@ -3864,8 +3993,18 @@ bool translate_pcmpistrm(IR1_INST *pir1)
     int imm = ir1_opnd_uimm(opnd2);
     if (ir1_opnd_is_xmm(opnd1)) {
         int s = ir1_opnd_base_reg_num(opnd1);
-        tr_gen_call_to_helper_pcmpxstrx((ADDR)helper_pcmpistrm_xmm, d, s, imm,
-                LOAD_HELPER_PCMPISTRM_XMM);
+        IR2_OPND vd = ra_alloc_xmm(d);
+        IR2_OPND vs = ra_alloc_xmm(s);
+        if (!tr_gen_inline_pcmpistrm(vd, vs, imm)) {
+            tr_gen_call_to_helper_pcmpxstrx((ADDR)helper_pcmpistrm_xmm, d, s, imm,
+                    LOAD_HELPER_PCMPISTRM_XMM);
+        }
+    } else if (imm == 0x02 || imm == 0x12) {
+        IR2_OPND vd = ra_alloc_xmm(d);
+        IR2_OPND vs = ra_alloc_ftemp();
+        load_freg128_from_ir1_mem(vs, opnd1);
+        tr_gen_inline_pcmpistrm(vd, vs, imm);
+        ra_free_temp(vs);
     } else {
         IR2_OPND temp = ra_alloc_ftemp();
         IR2_OPND src = ra_alloc_xmm((d + 1) % 7 + 1);
