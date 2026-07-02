@@ -151,6 +151,44 @@ static bool enable_strace_error;
  */
 static int last_log_mask;
 
+#ifdef CONFIG_LATX
+#define GLIBC_TUNABLES_ENV "GLIBC_TUNABLES"
+#define GLIBC_TUNABLES_ENV_PREFIX GLIBC_TUNABLES_ENV "="
+#define LATX_GLIBC_TUNABLES_DEFAULT \
+    "glibc.cpu.hwcaps=Fast_Unaligned_Load,Fast_Unaligned_Copy," \
+    "Slow_SSE4_2,-SSE4_2"
+
+static bool latx_glibc_tunables_is_empty(envlist_t *envlist)
+{
+    g_auto(GStrv) env = envlist_to_environ(envlist, NULL);
+    size_t prefix_len = strlen(GLIBC_TUNABLES_ENV_PREFIX);
+
+    for (char **entry = env; *entry != NULL; entry++) {
+        if (strncmp(*entry, GLIBC_TUNABLES_ENV_PREFIX, prefix_len) == 0) {
+            return (*entry)[prefix_len] == '\0';
+        }
+    }
+
+    return true;
+}
+
+static void latx_apply_glibc_tunables(envlist_t *envlist)
+{
+    g_autofree char *glibc_tuneables = NULL;
+
+    if (!latx_glibc_tunables_is_empty(envlist)) {
+        return;
+    }
+
+    glibc_tuneables = g_strdup_printf("%s%s", GLIBC_TUNABLES_ENV_PREFIX,
+                                      LATX_GLIBC_TUNABLES_DEFAULT);
+    if (envlist_setenv(envlist, glibc_tuneables) != 0) {
+        fprintf(stderr, "Unable to set GLIBC_TUNABLES for guest\n");
+        exit(EXIT_FAILURE);
+    }
+}
+#endif
+
 /*
  * When running 32-on-64 we should make sure we can fit all of the possible
  * guest address space into a contiguous chunk of virtual host memory.
@@ -1373,6 +1411,10 @@ int main(int argc, char **argv, char **envp)
             exit(1);
         }
     }
+
+#ifdef CONFIG_LATX
+    latx_apply_glibc_tunables(envlist);
+#endif
 
     target_environ = envlist_to_environ(envlist, NULL);
     envlist_free(envlist);
