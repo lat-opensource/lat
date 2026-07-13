@@ -14250,10 +14250,11 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
 
         if (path_len > 0) {
             real_path[path_len] = '\0';
-            int pid;
-            char extra[2];
+            char *endptr;
 
-            if (sscanf(real_path, "/proc/%d/task%1s", &pid, extra) == 1) {
+            if (!strncmp(real_path, "/proc/", 6)
+                && strtol(real_path + 6, &endptr, 10) > 0
+                && !strcmp(endptr, "/task")) {
 #ifdef CONFIG_LATX_DEBUG
                 fprintf(stderr, "latx: Detected task directory: %s\n", real_path);
 #endif
