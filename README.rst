@@ -165,19 +165,19 @@ STEP2:
 
 .. code-block:: bash
 
-    apt install -y git ninja-build libssl-dev libc6 gcc g++ pkg-config libglib2.0-dev libdrm-dev lsb-release make python3-setuptools
+    apt install -y git meson ninja-build libssl-dev libc6 gcc g++ pkg-config libglib2.0-dev libdrm-dev lsb-release make python3-setuptools
 
 - Arch Linux
 
 .. code-block:: bash
 
-    pacman -S --noconfirm ninja gcc pkgconf python3 python-setuptools openssl-static openssl
+    pacman -S --noconfirm meson ninja gcc pkgconf python3 python-setuptools openssl-static openssl
 
 - 安同 OS (AOSC OS)
 
 .. code-block:: bash
 
-    oma install -y gcc nettle pcre2 libffi gnutls glib zlib glib-static libgcrypt-static libgpg-error-static libnfs-static pcre-static zlib-static zstd-static openssl-static pkg-config ninja
+    oma install -y gcc meson nettle pcre2 libffi gnutls glib zlib glib-static libgcrypt-static libgpg-error-static libnfs-static pcre-static zlib-static zstd-static openssl-static pkg-config ninja
 
 - Fedora
 
@@ -190,7 +190,28 @@ STEP3:
 
 .. code-block:: bash
 
+    meson --version
+    ninja --version
+
+
+STEP4:
+
+.. code-block:: bash
+
     ./latxbuild/build-release.sh
+
+
+构建产物
+========
+
+构建完成后，生成的 ``tar.xz`` 包内包含以下可执行文件：
+
+- ``usr/bin/latx-i386``：用于运行 32 位 i386 x86 程序。
+- ``usr/bin/latx-x86_64``：用于运行 64 位 x86_64 程序。
+
+打包时会移除符号表和调试信息，因此包内二进制比 ``build32/`` 和
+``build64/`` 中的原始构建产物更小，这是正常行为。安装和实际使用时应以
+``tar.xz`` 包中的二进制为准；构建目录中的未剥离文件适用于调试。
 
 AVX指令支持
 ==============
@@ -238,4 +259,3 @@ AVX指令支持
 ------------
 
 如有任何问题或建议，欢迎通过 Issue 与我们交流！
-

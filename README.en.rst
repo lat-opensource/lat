@@ -176,19 +176,19 @@ STEP2:
 
 .. code-block:: bash
 
-    apt install -y git ninja-build libssl-dev libc6 gcc g++ pkg-config libglib2.0-dev libdrm-dev lsb-release make python3-setuptools
+    apt install -y git meson ninja-build libssl-dev libc6 gcc g++ pkg-config libglib2.0-dev libdrm-dev lsb-release make python3-setuptools
 
 - Arch Linux
 
 .. code-block:: bash
 
-    pacman -S --noconfirm ninja gcc pkgconf python3 python-setuptools openssl-static openssl
+    pacman -S --noconfirm meson ninja gcc pkgconf python3 python-setuptools openssl-static openssl
 
 - AOSC OS
 
 .. code-block:: bash
 
-    oma install -y gcc nettle pcre2 libffi gnutls glib zlib glib-static libgcrypt-static libgpg-error-static libnfs-static pcre-static zlib-static zstd-static openssl-static pkg-config ninja
+    oma install -y gcc meson nettle pcre2 libffi gnutls glib zlib glib-static libgcrypt-static libgpg-error-static libnfs-static pcre-static zlib-static zstd-static openssl-static pkg-config ninja
 
 - Fedora
 
@@ -200,7 +200,29 @@ STEP3:
 
 .. code-block:: bash
 
+    meson --version
+    ninja --version
+
+
+STEP4:
+
+.. code-block:: bash
+
     ./latxbuild/build-release.sh
+
+
+Build Outputs
+=============
+
+The generated ``tar.xz`` package contains the following executables:
+
+- ``usr/bin/latx-i386``: runs 32-bit i386 x86 programs.
+- ``usr/bin/latx-x86_64``: runs 64-bit x86_64 programs.
+
+Packaging strips symbol tables and debug information, so the binaries in the
+package are smaller than the original build outputs in ``build32/`` and
+``build64/``. This is expected. Use the binaries in the ``tar.xz`` package for
+installation and normal use; retain the unstripped build outputs for debugging.
 
 AVX Instruction Support
 ==============
