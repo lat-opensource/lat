@@ -74,6 +74,8 @@ typedef struct wine_sec_head {
 
 bool wine_dll_handle(char *file_name, int name_len, int target_prot,
     abi_ulong map_start, abi_ulong map_len, int map_offset, int map_fd);
+bool wine_dll_track_sections(abi_ulong map_start, abi_ulong map_len,
+                             int map_offset, int map_fd);
 void wine_sec_tree_init(void);
 wine_sec_info *wine_sec_tree_lookup(target_ulong pc);
 void segment_tree_init(void);

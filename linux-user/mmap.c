@@ -1069,6 +1069,7 @@ abi_long target_mmap(abi_ulong start, abi_ulong len, int target_prot,
     wine_sec_info * wine_sec = NULL;
     uint64_t aot_offset = offset;
     if (option_aot_wine && option_aot) {
+        wine_dll_track_sections(start, len, offset, fd);
         wine_sec = wine_sec_tree_lookup(start);
     }
     if (option_aot && ((fd > 2 && (target_prot & PROT_EXEC)) || wine_sec)) {

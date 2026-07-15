@@ -329,11 +329,31 @@ bool wine_dll_handle(char *file_name, int name_len, int target_prot,
            break;
         }
     }
-    if (is_pe && (target_prot & PROT_EXEC) && map_offset == 0) {
+    if (is_pe && map_offset == 0) {
         return wine_dll_inset_sec(map_start, map_len, map_fd);
     }
 
     return false;
+}
+
+bool wine_dll_track_sections(abi_ulong map_start, abi_ulong map_len,
+                             int map_offset, int map_fd)
+{
+    char path[64];
+    char file_name[PATH_MAX];
+    int name_len;
+
+    if (map_fd <= 2 || map_offset != 0) {
+        return false;
+    }
+    snprintf(path, sizeof(path), "/proc/self/fd/%d", map_fd);
+    name_len = readlink(path, file_name, sizeof(file_name) - 1);
+    if (name_len <= 4) {
+        return false;
+    }
+    file_name[name_len] = '\0';
+    return wine_dll_handle(file_name, name_len, 0, map_start, map_len,
+                           map_offset, map_fd);
 }
 
 seg_info *segment_tree_lookup(target_ulong pc)
