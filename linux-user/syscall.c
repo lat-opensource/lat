@@ -9192,62 +9192,6 @@ static int fork_with_flags(unsigned int flags)
     return 0;
 }
 
-static void lat_signal_vcpu_threads(void)
-{
-    pid_t pid;
-    pid_t self_tid;
-    pid_t *tids;
-    int nr_tids = 0;
-    int max_tids = 0;
-    CPUState *cpu;
-
-    pid = getpid();
-    self_tid = syscall(SYS_gettid);
-
-    cpu_list_lock();
-    CPU_FOREACH(cpu) {
-        TaskState *ts = cpu->opaque;
-
-        if (!ts || ts->ts_tid <= 0 || ts->ts_tid == self_tid) {
-            continue;
-        }
-        max_tids++;
-    }
-    if (!max_tids) {
-        cpu_list_unlock();
-        return;
-    }
-
-    tids = g_new(pid_t, max_tids);
-    CPU_FOREACH(cpu) {
-        TaskState *ts = cpu->opaque;
-
-        if (!ts || ts->ts_tid <= 0 || ts->ts_tid == self_tid) {
-            continue;
-        }
-        tids[nr_tids++] = ts->ts_tid;
-    }
-    cpu_list_unlock();
-
-    for (int i = 0; i < nr_tids; i++) {
-        siginfo_t info;
-        memset(&info, 0, sizeof(info));
-
-        info.si_signo = SIGRTMIN + 1;
-        info.si_code = SI_QUEUE;
-        info.si_pid = pid;
-        info.si_uid = getuid();
-
-        info.si_int = FORK_UNLINK_MAGIC;
-#ifdef CONFIG_LATX_DEBUG
-        fprintf(stderr, "[LAT] send signal pid=%d tid=%d sig=%d\n",
-                pid, tids[i], SIGRTMIN + 1);
-#endif
-        syscall(SYS_rt_tgsigqueueinfo, pid, tids[i], SIGRTMIN + 1, &info);
-    }
-
-    g_free(tids);
-}
 /* do_fork() Must return host values and target errnos (unlike most
    do_*() functions). */
 static int do_fork(CPUArchState *env, unsigned int flags, abi_ulong newsp,
@@ -9390,10 +9334,6 @@ static int do_fork(CPUArchState *env, unsigned int flags, abi_ulong newsp,
                 close(namespace_pipe[1]);
             }
             return -TARGET_ERESTARTSYS;
-        }
-
-        if (option_fork_unlink) {
-            lat_signal_vcpu_threads();
         }
 
         fork_start();

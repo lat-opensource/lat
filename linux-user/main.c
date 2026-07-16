@@ -40,6 +40,7 @@
 #include "qemu/module.h"
 #include "qemu/plugin.h"
 #include "exec/exec-all.h"
+#include "exec/fasttb.h"
 #include "tcg/tcg.h"
 #include "qemu/timer.h"
 #include "qemu/envlist.h"
@@ -250,6 +251,25 @@ bool qemu_cpu_is_self(CPUState *cpu)
 
 void qemu_cpu_kick(CPUState *cpu)
 {
+#ifdef CONFIG_LATX
+    /* start_exclusive() has already counted this vCPU as a waiter. */
+    if (option_fork_unlink && cpu->has_waiter) {
+        TaskState *ts = cpu->opaque;
+
+        if (ts && ts->ts_tid > 0) {
+            siginfo_t info = {
+                .si_signo = SIGRTMIN + 1,
+                .si_code = SI_QUEUE,
+                .si_pid = getpid(),
+                .si_uid = getuid(),
+                .si_int = FORK_UNLINK_MAGIC,
+            };
+
+            syscall(SYS_rt_tgsigqueueinfo, getpid(), ts->ts_tid,
+                    SIGRTMIN + 1, &info);
+        }
+    }
+#endif
     cpu_exit(cpu);
 }
 
