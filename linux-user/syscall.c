@@ -2703,6 +2703,9 @@ static abi_long do_setsockopt(int sockfd, int level, int optname,
 #ifdef IP_FREEBIND
         case IP_FREEBIND:
 #endif
+#ifdef IP_MULTICAST_ALL
+        case IP_MULTICAST_ALL:
+#endif
         case IP_MULTICAST_IF:
         case IP_MULTICAST_TTL:
         case IP_MULTICAST_LOOP:
