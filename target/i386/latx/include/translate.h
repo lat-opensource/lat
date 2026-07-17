@@ -1344,6 +1344,7 @@ void generate_xcomisx(IR2_OPND, IR2_OPND, bool, bool, uint8_t);
 /* extern ADDR tb_look_up_native; */
 
 void tr_generate_exit_tb(IR1_INST *branch, int succ_id);
+void tr_generate_exit_tb_to_next(IR1_INST *ir1);
 #ifdef CONFIG_LATX_XCOMISX_OPT
 void tr_generate_exit_stub_tb(IR1_INST *branch, int succ_id, void *func, IR1_INST *stub);
 #endif

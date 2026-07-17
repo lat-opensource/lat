@@ -93,6 +93,9 @@ int target_latx_host(CPUArchState *env, struct TranslationBlock *tb,
     TCGProfile *prof = &tcg_ctx->prof;
     int64_t ti = profile_getclock();
 #endif
+    if (option_anonym && (tb->flags & HF_TF_MASK)) {
+        max_insns = 1;
+    }
     tr_disasm(tb, max_insns);
     /* return code_size and skip translate */
     if (!tb->icount && tb->pc < reserved_va) {

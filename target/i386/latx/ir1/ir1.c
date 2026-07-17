@@ -1721,6 +1721,13 @@ bool ir1_is_tb_ending(IR1_INST *ir1)
 #if defined(CONFIG_LATX_KZT)
     if(option_kzt && ir1_opcode(ir1) == dt_X86_INS_INT3) return true;
 #endif
+    if (option_anonym &&
+        (ir1_opcode(ir1) == dt_X86_INS_POPF ||
+         ir1_opcode(ir1) == dt_X86_INS_POPFD ||
+         ir1_opcode(ir1) == dt_X86_INS_POPFQ)) {
+        return true;
+    }
+
     if (ir1_opcode(ir1) == dt_X86_INS_CALL && !ir1_is_indirect_call(ir1) &&
         ir1_addr_next(ir1) == ir1_target_addr(ir1)) {
         return false;

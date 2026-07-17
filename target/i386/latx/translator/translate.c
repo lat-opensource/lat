@@ -2596,6 +2596,44 @@ static inline void set_tb_canlink(IR1_INST *branch, int succ_id, ADDR succ_x86_a
     }
 }
 
+static void tr_generate_single_step_exit(IR2_OPND next_pc)
+{
+    IR2_OPND helper_addr = ra_alloc_itemp();
+
+    la_store_addrx(next_pc, env_ir2_opnd, lsenv_offset_of_eip(lsenv));
+    tr_save_registers_to_env(0xff, 0xff, option_save_xmm,
+                             options_to_save());
+#ifdef TARGET_X86_64
+    tr_save_x64_8_registers_to_env(0xff, option_save_xmm);
+#endif
+    aot_load_host_addr(helper_addr, (ADDR)helper_raise_trapop,
+                       LOAD_HELPER_RAISE_TRAPOP, 0);
+    la_jirl(zero_ir2_opnd, helper_addr, 0);
+    ra_free_temp(helper_addr);
+}
+
+void tr_generate_exit_tb_to_next(IR1_INST *ir1)
+{
+    TranslationBlock *tb = lsenv->tr_data->curr_tb;
+    IR2_OPND next_pc = ra_alloc_dbt_arg2();
+    target_ulong call_offset = aot_get_call_offset(ir1_addr_next(ir1));
+
+    aot_load_guest_addr(next_pc, ir1_addr_next(ir1), LOAD_CALL_TARGET,
+                        call_offset);
+
+    if (tb->flags & HF_TF_MASK) {
+        tr_generate_single_step_exit(next_pc);
+        return;
+    }
+
+    IR2_OPND base = ra_alloc_data();
+    IR2_OPND target = ra_alloc_data();
+
+    la_data_li(base, (ADDR)tb->tc.ptr);
+    la_data_li(target, context_switch_native_to_bt_ret_0);
+    aot_la_append_ir2_jmp_far(target, base, B_EPILOGUE_RET_0, 0);
+}
+
 #ifdef CONFIG_LATX_XCOMISX_OPT
 inline
 void tr_generate_exit_tb(IR1_INST *branch, int succ_id)
@@ -2675,6 +2713,15 @@ void tr_generate_exit_tb(IR1_INST *branch, int succ_id)
             tb->first_jmp_align = ir2_opnd_label_id(&label_first_jmp_align);
         }
 direct_jmp:
+        if (option_anonym && (tb->flags & HF_TF_MASK)) {
+            target_ulong call_offset = aot_get_call_offset(succ_x86_addr);
+
+            aot_load_guest_addr(succ_x86_addr_opnd, succ_x86_addr,
+                                LOAD_CALL_TARGET, call_offset);
+            tr_generate_single_step_exit(succ_x86_addr_opnd);
+            break;
+        }
+
         /*
          * If option_lsfpu is open, condition jmp will jmp to next tb diretly.
          * Therefore LATX do not always need to update last_tb, after tb link.
@@ -2741,6 +2788,11 @@ direct_jmp:
     case dt_X86_INS_IRETD:
     case dt_X86_INS_IRETQ:
 indirect_jmp:
+        if (option_anonym && (tb->flags & HF_TF_MASK)) {
+            tr_generate_single_step_exit(succ_x86_addr_opnd);
+            break;
+        }
+
         tb->bool_flags |= IS_INDIRECT_JMP;
         /*
          * If option_lsfpu is open, LATX do not need to fpu_rotate, therefore
