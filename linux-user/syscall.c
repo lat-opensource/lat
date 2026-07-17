@@ -64,6 +64,7 @@
 #include <linux/in6.h>
 #include <linux/errqueue.h>
 #include <linux/random.h>
+#include <linux/sctp.h>
 #ifdef CONFIG_TIMERFD
 #include <sys/timerfd.h>
 #endif
@@ -2667,12 +2668,23 @@ static inline abi_long host_to_target_cmsg(struct target_msghdr *target_msgh,
 static abi_long do_setsockopt(int sockfd, int level, int optname,
                               abi_ulong optval_addr, socklen_t optlen)
 {
+    struct {
+        uint8_t sctp_data_io_event;
+        uint8_t sctp_association_event;
+        uint8_t sctp_address_event;
+        uint8_t sctp_send_failure_event;
+        uint8_t sctp_peer_error_event;
+        uint8_t sctp_shutdown_event;
+        uint8_t sctp_partial_delivery_event;
+        uint8_t sctp_adaptation_layer_event;
+    } target_sctp_events;
     abi_long ret;
     int val;
     struct ip_mreqn *ip_mreq;
     struct ip_mreq_source *ip_mreq_source;
     struct group_req *group_req;
     struct tpacket_req *req;
+    struct sctp_event_subscribe sctp_events;
 
     switch(level) {
     case SOL_TCP:
@@ -2754,6 +2766,21 @@ static abi_long do_setsockopt(int sockfd, int level, int optname,
         default:
             goto unimplemented;
         }
+        break;
+    case IPPROTO_SCTP:
+        if (optname != SCTP_EVENTS || optlen != sizeof(target_sctp_events)) {
+            goto unimplemented;
+        }
+
+        /* The x86 JDK uses the legacy eight-byte subscription structure. */
+        memset(&sctp_events, 0, sizeof(sctp_events));
+        if (copy_from_user(&target_sctp_events, optval_addr,
+                           sizeof(target_sctp_events))) {
+            return -TARGET_EFAULT;
+        }
+        memcpy(&sctp_events, &target_sctp_events, sizeof(target_sctp_events));
+        ret = get_errno(setsockopt(sockfd, level, optname, &sctp_events,
+                                   sizeof(sctp_events)));
         break;
     case SOL_IPV6:
         switch (optname) {
