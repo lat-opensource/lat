@@ -258,4 +258,4 @@ AVX指令支持
 
 ------------
 
-如有任何问题或建议，欢迎通过 Issue 与我们交流！
+如有任何问题或建议，欢迎通过 `Issue <https://github.com/lat-opensource/lat/issues>`_ 与我们交流！

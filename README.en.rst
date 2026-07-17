@@ -269,4 +269,4 @@ their invaluable open-source contributions and support.
 ------------
 
 
-If you have any questions or suggestions, please feel free to engage with us through Issues!
+If you have any questions or suggestions, please feel free to engage with us through `Issue <https://github.com/lat-opensource/lat/issues>`_ !
