@@ -14950,11 +14950,15 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
         if (option_aot && (arg1 > 2)) {
             char buf[PATH_MAX];
             int target_prot = page_get_flags(arg2) & (PAGE_READ | PAGE_WRITE | PAGE_EXEC);
-            if (target_prot & PAGE_EXEC) {
+            if (option_aot_wine || (target_prot & PAGE_EXEC)) {
                 uint64_t aot_offset = target_offset64(arg4, arg5);
                 aot_offset = deal_seg(NULL, true, aot_offset, buf, arg1,
                         target_prot, arg3, arg2);
-                recover_aot_tb(buf, aot_offset, arg2, arg3);
+                /* Wine makes PE pread buffers executable via mprotect,
+                 * which has no AOT hook. Bind their cache while tracking. */
+                if (option_load_aot) {
+                    recover_aot_tb(buf, aot_offset, arg2, arg3);
+                }
             }
         }
 #endif
