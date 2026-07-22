@@ -725,6 +725,27 @@ abi_long target_mmap(abi_ulong start, abi_ulong len, int target_prot,
         goto fail;
     }
 
+#ifdef MAP_FIXED_NOREPLACE
+    /* Check guest mappings before replacing the pre-reserved host range. */
+    if (flags & MAP_FIXED_NOREPLACE) {
+        if (start & ~TARGET_PAGE_MASK) {
+            errno = EINVAL;
+            goto fail;
+        }
+        if (!guest_range_valid_untagged(start, len)) {
+            errno = ENOMEM;
+            goto fail;
+        }
+        if (page_find_range_empty(start, start + len - 1, len,
+                                  TARGET_PAGE_SIZE) != start) {
+            errno = EEXIST;
+            goto fail;
+        }
+        flags &= ~MAP_FIXED_NOREPLACE;
+        flags |= MAP_FIXED;
+    }
+#endif
+
     if (option_prlimit && rlimit_as_account && (vir_rlimit_as != RLIM_INFINITY)
         && (len + vir_rlimit_as_acc >= vir_rlimit_as)) {
         errno = ENOMEM;

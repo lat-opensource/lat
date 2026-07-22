@@ -98,6 +98,7 @@ int option_smc_opt;
 int option_set_rounding_opt;
 int option_cvt_opt;
 int option_fast_atomic;
+char *option_wine_pe_fixed_base;
 
 unsigned long long counter_tb_exec;
 unsigned long long counter_tb_tr;

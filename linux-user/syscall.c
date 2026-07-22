@@ -171,6 +171,180 @@
 #include <linux/dma-buf.h>
 
 #include <sys/syscall.h>
+
+#ifdef CONFIG_LATX
+#define IMAGE_NT_SIGNATURE 0x00004550
+#define IMAGE_FILE_RELOCS_STRIPPED 0x0001
+#define IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE 0x0040
+#define PE_OPTIONAL_HEADER_OFFSET 24
+#define PE_COFF_OPTIONAL_HEADER_SIZE_OFFSET 20
+#define PE_COFF_CHARACTERISTICS_OFFSET 22
+#define PE32_IMAGE_BASE_OFFSET 28
+#define PE64_IMAGE_BASE_OFFSET 24
+#define PE_SECTION_ALIGNMENT_OFFSET 32
+#define PE_SIZE_OF_IMAGE_OFFSET 56
+#define PE_DLL_CHARACTERISTICS_OFFSET 70
+#define PE32_NUMBER_OF_DATA_DIRECTORIES_OFFSET 92
+#define PE64_NUMBER_OF_DATA_DIRECTORIES_OFFSET 108
+#define PE32_DATA_DIRECTORIES_OFFSET 96
+#define PE64_DATA_DIRECTORIES_OFFSET 112
+#define PE_BASE_RELOCATION_DIRECTORY_INDEX 5
+#define PE_DATA_DIRECTORY_SIZE 8
+
+static bool latx_fd_basename_matches(int fd, const char *expected)
+{
+    char fd_link[64];
+    char path[PATH_MAX + 1];
+    const char *basename;
+    ssize_t len;
+
+    snprintf(fd_link, sizeof(fd_link), "/proc/self/fd/%d", fd);
+    len = readlink(fd_link, path, PATH_MAX);
+    if (len <= 0) {
+        return false;
+    }
+    path[len] = '\0';
+    basename = strrchr(path, '/');
+    basename = basename ? basename + 1 : path;
+    return !strcasecmp(basename, expected);
+}
+
+static bool latx_wine_pe_has_safe_preferred_base(const uint8_t *header,
+                                                  abi_long len,
+                                                  uint16_t magic,
+                                                  uint64_t *image_base,
+                                                  uint32_t *image_size)
+{
+    uint32_t data_directories_offset;
+    uint32_t number_of_data_directories_offset;
+    uint32_t number_of_data_directories;
+    uint32_t relocation_rva;
+    uint32_t relocation_size;
+    uint32_t section_alignment;
+    uint16_t file_characteristics;
+    uint16_t optional_header_size;
+    uint64_t end;
+    size_t relocation_directory_offset;
+
+    optional_header_size = lduw_le_p(
+        header + PE_COFF_OPTIONAL_HEADER_SIZE_OFFSET);
+    file_characteristics = lduw_le_p(
+        header + PE_COFF_CHARACTERISTICS_OFFSET);
+    if (file_characteristics & IMAGE_FILE_RELOCS_STRIPPED) {
+        return false;
+    }
+
+    if (magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC) {
+        *image_base = ldl_le_p(header + PE_OPTIONAL_HEADER_OFFSET +
+                               PE32_IMAGE_BASE_OFFSET);
+        number_of_data_directories_offset =
+            PE32_NUMBER_OF_DATA_DIRECTORIES_OFFSET;
+        data_directories_offset = PE32_DATA_DIRECTORIES_OFFSET;
+    } else {
+        *image_base = ldq_le_p(header + PE_OPTIONAL_HEADER_OFFSET +
+                               PE64_IMAGE_BASE_OFFSET);
+        number_of_data_directories_offset =
+            PE64_NUMBER_OF_DATA_DIRECTORIES_OFFSET;
+        data_directories_offset = PE64_DATA_DIRECTORIES_OFFSET;
+    }
+
+    relocation_directory_offset = PE_OPTIONAL_HEADER_OFFSET +
+        data_directories_offset + PE_BASE_RELOCATION_DIRECTORY_INDEX *
+        PE_DATA_DIRECTORY_SIZE;
+    if (optional_header_size < data_directories_offset +
+            (PE_BASE_RELOCATION_DIRECTORY_INDEX + 1) *
+            PE_DATA_DIRECTORY_SIZE ||
+            len < relocation_directory_offset + PE_DATA_DIRECTORY_SIZE) {
+        return false;
+    }
+
+    number_of_data_directories = ldl_le_p(header +
+        PE_OPTIONAL_HEADER_OFFSET + number_of_data_directories_offset);
+    if (number_of_data_directories <= PE_BASE_RELOCATION_DIRECTORY_INDEX) {
+        return false;
+    }
+
+    section_alignment = ldl_le_p(header + PE_OPTIONAL_HEADER_OFFSET +
+                                 PE_SECTION_ALIGNMENT_OFFSET);
+    *image_size = ldl_le_p(header + PE_OPTIONAL_HEADER_OFFSET +
+                           PE_SIZE_OF_IMAGE_OFFSET);
+    relocation_rva = ldl_le_p(header + relocation_directory_offset);
+    relocation_size = ldl_le_p(header + relocation_directory_offset + 4);
+
+    if (!*image_base || !*image_size ||
+            !is_power_of_2(section_alignment) ||
+            (*image_base & (TARGET_PAGE_SIZE - 1)) ||
+            (*image_size & (TARGET_PAGE_SIZE - 1)) ||
+            (*image_size & (section_alignment - 1)) ||
+            *image_base > GUEST_ADDR_MAX ||
+            *image_size - 1 > GUEST_ADDR_MAX - *image_base) {
+        return false;
+    }
+    end = *image_base + *image_size;
+    if ((magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC && end > UINT64_C(1) << 32) ||
+            !relocation_rva || relocation_size < PE_DATA_DIRECTORY_SIZE ||
+            relocation_rva >= *image_size ||
+            relocation_size > *image_size - relocation_rva) {
+        return false;
+    }
+
+    return true;
+}
+
+static void latx_wine_pe_prefer_image_base(int fd, void *buffer, abi_long len)
+{
+    static bool logged_enabled;
+    static bool logged_rejected;
+    uint8_t *header = buffer;
+    uint16_t characteristics;
+    uint16_t magic;
+    uint64_t image_base;
+    uint32_t image_size;
+
+    if (!option_wine_pe_fixed_base || len < PE_OPTIONAL_HEADER_OFFSET +
+            PE_DLL_CHARACTERISTICS_OFFSET + sizeof(characteristics)) {
+        return;
+    }
+    if (ldl_le_p(header) != IMAGE_NT_SIGNATURE) {
+        return;
+    }
+    magic = lduw_le_p(header + PE_OPTIONAL_HEADER_OFFSET);
+    if (magic != IMAGE_NT_OPTIONAL_HDR32_MAGIC &&
+            magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC) {
+        return;
+    }
+    if (!latx_fd_basename_matches(fd, option_wine_pe_fixed_base)) {
+        return;
+    }
+
+    if (!latx_wine_pe_has_safe_preferred_base(header, len, magic,
+                                               &image_base, &image_size)) {
+        if (!logged_rejected) {
+            fprintf(stderr, "[LATX Wine PE] keeping ASLR for %s: "
+                    "preferred range or relocations are unsafe\n",
+                    option_wine_pe_fixed_base);
+            logged_rejected = true;
+        }
+        return;
+    }
+
+    /* Wine parses this header before atomically probing the guest range. */
+    header += PE_OPTIONAL_HEADER_OFFSET + PE_DLL_CHARACTERISTICS_OFFSET;
+    characteristics = lduw_le_p(header);
+    if (!(characteristics & IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE)) {
+        return;
+    }
+    stw_le_p(header, characteristics & ~IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE);
+    if (!logged_enabled) {
+        fprintf(stderr, "[LATX Wine PE] preferred base enabled for %s: "
+                "0x%" PRIx64 "-0x%" PRIx64
+                " (relocation fallback retained)\n",
+                option_wine_pe_fixed_base, image_base,
+                image_base + image_size);
+        logged_enabled = true;
+    }
+}
+#endif
 /* We can't directly call the host clone syscall, because this will
  * badly confuse libc (breaking mutexes, for example). So we must
  * divide clone flags into:
@@ -8448,6 +8622,10 @@ static bitmask_transtbl mmap_flags_tbl[] = {
     { TARGET_MAP_SHARED, TARGET_MAP_SHARED, MAP_SHARED, MAP_SHARED },
     { TARGET_MAP_PRIVATE, TARGET_MAP_PRIVATE, MAP_PRIVATE, MAP_PRIVATE },
     { TARGET_MAP_FIXED, TARGET_MAP_FIXED, MAP_FIXED, MAP_FIXED },
+#if defined(TARGET_MAP_FIXED_NOREPLACE) && defined(MAP_FIXED_NOREPLACE)
+    { TARGET_MAP_FIXED_NOREPLACE, TARGET_MAP_FIXED_NOREPLACE,
+      MAP_FIXED_NOREPLACE, MAP_FIXED_NOREPLACE },
+#endif
     { TARGET_MAP_ANONYMOUS, TARGET_MAP_ANONYMOUS,
       MAP_ANONYMOUS, MAP_ANONYMOUS },
     { TARGET_MAP_GROWSDOWN, TARGET_MAP_GROWSDOWN,
@@ -14944,6 +15122,11 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
             }
         }
         ret = get_errno(pread64(arg1, p, arg3, target_offset64(arg4, arg5)));
+#ifdef CONFIG_LATX
+        if (ret > 0) {
+            latx_wine_pe_prefer_image_base(arg1, p, ret);
+        }
+#endif
         unlock_user_remap(p, arg2, ret);
 
 #ifdef CONFIG_LATX_AOT

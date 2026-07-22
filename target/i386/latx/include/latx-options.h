@@ -55,6 +55,7 @@ extern int option_aot_wine;
 extern int option_load_aot;
 extern int option_debug_aot;
 extern char ** latx_aot_wine_pefiles_cache;
+extern char *option_wine_pe_fixed_base;
 
 extern uint64_t debug_tb_pc;
 extern uint64_t latx_trace_mem;

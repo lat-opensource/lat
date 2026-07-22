@@ -737,6 +737,11 @@ static void handle_arg_smc_reload(const char *arg)
     }
 }
 
+static void handle_arg_latx_wine_pe_fixed_base(const char *arg)
+{
+    option_wine_pe_fixed_base = g_strdup(arg);
+}
+
 #ifdef CONFIG_LATX_AOT
 static void handle_arg_latx_aot(const char *arg)
 {
@@ -846,6 +851,9 @@ static const struct qemu_argument arg_table[] = {
     "",           "monitor shared memory, retranslate self modifying page"},
     {"smc_reload",    "LATX_SMC_RELOAD",     true,  handle_arg_smc_reload,
     "",           "reload SMC TB"},
+    {"latx-wine-pe-fixed-base", "LATX_WINE_PE_FIXED_BASE", true,
+    handle_arg_latx_wine_pe_fixed_base, "basename",
+    "prefer one relocatable Wine PE image's preferred base"},
 #ifdef CONFIG_LATX_AOT
     {"latx-aot",    "LATX_AOT",     true,  handle_arg_latx_aot,
     "",           "enable aot"},
