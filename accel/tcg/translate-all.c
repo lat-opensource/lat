@@ -565,7 +565,7 @@ static bool is_shadow_page_shmm(target_ulong address)
     return spd && spd->is_shmm;
 }
 
-bool is_shadow_page_not_shmm(target_ulong address)
+bool page_is_shadow_not_shmm(target_ulong address)
 {
     ShadowPageDesc *spd = page_get_target_data(address);
     return spd && !(spd->is_shmm);
@@ -1684,7 +1684,7 @@ static void gen_aot_and_flush(CPUState *cpu, run_on_cpu_data tb_flush_count)
 void tb_flush(CPUState *cpu)
 {
     if (option_smc_reload) {
-        reload_tree_clear();
+        smc_reload_tree_clear();
     }
 
     if (tcg_enabled()) {
@@ -2301,7 +2301,7 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
      * but the paired page cross 16K boundary is still not protected.
      */
     int p_flags = page_get_flags(pc);
-    if ((p_flags & PAGE_WRITE) && !is_shadow_page_not_shmm(pc)) {
+    if ((p_flags & PAGE_WRITE) && !page_is_shadow_not_shmm(pc)) {
         mprotect((void*)(pc & qemu_host_page_mask), qemu_host_page_size, PROT_READ);
     }
 
@@ -3590,6 +3590,12 @@ bool pageflags_set_clear(target_ulong start, target_ulong last,
 
 static void add_smc_node(tb_page_addr_t start, tb_page_addr_t end)
 {
+    TranslationBlock *tb;
+    PageForEachNext next_tb;
+    target_ulong curr_page;
+    size_t ir1_size;
+    unsigned int curr_page_tb_count;
+
     if (!option_smc_reload || !option_aot) {
         return;
     }
@@ -3597,49 +3603,49 @@ static void add_smc_node(tb_page_addr_t start, tb_page_addr_t end)
         return;
     }
 
-    TranslationBlock *tb;
-    PageForEachNext next_tb;
-    int ir1_size;
-    int curr_page_tb_num;
-
-    for (target_ulong curr_page = start; curr_page < end; curr_page += TARGET_PAGE_SIZE) {
-        curr_page_tb_num = 0;
+    for (curr_page = start; curr_page < end;
+         curr_page += TARGET_PAGE_SIZE) {
+        curr_page_tb_count = 0;
         ir1_size = 0;
-        PAGE_FOR_EACH_TB(curr_page, curr_page + TARGET_PAGE_SIZE, unused, tb, next_tb) {
+        PAGE_FOR_EACH_TB(curr_page, curr_page + TARGET_PAGE_SIZE,
+                         unused, tb, next_tb) {
             if ((tb->pc & TARGET_PAGE_MASK) == curr_page) {
-                curr_page_tb_num++;
+                curr_page_tb_count++;
                 ir1_size += tb->size;
             }
         }
-        if (curr_page_tb_num) {
-            reload_info *reload_node = (reload_info *)malloc(sizeof(reload_info));
-            reload_node->tb_num = curr_page_tb_num;
+        if (curr_page_tb_count) {
+            SMCReloadInfo *reload_node;
+            unsigned int tb_id;
+
+            reload_node = g_new(SMCReloadInfo, 1);
+            reload_node->tb_count = curr_page_tb_count;
             reload_node->page_addr = curr_page;
-            assert(reload_node);
             reload_node->tb_vector =
-                (TranslationBlock **)malloc(curr_page_tb_num * sizeof(TranslationBlock *));
-            assert(reload_node->tb_vector);
-            reload_node->ir1_code_buffer = malloc(ir1_size);
-            assert(reload_node->ir1_code_buffer);
-            int tb_id = 0;
+                g_new(TranslationBlock *, curr_page_tb_count);
+            reload_node->ir1_code_buffer = g_malloc(ir1_size);
+            tb_id = 0;
             ir1_size = 0;
-            PAGE_FOR_EACH_TB(curr_page, curr_page + TARGET_PAGE_SIZE, unused, tb, next_tb) {
+            PAGE_FOR_EACH_TB(curr_page, curr_page + TARGET_PAGE_SIZE,
+                             unused, tb, next_tb) {
                 if ((tb->pc & TARGET_PAGE_MASK) == curr_page) {
                     memcpy(reload_node->ir1_code_buffer + ir1_size,
-                            (void *)(uintptr_t)tb->pc, tb->size);
+                           (const void *)(uintptr_t)tb->pc, tb->size);
                     reload_node->tb_vector[tb_id++] = tb;
                     ir1_size += tb->size;
                 }
             }
-            reload_tree_insert(reload_node);
+            smc_reload_tree_insert(reload_node);
         }
     }
 }
 
-/* Modify the flags of a page and invalidate the code if necessary.
-   Save SMC TB to reload_tree if necessary.
-   The flag PAGE_WRITE_ORG is positioned automatically depending
-   on PAGE_WRITE.  The mmap_lock should already be held.  */
+/*
+ * Modify the flags of a page and invalidate the code if necessary.
+ * Save SMC TBs to the SMC reload tree if necessary.
+ * The flag PAGE_WRITE_ORG is positioned automatically depending
+ * on PAGE_WRITE.  The mmap_lock should already be held.
+ */
 void page_set_flags_tb_reload(target_ulong start, target_ulong end,
         int flags, bool tb_reload)
 {
@@ -3722,9 +3728,11 @@ void page_set_flags_tb_reload(target_ulong start, target_ulong end,
 #endif
 }
 
-/* Modify the flags of a page and invalidate the code if necessary.
-   The flag PAGE_WRITE_ORG is positioned automatically depending
-   on PAGE_WRITE.  The mmap_lock should already be held.  */
+/*
+ * Modify the flags of a page and invalidate the code if necessary.
+ * The flag PAGE_WRITE_ORG is positioned automatically depending
+ * on PAGE_WRITE.  The mmap_lock should already be held.
+ */
 void page_set_flags(target_ulong start, target_ulong end, int flags)
 {
     page_set_flags_tb_reload(start, end, flags, false);
@@ -3999,7 +4007,7 @@ void page_protect(tb_page_addr_t address)
         }
 
         pageflags_set_clear(start, last, 0, PAGE_WRITE);
-        if (!is_shadow_page_not_shmm(address)) {
+        if (!page_is_shadow_not_shmm(address)) {
             mprotect(g2h_untagged(start), qemu_host_page_size,
                     (prot & PAGE_BITS) & ~PAGE_WRITE);
         }
@@ -4699,7 +4707,7 @@ no_pageflags_cache:
             if (prot & PAGE_EXEC) {
                 prot = (prot & ~PAGE_EXEC) | PAGE_READ;
             }
-            if (!is_shadow_page_not_shmm(address)) {
+            if (!page_is_shadow_not_shmm(address)) {
                 mprotect((void *)g2h_untagged(start), len, prot & PAGE_BITS);
             }
         }

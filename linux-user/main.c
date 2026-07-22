@@ -728,7 +728,10 @@ static void handle_arg_latx_monitor_shared_mem(const char *arg)
 
 static void handle_arg_smc_reload(const char *arg)
 {
-    option_smc_reload = strtol(arg, NULL, 0);
+    long value = 0;
+
+    qemu_strtol(arg, NULL, 0, &value);
+    option_smc_reload = value;
     if (option_smc_reload) {
         option_jr_ra = 0;
     }

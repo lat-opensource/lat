@@ -1,100 +1,109 @@
-#include "smc_reload.h"
+#include "qemu/osdep.h"
+
 #include "latx-options.h"
-#include <glib.h>
+#include "smc_reload.h"
 
-static GTree *reload_tree = NULL;
+static GTree *smc_reload_tree;
 
-static gint compare_page_addr(gconstpointer a, gconstpointer b, gpointer user_data)
+static gint compare_page_addr(gconstpointer a, gconstpointer b,
+                              gpointer user_data G_GNUC_UNUSED)
 {
-    target_ulong addr_a = *((target_ulong *)a);
-    target_ulong addr_b = *((target_ulong *)b);
+    const target_ulong *addr_a = a;
+    const target_ulong *addr_b = b;
 
-    if (addr_a < addr_b) return -1;
-    if (addr_a > addr_b) return 1;
+    if (*addr_a < *addr_b) {
+        return -1;
+    }
+    if (*addr_a > *addr_b) {
+        return 1;
+    }
     return 0;
 }
 
 static void free_reload_info(gpointer data)
 {
-    reload_info *info = (reload_info *)data;
+    SMCReloadInfo *info = data;
+
     if (info) {
-        if (info->tb_vector) {
-            g_free(info->tb_vector);
-        }
-        if (info->ir1_code_buffer) {
-            g_free(info->ir1_code_buffer);
-        }
-        g_free(info); }
-}
-
-void reload_tree_init(void)
-{
-    if (reload_tree != NULL) {
-        reload_tree_clear();
+        g_free(info->tb_vector);
+        g_free(info->ir1_code_buffer);
+        g_free(info);
     }
-    reload_tree = g_tree_new_full(compare_page_addr, NULL, NULL, free_reload_info);
 }
 
-void reload_tree_insert(reload_info *reload_node)
+void smc_reload_tree_init(void)
 {
-    if (reload_tree == NULL) {
-        reload_tree_init();
+    if (smc_reload_tree) {
+        smc_reload_tree_clear();
+    }
+    smc_reload_tree = g_tree_new_full(compare_page_addr, NULL, NULL,
+                                      free_reload_info);
+}
+
+void smc_reload_tree_insert(SMCReloadInfo *reload_node)
+{
+    if (smc_reload_tree == NULL) {
+        smc_reload_tree_init();
     }
 
     if (reload_node == NULL) {
         return;
     }
 
-    g_tree_insert(reload_tree, &reload_node->page_addr, reload_node);
+    g_tree_insert(smc_reload_tree, &reload_node->page_addr, reload_node);
 }
 
-reload_info *reload_tree_lookup(target_ulong page_addr)
+SMCReloadInfo *smc_reload_tree_lookup(target_ulong page_addr)
 {
-    if (reload_tree == NULL) {
+    if (smc_reload_tree == NULL) {
         return NULL;
     }
 
-    return (reload_info *)g_tree_lookup(reload_tree, &page_addr);
+    return g_tree_lookup(smc_reload_tree, &page_addr);
 }
 
-void reload_tree_remove(reload_info *reload_node)
+void smc_reload_tree_remove(SMCReloadInfo *reload_node)
 {
-    if (reload_tree == NULL || reload_node == NULL) {
+    if (smc_reload_tree == NULL || reload_node == NULL) {
         return;
     }
 
-    g_tree_remove(reload_tree, &reload_node->page_addr);
+    g_tree_remove(smc_reload_tree, &reload_node->page_addr);
 }
 
-gint get_reload_node_num(void)
+unsigned int smc_reload_tree_get_node_count(void)
 {
-    if (reload_tree == NULL) {
+    if (smc_reload_tree == NULL) {
         return 0;
     }
 
-    return g_tree_nnodes(reload_tree);
+    return g_tree_nnodes(smc_reload_tree);
 }
 
-static gboolean foreach_print_callback(gpointer key, gpointer value, gpointer data)
+static gboolean smc_reload_tree_print(gpointer key G_GNUC_UNUSED,
+                                      gpointer value,
+                                      gpointer data G_GNUC_UNUSED)
 {
-    reload_info *info = (reload_info *)value;
-    fprintf(stderr, "Page addr: 0x%lx, TB num: %d\n", (uint64_t)info->page_addr, info->tb_num);
+    const SMCReloadInfo *info = value;
+
+    g_printerr("Page addr: 0x%" PRIx64 ", TB num: %u\n",
+               (uint64_t)info->page_addr, info->tb_count);
     return false;
 }
 
-void reload_tree_foreach(void)
+void smc_reload_tree_foreach(void)
 {
-    if (reload_tree == NULL) {
+    if (smc_reload_tree == NULL) {
         return;
     }
 
-    g_tree_foreach(reload_tree, foreach_print_callback, NULL);
+    g_tree_foreach(smc_reload_tree, smc_reload_tree_print, NULL);
 }
 
-void reload_tree_clear(void)
+void smc_reload_tree_clear(void)
 {
-    if (reload_tree != NULL) {
-        g_tree_destroy(reload_tree);
-        reload_tree = NULL;
+    if (smc_reload_tree) {
+        g_tree_destroy(smc_reload_tree);
+        smc_reload_tree = NULL;
     }
 }

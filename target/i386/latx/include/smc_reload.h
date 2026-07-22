@@ -1,21 +1,21 @@
-#ifndef __SMC_RELOAD_H_
-#define __SMC_RELOAD_H_
+#ifndef LATX_SMC_RELOAD_H
+#define LATX_SMC_RELOAD_H
 
 #include "qemu-def.h"
 
-typedef struct reoload_info {
-    int tb_num;
+typedef struct SMCReloadInfo {
+    unsigned int tb_count;
     target_ulong page_addr;
     TranslationBlock **tb_vector;
-    void *ir1_code_buffer;
-} reload_info;
+    uint8_t *ir1_code_buffer;
+} SMCReloadInfo;
 
-void reload_tree_init(void);
-void reload_tree_insert(reload_info *reload_node);
-reload_info *reload_tree_lookup(target_ulong page_addr);
-void reload_tree_remove(reload_info *reload_node);
-gint get_reload_node_num(void);
-void reload_tree_foreach(void);
-void reload_tree_clear(void);
+void smc_reload_tree_init(void);
+void smc_reload_tree_insert(SMCReloadInfo *reload_node);
+SMCReloadInfo *smc_reload_tree_lookup(target_ulong page_addr);
+void smc_reload_tree_remove(SMCReloadInfo *reload_node);
+unsigned int smc_reload_tree_get_node_count(void);
+void smc_reload_tree_foreach(void);
+void smc_reload_tree_clear(void);
 
 #endif

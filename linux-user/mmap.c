@@ -174,7 +174,7 @@ int target_mprotect(abi_ulong start, abi_ulong len, int target_prot)
             if ((prot_tmp & PAGE_EXEC) && !(prot_tmp & PAGE_WRITE) &&
                 (prot_tmp & PAGE_WRITE_ORG) && (target_prot & PAGE_WRITE)) {
                 page_set_flags_tb_reload(addr, addr + TARGET_PAGE_SIZE,
-                                prot_tmp | PAGE_WRITE, true);
+                                         prot_tmp | PAGE_WRITE, true);
             }
             prot1 |= prot_tmp;
         }
@@ -185,7 +185,7 @@ int target_mprotect(abi_ulong start, abi_ulong len, int target_prot)
                 if ((prot_tmp & PAGE_EXEC) && !(prot_tmp & PAGE_WRITE) &&
                     (prot_tmp & PAGE_WRITE_ORG) && (target_prot & PAGE_WRITE)) {
                     page_set_flags_tb_reload(addr, addr + TARGET_PAGE_SIZE,
-                                    prot_tmp | PAGE_WRITE, true);
+                                             prot_tmp | PAGE_WRITE, true);
                 }
                 prot1 |= prot_tmp;
             }
@@ -223,7 +223,7 @@ int target_mprotect(abi_ulong start, abi_ulong len, int target_prot)
             if ((prot_tmp & PAGE_EXEC) && !(prot_tmp & PAGE_WRITE) &&
                 (prot_tmp & PAGE_WRITE_ORG) && (target_prot & PAGE_WRITE)) {
                 page_set_flags_tb_reload(addr, addr + TARGET_PAGE_SIZE,
-                                prot_tmp | PAGE_WRITE, true);
+                                         prot_tmp | PAGE_WRITE, true);
             }
             prot1 |= prot_tmp;
         }
@@ -260,7 +260,7 @@ int target_mprotect(abi_ulong start, abi_ulong len, int target_prot)
 
     page_set_flags_tb_reload(start, start + len, page_flags, true);
 
-    if(target_prot == PROT_NONE) {
+    if (target_prot == PROT_NONE) {
 #ifdef CONFIG_LATX_AOT
         if (option_aot && segment_tree_lookup2(start, start + len)) {
             page_set_page_state_range(start, start + len, PAGE_SMC);
