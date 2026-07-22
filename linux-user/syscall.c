@@ -2869,6 +2869,46 @@ static abi_long do_setsockopt(int sockfd, int level, int optname,
                                        &ipv6mreq, sizeof(ipv6mreq)));
             break;
         }
+        case MCAST_JOIN_SOURCE_GROUP:
+        case MCAST_LEAVE_SOURCE_GROUP:
+        case MCAST_BLOCK_SOURCE:
+        case MCAST_UNBLOCK_SOURCE:
+        {
+            struct group_source_req req;
+            abi_long req_ret;
+            abi_ulong target_group_addr;
+            abi_ulong target_source_addr;
+
+            if (optlen != sizeof(struct target_group_source_req)) {
+                return -TARGET_EINVAL;
+            }
+            if (get_user_u32(req.gsr_interface, optval_addr)) {
+                return -TARGET_EFAULT;
+            }
+            req.gsr_interface = tswap32(req.gsr_interface);
+
+            target_group_addr = optval_addr +
+                offsetof(struct target_group_source_req, gsr_group);
+            req_ret = target_to_host_sockaddr(
+                sockfd, (struct sockaddr *)&req.gsr_group, target_group_addr,
+                sizeof(struct target_sockaddr_storage));
+            if (req_ret) {
+                return req_ret;
+            }
+
+            target_source_addr = optval_addr +
+                offsetof(struct target_group_source_req, gsr_source);
+            req_ret = target_to_host_sockaddr(
+                sockfd, (struct sockaddr *)&req.gsr_source, target_source_addr,
+                sizeof(struct target_sockaddr_storage));
+            if (req_ret) {
+                return req_ret;
+            }
+
+            ret = get_errno(setsockopt(sockfd, level, optname,
+                                       &req, sizeof(req)));
+            break;
+        }
         default:
             goto unimplemented;
         }

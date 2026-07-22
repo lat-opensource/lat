@@ -193,6 +193,18 @@ struct target_sockaddr_in6 {
     abi_uint sin6_scope_id;
 };
 
+struct target_sockaddr_storage {
+    abi_ushort ss_family;
+    uint8_t ss_padding[128 - sizeof(abi_ushort) - sizeof(abi_ulong)];
+    abi_ulong ss_align;
+};
+
+struct target_group_source_req {
+    abi_uint gsr_interface;
+    struct target_sockaddr_storage gsr_group;
+    struct target_sockaddr_storage gsr_source;
+};
+
 struct target_sock_filter {
     abi_ushort code;
     uint8_t jt;
