@@ -69,3 +69,24 @@ const char *path(const char *name)
     qemu_mutex_unlock(&lock);
     return ret;
 }
+
+/* Keep a child from inheriting a path-cache lock held by another thread. */
+void path_fork_start(void)
+{
+    if (base) {
+        qemu_mutex_lock(&lock);
+    }
+}
+
+void path_fork_end(int child)
+{
+    if (!base) {
+        return;
+    }
+
+    if (child) {
+        qemu_mutex_init(&lock);
+    } else {
+        qemu_mutex_unlock(&lock);
+    }
+}
