@@ -21,6 +21,8 @@ int segment_get_aot_file_name(const seg_info *seg, char *name,
                               size_t name_size)
 {
     char *path_hash;
+    const char *base;
+    const char *profile_suffix = "";
     int len;
 
     if (!seg || !seg->file_name || !name || !name_size) {
@@ -31,10 +33,16 @@ int segment_get_aot_file_name(const seg_info *seg, char *name,
     if (!path_hash) {
         return -ENOMEM;
     }
+    base = strrchr(seg->file_name, '/');
+    base = base ? base + 1 : seg->file_name;
+    if (option_aot_pe_profile && !strcasecmp(base, "libcef.dll")) {
+        profile_suffix = aot_process_profile;
+    }
     if (seg->aot_file_type & (PE_AOT_FILE | CACHE_AOT_FILE)) {
-        len = snprintf(name, name_size, "v2-%02x-%s-%" PRIx64,
+        len = snprintf(name, name_size, "v2-%02x-%s-%" PRIx64 "%s%s",
                        seg->aot_file_type, path_hash,
-                       (uint64_t)seg->seg_begin);
+                       (uint64_t)seg->seg_begin,
+                       profile_suffix[0] ? "-" : "", profile_suffix);
     } else {
         len = snprintf(name, name_size, "v2-%02x-%s",
                        seg->aot_file_type, path_hash);

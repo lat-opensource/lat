@@ -56,6 +56,48 @@ static int curr_lib_seg_num;
 static char *curr_lib_name;
 static char curr_aot_file_name[PATH_MAX];
 uintptr_t table_end_addr;
+const char *aot_process_profile = "browser";
+
+void aot_set_process_profile(int argc, char **argv)
+{
+    bool gpu = false;
+    bool renderer = false;
+    bool utility = false;
+
+    aot_process_profile = "browser";
+    for (int i = 0; i < argc; i++) {
+        if (!strcmp(argv[i], "--type=gpu-process")) {
+            gpu = true;
+        } else if (!strcmp(argv[i], "--type=renderer")) {
+            renderer = true;
+        } else if (!strcmp(argv[i], "--type=utility")) {
+            utility = true;
+        }
+    }
+    if (gpu) {
+        aot_process_profile = "gpu";
+        return;
+    }
+    if (renderer) {
+        aot_process_profile = "renderer";
+        return;
+    }
+    if (!utility) {
+        return;
+    }
+    aot_process_profile = "utility";
+    for (int i = 0; i < argc; i++) {
+        if (!strncmp(argv[i], "--utility-sub-type=", 19)) {
+            if (strstr(argv[i], "NetworkService")) {
+                aot_process_profile = "utility-network";
+            } else if (strstr(argv[i], "StorageService")) {
+                aot_process_profile = "utility-storage";
+            }
+            return;
+        }
+    }
+}
+
 /* Helper functions used to dump tbs in hash table to a vector */
 static void do_tb_count(void *p, uint32_t hash, void *userp)
 {

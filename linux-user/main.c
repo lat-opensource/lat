@@ -751,6 +751,11 @@ static void handle_arg_latx_aot(const char *arg)
     }
 }
 
+static void handle_arg_latx_aot_pe_profile(const char *arg)
+{
+    option_aot_pe_profile = strtol(arg, NULL, 0);
+}
+
 static void handle_arg_latx_aot_wine_pefiles_cache(const char *arg)
 {
     if (!arg || !strlen(arg)) {
@@ -857,6 +862,8 @@ static const struct qemu_argument arg_table[] = {
 #ifdef CONFIG_LATX_AOT
     {"latx-aot",    "LATX_AOT",     true,  handle_arg_latx_aot,
     "",           "enable aot"},
+    {"latx-aot-pe-profile", "LATX_AOT_PE_PROFILE", true,
+    handle_arg_latx_aot_pe_profile, "", "split libcef PE AOT by process role"},
     {"latx-aot-file-size", "LAT_AOT_FILE_SIZE", false,
     handle_arg_lat_aot_file_size, "", "set max aot file size by MB."},
     {"latx-aot-left-file-size",   "LAT_AOT_LEFT_FILE_SIZE", false,
@@ -1521,6 +1528,7 @@ int main(int argc, char **argv, char **envp)
     cpu->opaque = ts;
     task_settid(ts);
 #ifdef CONFIG_LATX_AOT
+    aot_set_process_profile(target_argc, target_argv);
     aot_init();
 #endif
     ret = loader_exec(execfd, exec_path, target_argv, target_environ, regs,

@@ -291,6 +291,7 @@ typedef struct aot_rel {
 extern aot_rel *rel_table;
 extern seg_info **seg_info_vector;
 void mk_aot_dir(char * pathname);
+void aot_set_process_profile(int argc, char **argv);
 void dump_aot_buffer(aot_header *p_header);
 void dump_seg(aot_segment *p_segment, aot_header *p_header);
 lib_info *aot_load(char *lib_name, char *aot_file_name,

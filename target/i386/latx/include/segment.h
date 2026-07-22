@@ -91,5 +91,6 @@ gint get_segment_num(void);
 void do_segment_record(seg_info **seg_info_vector);
 int segment_get_aot_file_name(const seg_info *seg, char *name,
                               size_t name_size);
+extern const char *aot_process_profile;
 
 #endif
