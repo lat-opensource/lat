@@ -1067,7 +1067,6 @@ static void host_signal_handler(int host_signum, siginfo_t *info,
 
     if (host_signum == SIGSEGV) {
         if ((*(unsigned int *)UC_PC(uc) == WRITE_ILL_INST) || (*(unsigned int *)UC_PC(uc) == READ_ILL_INST)) {
-            env->puc = uc;
             uint64_t real_si_addr = env->cr[2];
             int flag = page_get_flags(real_si_addr);
             if (flag & PAGE_VALID) {
@@ -1129,13 +1128,6 @@ static void host_signal_handler(int host_signum, siginfo_t *info,
         cpu_exit(cpu);
         return;
     }
-#ifdef CONFIG_LATX
-    /*
-     * store ucontext_t to env for context switch.
-     */
-    env->puc = uc;
-#endif
-
     /* #define LA_HOOK_PTRACE SIGSEGV */
     if (host_signum == LA_HOOK_PTRACE && info->si_code == SI_QUEUE) {
         void *trace_page = info->si_value.sival_ptr;
@@ -1162,8 +1154,18 @@ static void host_signal_handler(int host_signum, siginfo_t *info,
        we forward to it some signals */
     if ((host_signum == SIGSEGV || host_signum == SIGBUS)
         && info->si_code > 0) {
-        if (cpu_signal_handler(host_signum, info, puc))
+#ifdef CONFIG_LATX
+        env->puc = uc;
+#endif
+        if (cpu_signal_handler(host_signum, info, puc)) {
+#ifdef CONFIG_LATX
+            env->puc = NULL;
+#endif
             return;
+        }
+#ifdef CONFIG_LATX
+        env->puc = NULL;
+#endif
     }
 
 
@@ -1202,6 +1204,9 @@ static void host_signal_handler(int host_signum, siginfo_t *info,
     greg_t pc = UC_PC(uc);
     if (host_signum == SIGFPE && tcg_tb_lookup(pc)) {
         pc += GETPC_ADJ;
+#ifdef CONFIG_LATX
+        env->puc = uc;
+#endif
         cc = CPU_GET_CLASS(cpu);
         cc->tcg_ops->tlb_fill(cpu, address, 0, MMU_DATA_LOAD,
                               MMU_USER_IDX, false, pc, info);
@@ -1216,6 +1221,9 @@ static void host_signal_handler(int host_signum, siginfo_t *info,
         sigprocmask(SIG_SETMASK, &((ucontext_t *)puc)->uc_sigmask, NULL);
 #endif
         clear_helper_retaddr();
+#ifdef CONFIG_LATX
+        env->puc = uc;
+#endif
         cc = CPU_GET_CLASS(cpu);
         cc->tcg_ops->tlb_fill(cpu, address, 0, MMU_INST_FETCH,
                           MMU_USER_IDX, false, pc, info);

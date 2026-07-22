@@ -431,6 +431,7 @@ static int cpu_restore_state_from_tb(CPUState *cpu, TranslationBlock *tb,
     uintptr_t host_pc = (uintptr_t)tb->tc.ptr;
     CPUArchState *env = cpu->env_ptr;
     const uint8_t *p;
+    int ret = -1;
 #ifdef CONFIG_LATX_TU
     if (is_tu_tb(tb)) {
         p = tb->tc.ptr + tb->tu_search_addr_offset;
@@ -449,7 +450,7 @@ static int cpu_restore_state_from_tb(CPUState *cpu, TranslationBlock *tb,
     searched_pc -= GETPC_ADJ;
 
     if (searched_pc < host_pc) {
-        return -1;
+        goto out;
     }
 
     /* Reconstruct the stored insn data while looking for the point at
@@ -463,7 +464,7 @@ static int cpu_restore_state_from_tb(CPUState *cpu, TranslationBlock *tb,
             goto found;
         }
     }
-    return -1;
+    goto out;
 
  found:
     if (reset_icount && (tb_cflags(tb) & CF_USE_ICOUNT)) {
@@ -487,7 +488,13 @@ static int cpu_restore_state_from_tb(CPUState *cpu, TranslationBlock *tb,
                 prof->restore_time + profile_getclock() - ti);
     qatomic_set(&prof->restore_count, prof->restore_count + 1);
 #endif
-    return 0;
+    ret = 0;
+
+ out:
+#ifdef CONFIG_LATX
+    env->puc = NULL;
+#endif
+    return ret;
 }
 
 void tb_destroy(TranslationBlock *tb)
