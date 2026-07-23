@@ -50,14 +50,14 @@ static gboolean tb_host_size_iter(gpointer key, gpointer value, gpointer data)
 /* flush all the translation blocks */
 void do_tb_flush(CPUState *cpu, run_on_cpu_data tb_flush_count)
 {
+    bool did_flush = false;
+
 #ifdef CONFIG_LATX_AOT
     if (option_aot && in_pre_translate) {
         qemu_log_mask(LAT_LOG_AOT, "FIXME: tb flush in pre translate\n");
         _exit(0);
     }
 #endif
-
-    bool did_flush = false;
 
     mmap_lock();
     /*

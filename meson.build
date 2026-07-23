@@ -579,50 +579,60 @@ foreach target : target_dirs
                  name_suffix: 'fa')
 
   if target == 'x86_64-linux-user' and 'CONFIG_LATX_O1' in config_host
-    smc_reload_tu_test = executable('test-latx-smc-reload-tu',
-                                    files('target/i386/latx/sbt/tests/smc-reload-tu-test.c',
-                                          'target/i386/latx/sbt/smc_reload.c',
-                                          'target/i386/latx/sbt/aot_smc_reload.c',
-                                          'accel/tcg/tb-jump.c'),
-                                    c_args: c_args + ['-ffunction-sections',
-                                        '-fvisibility=hidden',
-                                        '-I' + (meson.current_build_dir() /
-                                        ('libqemu-' + target + '.fa.p'))],
-                                    dependencies: [glib],
-                                    include_directories: target_inc,
-                                    link_args: ['-Wl,--gc-sections',
-                                        '-Wl,--no-export-dynamic'])
+    smc_reload_test_c_args = c_args + [
+      '-ffunction-sections',
+      '-fvisibility=hidden',
+      '-I' + (meson.current_build_dir() /
+              ('libqemu-' + target + '.fa.p'))
+    ]
+    smc_reload_test_link_args = [
+      '-Wl,--gc-sections',
+      '-Wl,--no-export-dynamic'
+    ]
+
+    smc_reload_tu_test = executable(
+      'test-latx-smc-reload-tu',
+      files(
+        'target/i386/latx/sbt/tests/smc-reload-tu-test.c',
+        'target/i386/latx/sbt/smc_reload.c',
+        'target/i386/latx/sbt/aot_smc_reload.c',
+        'accel/tcg/tb-jump.c'
+      ),
+      c_args: smc_reload_test_c_args,
+      dependencies: [glib],
+      include_directories: target_inc,
+      link_args: smc_reload_test_link_args
+    )
     test('latx-smc-reload-tu', smc_reload_tu_test)
 
-    smc_reload_guest_base_test = executable('test-latx-smc-reload-guest-base',
-                                            files('target/i386/latx/sbt/tests/smc-reload-guest-base-test.c',
-                                                  'target/i386/latx/sbt/smc_reload.c',
-                                                  'target/i386/latx/sbt/aot_smc_reload.c',
-                                                  'accel/tcg/tb-jump.c',
-                                                  'util/pagesize.c'),
-                                            c_args: c_args + ['-ffunction-sections',
-                                                '-fvisibility=hidden',
-                                                '-I' + (meson.current_build_dir() /
-                                                ('libqemu-' + target + '.fa.p'))],
-                                            dependencies: [glib],
-                                            include_directories: target_inc,
-                                            link_args: ['-Wl,--gc-sections',
-                                                '-Wl,--wrap=mprotect',
-                                                '-Wl,--no-export-dynamic'])
+    smc_reload_guest_base_test = executable(
+      'test-latx-smc-reload-guest-base',
+      files(
+        'target/i386/latx/sbt/tests/smc-reload-guest-base-test.c',
+        'target/i386/latx/sbt/smc_reload.c',
+        'target/i386/latx/sbt/aot_smc_reload.c',
+        'accel/tcg/tb-jump.c',
+        'util/pagesize.c'
+      ),
+      c_args: smc_reload_test_c_args,
+      dependencies: [glib],
+      include_directories: target_inc,
+      link_args: smc_reload_test_link_args + ['-Wl,--wrap=mprotect']
+    )
     test('latx-smc-reload-guest-base', smc_reload_guest_base_test)
 
-    smc_reload_async_flush_test = executable('test-latx-tb-flush-smc-reload-async',
-                                             files('target/i386/latx/sbt/tests/tb-flush-smc-reload-async-test.c',
-                                                   'target/i386/latx/sbt/smc_reload.c',
-                                                   'accel/tcg/tb-flush.c'),
-                                             c_args: c_args + ['-ffunction-sections',
-                                                 '-fvisibility=hidden',
-                                                 '-I' + (meson.current_build_dir() /
-                                                 ('libqemu-' + target + '.fa.p'))],
-                                             dependencies: [glib],
-                                             include_directories: target_inc,
-                                             link_args: ['-Wl,--gc-sections',
-                                                 '-Wl,--no-export-dynamic'])
+    smc_reload_async_flush_test = executable(
+      'test-latx-tb-flush-smc-reload-async',
+      files(
+        'target/i386/latx/sbt/tests/tb-flush-smc-reload-async-test.c',
+        'target/i386/latx/sbt/smc_reload.c',
+        'accel/tcg/tb-flush.c'
+      ),
+      c_args: smc_reload_test_c_args,
+      dependencies: [glib],
+      include_directories: target_inc,
+      link_args: smc_reload_test_link_args
+    )
     test('latx-tb-flush-smc-reload-async', smc_reload_async_flush_test)
   endif
 
