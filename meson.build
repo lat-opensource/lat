@@ -593,6 +593,22 @@ foreach target : target_dirs
                                     link_args: ['-Wl,--gc-sections',
                                         '-Wl,--no-export-dynamic'])
     test('latx-smc-reload-tu', smc_reload_tu_test)
+
+    smc_reload_guest_base_test = executable('test-latx-smc-reload-guest-base',
+                                            files('target/i386/latx/sbt/tests/smc-reload-guest-base-test.c',
+                                                  'target/i386/latx/sbt/smc_reload.c',
+                                                  'target/i386/latx/sbt/aot_smc_reload.c',
+                                                  'accel/tcg/tb-jump.c',
+                                                  'util/pagesize.c'),
+                                            c_args: c_args + ['-ffunction-sections',
+                                                '-fvisibility=hidden',
+                                                '-I' + (meson.current_build_dir() /
+                                                ('libqemu-' + target + '.fa.p'))],
+                                            dependencies: [glib],
+                                            include_directories: target_inc,
+                                            link_args: ['-Wl,--gc-sections',
+                                                '-Wl,--no-export-dynamic'])
+    test('latx-smc-reload-guest-base', smc_reload_guest_base_test)
   endif
 
     execs = [{

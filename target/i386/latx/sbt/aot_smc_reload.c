@@ -4,6 +4,7 @@
 #include "latx-options.h"
 #include "accel/tcg/internal.h"
 #include "exec/cpu-all.h"
+#include "exec/cpu_ldst.h"
 #include "exec/translate-all.h"
 #include "aot.h"
 #include "smc_reload.h"
@@ -30,7 +31,7 @@ int smc_page_reload(target_ulong page_addr, uint32_t cflags)
         return 0;
     }
     if ((p_flags & PAGE_WRITE) && !page_is_shadow_not_shmm(page_addr)) {
-        mprotect((void *)(page_addr & qemu_host_page_mask),
+        mprotect(g2h_untagged(page_addr & qemu_host_page_mask),
                  qemu_host_page_size, PROT_READ);
     }
 
@@ -38,7 +39,7 @@ int smc_page_reload(target_ulong page_addr, uint32_t cflags)
     ir1_offset = 0;
     for (tb_id = 0; tb_id < reload_node->tb_count; tb_id++) {
         tb = reload_node->tb_vector[tb_id];
-        if (!memcmp((const void *)(uintptr_t)tb->pc,
+        if (!memcmp(g2h_untagged(tb->pc),
                     reload_node->ir1_code_buffer + ir1_offset, tb->size)) {
             tb->cflags &= ~CF_INVALID;
             if (!use_tu_jmp(tb)) {

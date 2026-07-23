@@ -49,7 +49,7 @@ void aot_tb_register(TranslationBlock *tb)
 
 int page_get_flags(target_ulong address G_GNUC_UNUSED)
 {
-    return PAGE_READ;
+    return PAGE_VALID | PAGE_READ | PAGE_WRITE | PAGE_EXEC;
 }
 
 bool page_is_shadow_not_shmm(target_ulong address G_GNUC_UNUSED)
@@ -60,29 +60,45 @@ bool page_is_shadow_not_shmm(target_ulong address G_GNUC_UNUSED)
 int main(void)
 {
     static TCGContext test_tcg_ctx;
-    static uint8_t guest_code[] = { 0x90 };
+    const size_t code_size = 1;
+    const size_t mapping_size = 2 * qemu_real_host_page_size;
+    uint8_t *mapping;
+    target_ulong guest_page;
+    uint8_t *host_page;
     TranslationBlock tb = { 0 };
     SMCReloadInfo *reload = g_new0(SMCReloadInfo, 1);
 
+    qemu_host_page_size = qemu_real_host_page_size;
+    qemu_host_page_mask = -qemu_host_page_size;
+    mapping = mmap(NULL, mapping_size, PROT_READ | PROT_WRITE,
+                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    g_assert(mapping != MAP_FAILED);
+    guest_page = (target_ulong)(uintptr_t)mapping;
+    host_page = mapping + qemu_host_page_size;
+    guest_base = qemu_host_page_size;
+    mapping[0] = 0xcc;
+    host_page[0] = 0x90;
+    g_assert(mprotect(mapping, qemu_host_page_size, PROT_NONE) == 0);
+
     tcg_ctx = &test_tcg_ctx;
     option_smc_reload = 1;
-    tb.pc = (uintptr_t)guest_code;
-    tb.size = sizeof(guest_code);
+    tb.pc = guest_page;
+    tb.size = code_size;
     tb.bool_flags = IS_TU_JMP;
-    tb.tu_jmp[TU_TB_INDEX_NEXT] = 4;
-    tb.tu_jmp[TU_TB_INDEX_TARGET] = TB_JMP_RESET_OFFSET_INVALID;
+    qemu_spin_init(&tb.jmp_lock);
 
     reload->tb_count = 1;
-    reload->page_addr = (uintptr_t)guest_code & TARGET_PAGE_MASK;
+    reload->page_addr = guest_page;
     reload->tb_vector = g_new(TranslationBlock *, 1);
     reload->tb_vector[0] = &tb;
-    reload->ir1_code_buffer = g_malloc(sizeof(guest_code));
-    memcpy(reload->ir1_code_buffer, guest_code, sizeof(guest_code));
+    reload->ir1_code_buffer = g_malloc(code_size);
+    memcpy(reload->ir1_code_buffer, host_page, code_size);
 
     smc_reload_tree_insert(reload);
     g_assert(smc_page_reload(reload->page_addr, 0) == 1);
     g_assert(aot_register_count == 1);
-    g_assert(tb.tu_jmp[TU_TB_INDEX_NEXT] == 4);
     g_assert(smc_reload_tree_get_node_count() == 0);
+    qemu_spin_destroy(&tb.jmp_lock);
+    g_assert(munmap(mapping, mapping_size) == 0);
     return 0;
 }
