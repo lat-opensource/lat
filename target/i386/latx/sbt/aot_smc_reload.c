@@ -38,7 +38,7 @@ int smc_page_reload(target_ulong page_addr, uint32_t cflags)
     }
 
     p_flags = page_get_flags(page_addr);
-    if (!(p_flags & PAGE_EXEC)) {
+    if (!(p_flags & (PAGE_READ | PAGE_EXEC))) {
         return 0;
     }
     if ((p_flags & PAGE_WRITE) && !page_is_shadow_not_shmm(page_addr)) {

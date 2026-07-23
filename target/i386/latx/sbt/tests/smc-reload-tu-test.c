@@ -7,6 +7,7 @@
 #include "exec/translate-all.h"
 
 static unsigned int aot_register_count;
+static int test_page_flags;
 
 __thread TCGContext *tcg_ctx;
 int option_smc_reload;
@@ -52,7 +53,7 @@ void aot_tb_register(TranslationBlock *tb)
 
 int page_get_flags(target_ulong address G_GNUC_UNUSED)
 {
-    return PAGE_VALID | PAGE_EXEC;
+    return test_page_flags;
 }
 
 bool page_is_shadow_not_shmm(target_ulong address G_GNUC_UNUSED)
@@ -96,9 +97,26 @@ int main(void)
     reload->ir1_code_buffer = g_malloc(sizeof(guest_code));
     memcpy(reload->ir1_code_buffer, guest_code, sizeof(guest_code));
 
+    test_page_flags = PAGE_READ;
     smc_reload_tree_insert(reload);
     g_assert(smc_page_reload(reload->page_addr, 0) == 1);
     g_assert(aot_register_count == 1);
+    g_assert(tb.tu_jmp[TU_TB_INDEX_NEXT] == 4);
+    g_assert(smc_reload_tree_get_node_count() == 0);
+
+    tb.cflags = CF_INVALID;
+    reload = g_new0(SMCReloadInfo, 1);
+    reload->tb_count = 1;
+    reload->page_addr = (uintptr_t)guest_code & TARGET_PAGE_MASK;
+    reload->tb_vector = g_new(TranslationBlock *, 1);
+    reload->tb_vector[0] = &tb;
+    reload->ir1_code_buffer = g_malloc(sizeof(guest_code));
+    memcpy(reload->ir1_code_buffer, guest_code, sizeof(guest_code));
+
+    test_page_flags = PAGE_VALID | PAGE_EXEC;
+    smc_reload_tree_insert(reload);
+    g_assert(smc_page_reload(reload->page_addr, 0) == 1);
+    g_assert(aot_register_count == 2);
     g_assert(tb.tu_jmp[TU_TB_INDEX_NEXT] == 4);
     g_assert(smc_reload_tree_get_node_count() == 0);
     qemu_spin_destroy(&tb.jmp_lock);
