@@ -577,7 +577,9 @@ foreach target : target_dirs
                  build_by_default: false,
                  name_suffix: 'fa')
 
-  if target == 'x86_64-linux-user' and 'CONFIG_LATX_O1' in config_host
+  if get_option('tests').enabled() and \
+     target == 'x86_64-linux-user' and \
+     'CONFIG_LATX_O1' in config_host
     smc_reload_test_c_args = c_args + [
       '-ffunction-sections',
       '-fvisibility=hidden',

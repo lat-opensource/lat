@@ -126,6 +126,6 @@ option('fdt', type: 'combo', value: 'auto',
        choices: ['disabled', 'enabled', 'auto', 'system', 'internal'],
        description: 'Whether and how to find the libfdt library')
 option('tests', type : 'feature', value : 'auto',
-       description: 'Tests build support')
+       description: 'Build tests only when explicitly enabled')
 option('latx_version', type: 'string', value: '',
        description: 'Custom version string')
