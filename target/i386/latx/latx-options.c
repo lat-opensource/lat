@@ -471,7 +471,7 @@ void options_parse_latx_disassemble_trace_cmp(const char *args)
     if (!args) {
         return;
     }
-    char *findSpil = strstr(args, ":");
+    const char *findSpil = strstr(args, ":");
     if (!findSpil) {
         lsassertm(0, "Can't find \':\' from args.\n");
         return;

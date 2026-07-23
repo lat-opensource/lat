@@ -45,22 +45,6 @@
 #define offsetof(st, m) __builtin_offsetof(st, m)
 #endif
 
-#ifndef _Bool
-#define _Bool char
-#endif
-
-#ifndef bool
-#define bool _Bool
-#endif
-
-#ifndef true
-#define true 1
-#endif
-
-#ifndef false
-#define false 0
-#endif
-
 enum {
     UNKNOWN_EXTENSION = 96,
     SIGN_EXTENSION,

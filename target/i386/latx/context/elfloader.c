@@ -230,28 +230,33 @@ static char* GenPathList(char * rpath, const char* origin)
 {
     char *rpathref = rpath;
     while (strstr(rpath, "$ORIGIN")) {
-        char* p = strrchr(origin, '/');
+        char *origin_tmp = box_strdup(origin);
+        char* p = strrchr(origin_tmp, '/');
         if (p) *p = '\0';    // remove file name to have only full path, without last '/'
-        char* tmp = (char*)box_calloc(1, strlen(rpath)-strlen("$ORIGIN")+strlen(origin)+1);
+        char* tmp = (char*)box_calloc(1, strlen(rpath)-strlen("$ORIGIN")+strlen(origin_tmp)+1);
         p = strstr(rpath, "$ORIGIN");
         memcpy(tmp, rpath, p-rpath);
-        strcat(tmp, origin);
+        strcat(tmp, origin_tmp);
         strcat(tmp, p+strlen("$ORIGIN"));
         if (rpath!=rpathref)
             box_free(rpath);
         rpath = tmp;
+        box_free(origin_tmp);
     }
+
     while (strstr(rpath, "${ORIGIN}")) {
-        char* p = strrchr(origin, '/');
+        char* origin_tmp = box_strdup(origin);
+        char* p = strrchr(origin_tmp, '/');
         if (p) *p = '\0';    // remove file name to have only full path, without last '/'
-        char* tmp = (char*)box_calloc(1, strlen(rpath)-strlen("${ORIGIN}")+strlen(origin)+1);
+        char* tmp = (char*)box_calloc(1, strlen(rpath)-strlen("${ORIGIN}")+strlen(origin_tmp)+1);
         p = strstr(rpath, "${ORIGIN}");
         memcpy(tmp, rpath, p-rpath);
-        strcat(tmp, origin);
+        strcat(tmp, origin_tmp);
         strcat(tmp, p+strlen("${ORIGIN}"));
         if (rpath!=rpathref)
             box_free(rpath);
         rpath = tmp;
+        box_free(origin_tmp);
     }
     while (strstr(rpath, "${PLATFORM}")) {
         char* platform = box_strdup("x86_64");
@@ -439,7 +444,7 @@ static int isChromeApp(elfheader_t* h, int con_score)
         sym = h->DynSym+i;
         if (h->DynSym[i].st_shndx != SHN_UNDEF && sym->st_value) {
             int score = 0;
-            char *find_offset;
+            const char *find_offset;
             const char * symname = h->DynStr+sym->st_name;
             snprintf(symnamebuf, 1023, KEY_SPLIT"%s"KEY_SPLIT, symname);
             find_offset = strstr(chromekeys, symnamebuf);

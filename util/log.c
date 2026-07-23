@@ -205,7 +205,7 @@ void qemu_set_log_filename(const char *filename, Error **errp)
     logfilename = NULL;
 
     if (filename) {
-            char *pidstr = strstr(filename, "%");
+            const char *pidstr = strstr(filename, "%");
             if (pidstr) {
                 /* We only accept one %d, no other format strings */
                 if (pidstr[1] != 'd' || strchr(pidstr + 2, '%')) {

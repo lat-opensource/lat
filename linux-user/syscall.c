@@ -11681,8 +11681,8 @@ static int do_openat(void *cpu_env, int dirfd, const char *pathname, int flags, 
         const char *tmpdir;
         char filename[PATH_MAX];
         int fd, r;
-        char *latx_filename;
-        char *slash;
+        const char *latx_filename;
+        const char *slash;
 
         /* create temporary file to map stat to */
         tmpdir = getenv("TMPDIR");
@@ -11693,7 +11693,7 @@ static int do_openat(void *cpu_env, int dirfd, const char *pathname, int flags, 
         if (slash) {
             latx_filename = slash + 1;
         } else {
-            latx_filename = (char *)fake_open->filename;
+            latx_filename = fake_open->filename;
         }
         snprintf(filename, sizeof(filename), "%s/latxopen-%s.XXXXXX",
                     tmpdir, latx_filename);
