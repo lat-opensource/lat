@@ -46,7 +46,7 @@ int smc_page_reload(target_ulong page_addr, uint32_t cflags)
         tb = reload_node->tb_vector[tb_id];
         if (!memcmp(g2h_untagged(tb->pc),
                     reload_node->ir1_code_buffer + ir1_offset, tb->size)) {
-            tb->cflags &= ~CF_INVALID;
+            qemu_spin_lock(&tb->jmp_lock);
             if (!use_tu_jmp(tb)) {
                 if (tb->jmp_reset_offset[0] !=
                     TB_JMP_RESET_OFFSET_INVALID) {
@@ -62,6 +62,8 @@ int smc_page_reload(target_ulong page_addr, uint32_t cflags)
             tb->jmp_list_next[1] = 0;
             tb->jmp_dest[0] = 0;
             tb->jmp_dest[1] = 0;
+            qatomic_and(&tb->cflags, ~CF_INVALID);
+            qemu_spin_unlock(&tb->jmp_lock);
             aot_tb_register(tb);
         }
         ir1_offset += tb->size;
