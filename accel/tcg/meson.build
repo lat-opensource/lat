@@ -5,6 +5,7 @@ tcg_ss.add(files(
   'cpu-exec.c',
   'tcg-runtime-gvec.c',
   'tcg-runtime.c',
+  'tb-flush.c',
   'tb-jump.c',
   'translate-all.c',
   'translator.c',

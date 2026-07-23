@@ -609,6 +609,20 @@ foreach target : target_dirs
                                             link_args: ['-Wl,--gc-sections',
                                                 '-Wl,--no-export-dynamic'])
     test('latx-smc-reload-guest-base', smc_reload_guest_base_test)
+
+    smc_reload_async_flush_test = executable('test-latx-tb-flush-smc-reload-async',
+                                             files('target/i386/latx/sbt/tests/tb-flush-smc-reload-async-test.c',
+                                                   'target/i386/latx/sbt/smc_reload.c',
+                                                   'accel/tcg/tb-flush.c'),
+                                             c_args: c_args + ['-ffunction-sections',
+                                                 '-fvisibility=hidden',
+                                                 '-I' + (meson.current_build_dir() /
+                                                 ('libqemu-' + target + '.fa.p'))],
+                                             dependencies: [glib],
+                                             include_directories: target_inc,
+                                             link_args: ['-Wl,--gc-sections',
+                                                 '-Wl,--no-export-dynamic'])
+    test('latx-tb-flush-smc-reload-async', smc_reload_async_flush_test)
   endif
 
     execs = [{

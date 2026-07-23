@@ -1424,7 +1424,7 @@ static inline void invalidate_page_bitmap(PageDesc *p)
  */
 static IntervalTreeRoot tb_root;
 
-static void tb_remove_all(void)
+void tb_flush_remove_all(void)
 {
     assert_memory_lock();
     memset(&tb_root, 0, sizeof(tb_root));
@@ -1526,7 +1526,7 @@ static void tb_remove_all_1(int level, void **lp)
     }
 }
 
-static void tb_remove_all(void)
+void tb_flush_remove_all(void)
 {
     int i, l1_sz = v_l1_size;
 
@@ -1604,103 +1604,6 @@ static void tb_remove(TranslationBlock *tb)
     }
 }
 #endif /* CONFIG_USER_ONLY */
-
-static gboolean tb_host_size_iter(gpointer key, gpointer value, gpointer data)
-{
-    const TranslationBlock *tb = value;
-    size_t *size = data;
-
-    *size += tb->tc.size;
-    return false;
-}
-
-/* flush all the translation blocks */
-void do_tb_flush(CPUState *cpu, run_on_cpu_data tb_flush_count)
-{
-#ifdef CONFIG_LATX_AOT
-    if (option_aot && in_pre_translate) {
-	qemu_log_mask(LAT_LOG_AOT, "FIXME: tb flush in pre translate\n");
-	_exit(0);
-    }
-#endif
-
-    bool did_flush = false;
-
-    mmap_lock();
-    /* If it is already been done on request of another CPU,
-     * just retry.
-     */
-    if (tb_ctx.tb_flush_count != tb_flush_count.host_int) {
-        goto done;
-    }
-    did_flush = true;
-
-    if (DEBUG_TB_FLUSH_GATE) {
-        size_t nb_tbs = tcg_nb_tbs();
-        size_t host_size = 0;
-
-        tcg_tb_foreach(tb_host_size_iter, &host_size);
-        printf("qemu: flush code_size=%zu nb_tbs=%zu avg_tb_size=%zu\n",
-               tcg_code_size(), nb_tbs, nb_tbs > 0 ? host_size / nb_tbs : 0);
-    }
-
-    CPU_FOREACH(cpu) {
-#ifdef CONFIG_LATX_FAST_JMPCACHE
-        latx_fast_jmp_cache_clear_all(cpu);
-#endif
-        cpu_tb_jmp_cache_clear(cpu);
-    }
-
-    qht_reset_size(&tb_ctx.htable, CODE_GEN_HTABLE_SIZE);
-    tb_remove_all();
-
-    tcg_region_reset_all();
-    /* XXX: flush processor icache at this point if cache flush is
-       expensive */
-    qatomic_mb_set(&tb_ctx.tb_flush_count, tb_ctx.tb_flush_count + 1);
-
-done:
-    mmap_unlock();
-    if (did_flush) {
-        qemu_plugin_flush_cb();
-    }
-#if defined(CONFIG_LATX_KZT)
-    CPU_FOREACH(cpu) {
-        if (cpu && option_kzt) {
-            init_tb_callback_bridge(cpu, &info1);
-        }
-    }
-#endif
-}
-
-static void gen_aot_and_flush(CPUState *cpu, run_on_cpu_data tb_flush_count)
-{
-#ifdef CONFIG_LATX_AOT
-    aot_exit_entry(cpu, false);
-#endif
-    do_tb_flush(cpu, tb_flush_count);
-}
-
-void tb_flush(CPUState *cpu)
-{
-    if (option_smc_reload) {
-        smc_reload_tree_clear();
-    }
-
-    if (tcg_enabled()) {
-        unsigned tb_flush_count = qatomic_mb_read(&tb_ctx.tb_flush_count);
-
-        if (cpu_in_exclusive_context(cpu)) {
-            /* do_tb_flush(cpu, RUN_ON_CPU_HOST_INT(tb_flush_count)); */
-            gen_aot_and_flush(cpu, RUN_ON_CPU_HOST_INT(tb_flush_count));
-        } else {
-            /* async_safe_run_on_cpu(cpu, do_tb_flush, */
-            /*                       RUN_ON_CPU_HOST_INT(tb_flush_count)); */
-            async_safe_run_on_cpu(cpu, gen_aot_and_flush,
-                                   RUN_ON_CPU_HOST_INT(tb_flush_count));
-        }
-    }
-}
 
 /*
  * Formerly ifdef DEBUG_TB_CHECK. These debug functions are user-mode-only,
