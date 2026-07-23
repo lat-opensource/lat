@@ -3467,6 +3467,7 @@ bool pageflags_set_clear(target_ulong start, target_ulong last,
     return inval_tb;
 }
 
+#ifdef CONFIG_LATX_AOT
 static void add_smc_node(tb_page_addr_t start, tb_page_addr_t end)
 {
     TranslationBlock *tb;
@@ -3520,6 +3521,7 @@ static void add_smc_node(tb_page_addr_t start, tb_page_addr_t end)
         }
     }
 }
+#endif
 
 /*
  * Modify the flags of a page and invalidate the code if necessary.
@@ -3599,9 +3601,11 @@ void page_set_flags_tb_reload(target_ulong start, target_ulong end,
     }
 
     if (inval_tb) {
+#ifdef CONFIG_LATX_AOT
         if (tb_reload) {
             add_smc_node(start, end);
         }
+#endif
         tb_invalidate_phys_range(start, end);
     }
 #ifdef CONFIG_LATX_PERF

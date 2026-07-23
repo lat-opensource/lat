@@ -14946,6 +14946,7 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
         ret = get_errno(pread64(arg1, p, arg3, target_offset64(arg4, arg5)));
         unlock_user_remap(p, arg2, ret);
 
+#ifdef CONFIG_LATX_AOT
         if (option_aot && (arg1 > 2)) {
             char buf[PATH_MAX];
             int target_prot = page_get_flags(arg2) & (PAGE_READ | PAGE_WRITE | PAGE_EXEC);
@@ -14956,6 +14957,7 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
                 recover_aot_tb(buf, aot_offset, arg2, arg3);
             }
         }
+#endif
 
         return ret;
     case TARGET_NR_pwrite64:
