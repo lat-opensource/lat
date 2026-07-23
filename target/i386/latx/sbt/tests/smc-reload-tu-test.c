@@ -49,7 +49,7 @@ void aot_tb_register(TranslationBlock *tb)
 
 int page_get_flags(target_ulong address G_GNUC_UNUSED)
 {
-    return PAGE_READ;
+    return PAGE_VALID | PAGE_EXEC;
 }
 
 bool page_is_shadow_not_shmm(target_ulong address G_GNUC_UNUSED)
