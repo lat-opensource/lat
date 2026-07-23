@@ -32,6 +32,7 @@ jobs:
         IMAGE:
           - {TAG_NAME: "latx-runner-aosc:loong64", DOCKER_PLATFORM: "linux/loong64", DOCKERFILE_PATH: ".github/.ci/aosc", RUNNER: "ubuntu-latest"}
           - {TAG_NAME: "latx-runner-debian:loong64", DOCKER_PLATFORM: "linux/loong64", DOCKERFILE_PATH: ".github/.ci/debian", RUNNER: "ubuntu-latest"}
+          - {TAG_NAME: "latx-runner-fedora:loongarch64", DOCKER_PLATFORM: "linux/loong64", DOCKERFILE_PATH: ".github/.ci/fedora", RUNNER: "ubuntu-latest"}
           
     name: "${{ matrix.IMAGE.TAG_NAME }}"
     steps:

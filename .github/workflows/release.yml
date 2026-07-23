@@ -32,7 +32,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        container: [ 'latx-runner-aosc', 'latx-runner-debian' ]
+        container:
+          - { NAME: 'latx-runner-aosc', ARCH_NAME: 'loong64' }
+          - { NAME: 'latx-runner-debian', ARCH_NAME: 'loong64' }
+          - { NAME: 'latx-runner-fedora', ARCH_NAME: 'loongarch64' }
         type: [ 'build-release', 'build32', 'build32-dbg', 'build64', 'build64-dbg' ]
 
     steps:
@@ -44,8 +47,8 @@ jobs:
         uses: actions/cache@v6
         with:
           path: /tmp/.cache
-          key: ${{ matrix.container }}-${{ matrix.type }}-${{ github.sha }}
-          restore-keys: ${{ matrix.container }}-${{ matrix.type }}-
+          key: ${{ matrix.container.NAME }}-${{ matrix.type }}-${{ github.sha }}
+          restore-keys: ${{ matrix.container.NAME }}-${{ matrix.type }}-
 
       - name: Setup QEMU
         uses: docker/setup-qemu-action@v4
@@ -55,7 +58,7 @@ jobs:
 
       - name: "Build LATX"
         run: |
-          DOCKER_IMAGE="ghcr.io/${{ github.repository_owner }}/${{ matrix.container }}:loong64"
+          DOCKER_IMAGE="ghcr.io/${{ github.repository_owner }}/${{ matrix.container.NAME }}:${{ matrix.container.ARCH_NAME }}"
           DOCKER_CMD="./latxbuild/${{ matrix.type }}.sh -c"
           docker run --rm \
             --platform linux/loong64 \
@@ -72,7 +75,7 @@ jobs:
       - name: "Upload Artifact"
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ matrix.container }}-${{ matrix.type }}-${{ env.SHORT_COMMIT }}
+          name: ${{ matrix.container.NAME }}-${{ matrix.type }}-${{ env.SHORT_COMMIT }}
           path: |
             ${{ matrix.type }}/latx-i386
             ${{ matrix.type }}/latx-x86_64
