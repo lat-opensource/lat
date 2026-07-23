@@ -20,5 +20,7 @@ unsigned int smc_reload_tree_get_node_count(void);
 void smc_reload_tree_foreach(void);
 void smc_reload_tree_clear(void);
 bool smc_reload_segment_is_candidate(const struct seg_info *segment);
+void smc_reload_save_tb_code(uint8_t *dest, target_ulong guest_pc,
+                             size_t size);
 
 #endif

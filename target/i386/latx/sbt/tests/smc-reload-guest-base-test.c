@@ -5,8 +5,12 @@
 #include "latx-options.h"
 #include "smc_reload.h"
 #include "exec/translate-all.h"
+#include "smc-reload-guest-base-test.h"
 
 static unsigned int aot_register_count;
+static void *reload_mprotect_addr;
+static int reload_mprotect_prot;
+static bool capture_reload_mprotect;
 
 __thread TCGContext *tcg_ctx;
 int option_smc_reload;
@@ -15,6 +19,14 @@ uintptr_t qemu_host_page_size;
 intptr_t qemu_host_page_mask;
 uintptr_t guest_base;
 bool have_guest_base;
+
+int __wrap_mprotect(void *addr, size_t len G_GNUC_UNUSED, int prot)
+{
+    g_assert(capture_reload_mprotect);
+    reload_mprotect_addr = addr;
+    reload_mprotect_prot = prot;
+    return 0;
+}
 
 bool use_tu_jmp(TranslationBlock *tb)
 {
@@ -81,7 +93,6 @@ int main(void)
     guest_base = qemu_host_page_size;
     mapping[0] = 0xcc;
     host_page[0] = 0x90;
-    g_assert(mprotect(mapping, qemu_host_page_size, PROT_NONE) == 0);
 
     tcg_ctx = &test_tcg_ctx;
     option_smc_reload = 1;
@@ -96,10 +107,15 @@ int main(void)
     reload->tb_vector = g_new(TranslationBlock *, 1);
     reload->tb_vector[0] = &tb;
     reload->ir1_code_buffer = g_malloc(code_size);
-    memcpy(reload->ir1_code_buffer, host_page, code_size);
+    smc_reload_save_tb_code(reload->ir1_code_buffer, guest_page, code_size);
+    g_assert(reload->ir1_code_buffer[0] == host_page[0]);
 
     smc_reload_tree_insert(reload);
+    capture_reload_mprotect = true;
     g_assert(smc_page_reload(reload->page_addr, 0) == 1);
+    capture_reload_mprotect = false;
+    g_assert(reload_mprotect_addr == host_page);
+    g_assert(reload_mprotect_prot == PROT_READ);
     g_assert(aot_register_count == 1);
     g_assert(smc_reload_tree_get_node_count() == 0);
     qemu_spin_destroy(&tb.jmp_lock);

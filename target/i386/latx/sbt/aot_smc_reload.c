@@ -15,6 +15,12 @@ bool smc_reload_segment_is_candidate(const struct seg_info *segment)
     return segment == NULL || segment->buffer == NULL;
 }
 
+void smc_reload_save_tb_code(uint8_t *dest, target_ulong guest_pc,
+                             size_t size)
+{
+    memcpy(dest, g2h_untagged(guest_pc), size);
+}
+
 int smc_page_reload(target_ulong page_addr, uint32_t cflags)
 {
     SMCReloadInfo *reload_node;

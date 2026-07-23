@@ -3509,8 +3509,9 @@ static void add_smc_node(tb_page_addr_t start, tb_page_addr_t end)
             PAGE_FOR_EACH_TB(curr_page, curr_page + TARGET_PAGE_SIZE,
                              unused, tb, next_tb) {
                 if ((tb->pc & TARGET_PAGE_MASK) == curr_page) {
-                    memcpy(reload_node->ir1_code_buffer + ir1_size,
-                           g2h_untagged(tb->pc), tb->size);
+                    smc_reload_save_tb_code(
+                        reload_node->ir1_code_buffer + ir1_size,
+                        tb->pc, tb->size);
                     reload_node->tb_vector[tb_id++] = tb;
                     ir1_size += tb->size;
                 }

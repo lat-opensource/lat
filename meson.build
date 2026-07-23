@@ -607,6 +607,7 @@ foreach target : target_dirs
                                             dependencies: [glib],
                                             include_directories: target_inc,
                                             link_args: ['-Wl,--gc-sections',
+                                                '-Wl,--wrap=mprotect',
                                                 '-Wl,--no-export-dynamic'])
     test('latx-smc-reload-guest-base', smc_reload_guest_base_test)
 
