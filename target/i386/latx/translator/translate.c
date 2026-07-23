@@ -2737,7 +2737,11 @@ direct_jmp:
         la_code_accl(base, 2, 0x03400000);
 
         if (!use_tu_jmp(tb)) {
+#ifdef CONFIG_LATX_XCOMISX_OPT
             set_jmp_reset_offset(tb, func, stub, succ_id);
+#else
+            set_jmp_reset_offset(tb, NULL, NULL, succ_id);
+#endif
 #ifndef CONFIG_LATX_LAZYLINK
             la_b(imm_zero_ir2_opnd);
  #ifdef CONFIG_LATX_LARGE_CC
