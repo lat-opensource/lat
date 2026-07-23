@@ -99,6 +99,7 @@ int option_set_rounding_opt;
 int option_cvt_opt;
 int option_fast_atomic;
 char *option_wine_pe_fixed_base;
+char *option_wine_pe_fixed_address;
 int option_aot_pe_profile;
 
 unsigned long long counter_tb_exec;

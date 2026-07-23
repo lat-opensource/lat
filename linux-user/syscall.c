@@ -209,6 +209,35 @@ static bool latx_fd_basename_matches(int fd, const char *expected)
     return !strcasecmp(basename, expected);
 }
 
+static bool latx_wine_pe_fixed_address_matches(int fd, uint64_t *address)
+{
+    const char *spec = option_wine_pe_fixed_address;
+    const char *separator;
+    char basename[NAME_MAX + 1];
+    char *end;
+    size_t basename_len;
+
+    if (!spec) {
+        return false;
+    }
+    separator = strrchr(spec, '@');
+    if (!separator || separator == spec) {
+        return false;
+    }
+    basename_len = separator - spec;
+    if (basename_len > NAME_MAX) {
+        return false;
+    }
+    memcpy(basename, spec, basename_len);
+    basename[basename_len] = '\0';
+    if (!latx_fd_basename_matches(fd, basename)) {
+        return false;
+    }
+    errno = 0;
+    *address = strtoull(separator + 1, &end, 0);
+    return !errno && *address && !*end;
+}
+
 static bool latx_wine_pe_has_safe_preferred_base(const uint8_t *header,
                                                   abi_long len,
                                                   uint16_t magic,
@@ -299,9 +328,12 @@ static void latx_wine_pe_prefer_image_base(int fd, void *buffer, abi_long len)
     uint16_t characteristics;
     uint16_t magic;
     uint64_t image_base;
+    uint64_t fixed_address = 0;
     uint32_t image_size;
+    bool fixed_address_set;
+    const char *requested_image;
 
-    if (!option_wine_pe_fixed_base || len < PE_OPTIONAL_HEADER_OFFSET +
+    if (len < PE_OPTIONAL_HEADER_OFFSET +
             PE_DLL_CHARACTERISTICS_OFFSET + sizeof(characteristics)) {
         return;
     }
@@ -313,9 +345,14 @@ static void latx_wine_pe_prefer_image_base(int fd, void *buffer, abi_long len)
             magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC) {
         return;
     }
-    if (!latx_fd_basename_matches(fd, option_wine_pe_fixed_base)) {
+    fixed_address_set = latx_wine_pe_fixed_address_matches(fd,
+                                                            &fixed_address);
+    if (!fixed_address_set && (!option_wine_pe_fixed_base ||
+            !latx_fd_basename_matches(fd, option_wine_pe_fixed_base))) {
         return;
     }
+    requested_image = fixed_address_set ? option_wine_pe_fixed_address :
+                                         option_wine_pe_fixed_base;
 
     if (!latx_wine_pe_has_safe_preferred_base(header, len, magic,
                                                &image_base, &image_size)) {
@@ -326,6 +363,23 @@ static void latx_wine_pe_prefer_image_base(int fd, void *buffer, abi_long len)
             logged_rejected = true;
         }
         return;
+    }
+
+    if (fixed_address_set) {
+        if ((fixed_address & (TARGET_PAGE_SIZE - 1)) ||
+                fixed_address > GUEST_ADDR_MAX - image_size ||
+                (magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC &&
+                 fixed_address + image_size > UINT64_C(1) << 32)) {
+            return;
+        }
+        if (magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC) {
+            stl_le_p(header + PE_OPTIONAL_HEADER_OFFSET +
+                     PE32_IMAGE_BASE_OFFSET, fixed_address);
+        } else {
+            stq_le_p(header + PE_OPTIONAL_HEADER_OFFSET +
+                     PE64_IMAGE_BASE_OFFSET, fixed_address);
+        }
+        image_base = fixed_address;
     }
 
     /* Wine parses this header before atomically probing the guest range. */
@@ -339,7 +393,7 @@ static void latx_wine_pe_prefer_image_base(int fd, void *buffer, abi_long len)
         fprintf(stderr, "[LATX Wine PE] preferred base enabled for %s: "
                 "0x%" PRIx64 "-0x%" PRIx64
                 " (relocation fallback retained)\n",
-                option_wine_pe_fixed_base, image_base,
+                requested_image, image_base,
                 image_base + image_size);
         logged_enabled = true;
     }
