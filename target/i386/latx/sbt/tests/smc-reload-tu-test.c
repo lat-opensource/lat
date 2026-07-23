@@ -57,6 +57,17 @@ bool page_is_shadow_not_shmm(target_ulong address G_GNUC_UNUSED)
     return false;
 }
 
+static void test_smc_reload_segment_candidate(void)
+{
+    static uint8_t aot_buffer;
+    seg_info segment = { 0 };
+
+    g_assert(smc_reload_segment_is_candidate(NULL));
+    g_assert(smc_reload_segment_is_candidate(&segment));
+    segment.buffer = &aot_buffer;
+    g_assert(!smc_reload_segment_is_candidate(&segment));
+}
+
 int main(void)
 {
     static TCGContext test_tcg_ctx;
@@ -64,6 +75,7 @@ int main(void)
     TranslationBlock tb = { 0 };
     SMCReloadInfo *reload = g_new0(SMCReloadInfo, 1);
 
+    test_smc_reload_segment_candidate();
     tcg_ctx = &test_tcg_ctx;
     option_smc_reload = 1;
     tb.pc = (uintptr_t)guest_code;

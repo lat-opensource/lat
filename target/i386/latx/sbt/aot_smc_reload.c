@@ -10,6 +10,11 @@
 #include "smc_reload.h"
 
 #ifdef CONFIG_LATX_AOT
+bool smc_reload_segment_is_candidate(const struct seg_info *segment)
+{
+    return segment == NULL || segment->buffer == NULL;
+}
+
 int smc_page_reload(target_ulong page_addr, uint32_t cflags)
 {
     SMCReloadInfo *reload_node;

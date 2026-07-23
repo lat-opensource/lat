@@ -3,6 +3,8 @@
 
 #include "qemu-def.h"
 
+struct seg_info;
+
 typedef struct SMCReloadInfo {
     unsigned int tb_count;
     target_ulong page_addr;
@@ -17,5 +19,6 @@ void smc_reload_tree_remove(SMCReloadInfo *reload_node);
 unsigned int smc_reload_tree_get_node_count(void);
 void smc_reload_tree_foreach(void);
 void smc_reload_tree_clear(void);
+bool smc_reload_segment_is_candidate(const struct seg_info *segment);
 
 #endif

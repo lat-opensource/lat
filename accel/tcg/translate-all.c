@@ -3478,7 +3478,8 @@ static void add_smc_node(tb_page_addr_t start, tb_page_addr_t end)
     if (!option_smc_reload || !option_aot) {
         return;
     }
-    if (segment_tree_lookup2(start, end)) {
+    if (!smc_reload_segment_is_candidate(
+            segment_tree_lookup2(start, end))) {
         return;
     }
 
