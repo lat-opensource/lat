@@ -107,14 +107,24 @@ void aot_link_tree_insert(TranslationBlock *curr,
         target_ulong aim1_pc, target_ulong aim2_pc)
 {
     if (aot_global_info_index >= aot_global_info_total) {
+        size_t new_total;
+        aot_link_info *new_info;
+
         if (aot_global_info_total >
             SIZE_MAX / 2 / sizeof(*aot_global_info)) {
-            error_report("AOT link table capacity overflow");
-            exit(EXIT_FAILURE);
+            warn_report_once("AOT link table capacity overflow; "
+                             "skipping additional AOT links");
+            return;
         }
-        aot_global_info_total <<= 1;
-        aot_global_info = g_renew(aot_link_info, aot_global_info,
-                                  aot_global_info_total);
+        new_total = aot_global_info_total << 1;
+        new_info = g_try_renew(aot_link_info, aot_global_info, new_total);
+        if (!new_info) {
+            warn_report_once("Could not grow AOT link table; "
+                             "skipping additional AOT links");
+            return;
+        }
+        aot_global_info = new_info;
+        aot_global_info_total = new_total;
     }
     aot_link_info *info = aot_global_info + aot_global_info_index;
     info->curr = curr;
