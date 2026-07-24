@@ -8968,6 +8968,7 @@ static int do_fork(CPUArchState *env, unsigned int flags, abi_ulong newsp,
     unsigned int namespace_flags;
     unsigned int direct_fork_flags;
     bool userns_via_unshare;
+    bool rcu_child_was_deferred = false;
     int namespace_pipe[2] = { -1, -1 };
     int ret;
     TaskState *ts;
@@ -9103,27 +9104,16 @@ static int do_fork(CPUArchState *env, unsigned int flags, abi_ulong newsp,
 
         fork_start();
         if (userns_via_unshare) {
-            rcu_defer_atfork_child();
+            rcu_child_was_deferred = rcu_defer_atfork_child();
         }
         if (direct_fork_flags) {
-            CPUState *other_cpu;
-            unsigned int cpu_count = 0;
-
-            CPU_FOREACH(other_cpu) {
-                cpu_count++;
-            }
-            if (cpu_count != 1) {
-                errno = EINVAL;
-                ret = -1;
+            rcu_raw_clone_prepare();
+            ret = fork_with_flags(flags &
+                                  (CLONE_DIRECT_FORK_FLAGS | CSIGNAL));
+            if (ret == 0) {
+                rcu_raw_clone_child();
             } else {
-                rcu_raw_clone_prepare();
-                ret = fork_with_flags(flags &
-                                      (CLONE_DIRECT_FORK_FLAGS | CSIGNAL));
-                if (ret == 0) {
-                    rcu_raw_clone_child();
-                } else {
-                    rcu_raw_clone_parent();
-                }
+                rcu_raw_clone_parent();
             }
         } else {
             ret = fork();
@@ -9151,9 +9141,6 @@ static int do_fork(CPUArchState *env, unsigned int flags, abi_ulong newsp,
             /* Child Process.  */
             cpu_clone_regs_child(env, newsp, flags);
             fork_end(1);
-            if (userns_via_unshare) {
-                rcu_start_deferred_thread();
-            }
             /* There is a race condition here.  The parent process could
                theoretically read the TID in the child process before the child
                tid is set.  This would require using either ptrace
@@ -9175,7 +9162,7 @@ static int do_fork(CPUArchState *env, unsigned int flags, abi_ulong newsp,
 
             if (userns_via_unshare) {
                 close(namespace_pipe[1]);
-                rcu_cancel_atfork_child_defer();
+                rcu_restore_atfork_child_defer(rcu_child_was_deferred);
             }
             cpu_clone_regs_parent(env, flags);
             fork_end(0);
@@ -15124,9 +15111,11 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
         }
         ret = get_errno(fstatat(arg1, path(p), &st, arg4));
 
-        if (!strcmp((const char *)p, "self/task/")
-            || is_proc_myself((const char *)p, "task/"))
+        if (!is_error(ret) && rcu_call_thread_is_running() &&
+            (!strcmp((const char *)p, "self/task/") ||
+             is_proc_myself((const char *)p, "task/"))) {
             st.st_nlink--;
+        }
 
         unlock_user(p, arg2, 0);
         if (!is_error(ret))

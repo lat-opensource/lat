@@ -610,6 +610,7 @@ endif
 
 subdir('scripts')
 subdir('docs')
+subdir('tests')
 
 #########################
 # Configuration summary #

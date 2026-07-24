@@ -399,15 +399,17 @@ void rcu_disable_atfork(void)
     atfork_depth--;
 }
 
-void rcu_defer_atfork_child(void)
+bool rcu_defer_atfork_child(void)
 {
-    assert(!atfork_child_deferred);
+    bool deferred = atfork_child_deferred;
+
     atfork_child_deferred = true;
+    return deferred;
 }
 
-void rcu_cancel_atfork_child_defer(void)
+void rcu_restore_atfork_child_defer(bool deferred)
 {
-    atfork_child_deferred = false;
+    atfork_child_deferred = deferred;
 }
 
 void rcu_start_deferred_thread(void)
@@ -416,6 +418,11 @@ void rcu_start_deferred_thread(void)
         atfork_child_deferred = false;
         rcu_start_call_thread();
     }
+}
+
+bool rcu_call_thread_is_running(void)
+{
+    return !atfork_child_deferred;
 }
 
 #ifdef CONFIG_POSIX
@@ -475,5 +482,12 @@ static void __attribute__((__constructor__)) rcu_init(void)
 #ifdef CONFIG_POSIX
     pthread_atfork(rcu_init_lock, rcu_init_unlock, rcu_init_child);
 #endif
-    rcu_init_complete(true);
+#ifdef CONFIG_LATX
+    /*
+     * Chromium execs its PID namespace child before entering the nested user
+     * namespace.  Keep that child single-threaded until the guest unshare.
+     */
+    atfork_child_deferred = g_strcmp0(g_getenv("SBX_USER_NS"), "1") == 0;
+#endif
+    rcu_init_complete(!atfork_child_deferred);
 }
