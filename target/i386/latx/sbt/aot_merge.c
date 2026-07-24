@@ -680,10 +680,17 @@ out:
     return success;
 }
 
-static int aot_load_no_lock(char *lib_name)
+typedef enum AOTLoadResult {
+    AOT_LOAD_ERROR = -1,
+    AOT_LOAD_OK,
+    AOT_LOAD_INVALID_BASE,
+} AOTLoadResult;
+
+static AOTLoadResult aot_load_no_lock(char *lib_name)
 {
     void *buffer;
     struct stat statbuf;
+    AOTLoadResult result;
     int count = 2;
     int j = 0;
     char aot_version[sizeof(AOT_VERSION)];
@@ -735,6 +742,13 @@ static int aot_load_no_lock(char *lib_name)
             fclose(pf);
             goto load_error;
         }
+        if ((size_t)file_end < strlen(AOT_VERSION)) {
+            fclose(pf);
+            if (i == 0) {
+                goto invalid_base;
+            }
+            goto load_error;
+        }
         file_sz = file_end;
         /*check aot complete.*/
         if (fseek(pf, -strlen(AOT_VERSION), SEEK_END) != 0) {
@@ -748,6 +762,9 @@ static int aot_load_no_lock(char *lib_name)
         }
         if (memcmp(aot_version, AOT_VERSION, strlen(AOT_VERSION))) {
             fclose(pf);
+            if (i == 0) {
+                goto invalid_base;
+            }
             goto load_error;
         }
 
@@ -775,16 +792,21 @@ static int aot_load_no_lock(char *lib_name)
         j++;
     }
     aot_buffer_all_num = j;
-    return 0;
+    return AOT_LOAD_OK;
 
+invalid_base:
+    result = AOT_LOAD_INVALID_BASE;
+    goto release_buffers;
 load_error:
+    result = AOT_LOAD_ERROR;
+release_buffers:
     for (int i = 0; i < j; i++) {
         free(aot_buffer_all[i].p);
     }
     g_free(aot_buffer_all);
     aot_buffer_all = NULL;
     aot_buffer_all_num = 0;
-    return -1;
+    return result;
 }
 
 #ifdef CONFIG_LATX_TU
@@ -1010,12 +1032,20 @@ AOTMergeResult aot2_merge(char *curr_lib_name, int first_seg_id,
                           int last_seg_id, CPUState *cpu)
 {
     AOTMergeResult result;
+    AOTLoadResult load_result;
 
     get_aot_path(curr_lib_name, aot_file_path);
     if (access(aot_file_path, F_OK) < 0) {
         return errno == ENOENT ? AOT_MERGE_NO_BASE : AOT_MERGE_ERROR;
     }
-    if (aot_load_no_lock(curr_lib_name) < 0) {
+    load_result = aot_load_no_lock(curr_lib_name);
+    if (load_result == AOT_LOAD_INVALID_BASE) {
+        if (unlink(aot_file_path) && errno != ENOENT) {
+            return AOT_MERGE_ERROR;
+        }
+        return AOT_MERGE_NO_BASE;
+    }
+    if (load_result == AOT_LOAD_ERROR) {
         return AOT_MERGE_ERROR;
     }
     if (aot_buffer_all_num < 2) {
