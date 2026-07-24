@@ -1137,8 +1137,7 @@ bool translate_int_syscall(IR1_INST *pir1)
     aot_load_host_addr(syscall_optimize_arr,
                         (ADDR)lsenv->syscall_optimize_confirm,
                         LOAD_SYSCALL_OPTIMIZE_CONFIRM, 0);
-    la_add_addr(syscall_optimize_arr,
-                                syscall_optimize_arr, eax_opnd);
+    la_add_d(syscall_optimize_arr, syscall_optimize_arr, eax_opnd);
     la_ld_b(syscall_specified,
                                 syscall_optimize_arr, 0x0);
     la_beq(syscall_specified,
@@ -1167,7 +1166,7 @@ bool translate_int_syscall(IR1_INST *pir1)
     la_or(a5_ir2_opnd, zero_ir2_opnd, ra_alloc_gpr(ebp_index));
 
     /* 3. translate int to syscall(LA), and its' code operand is 0x0 by default */
-    la_syscall(ir2_opnd_new(IR2_OPND_IMM, 0x0));
+    la_syscall(0);
 
     /* 4. save the return value to EAX(s0) */
     la_or(s0_ir2_opnd, zero_ir2_opnd, a0_ir2_opnd);
@@ -1203,8 +1202,8 @@ bool translate_int_syscall(IR1_INST *pir1)
     /* 4. store curr_tb to last_executed_tb */
     IR2_OPND tb_opnd = ra_alloc_itemp();
     aot_load_host_addr(tb_opnd, (ADDR)tb, LOAD_TB_ADDR, 0);
-    la_store_addr(tb_opnd, env_ir2_opnd,
-                      lsenv_offset_of_last_executed_tb(lsenv));
+    la_store_addrx(tb_opnd, env_ir2_opnd,
+                   lsenv_offset_of_last_executed_tb(lsenv));
     ra_free_temp(tb_opnd);
 
     /* 5. call helper function */
