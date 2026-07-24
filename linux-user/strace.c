@@ -344,6 +344,13 @@ static void print_siginfo(const target_siginfo_t *tinfo)
                  (unsigned int)tinfo->_sifields._rt._uid,
                  tinfo->_sifields._rt._sigval.sival_ptr);
         break;
+    case QEMU_SI_SYS:
+        qemu_log_tmp(", si_call_addr=" TARGET_ABI_FMT_lx
+                     ", si_syscall=%d, si_arch=%u",
+                     tinfo->_sifields._sigsys._call_addr,
+                     tinfo->_sifields._sigsys._syscall,
+                     tinfo->_sifields._sigsys._arch);
+        break;
     default:
         g_assert_not_reached();
     }

@@ -502,6 +502,14 @@ void tswap_siginfo(target_siginfo_t *tinfo,
         __put_user(info->_sifields._rt._sigval.sival_ptr,
                    &tinfo->_sifields._rt._sigval.sival_ptr);
         break;
+    case QEMU_SI_SYS:
+        __put_user(info->_sifields._sigsys._call_addr,
+                   &tinfo->_sifields._sigsys._call_addr);
+        __put_user(info->_sifields._sigsys._syscall,
+                   &tinfo->_sifields._sigsys._syscall);
+        __put_user(info->_sifields._sigsys._arch,
+                   &tinfo->_sifields._sigsys._arch);
+        break;
     default:
         g_assert_not_reached();
     }
@@ -772,6 +780,11 @@ static void QEMU_NORETURN dump_core_and_abort(int target_sig)
 
     /* unreachable */
     abort();
+}
+
+void QEMU_NORETURN force_sig_abort(int sig)
+{
+    dump_core_and_abort(sig);
 }
 
 /* queue a signal so that it will be send to the virtual CPU as soon

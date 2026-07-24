@@ -23,6 +23,7 @@
 #include "qemu/path.h"
 #include "qemu/memfd.h"
 #include "qemu/queue.h"
+#include "qemu/rcu.h"
 #include <elf.h>
 #include <endian.h>
 #include <grp.h>
@@ -142,6 +143,7 @@
 #include "ioctl/mpt3sas_ctl.h"
 
 #include "qemu.h"
+#include "guest-seccomp.h"
 #include "signal-common.h"
 #include "qemu/guest-random.h"
 #include "qemu/selfmap.h"
@@ -165,6 +167,15 @@
 #include <sys/ptrace.h>
 #ifndef CLONE_IO
 #define CLONE_IO                0x80000000      /* Clone io context */
+#endif
+#ifndef CLONE_NEWUSER
+#define CLONE_NEWUSER           0x10000000      /* New user namespace */
+#endif
+#ifndef CLONE_NEWPID
+#define CLONE_NEWPID            0x20000000      /* New pid namespace */
+#endif
+#ifndef CLONE_NEWNET
+#define CLONE_NEWNET            0x40000000      /* New network namespace */
 #endif
 
 #include <linux/netfilter_ipv4.h>
@@ -194,9 +205,16 @@
     (CLONE_DETACHED | CLONE_IO)
 
 /* Flags for fork which we can implement within QEMU itself */
+#define CLONE_FORK_NAMESPACE_FLAGS \
+    (CLONE_NEWUSER | CLONE_NEWPID | CLONE_NEWNET)
+
+#define CLONE_DIRECT_FORK_FLAGS \
+    (CLONE_NEWUSER | CLONE_NEWPID | CLONE_NEWNET | CLONE_FS)
+
 #define CLONE_OPTIONAL_FORK_FLAGS               \
     (CLONE_SETTLS | CLONE_PARENT_SETTID |       \
-     CLONE_CHILD_CLEARTID | CLONE_CHILD_SETTID)
+     CLONE_CHILD_CLEARTID | CLONE_CHILD_SETTID | \
+     CLONE_FORK_NAMESPACE_FLAGS | CLONE_FS)
 
 /* Flags for thread creation which we can implement within QEMU itself */
 #define CLONE_OPTIONAL_THREAD_FLAGS                             \
@@ -213,9 +231,12 @@
 /* CLONE_VFORK is special cased early in do_fork(). The other flag bits
  * have almost all been allocated. We cannot support any of
  * CLONE_NEWNS, CLONE_NEWCGROUP, CLONE_NEWUTS, CLONE_NEWIPC,
- * CLONE_NEWUSER, CLONE_NEWPID, CLONE_NEWNET, CLONE_PTRACE, CLONE_UNTRACED.
+ * CLONE_PTRACE, CLONE_UNTRACED.
  * The checks against the invalid thread masks above will catch these.
  * (The one remaining unallocated bit is 0x1000 which used to be CLONE_PID.)
+ * Fork-like CLONE_NEWUSER is applied in the single-threaded child. PID,
+ * network, and shared-fs clone flags require a deferred single-thread child
+ * and use the libc clone wrapper so the kernel creates the requested state.
  */
 
 /* Define DEBUG_ERESTARTSYS to force every syscall to be restarted
@@ -8805,6 +8826,10 @@ abi_long do_arch_prctl(CPUX86State *env, int code, abi_ulong addr)
 
 
 static pthread_mutex_t clone_lock = PTHREAD_MUTEX_INITIALIZER;
+static int do_sys_futex(int *uaddr, int op, int val,
+                        const struct timespec *timeout, int *uaddr2,
+                        int val3);
+
 typedef struct {
     CPUArchState *env;
     pthread_mutex_t mutex;
@@ -8853,6 +8878,86 @@ static void *clone_func(void *arg)
     return NULL;
 }
 
+static void cleanup_guest_thread_resources(CPUArchState *env)
+{
+    assert(env->gdt.base);
+    target_munmap(env->gdt.base, sizeof(uint64_t) * TARGET_GDT_ENTRIES, 0);
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+    if (env->tb_jmp_cache_ptr) {
+        free(env->tb_jmp_cache_ptr);
+        env->tb_jmp_cache_ptr = NULL;
+    }
+#endif
+}
+
+/* clone_lock is held and at least one other guest thread exists. */
+static void QEMU_NORETURN exit_guest_thread_locked(CPUArchState *env)
+{
+    CPUState *cpu = env_cpu(env);
+    TaskState *ts = cpu->opaque;
+
+    object_property_set_bool(OBJECT(cpu), "realized", false, NULL);
+    object_unparent(OBJECT(cpu));
+    object_unref(OBJECT(cpu));
+    pthread_mutex_unlock(&clone_lock);
+
+    if (ts->child_tidptr) {
+        put_user_u32(0, ts->child_tidptr);
+        do_sys_futex(g2h(cpu, ts->child_tidptr), FUTEX_WAKE, INT_MAX,
+                     NULL, NULL, 0);
+    }
+    thread_cpu = NULL;
+    g_free(ts);
+    rcu_unregister_thread();
+    pthread_exit(NULL);
+}
+
+static void QEMU_NORETURN seccomp_kill_thread(CPUArchState *env)
+{
+#ifdef CONFIG_LATX_AOT
+    CPUState *cpu = env_cpu(env);
+#endif
+
+    /* KILL actions take precedence over already-pending guest signals. */
+    block_signals();
+    cleanup_guest_thread_resources(env);
+    pthread_mutex_lock(&clone_lock);
+#ifdef CONFIG_LATX_AOT
+    if (current_cpu->cpu_index == 0) {
+        aot_exit_entry(cpu, false);
+    }
+#endif
+    if (CPU_NEXT(first_cpu)) {
+        exit_guest_thread_locked(env);
+    }
+    pthread_mutex_unlock(&clone_lock);
+
+    /* A single-thread KILL_THREAD terminates the process as SIGSYS. */
+    force_sig_abort(TARGET_SIGSYS);
+}
+
+typedef struct ForkCloneContext {
+    void *jump_buffer[5];
+} ForkCloneContext;
+
+static int fork_clone_func(void *opaque)
+{
+    ForkCloneContext *context = opaque;
+
+    __builtin_longjmp(context->jump_buffer, 1);
+}
+
+static int fork_with_flags(unsigned int flags)
+{
+    char stack[PTHREAD_STACK_MIN] __attribute__((aligned(16)));
+    ForkCloneContext context;
+
+    if (__builtin_setjmp(context.jump_buffer) == 0) {
+        return clone(fork_clone_func, stack + sizeof(stack), flags, &context);
+    }
+    return 0;
+}
+
 /* do_fork() Must return host values and target errnos (unlike most
    do_*() functions). */
 static int do_fork(CPUArchState *env, unsigned int flags, abi_ulong newsp,
@@ -8860,6 +8965,10 @@ static int do_fork(CPUArchState *env, unsigned int flags, abi_ulong newsp,
                    abi_ulong child_tidptr)
 {
     CPUState *cpu = env_cpu(env);
+    unsigned int namespace_flags;
+    unsigned int direct_fork_flags;
+    bool userns_via_unshare;
+    int namespace_pipe[2] = { -1, -1 };
     int ret;
     TaskState *ts;
     CPUState *new_cpu;
@@ -8867,15 +8976,22 @@ static int do_fork(CPUArchState *env, unsigned int flags, abi_ulong newsp,
     sigset_t sigmask;
 
     flags &= ~CLONE_IGNORED_FLAGS;
+    namespace_flags = flags & CLONE_FORK_NAMESPACE_FLAGS;
 
     /* Emulate vfork() with fork() */
     if (flags & CLONE_VFORK)
         flags &= ~(CLONE_VFORK | CLONE_VM);
 
+    direct_fork_flags = flags & (CLONE_NEWPID | CLONE_NEWNET | CLONE_FS);
+    userns_via_unshare = namespace_flags == CLONE_NEWUSER &&
+                         !direct_fork_flags;
+
     if (flags & CLONE_VM) {
         TaskState *parent_ts = (TaskState *)cpu->opaque;
         new_thread_info info;
         pthread_attr_t attr;
+
+        rcu_start_deferred_thread();
 
         if (((flags & CLONE_THREAD_FLAGS) != CLONE_THREAD_FLAGS) ||
             (flags & CLONE_INVALID_THREAD_FLAGS)) {
@@ -8908,6 +9024,7 @@ static int do_fork(CPUArchState *env, unsigned int flags, abi_ulong newsp,
         ts->bprm = parent_ts->bprm;
         ts->info = parent_ts->info;
         ts->signal_mask = parent_ts->signal_mask;
+        ts->seccomp_filter = parent_ts->seccomp_filter;
 
         if (flags & CLONE_CHILD_CLEARTID) {
             ts->child_tidptr = child_tidptr;
@@ -8965,6 +9082,10 @@ static int do_fork(CPUArchState *env, unsigned int flags, abi_ulong newsp,
             return -TARGET_EINVAL;
         }
 
+        if (userns_via_unshare && pipe2(namespace_pipe, O_CLOEXEC) < 0) {
+            return -1;
+        }
+
         /* We can't support custom termination signals */
         /* We don't support child exit with no SIGCHLD sent
         if ((flags & CSIGNAL) != TARGET_SIGCHLD) {
@@ -8973,15 +9094,66 @@ static int do_fork(CPUArchState *env, unsigned int flags, abi_ulong newsp,
         */
 
         if (block_signals()) {
+            if (userns_via_unshare) {
+                close(namespace_pipe[0]);
+                close(namespace_pipe[1]);
+            }
             return -TARGET_ERESTARTSYS;
         }
 
         fork_start();
-        ret = fork();
+        if (userns_via_unshare) {
+            rcu_defer_atfork_child();
+        }
+        if (direct_fork_flags) {
+            CPUState *other_cpu;
+            unsigned int cpu_count = 0;
+
+            CPU_FOREACH(other_cpu) {
+                cpu_count++;
+            }
+            if (cpu_count != 1) {
+                errno = EINVAL;
+                ret = -1;
+            } else {
+                rcu_raw_clone_prepare();
+                ret = fork_with_flags(flags &
+                                      (CLONE_DIRECT_FORK_FLAGS | CSIGNAL));
+                if (ret == 0) {
+                    rcu_raw_clone_child();
+                } else {
+                    rcu_raw_clone_parent();
+                }
+            }
+        } else {
+            ret = fork();
+        }
         if (ret == 0) {
+            int namespace_errno = 0;
+            ssize_t len;
+
+            if (userns_via_unshare) {
+                close(namespace_pipe[0]);
+                if (unshare(CLONE_NEWUSER) < 0) {
+                    namespace_errno = errno;
+                }
+                do {
+                    len = write(namespace_pipe[1], &namespace_errno,
+                                sizeof(namespace_errno));
+                } while (len < 0 && errno == EINTR);
+                close(namespace_pipe[1]);
+                if (len != (ssize_t)sizeof(namespace_errno) ||
+                    namespace_errno) {
+                    _exit(EXIT_FAILURE);
+                }
+            }
+
             /* Child Process.  */
             cpu_clone_regs_child(env, newsp, flags);
             fork_end(1);
+            if (userns_via_unshare) {
+                rcu_start_deferred_thread();
+            }
             /* There is a race condition here.  The parent process could
                theoretically read the TID in the child process before the child
                tid is set.  This would require using either ptrace
@@ -8998,8 +9170,38 @@ static int do_fork(CPUArchState *env, unsigned int flags, abi_ulong newsp,
             if (flags & CLONE_CHILD_CLEARTID)
                 ts->child_tidptr = child_tidptr;
         } else {
+            int namespace_errno = EIO;
+            ssize_t len = -1;
+
+            if (userns_via_unshare) {
+                close(namespace_pipe[1]);
+                rcu_cancel_atfork_child_defer();
+            }
             cpu_clone_regs_parent(env, flags);
             fork_end(0);
+
+            if (userns_via_unshare && ret > 0) {
+                do {
+                    len = read(namespace_pipe[0], &namespace_errno,
+                               sizeof(namespace_errno));
+                } while (len < 0 && errno == EINTR);
+                close(namespace_pipe[0]);
+            } else if (userns_via_unshare) {
+                close(namespace_pipe[0]);
+            }
+
+            if (userns_via_unshare && ret > 0 &&
+                (len != (ssize_t)sizeof(namespace_errno) ||
+                 namespace_errno)) {
+                int status;
+
+                while (waitpid(ret, &status, 0) < 0 && errno == EINTR) {
+                    /* Retry until the namespace child can be reaped. */
+                }
+                errno = len == (ssize_t)sizeof(namespace_errno) ?
+                        namespace_errno : EIO;
+                ret = -1;
+            }
         }
         g_assert(!cpu_in_exclusive_context(cpu));
     }
@@ -11412,8 +11614,7 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
         /*
          * During thread exit, need to free gdt table to avoid memory leak.
          */
-        assert(env->gdt.base);
-        target_munmap(env->gdt.base, sizeof(uint64_t) * TARGET_GDT_ENTRIES, 0);
+        cleanup_guest_thread_resources(env);
         /* In old applications this may be used to implement _exit(2).
            However in threaded applications it is used for thread termination,
            and _exit_group is used for application termination.
@@ -11421,14 +11622,6 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
         if (block_signals()) {
             return -TARGET_ERESTARTSYS;
         }
-#ifdef CONFIG_LATX_FAST_JMPCACHE
-        {
-            CPUX86State *x86env = env;
-            if (x86env->tb_jmp_cache_ptr) {
-                free(x86env->tb_jmp_cache_ptr);
-            }
-        }
-#endif
         pthread_mutex_lock(&clone_lock);
 #ifdef CONFIG_LATX_AOT
         if(current_cpu->cpu_index == 0) {
@@ -11437,28 +11630,7 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
 #endif
 
         if (CPU_NEXT(first_cpu)) {
-            TaskState *ts = cpu->opaque;
-
-            object_property_set_bool(OBJECT(cpu), "realized", false, NULL);
-            object_unparent(OBJECT(cpu));
-            object_unref(OBJECT(cpu));
-            /*
-             * At this point the CPU should be unrealized and removed
-             * from cpu lists. We can clean-up the rest of the thread
-             * data without the lock held.
-             */
-
-            pthread_mutex_unlock(&clone_lock);
-
-            if (ts->child_tidptr) {
-                put_user_u32(0, ts->child_tidptr);
-                do_sys_futex(g2h(cpu, ts->child_tidptr),
-                             FUTEX_WAKE, INT_MAX, NULL, NULL, 0);
-            }
-            thread_cpu = NULL;
-            g_free(ts);
-            rcu_unregister_thread();
-            pthread_exit(NULL);
+            exit_guest_thread_locked(env);
         }
 
         pthread_mutex_unlock(&clone_lock);
@@ -14700,9 +14872,7 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
 #endif /* AARCH64 */
         case PR_GET_SECCOMP:
         case PR_SET_SECCOMP:
-            /* Disable seccomp to prevent the target disabling syscalls we
-             * need. */
-            return -TARGET_EINVAL;
+            return guest_seccomp_prctl(env, arg1, arg2, arg3);
         default:
             /* Most prctl options have no pointer arguments */
             return get_errno(prctl(arg1, g2h_untagged(arg2), g2h_untagged(arg3),
@@ -17120,9 +17290,17 @@ defined(__loongarch__)
     case TARGET_NR_setns:
         return get_errno(setns(arg1, arg2));
 #endif
+#ifdef TARGET_NR_seccomp
+    case TARGET_NR_seccomp:
+        return guest_seccomp_syscall(env, arg1, arg2, arg3);
+#endif
 #if defined(TARGET_NR_unshare) && defined(CONFIG_SETNS)
     case TARGET_NR_unshare:
-        return get_errno(unshare(arg1));
+        ret = get_errno(unshare(arg1));
+        if (arg1 & CLONE_NEWUSER) {
+            rcu_start_deferred_thread();
+        }
+        return ret;
 #endif
 #if defined(TARGET_NR_kcmp) && defined(__NR_kcmp)
     case TARGET_NR_kcmp:
@@ -17281,12 +17459,19 @@ defined(__loongarch__)
     return ret;
 }
 
-abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
-                    abi_long arg2, abi_long arg3, abi_long arg4,
-                    abi_long arg5, abi_long arg6, abi_long arg7,
-                    abi_long arg8)
+abi_long do_syscall_with_seccomp(void *cpu_env, int num, int seccomp_num,
+                                uint32_t seccomp_arch, abi_long arg1,
+                                abi_long arg2, abi_long arg3, abi_long arg4,
+                                abi_long arg5, abi_long arg6, abi_long arg7,
+                                abi_long arg8)
 {
     CPUState *cpu = env_cpu(cpu_env);
+    CPUArchState *env = cpu->env_ptr;
+    const abi_long seccomp_args[6] = {
+        arg1, arg2, arg3, arg4, arg5, arg6,
+    };
+    GuestSeccompAction seccomp_action = GUEST_SECCOMP_CONTINUE;
+    bool apply_seccomp = true;
     abi_long ret;
 #if defined(CONFIG_LATX_JRRA) || defined(CONFIG_LATX_JRRA_STACK)
     /*GR2SCR scr0, zeor; for todo.*/
@@ -17316,8 +17501,28 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
         print_syscall(cpu_env, num, arg1, arg2, arg3, arg4, arg5, arg6);
     }
 
-    ret = do_syscall1(cpu_env, num, arg1, arg2, arg3, arg4,
-                      arg5, arg6, arg7, arg8);
+#ifdef CONFIG_LATX_TUNNEL_LIB
+    apply_seccomp = num != TUNNEL_VIRTUAL_SYSCALL_ID;
+#endif
+    if (apply_seccomp) {
+        seccomp_action = guest_seccomp_filter_syscall(
+            env, seccomp_num, seccomp_arch, seccomp_args, &ret);
+    }
+
+    switch (seccomp_action) {
+    case GUEST_SECCOMP_CONTINUE:
+        ret = do_syscall1(cpu_env, num, arg1, arg2, arg3, arg4,
+                          arg5, arg6, arg7, arg8);
+        break;
+    case GUEST_SECCOMP_RETURN:
+        break;
+    case GUEST_SECCOMP_KILL_THREAD:
+        seccomp_kill_thread(env);
+    case GUEST_SECCOMP_KILL_PROCESS:
+        force_sig_abort(TARGET_SIGSYS);
+    default:
+        g_assert_not_reached();
+    }
 
     if (unlikely(qemu_loglevel_mask(LOG_STRACE)) ||
         unlikely(qemu_loglevel_mask(LOG_STRACE_ERROR))) {
@@ -17327,4 +17532,15 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
 
     record_syscall_return(cpu, num, ret);
     return ret;
+}
+
+abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
+                    abi_long arg2, abi_long arg3, abi_long arg4,
+                    abi_long arg5, abi_long arg6, abi_long arg7,
+                    abi_long arg8)
+{
+    return do_syscall_with_seccomp(cpu_env, num, num,
+                                   guest_seccomp_target_arch(),
+                                   arg1, arg2, arg3, arg4,
+                                   arg5, arg6, arg7, arg8);
 }
