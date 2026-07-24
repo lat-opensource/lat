@@ -19,6 +19,8 @@ int aot_file_get_lock_path(const char *aot_file, char *lock_path,
                            size_t lock_path_size);
 int aot_file_complete_write(FILE *file, const char *tmp_path);
 int aot_file_publish(const char *tmp_path, const char *aot_file);
+int aot_file_unlink_if_same(const char *aot_file, int file_fd,
+                            const char *lock_path);
 int flock_set(int fd, int type, bool wait);
 uint64_t aot_file_rmgroup(char *aotFile);
 int file_lock(const char *file_name, int *fd, int type, bool wait);

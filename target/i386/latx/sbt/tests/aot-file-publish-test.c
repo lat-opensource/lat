@@ -37,7 +37,10 @@ int main(void)
     char tmp_path[PATH_MAX];
     g_autofree char *test_dir = NULL;
     g_autofree char *aot_path = NULL;
+    char lock_path[PATH_MAX];
     FILE *file;
+    int old_fd;
+    int current_fd;
 
     g_assert(aot_file_get_tmp_path("/tmp/cache.aot2", tmp_path,
                                    sizeof(tmp_path)) == 0);
@@ -78,7 +81,22 @@ int main(void)
     assert_file_contents(aot_path, "old");
     g_assert(!g_file_test(tmp_path, G_FILE_TEST_EXISTS));
 
-    g_assert(unlink(aot_path) == 0);
+    g_assert(aot_file_get_lock_path(aot_path, lock_path,
+                                    sizeof(lock_path)) == 0);
+    old_fd = open(aot_path, O_RDONLY);
+    g_assert(old_fd >= 0);
+    g_assert(g_file_set_contents(tmp_path, "new", -1, NULL));
+    g_assert(rename(tmp_path, aot_path) == 0);
+    g_assert(aot_file_unlink_if_same(aot_path, old_fd, lock_path) == 0);
+    assert_file_contents(aot_path, "new");
+    g_assert(close(old_fd) == 0);
+
+    current_fd = open(aot_path, O_RDONLY);
+    g_assert(current_fd >= 0);
+    g_assert(aot_file_unlink_if_same(aot_path, current_fd, lock_path) == 0);
+    g_assert(!g_file_test(aot_path, G_FILE_TEST_EXISTS));
+    g_assert(close(current_fd) == 0);
+    g_assert(unlink(lock_path) == 0);
     g_assert(rmdir(test_dir) == 0);
     return 0;
 }

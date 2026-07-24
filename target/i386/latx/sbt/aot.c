@@ -1170,13 +1170,15 @@ void dump_aot_buffer(aot_header *p_header)
 
 }
 
-static void remove_curr_aot_file(void)
+static void remove_curr_aot_file(int fd)
 {
-    remove(aot_file_path);
-    strcat(aot_file_path, "A");
-    if (access(aot_file_path, 0) >= 0) {
-        remove(aot_file_path);
+    char lock_path[PATH_MAX];
+
+    if (aot_file_get_lock_path(aot_file_path, lock_path,
+                               sizeof(lock_path)) < 0) {
+        return;
     }
+    aot_file_unlink_if_same(aot_file_path, fd, lock_path);
 }
 
 time_t aot_st_ctime;
@@ -1212,7 +1214,7 @@ lib_info *aot_load(char *lib_name, void **curr_aot_buffer)
     }
     if (!strstr(aot_version, AOT_VERSION)) {
         qemu_log_mask(LAT_LOG_AOT, "aot file is not complete %s\n", lib_name);
-        remove_curr_aot_file();
+        remove_curr_aot_file(fd);
         goto exit_aot_load;
     }
 
@@ -1234,7 +1236,7 @@ lib_info *aot_load(char *lib_name, void **curr_aot_buffer)
                 || p_header->last_modify_time.tv_nsec != statbuf.st_mtim.tv_nsec) {
             qemu_log_mask(LAT_LOG_AOT, "need remove old aot file. %s lib_size %d %ld\n",
                     aot_file_path, p_header->lib_size, statbuf.st_size);
-            remove_curr_aot_file();
+            remove_curr_aot_file(fd);
             goto exit_aot_load;
         }
     }

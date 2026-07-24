@@ -161,6 +161,33 @@ int file_lock(const char *file_name, int *fd, int type, bool wait)
     return flock_set(*fd, type, wait);
 }
 
+int aot_file_unlink_if_same(const char *aot_file, int file_fd,
+                            const char *lock_path)
+{
+    struct stat opened;
+    struct stat current;
+    int lock_fd = -1;
+    int ret = 0;
+
+    if (file_lock(lock_path, &lock_fd, F_WRLCK, true) < 0) {
+        ret = -errno;
+        if (lock_fd >= 0) {
+            close(lock_fd);
+        }
+        return ret;
+    }
+    if (fstat(file_fd, &opened) || lstat(aot_file, &current)) {
+        ret = -errno;
+    } else if (opened.st_dev == current.st_dev &&
+               opened.st_ino == current.st_ino &&
+               unlink(aot_file)) {
+        ret = -errno;
+    }
+    flock_set(lock_fd, F_UNLCK, true);
+    close(lock_fd);
+    return ret;
+}
+
 static int aot_file_cmp(const void *a, const void *b)
 {
     struct aot_info * pa = *(struct aot_info **)a;
