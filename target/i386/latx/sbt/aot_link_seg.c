@@ -15,6 +15,12 @@
 #include "accel/tcg/internal.h"
 
 #ifdef CONFIG_LATX_AOT
+enum {
+    AOT_MODE_LOAD_ALL = 2,
+    AOT_LINK_PAGE_INITIAL_CAPACITY = 512,
+    AOT_LINK_SEGMENT_INITIAL_CAPACITY = 100000,
+};
+
 static aot_link_info *aot_global_info;
 static int aot_global_info_total;
 static int aot_global_info_index;
@@ -87,10 +93,10 @@ void try_aot_link(void)
 
 void aot_link_tree_init(void)
 {
-    if (option_aot & 0x2) {
-        aot_global_info_total = 100000;
+    if (option_aot == AOT_MODE_LOAD_ALL) {
+        aot_global_info_total = AOT_LINK_SEGMENT_INITIAL_CAPACITY;
     } else {
-        aot_global_info_total = 128;
+        aot_global_info_total = AOT_LINK_PAGE_INITIAL_CAPACITY;
     }
     aot_global_info = malloc(aot_global_info_total * sizeof(aot_link_info));
     aot_global_info_index = 0;
