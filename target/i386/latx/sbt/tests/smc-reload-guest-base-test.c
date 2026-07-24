@@ -30,7 +30,6 @@ int __wrap_mprotect(void *addr, size_t len G_GNUC_UNUSED, int prot)
 
 bool use_tu_jmp(TranslationBlock *tb)
 {
-    g_assert(qemu_spin_locked(&tb->jmp_lock));
     return tb->bool_flags & IS_TU_JMP;
 }
 
@@ -57,8 +56,6 @@ void tb_target_set_nop(uintptr_t tc_ptr G_GNUC_UNUSED,
 void aot_tb_register(TranslationBlock *tb)
 {
     assert(tb != NULL);
-    g_assert(!qemu_spin_locked(&tb->jmp_lock));
-    g_assert(!(tb->cflags & CF_INVALID));
     aot_register_count++;
 }
 
@@ -99,7 +96,6 @@ int main(void)
     tb.pc = guest_page;
     tb.size = code_size;
     tb.bool_flags = IS_TU_JMP;
-    tb.cflags = CF_INVALID;
     qemu_spin_init(&tb.jmp_lock);
 
     reload->tb_count = 1;

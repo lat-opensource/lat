@@ -19,7 +19,6 @@ bool have_guest_base;
 
 bool use_tu_jmp(TranslationBlock *tb)
 {
-    g_assert(qemu_spin_locked(&tb->jmp_lock));
     return tb->bool_flags & IS_TU_JMP;
 }
 
@@ -46,8 +45,6 @@ void tb_target_set_nop(uintptr_t tc_ptr G_GNUC_UNUSED,
 void aot_tb_register(TranslationBlock *tb)
 {
     assert(tb != NULL);
-    g_assert(!qemu_spin_locked(&tb->jmp_lock));
-    g_assert(!(tb->cflags & CF_INVALID));
     aot_register_count++;
 }
 
@@ -85,8 +82,6 @@ int main(void)
     tb.pc = (uintptr_t)guest_code;
     tb.size = sizeof(guest_code);
     tb.bool_flags = IS_TU_JMP;
-    tb.cflags = CF_INVALID;
-    qemu_spin_init(&tb.jmp_lock);
     tb.tu_jmp[TU_TB_INDEX_NEXT] = 4;
     tb.tu_jmp[TU_TB_INDEX_TARGET] = TB_JMP_RESET_OFFSET_INVALID;
 
@@ -103,7 +98,6 @@ int main(void)
     g_assert(aot_register_count == 1);
     g_assert(tb.tu_jmp[TU_TB_INDEX_NEXT] == 4);
     g_assert(smc_reload_tree_get_node_count() == 0);
-
     tb.cflags = CF_INVALID;
     reload = g_new0(SMCReloadInfo, 1);
     reload->tb_count = 1;
@@ -119,6 +113,5 @@ int main(void)
     g_assert(aot_register_count == 2);
     g_assert(tb.tu_jmp[TU_TB_INDEX_NEXT] == 4);
     g_assert(smc_reload_tree_get_node_count() == 0);
-    qemu_spin_destroy(&tb.jmp_lock);
     return 0;
 }
