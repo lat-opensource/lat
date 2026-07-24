@@ -363,26 +363,31 @@ void rcu_unregister_thread(void)
     qemu_mutex_unlock(&rcu_registry_lock);
 }
 
-static void rcu_init_complete(void)
+static void rcu_start_call_thread(void)
 {
     QemuThread thread;
 
+    qemu_thread_create(&thread, "call_rcu", call_rcu_thread,
+                       NULL, QEMU_THREAD_DETACHED);
+}
+
+static void rcu_init_complete(bool start_thread)
+{
     qemu_mutex_init(&rcu_registry_lock);
     qemu_mutex_init(&rcu_sync_lock);
     qemu_event_init(&rcu_gp_event, true);
 
     qemu_event_init(&rcu_call_ready_event, false);
 
-    /* The caller is assumed to have iothread lock, so the call_rcu thread
-     * must have been quiescent even after forking, just recreate it.
-     */
-    qemu_thread_create(&thread, "call_rcu", call_rcu_thread,
-                       NULL, QEMU_THREAD_DETACHED);
+    if (start_thread) {
+        rcu_start_call_thread();
+    }
 
     rcu_register_thread();
 }
 
 static int atfork_depth = 1;
+static bool atfork_child_deferred;
 
 void rcu_enable_atfork(void)
 {
@@ -392,6 +397,25 @@ void rcu_enable_atfork(void)
 void rcu_disable_atfork(void)
 {
     atfork_depth--;
+}
+
+void rcu_defer_atfork_child(void)
+{
+    assert(!atfork_child_deferred);
+    atfork_child_deferred = true;
+}
+
+void rcu_cancel_atfork_child_defer(void)
+{
+    atfork_child_deferred = false;
+}
+
+void rcu_start_deferred_thread(void)
+{
+    if (atfork_child_deferred) {
+        atfork_child_deferred = false;
+        rcu_start_call_thread();
+    }
 }
 
 #ifdef CONFIG_POSIX
@@ -426,7 +450,22 @@ static void rcu_init_child(void)
     }
 
     memset(&registry, 0, sizeof(registry));
-    rcu_init_complete();
+    rcu_init_complete(!atfork_child_deferred);
+}
+
+void rcu_raw_clone_prepare(void)
+{
+    rcu_init_lock();
+}
+
+void rcu_raw_clone_parent(void)
+{
+    rcu_init_unlock();
+}
+
+void rcu_raw_clone_child(void)
+{
+    rcu_init_child();
 }
 #endif
 
@@ -436,5 +475,5 @@ static void __attribute__((__constructor__)) rcu_init(void)
 #ifdef CONFIG_POSIX
     pthread_atfork(rcu_init_lock, rcu_init_unlock, rcu_init_child);
 #endif
-    rcu_init_complete();
+    rcu_init_complete(true);
 }

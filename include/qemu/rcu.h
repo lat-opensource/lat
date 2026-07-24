@@ -123,6 +123,12 @@ extern void rcu_unregister_thread(void);
  */
 extern void rcu_enable_atfork(void);
 extern void rcu_disable_atfork(void);
+extern void rcu_defer_atfork_child(void);
+extern void rcu_cancel_atfork_child_defer(void);
+extern void rcu_start_deferred_thread(void);
+extern void rcu_raw_clone_prepare(void);
+extern void rcu_raw_clone_parent(void);
+extern void rcu_raw_clone_child(void);
 
 struct rcu_head;
 typedef void RCUCBFunc(struct rcu_head *head);

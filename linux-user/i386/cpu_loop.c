@@ -22,6 +22,7 @@
 #include "qemu.h"
 #include "cpu_loop-common.h"
 #include "latx-options.h"
+#include <linux/audit.h>
 
 /***********************************************************/
 /* CPUX86 core interface */
@@ -225,12 +226,11 @@ void cpu_loop(CPUX86State *env)
         switch(trapnr) {
         case 0x80:
             /* linux syscall from int $0x80 */
-            ret = do_syscall(env,
 #ifdef TARGET_X86_64
-                             syscall_64_to_32[env->regs[R_EAX]],
-#else
+            ret = do_syscall_with_seccomp(
+                             env, syscall_64_to_32[env->regs[R_EAX]],
                              env->regs[R_EAX],
-#endif
+                             CODEIS64 ? AUDIT_ARCH_X86_64 : AUDIT_ARCH_I386,
                              env->regs[R_EBX],
                              env->regs[R_ECX],
                              env->regs[R_EDX],
@@ -238,6 +238,16 @@ void cpu_loop(CPUX86State *env)
                              env->regs[R_EDI],
                              env->regs[R_EBP],
                              0, 0);
+#else
+            ret = do_syscall(env, env->regs[R_EAX],
+                             env->regs[R_EBX],
+                             env->regs[R_ECX],
+                             env->regs[R_EDX],
+                             env->regs[R_ESI],
+                             env->regs[R_EDI],
+                             env->regs[R_EBP],
+                             0, 0);
+#endif
             if (ret == -TARGET_ERESTARTSYS) {
                 env->eip -= 2;
             } else if (ret != -TARGET_QEMU_ESIGRETURN) {

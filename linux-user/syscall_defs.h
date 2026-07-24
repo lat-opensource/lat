@@ -616,6 +616,7 @@ typedef struct {
 #define QEMU_SI_FAULT 3
 #define QEMU_SI_CHLD 4
 #define QEMU_SI_RT 5
+#define QEMU_SI_SYS 6
 
 typedef struct target_siginfo {
 #ifdef TARGET_MIPS
@@ -669,8 +670,17 @@ typedef struct target_siginfo {
 			int _band;	/* POLL_IN, POLL_OUT, POLL_MSG */
 			int _fd;
 		} _sigpoll;
+
+        /* SIGSYS */
+        struct {
+            abi_ulong _call_addr;
+            int _syscall;
+            unsigned int _arch;
+        } _sigsys;
 	} _sifields;
 } target_siginfo_t;
+
+#define TARGET_SYS_SECCOMP 1
 
 /*
  * si_code values

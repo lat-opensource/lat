@@ -101,6 +101,8 @@ struct emulated_sigtable {
     target_siginfo_t info;
 };
 
+struct GuestSeccompFilter;
+
 /* NOTE: we force a big alignment so that the stack stored after is
    aligned too */
 typedef struct TaskState {
@@ -120,6 +122,8 @@ typedef struct TaskState {
     uint32_t v86flags;
     uint32_t v86mask;
     abi_ulong child_tidptr;
+    /* Immutable seccomp filter chain inherited by guest threads. */
+    struct GuestSeccompFilter *seccomp_filter;
 #ifdef TARGET_M68K
     abi_ulong tp_value;
 #endif
@@ -283,6 +287,11 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
                     abi_long arg2, abi_long arg3, abi_long arg4,
                     abi_long arg5, abi_long arg6, abi_long arg7,
                     abi_long arg8);
+abi_long do_syscall_with_seccomp(void *cpu_env, int num, int seccomp_num,
+                                uint32_t seccomp_arch, abi_long arg1,
+                                abi_long arg2, abi_long arg3, abi_long arg4,
+                                abi_long arg5, abi_long arg6, abi_long arg7,
+                                abi_long arg8);
 extern __thread CPUState *thread_cpu;
 void cpu_loop(CPUArchState *env);
 const char *target_strerror(int err);
