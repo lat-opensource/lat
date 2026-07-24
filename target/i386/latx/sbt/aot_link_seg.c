@@ -10,6 +10,7 @@
  * @brief AOT optimization
  */
 #include "aot_link_seg.h"
+#include "qemu/error-report.h"
 #include "latx-options.h"
 #include "reg-map.h"
 #include "accel/tcg/internal.h"
@@ -22,8 +23,8 @@ enum {
 };
 
 static aot_link_info *aot_global_info;
-static int aot_global_info_total;
-static int aot_global_info_index;
+static size_t aot_global_info_total;
+static size_t aot_global_info_index;
 
 static void patch_jrra(aot_link_info *info)
 {
@@ -79,7 +80,7 @@ __inline static void link_aot_tb(aot_link_info *info)
 
 void try_aot_link(void)
 {
-    for (int i = 0; i < aot_global_info_index; i++) {
+    for (size_t i = 0; i < aot_global_info_index; i++) {
         aot_link_info *info = aot_global_info + i;
         link_aot_tb(info);
 #if defined(CONFIG_LATX_JRRA) || defined(CONFIG_LATX_JRRA_STACK)
@@ -98,7 +99,7 @@ void aot_link_tree_init(void)
     } else {
         aot_global_info_total = AOT_LINK_PAGE_INITIAL_CAPACITY;
     }
-    aot_global_info = malloc(aot_global_info_total * sizeof(aot_link_info));
+    aot_global_info = g_new(aot_link_info, aot_global_info_total);
     aot_global_info_index = 0;
 }
 
@@ -106,9 +107,14 @@ void aot_link_tree_insert(TranslationBlock *curr,
         target_ulong aim1_pc, target_ulong aim2_pc)
 {
     if (aot_global_info_index >= aot_global_info_total) {
+        if (aot_global_info_total >
+            SIZE_MAX / 2 / sizeof(*aot_global_info)) {
+            error_report("AOT link table capacity overflow");
+            exit(EXIT_FAILURE);
+        }
         aot_global_info_total <<= 1;
-        aot_global_info = realloc(aot_global_info,
-            aot_global_info_total * sizeof(aot_link_info));
+        aot_global_info = g_renew(aot_link_info, aot_global_info,
+                                  aot_global_info_total);
     }
     aot_link_info *info = aot_global_info + aot_global_info_index;
     info->curr = curr;
