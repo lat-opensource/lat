@@ -701,7 +701,9 @@ static AOTLoadResult aot_load_no_lock(char *lib_name)
     if (lib_name == NULL) {
         return -1;
     }
-    get_aot_path(lib_name, aot_file_path);
+    if (get_aot_path(lib_name, aot_file_path, PATH_MAX) < 0) {
+        return AOT_LOAD_ERROR;
+    }
     if (access(aot_file_path, 0) < 0) {
         return -1;
     }
@@ -1034,7 +1036,9 @@ AOTMergeResult aot2_merge(char *curr_lib_name, int first_seg_id,
     AOTMergeResult result;
     AOTLoadResult load_result;
 
-    get_aot_path(curr_lib_name, aot_file_path);
+    if (get_aot_path(curr_lib_name, aot_file_path, PATH_MAX) < 0) {
+        return AOT_MERGE_ERROR;
+    }
     if (access(aot_file_path, F_OK) < 0) {
         return errno == ENOENT ? AOT_MERGE_NO_BASE : AOT_MERGE_ERROR;
     }

@@ -21,7 +21,9 @@ static void lib_delete(gconstpointer a)
     lsassert(oldkey);
     lsassert(oldkey->name);
     free(oldkey->name);
-    free(oldkey->buffer);
+    if (oldkey->buffer && oldkey->map_len) {
+        munmap(oldkey->buffer, oldkey->map_len);
+    }
     free(oldkey);
 }
 
@@ -61,7 +63,7 @@ lib_info *lib_tree_lookup(char *name) {
 
 }
 
-lib_info *lib_tree_insert(char *name, void *buffer)
+lib_info *lib_tree_insert(char *name, void *buffer, size_t map_len)
 {
     lib_info *lib = (lib_info *)malloc(sizeof(lib_info));
     if (lib == NULL) {
@@ -77,10 +79,18 @@ lib_info *lib_tree_insert(char *name, void *buffer)
     strncpy(lib->name, name, strlen(name) + 1);
 
     lib->buffer = buffer;
+    lib->map_len = map_len;
     lib->is_unmapped = 0;
     /* Now insert this new lib into lib_tree */
     g_tree_replace(lib_tree, lib, lib);
     return lib;
+}
+
+bool lib_tree_remove(char *name)
+{
+    lib_info key = {.name = name};
+
+    return g_tree_remove(lib_tree, &key);
 }
 
 gint get_lib_num(void)
@@ -98,4 +108,3 @@ void do_lib_record(lib_info **lib_info_vector)
 }
 
 #endif
-

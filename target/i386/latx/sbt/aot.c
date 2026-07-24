@@ -54,6 +54,7 @@ seg_info **seg_info_vector;
 static int seg_info_num;
 static int curr_lib_seg_num;
 static char *curr_lib_name;
+static char curr_aot_file_name[PATH_MAX];
 uintptr_t table_end_addr;
 /* Helper functions used to dump tbs in hash table to a vector */
 static void do_tb_count(void *p, uint32_t hash, void *userp)
@@ -613,25 +614,34 @@ static uint8_t *fill_ir1_buff(uint64_t ir1_table_offset, aot_tb *p_aot_tbs,
     return ir1_buffer;
 }
 
-void get_aot_path(const char *lib_name, char *file_path) 
+int get_aot_path(const char *lib_name, char *file_path,
+                 size_t file_path_size)
 {
-    assert(lib_name && file_path);
-    char *home = getenv("HOME");
-    if (likely(home)) {
-    	snprintf(file_path, PATH_MAX, "%s%s", home, "/.cache/latx/");
-    } else {
-    	snprintf(file_path, PATH_MAX, "%s", "/.cache/latx/");
+    const char *home;
+    char *escaped_name;
+    int len;
+
+    if (!lib_name || !file_path || !file_path_size) {
+        return -EINVAL;
     }
-    char temp[PATH_MAX];
-    strcpy(temp, "");
-    strcat(temp, lib_name);
-    for (int i = 0; i < strlen(temp); i++) {
-        if (temp[i] == '/') {
-            temp[i] = '+';
+    escaped_name = g_strdup(lib_name);
+    if (!escaped_name) {
+        return -ENOMEM;
+    }
+    for (char *p = escaped_name; *p; p++) {
+        if (*p == '/') {
+            *p = '+';
         }
     }
-    strcat(file_path, temp);
-    strcat(file_path, ".aot2");
+    home = getenv("HOME");
+    len = snprintf(file_path, file_path_size, "%s/.cache/latx/%s.aot2",
+                   home ? home : "", escaped_name);
+    g_free(escaped_name);
+    if (len < 0 || (size_t)len >= file_path_size) {
+        file_path[0] = '\0';
+        return -ENAMETOOLONG;
+    }
+    return 0;
 }
 
 static long get_fileSize(FILE* file) 
@@ -657,7 +667,11 @@ static int write_aot_file(int *lockfd, aot_header *p_header, uint32_t *p_insn,
     size_t write_size;
     int fd;
 
-    get_aot_path(curr_lib_name, aot_file_path);
+    if (get_aot_path(curr_aot_file_name, aot_file_path,
+                     PATH_MAX) < 0) {
+        qemu_log_mask(LAT_LOG_AOT, "AOT path is too long\n");
+        return -1;
+    }
     if (aot_file_get_tmp_path(aot_file_path, tmp_file_path,
                               sizeof(tmp_file_path)) < 0) {
         qemu_log_mask(LAT_LOG_AOT, "AOT temporary path is too long\n");
@@ -736,7 +750,8 @@ int do_generate_aot(int first_seg_in_lib, int end_seg_in_lib)
         return false;
     }
 
-    p_header->aot_file_type = get_file_type(curr_lib_name);
+    p_header->aot_file_type =
+        seg_info_vector[first_seg_in_lib]->aot_file_type;
 
     if (p_header->aot_file_type & (ELF_AOT_FILE | PE_AOT_FILE)) {
         struct stat statbuf;
@@ -786,7 +801,7 @@ int do_generate_aot(int first_seg_in_lib, int end_seg_in_lib)
     uint8_t *p_ir1 = (uint8_t *)ROUND_UP(table_end_addr, 8);
     int ir1_size = 0;
     uint8_t *ir1_buffer = NULL;
-    if (!is_elf_file(curr_lib_name)) {
+    if (!(p_header->aot_file_type & ELF_AOT_FILE)) {
         ir1_buffer = fill_ir1_buff((void *)p_ir1 - (void *)p_header,
             p_aot_tbs, tb_table_end, &ir1_size);
     }
@@ -830,8 +845,11 @@ char in_white_list(char *lib)
     return in_list(lib, lib_white_list);
 }
 
-static int get_tb_num(char *lib_name, CPUState *cpu) {
-    get_aot_path(lib_name, aot_file_path);
+static int get_tb_num(char *lib_name, char *aot_file_name, CPUState *cpu)
+{
+    if (get_aot_path(aot_file_name, aot_file_path, PATH_MAX) < 0) {
+        return 0;
+    }
     if (access(aot_file_path, 0) < 0) {
         return 0;
     }
@@ -897,10 +915,10 @@ static int get_tb_num(char *lib_name, CPUState *cpu) {
 
 #define PROLIFERATION_RATE 10
 static inline int need_gen_aot(CPUState *cpu,
-        char *lib_name, int *lockfd, uint32_t tb_count) 
+        char *lib_name, char *aot_file_name, int *lockfd, uint32_t tb_count)
 {
-    lib_info *lib = lib_tree_lookup(lib_name);
-    int aim_tb_num = 0;;
+    lib_info *lib = lib_tree_lookup(aot_file_name);
+    int aim_tb_num = 0;
     if (lib) {
         aot_header *p_head = (aot_header *)lib->buffer;
         if (cpu->tcg_cflags & CF_PARALLEL) {
@@ -909,13 +927,15 @@ static inline int need_gen_aot(CPUState *cpu,
             aim_tb_num = p_head->unparallel_tb_num;
         }
     } else {
-        aim_tb_num = get_tb_num(lib_name, cpu);
+        aim_tb_num = get_tb_num(lib_name, aot_file_name, cpu);
     }
     /* Too few tb number. */
     if (tb_count * PROLIFERATION_RATE < aim_tb_num) {
         return -1;
     }
-    get_aot_path(curr_lib_name, aot_file_path);
+    if (get_aot_path(aot_file_name, aot_file_path, PATH_MAX) < 0) {
+        return -1;
+    }
     if (aot_file_get_lock_path(aot_file_path, aot_file_lock,
                                PATH_MAX) < 0) {
         return -1;
@@ -954,7 +974,11 @@ void pre_translate(int begin_id, int end_id, CPUState *cpu,
     qatomic_set(&tcg_ctx->tb_gen_ptr, tcg_ctx->tb_gen_buffer);
     clear_rel_table();
 
-    get_aot_path(curr_lib_name, aot_file_path);
+    if (get_aot_path(curr_aot_file_name, aot_file_path,
+                     PATH_MAX) < 0) {
+        tb_num = 0;
+        return;
+    }
     if (access(aot_file_path, 0) >= 0) {
         char tmp_file_path[PATH_MAX];
 
@@ -976,7 +1000,9 @@ static bool rename_aot_file(char *lib_name)
     char tmp_file_path[PATH_MAX];
     int ret;
 
-    get_aot_path(lib_name, aot_file_path);
+    if (get_aot_path(lib_name, aot_file_path, PATH_MAX) < 0) {
+        return false;
+    }
     if (aot_file_get_tmp_path(aot_file_path, tmp_file_path,
                               sizeof(tmp_file_path)) < 0) {
         return false;
@@ -1006,9 +1032,18 @@ static inline void gen_aot_by_lib(int first_seg_id, int end_seg_id,
     int lockfd = -1;
 
     curr_lib_name = seg_info_vector[first_seg_id]->file_name;
+    if (segment_get_aot_file_name(seg_info_vector[first_seg_id],
+                                  curr_aot_file_name,
+                                  sizeof(curr_aot_file_name)) < 0) {
+        return;
+    }
 
-    if (need_gen_aot(cpu, curr_lib_name, &lockfd, tb_count) >= 0) {
-        get_aot_path(curr_lib_name, aot_file_path);
+    if (need_gen_aot(cpu, curr_lib_name, curr_aot_file_name,
+                     &lockfd, tb_count) >= 0) {
+        if (get_aot_path(curr_aot_file_name, aot_file_path,
+                         PATH_MAX) < 0) {
+            goto unlock;
+        }
         if (aot_file_get_tmp_path(aot_file_path, tmp_file_path,
                                   sizeof(tmp_file_path)) < 0) {
             goto unlock;
@@ -1022,10 +1057,10 @@ static inline void gen_aot_by_lib(int first_seg_id, int end_seg_id,
         pre_translate(first_seg_id, end_seg_id, cpu, NULL);
         if (do_generate_aot(first_seg_id, end_seg_id)) {
             merge_result =
-                aot2_merge(curr_lib_name, first_seg_id, end_seg_id, cpu);
+                aot2_merge(curr_aot_file_name, first_seg_id, end_seg_id, cpu);
             if (merge_result == AOT_MERGE_NO_BASE ||
                 merge_result == AOT_MERGE_READY) {
-                generated_aot_file |= rename_aot_file(curr_lib_name);
+                generated_aot_file |= rename_aot_file(curr_aot_file_name);
             } else {
                 unlink(tmp_file_path);
             }
@@ -1044,7 +1079,9 @@ static void generate_aot_v2(CPUState *cpu)
         seg_info_vector[0]->first_tb_id + 1;
     for (int i = 1; i < seg_info_num; i++) {
         if (strcmp(seg_info_vector[i]->file_name, 
-                    seg_info_vector[first_seg_in_lib]->file_name)) {
+                    seg_info_vector[first_seg_in_lib]->file_name) ||
+            (seg_info_vector[first_seg_in_lib]->aot_file_type &
+             (PE_AOT_FILE | CACHE_AOT_FILE))) {
             gen_aot_by_lib(first_seg_in_lib, i, cpu, tb_count);
             first_seg_in_lib = i;
             tb_count = seg_info_vector[i]->last_tb_id 
@@ -1074,7 +1111,10 @@ void clear_rel_table(void)
 void aot_generate(CPUState *cpu)
 {
     char tmp_file[2] = "t";
-    get_aot_path(tmp_file, aot_file_path);
+    if (get_aot_path(tmp_file, aot_file_path, PATH_MAX) < 0) {
+        qemu_log_mask(LAT_LOG_AOT, "AOT path is too long\n");
+        return;
+    }
     int fd = open(aot_file_path, O_CREAT | O_RDONLY, 0777);
     /* make fd > 2. */
     while(fd <= 2) {
@@ -1205,19 +1245,23 @@ static void remove_curr_aot_file(int fd)
 
 time_t aot_st_ctime;
 
-lib_info *aot_load(char *lib_name, void **curr_aot_buffer)
+lib_info *aot_load(char *lib_name, char *aot_file_name,
+                   void **curr_aot_buffer)
 {
     /* Get aot_file path and lock file. */
     assert(lib_name);
-    get_aot_path(lib_name, aot_file_path);
+    if (get_aot_path(aot_file_name, aot_file_path, PATH_MAX) < 0) {
+        return NULL;
+    }
     if (access(aot_file_path, 0) < 0) {
         return NULL;
     }
 
     /* Open aot_file. */
-    void *buffer;
+    void *buffer = MAP_FAILED;
     struct stat statbuf;
     lib_info *curr_lib_info = NULL;
+    size_t file_sz = 0;
     char aot_version[strlen(AOT_VERSION) + 1];
     int fd = open(aot_file_path, O_RDONLY);
     FILE *pf = NULL;
@@ -1227,7 +1271,7 @@ lib_info *aot_load(char *lib_name, void **curr_aot_buffer)
     pf = fdopen(fd, "r");
     lsassert(pf && ("open aot file failed!"));
     fseek(pf, 0, SEEK_END);      /* seek to end of file */
-    size_t file_sz = ftell(pf);  /* get current file pointer */
+    file_sz = ftell(pf);         /* get current file pointer */
 
     /*check aot complete.*/
     if (fseek(pf, -strlen(AOT_VERSION), SEEK_END) != 0
@@ -1243,7 +1287,7 @@ lib_info *aot_load(char *lib_name, void **curr_aot_buffer)
     /* Read aot file */
     fseek(pf, 0, SEEK_SET);      /* seek back to beginning of file */
     buffer = mmap(NULL, file_sz, PROT_READ, MAP_SHARED, fd, 0);
-    if (buffer <= 0) {
+    if (buffer == MAP_FAILED) {
         qemu_log_mask(LAT_LOG_AOT, "aot file mmap error\n");
         goto exit_aot_load;
     }
@@ -1265,9 +1309,12 @@ lib_info *aot_load(char *lib_name, void **curr_aot_buffer)
 
     /* dump_aot_buffer(p_header); */
     *curr_aot_buffer = buffer;
-    curr_lib_info = lib_tree_insert(lib_name, buffer);
+    curr_lib_info = lib_tree_insert(aot_file_name, buffer, file_sz);
 
 exit_aot_load:
+    if (!curr_lib_info && buffer != MAP_FAILED) {
+        munmap(buffer, file_sz);
+    }
     if (likely(pf)) {
         fclose(pf);
     }
@@ -1556,27 +1603,45 @@ void aot_do_tb_reloc(TranslationBlock *tb, struct aot_tb *stb,
     }
 }
 
-static aot_segment *get_segment(char *lib_name, uint64_t aot_offset,
-        abi_long start, abi_long end, void **curr_aot_buffer)
+static aot_segment *get_segment(seg_info *seg, char *lib_name,
+        uint64_t aot_offset, abi_long start, abi_long end,
+        void **curr_aot_buffer)
 {
+    char aot_file_name[PATH_MAX];
     aot_segment *p_segment;
-    lib_info *lib = lib_tree_lookup(lib_name);
+    lib_info *lib;
+
+    if (segment_get_aot_file_name(seg, aot_file_name,
+                                  sizeof(aot_file_name)) < 0) {
+        return NULL;
+    }
+    lib = lib_tree_lookup(aot_file_name);
     if (lib == NULL) {
         *curr_aot_buffer = NULL;
-        lib = aot_load(lib_name, curr_aot_buffer);
+        lib = aot_load(lib_name, aot_file_name, curr_aot_buffer);
     } else if (!lib->is_unmapped){
         *curr_aot_buffer = lib->buffer;
+    } else if (seg->aot_file_type & (PE_AOT_FILE | CACHE_AOT_FILE)) {
+        lib_tree_remove(aot_file_name);
+        *curr_aot_buffer = NULL;
+        return NULL;
     }
     if (*curr_aot_buffer == NULL) {
         return NULL;
     }
     p_segment = aot_find_segment(lib_name, aot_offset, *curr_aot_buffer);
     if (p_segment == NULL) {
+        if (seg->aot_file_type & (PE_AOT_FILE | CACHE_AOT_FILE)) {
+            lib_tree_remove(aot_file_name);
+            *curr_aot_buffer = NULL;
+        }
         return NULL;
     }
-    if (p_segment->aot_file_type & PE_AOT_FILE) {
-        if (p_segment->details.seg_begin != start) {
-            lib->is_unmapped = 1;
+    if (p_segment->aot_file_type & (PE_AOT_FILE | CACHE_AOT_FILE)) {
+        if (p_segment->details.seg_begin != start ||
+            p_segment->details.seg_end != end) {
+            lib_tree_remove(aot_file_name);
+            *curr_aot_buffer = NULL;
             return NULL;
         }
     }
@@ -1585,7 +1650,12 @@ static aot_segment *get_segment(char *lib_name, uint64_t aot_offset,
             && (start > p_segment->details.seg_begin)){
         qemu_log_mask(LAT_LOG_AOT, "seg start h32 not zero\n");
         assert(lib);
-        lib->is_unmapped = 1;
+        if (seg->aot_file_type & (PE_AOT_FILE | CACHE_AOT_FILE)) {
+            lib_tree_remove(aot_file_name);
+            *curr_aot_buffer = NULL;
+        } else {
+            lib->is_unmapped = 1;
+        }
         return NULL;
     }
         
@@ -1628,9 +1698,13 @@ static void aot_guest_code_protect(target_ulong seg_begin,
     }
 }
 
-void recover_aot_tb(char *lib_name, uint64_t aot_offset, abi_long start, 
+void recover_aot_tb(char *lib_name, uint64_t aot_offset, abi_long start,
         abi_long len) 
 {
+    seg_info *seg;
+    void *curr_aot_buffer = NULL;
+    struct aot_segment *p_segment;
+
     if (!option_load_aot) {
         return;
     }
@@ -1641,11 +1715,21 @@ void recover_aot_tb(char *lib_name, uint64_t aot_offset, abi_long start,
         #endif
         return;
     }
-    /* First, we should identify whether this segment is in aot. */
-    void *curr_aot_buffer = NULL;
+    seg = segment_tree_lookup2(start, start + len);
+    if (!seg) {
+        return;
+    }
+    if (strcmp(seg->file_name, lib_name)) {
+        return;
+    }
+    if ((seg->aot_file_type & (PE_AOT_FILE | CACHE_AOT_FILE)) &&
+        (seg->seg_begin != start || seg->seg_end != start + len)) {
+        return;
+    }
 
-    struct aot_segment *p_segment = 
-        get_segment(lib_name, aot_offset, start, start + len, &curr_aot_buffer);
+    /* First, we should identify whether this segment is in aot. */
+    p_segment = get_segment(seg, lib_name, aot_offset, start, start + len,
+                            &curr_aot_buffer);
 
     if (p_segment == NULL) {
         return;
@@ -1658,10 +1742,10 @@ void recover_aot_tb(char *lib_name, uint64_t aot_offset, abi_long start,
         qemu_log_mask(LAT_LOG_AOT, "---------------------------------------------\n");
     }
 
-    seg_info *seg = segment_tree_lookup2(start, start + len);
-    if (seg && (seg->seg_begin == start) && (seg->seg_end == start + len)) {
+    if ((seg->seg_begin == start) && (seg->seg_end == start + len)) {
         seg->buffer = curr_aot_buffer;
         seg->p_segment = p_segment;
+        seg->seg_flag |= SEG_AOT_LOADED;
     }
     if (p_segment->aot_file_type & ELF_AOT_FILE) {
         aot_guest_code_protect(start, start + len, p_segment, curr_aot_buffer);

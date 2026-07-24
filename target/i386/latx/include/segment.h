@@ -27,7 +27,9 @@ typedef struct seg_info {
     };
 #define SEG_RUNNING     0x1
 #define IS_ELF_SEG      0x2
+#define SEG_AOT_LOADED  0x4
     uint8_t seg_flag;
+    uint8_t aot_file_type;
 } seg_info;
 
 typedef struct wine_sec_info {
@@ -85,5 +87,7 @@ void segment_tree_remove(seg_info *val);
 bool segment_tree_winepe_lookup(target_ulong pc);
 gint get_segment_num(void);
 void do_segment_record(seg_info **seg_info_vector);
+int segment_get_aot_file_name(const seg_info *seg, char *name,
+                              size_t name_size);
 
 #endif

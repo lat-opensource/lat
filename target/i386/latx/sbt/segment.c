@@ -16,10 +16,48 @@
 #ifdef CONFIG_LATX_AOT
 static GTree *segment_tree;
 static GTree *wine_sec_tree;
+
+int segment_get_aot_file_name(const seg_info *seg, char *name,
+                              size_t name_size)
+{
+    char *path_hash;
+    int len;
+
+    if (!seg || !seg->file_name || !name || !name_size) {
+        return -EINVAL;
+    }
+    path_hash = g_compute_checksum_for_string(G_CHECKSUM_SHA256,
+                                              seg->file_name, -1);
+    if (!path_hash) {
+        return -ENOMEM;
+    }
+    if (seg->aot_file_type & (PE_AOT_FILE | CACHE_AOT_FILE)) {
+        len = snprintf(name, name_size, "v2-%02x-%s-%" PRIx64,
+                       seg->aot_file_type, path_hash,
+                       (uint64_t)seg->seg_begin);
+    } else {
+        len = snprintf(name, name_size, "v2-%02x-%s",
+                       seg->aot_file_type, path_hash);
+    }
+    g_free(path_hash);
+    if (len < 0 || (size_t)len >= name_size) {
+        return -ENAMETOOLONG;
+    }
+    return 0;
+}
+
 static void seg_delete(gconstpointer a) {
     seg_info *oldkey = (seg_info *)a;
+    char aot_file_name[PATH_MAX];
+
     lsassert(oldkey);
     lsassert(oldkey->file_name);
+    if ((oldkey->seg_flag & SEG_AOT_LOADED) && oldkey->buffer &&
+        (oldkey->aot_file_type & (PE_AOT_FILE | CACHE_AOT_FILE)) &&
+        segment_get_aot_file_name(oldkey, aot_file_name,
+                                  sizeof(aot_file_name)) == 0) {
+        lib_tree_remove(aot_file_name);
+    }
     free(oldkey->file_name);
     free(oldkey);
 }
@@ -155,6 +193,7 @@ void segment_tree_insert(char *name, target_ulong offset, target_ulong begin,
     seg->buffer = NULL;
     seg->p_segment = NULL;
     seg->seg_flag = 0;
+    seg->aot_file_type = get_file_type(name);
     if (is_elf_file(name)) {
        seg->seg_flag = IS_ELF_SEG;
     }

@@ -293,7 +293,8 @@ extern seg_info **seg_info_vector;
 void mk_aot_dir(char * pathname);
 void dump_aot_buffer(aot_header *p_header);
 void dump_seg(aot_segment *p_segment, aot_header *p_header);
-lib_info *aot_load(char *lib_name, void **curr_aot_buffer);
+lib_info *aot_load(char *lib_name, char *aot_file_name,
+                   void **curr_aot_buffer);
 void aot_tb_register(TranslationBlock *tb);
 void aot_do_tb_reloc(TranslationBlock *tb, struct aot_tb *stb,
     target_ulong seg_begin, target_ulong seg_end);
@@ -339,7 +340,8 @@ extern aot_rel *aot_rel_table;
 extern aot_file_info *aot_buffer_all;
 extern int aot_buffer_all_num;
 
-void get_aot_path(const char *lib_name, char *file_path);
+int get_aot_path(const char *lib_name, char *file_path,
+                 size_t file_path_size);
 char in_share_list(char *lib);
 char in_black_list(char *lib);
 char in_white_list(char *lib);

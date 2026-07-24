@@ -17,12 +17,14 @@
 typedef struct lib_info {
     char *name;
     void *buffer;
+    size_t map_len;
     bool is_unmapped;
 } lib_info;
 
 void lib_tree_init(void);
 
-lib_info *lib_tree_insert(char *name, void *buffer);
+lib_info *lib_tree_insert(char *name, void *buffer, size_t map_len);
+bool lib_tree_remove(char *name);
 
 gint get_lib_num(void);
 void do_lib_record(lib_info **lib_info_vector);
