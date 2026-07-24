@@ -559,33 +559,47 @@ static void merge_aot_generate(void)
     }
     /* Write file metadata infomation(aot_buffer) into aot. */
 
-    aot_file_rmgroup(aot_file_path);
-    int fd = open(aot_file_path, O_CREAT | O_WRONLY | O_TRUNC, 0644);
+    char tmp_file_path[PATH_MAX];
+    if (aot_file_get_tmp_path(aot_file_path, tmp_file_path,
+                              sizeof(tmp_file_path)) < 0) {
+        goto out;
+    }
+    if (unlink(tmp_file_path) && errno != ENOENT) {
+        goto out;
+    }
+    int fd = open(tmp_file_path, O_CREAT | O_EXCL | O_WRONLY, 0644);
+    if (fd < 0) {
+        goto out;
+    }
     FILE *pfile = fdopen(fd, "w");
     if (pfile == NULL) {
+        close(fd);
+        unlink(tmp_file_path);
         qemu_log_mask(LAT_LOG_AOT, "Error! write aot metadata failed!\n");
         goto out;
     }
     size_t write_size = (uintptr_t)p_insn - (uintptr_t)p_header;
     if (fwrite(p_header, write_size, 1, pfile) != 1) {
         qemu_log_mask(LAT_LOG_AOT, "Error! write aot metadata failed!\n");
-        fclose(pfile);
-        goto out;
+        goto write_error;
     }
     if (fwrite(insn_buffer, total_code_cache_size, 1, pfile) != 1) {
         qemu_log_mask(LAT_LOG_AOT, "Error! write aot translated code failed!\n");
-        fclose(pfile);
-        goto out;
+        goto write_error;
     }
     if (fwrite(AOT_VERSION, strlen(AOT_VERSION), 1, pfile) != 1) {
         qemu_log_mask(LAT_LOG_AOT, "Error! write aot AOT_VERSION failed!\n");
-        fclose(pfile);
+        goto write_error;
+    }
+    if (aot_file_complete_write(pfile, tmp_file_path) < 0) {
+        qemu_log_mask(LAT_LOG_AOT, "Error! sync aot file failed\n");
         goto out;
     }
-    if (fclose(pfile) != 0) {
-        qemu_log_mask(LAT_LOG_AOT, "Error! close aot file failed\n");
-        goto out;
-    }
+    goto out;
+
+write_error:
+    fclose(pfile);
+    unlink(tmp_file_path);
 out:
     free(p_header);
     free(insn_buffer);
