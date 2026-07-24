@@ -1204,8 +1204,8 @@ bool translate_int_syscall(IR1_INST *pir1)
     /* 4. store curr_tb to last_executed_tb */
     IR2_OPND tb_opnd = ra_alloc_itemp();
     aot_load_host_addr(tb_opnd, (ADDR)tb, LOAD_TB_ADDR, 0);
-    la_store_addrx(tb_opnd, env_ir2_opnd,
-                   lsenv_offset_of_last_executed_tb(lsenv));
+    la_st_d(tb_opnd, env_ir2_opnd,
+            lsenv_offset_of_last_executed_tb(lsenv));
     ra_free_temp(tb_opnd);
 
     /* 5. call helper function */
