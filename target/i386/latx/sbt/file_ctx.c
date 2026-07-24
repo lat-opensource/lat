@@ -27,6 +27,72 @@ struct aot_info {
     time_t st_actime;
 };
 
+int aot_file_get_tmp_path(const char *aot_file, char *tmp_path,
+                          size_t tmp_path_size)
+{
+    int len = snprintf(tmp_path, tmp_path_size, "%s.tmp", aot_file);
+
+    if (len < 0 || (size_t)len >= tmp_path_size) {
+        return -ENAMETOOLONG;
+    }
+    return 0;
+}
+
+int aot_file_get_lock_path(const char *aot_file, char *lock_path,
+                           size_t lock_path_size)
+{
+    int len = snprintf(lock_path, lock_path_size, "%s.lock", aot_file);
+
+    if (len < 0 || (size_t)len >= lock_path_size) {
+        return -ENAMETOOLONG;
+    }
+    return 0;
+}
+
+int aot_file_complete_write(FILE *file, const char *tmp_path)
+{
+    int saved_errno = 0;
+    int fd = fileno(file);
+
+    if (fflush(file) || fsync(fd)) {
+        saved_errno = errno;
+    }
+    if (fclose(file) && !saved_errno) {
+        saved_errno = errno;
+    }
+    if (saved_errno) {
+        unlink(tmp_path);
+        return -saved_errno;
+    }
+    return 0;
+}
+
+int aot_file_publish(const char *tmp_path, const char *aot_file)
+{
+    int saved_errno = 0;
+
+    if (rename(tmp_path, aot_file)) {
+        saved_errno = errno;
+        unlink(tmp_path);
+        return -saved_errno;
+    }
+
+    char *dir_name = g_path_get_dirname(aot_file);
+    int dir_fd = open(dir_name, O_RDONLY | O_DIRECTORY);
+
+    g_free(dir_name);
+    if (dir_fd < 0) {
+        return -errno;
+    }
+    if (fsync(dir_fd)) {
+        saved_errno = errno;
+    }
+    if (close(dir_fd) && !saved_errno) {
+        saved_errno = errno;
+    }
+    return -saved_errno;
+}
+
 int flock_set(int fd, int type, bool wait)
 {
     struct flock fflock = {0};
@@ -74,7 +140,7 @@ int send_file_message(char *file_d, char *message)
     fclose(pfile);
     return 0;
 }
-int file_lock(char *file_name, int *fd, int type, bool wait)
+int file_lock(const char *file_name, int *fd, int type, bool wait)
 {
     int mask = O_RDONLY;
 
@@ -94,6 +160,7 @@ int file_lock(char *file_name, int *fd, int type, bool wait)
     }
     return flock_set(*fd, type, wait);
 }
+
 static int aot_file_cmp(const void *a, const void *b)
 {
     struct aot_info * pa = *(struct aot_info **)a;

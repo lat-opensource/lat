@@ -669,23 +669,38 @@ static int aot_load_no_lock(char *lib_name)
     }
     void *buffer;
     struct stat statbuf;
-    int count = aot_get_file_init(aot_file_path);
+    int count = 2;
     size_t total_file_sz = 0;
     char aot_version[strlen(AOT_VERSION) + 1];
-    lsassert(count > 0);
     char tmp_file_path[PATH_MAX];
+    char path[PATH_MAX];
+
     if (lstat(aot_file_path, &statbuf)) {
         aot_buffer_all_num = 0;
         return -1;
     }
+    if (aot_file_get_tmp_path(aot_file_path, tmp_file_path,
+                              sizeof(tmp_file_path)) < 0) {
+        return -1;
+    }
+    aot_buffer_all = calloc(count, sizeof(*aot_buffer_all));
+    if (!aot_buffer_all) {
+        return -1;
+    }
+    aot_buffer_all_num = count;
     aot_st_ctime = statbuf.st_ctime;
     int j = 0;
     for (int i = 0; i < count; i++) {
-        memset(tmp_file_path, 0, PATH_MAX);
-        aot_get_file_name(aot_file_path, tmp_file_path, i);
-        int fd = open(tmp_file_path, O_RDONLY);
+        pstrcpy(path, sizeof(path), i ? tmp_file_path : aot_file_path);
+        int fd = open(path, O_RDONLY);
+        if (fd < 0) {
+            continue;
+        }
         FILE *pf = fdopen(fd, "r");
-        lsassert(pf && ("open aot file failed!"));
+        if (!pf) {
+            close(fd);
+            continue;
+        }
         /* Get file size */
         fseek(pf, 0, SEEK_END);      /* seek to end of file */
         size_t file_sz = ftell(pf);  /* get current file pointer */
@@ -702,10 +717,7 @@ static int aot_load_no_lock(char *lib_name)
         }
         if (!strstr(aot_version, AOT_VERSION)) {
             fclose(pf);
-            for (int ii = i; ii < count; ii++) {
-                aot_get_file_name(aot_file_path, tmp_file_path, ii);
-                remove(tmp_file_path);
-            }
+            unlink(path);
             aot_buffer_all_num = j;
             return 0;
         }
@@ -733,6 +745,7 @@ static int aot_load_no_lock(char *lib_name)
         /* align with 8 bytes. */
         total_file_sz += file_sz;
     }
+    aot_buffer_all_num = j;
     return total_file_sz;
 }
 
@@ -930,8 +943,13 @@ static void aot2_merge_tu(char *curr_lib_name, int first_seg_id,
     }
 #endif
 
-    strcat(aot_file_path, "A");
-    remove(aot_file_path);
+    char tmp_file_path[PATH_MAX];
+    if (aot_file_get_tmp_path(aot_file_path, tmp_file_path,
+                              sizeof(tmp_file_path)) < 0) {
+        free(tb_message_vector);
+        return;
+    }
+    unlink(tmp_file_path);
     /* The second and first AOT files are duplicated. */
     if (curr_tb_num <= tb_num1) {
     	assert(curr_tb_num >= tb_num1);

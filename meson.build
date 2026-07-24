@@ -635,6 +635,22 @@ foreach target : target_dirs
       link_args: smc_reload_test_link_args
     )
     test('latx-tb-flush-smc-reload-async', smc_reload_async_flush_test)
+
+    aot_file_publish_test = executable(
+      'test-latx-aot-file-publish',
+      files(
+        'target/i386/latx/sbt/tests/aot-file-publish-test.c',
+        'target/i386/latx/sbt/file_ctx.c'
+      ),
+      c_args: smc_reload_test_c_args,
+      dependencies: [glib],
+      include_directories: target_inc,
+      link_args: smc_reload_test_link_args + [
+        '-Wl,--wrap=fsync',
+        '-Wl,--wrap=rename'
+      ]
+    )
+    test('latx-aot-file-publish', aot_file_publish_test)
   endif
 
     execs = [{

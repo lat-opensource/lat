@@ -13,9 +13,14 @@
 #define AOT_FILE_CTX_H
 #include "aot.h"
 int aot_file_ctx(uint64_t maxSize, uint64_t leftMinSize);
+int aot_file_get_tmp_path(const char *aot_file, char *tmp_path,
+                          size_t tmp_path_size);
+int aot_file_get_lock_path(const char *aot_file, char *lock_path,
+                           size_t lock_path_size);
+int aot_file_complete_write(FILE *file, const char *tmp_path);
+int aot_file_publish(const char *tmp_path, const char *aot_file);
 int flock_set(int fd, int type, bool wait);
 uint64_t aot_file_rmgroup(char *aotFile);
-int file_lock(char *file_name, int *fd, int type, bool wait);
+int file_lock(const char *file_name, int *fd, int type, bool wait);
 int send_file_message(char *file_d, char *message);
 #endif
-

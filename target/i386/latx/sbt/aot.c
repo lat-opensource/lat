@@ -652,64 +652,67 @@ static int write_aot_file(int *lockfd, aot_header *p_header, uint32_t *p_insn,
         uint32_t *insn_buffer, unsigned long total_code_cache_size,
         uint8_t *p_ir1, uint8_t *ir1_buffer, int ir1_size)
 {
-    char *pathtmp;
+    char tmp_file_path[PATH_MAX];
+
     get_aot_path(curr_lib_name, aot_file_path);
-    pathtmp = aot_file_path;
-    strcat(pathtmp, "A");
-    if (access(pathtmp, 0) >= 0) {
-        qemu_log_mask(LAT_LOG_AOT,
-                      "ERROR: other process generated aot file %s\n", pathtmp);
+    if (aot_file_get_tmp_path(aot_file_path, tmp_file_path,
+                              sizeof(tmp_file_path)) < 0) {
+        qemu_log_mask(LAT_LOG_AOT, "AOT temporary path is too long\n");
         return -1;
     }
 
     /* Write file metadata infomation(aot_buffer) into aot. */
-    int fd = open(pathtmp, O_CREAT | O_WRONLY | O_TRUNC, 0644);
-	assert(fd > 2);
-	if (fd <= 2) {
-	    exit(EXIT_FAILURE);
-	}
+    int fd = open(tmp_file_path, O_CREAT | O_EXCL | O_WRONLY, 0644);
+    if (fd < 0) {
+        qemu_log_mask(LAT_LOG_AOT, "open AOT temporary file failed: %s\n",
+                      strerror(errno));
+        return -1;
+    }
     FILE *pfile = fdopen(fd, "w");
+    if (!pfile) {
+        close(fd);
+        unlink(tmp_file_path);
+        return -1;
+    }
     size_t write_size = (uintptr_t)p_insn - (uintptr_t)p_header;
 
     /* FILE *tp = pfile; */
     if (fwrite(p_header, write_size, 1, pfile) != 1) {
         qemu_log_mask(LAT_LOG_AOT, "Error! write aot metadata failed!\n");
-        fclose(pfile);
-        return -1;
+        goto write_error;
     }
     if (fwrite(insn_buffer, total_code_cache_size, 1, pfile) != 1) {
         qemu_log_mask(LAT_LOG_AOT, "Error! write aot translated code failed!\n");
-        fclose(pfile);
-        return -1;
+        goto write_error;
     }
     if (ir1_buffer && fwrite(ir1_buffer, ir1_size, 1, pfile) != 1) {
         qemu_log_mask(LAT_LOG_AOT, "Error! write aot ir1 code failed!\n");
-        fclose(pfile);
-        return -1;
+        goto write_error;
     }
     if (fwrite(AOT_VERSION, strlen(AOT_VERSION), 1, pfile) != 1) {
         qemu_log_mask(LAT_LOG_AOT, "Error! write aot AOT_VERSION failed!\n");
-        fclose(pfile);
-        return -1;
+        goto write_error;
     }
     if (option_debug_aot) {
         qemu_log_mask(LAT_LOG_AOT, "!!!! name %s size %ld curr_tb_num %d pid %d!!!\n",
-                pathtmp, get_fileSize(pfile), curr_lib_tb_num, getpid());
+                tmp_file_path, get_fileSize(pfile), curr_lib_tb_num, getpid());
     }
-    if (fclose(pfile) != 0) {
-        qemu_log_mask(LAT_LOG_AOT, "Error! close aot file failed\n");
+    if (aot_file_complete_write(pfile, tmp_file_path) < 0) {
+        qemu_log_mask(LAT_LOG_AOT, "Error! sync aot file failed\n");
         return -1;
     }
-
-    generated_aot_file = true;
-
     return 0;
+
+write_error:
+    fclose(pfile);
+    unlink(tmp_file_path);
+    return -1;
 }
 
-void do_generate_aot(int first_seg_in_lib, int end_seg_in_lib) 
+bool do_generate_aot(int first_seg_in_lib, int end_seg_in_lib)
 {
     if (tb_num == 0) {
-        return;
+        return false;
     }
     TaskState *ts = (TaskState *)thread_cpu->opaque;
     sigset_t oldmask, mask;
@@ -724,7 +727,7 @@ void do_generate_aot(int first_seg_in_lib, int end_seg_in_lib)
         qemu_log_mask(LAT_LOG_AOT,
             "skip aot generation for %s due to buffer preparation failure\n",
             curr_lib_name);
-        return;
+        return false;
     }
 
     p_header->aot_file_type = get_file_type(curr_lib_name);
@@ -733,14 +736,16 @@ void do_generate_aot(int first_seg_in_lib, int end_seg_in_lib)
         struct stat statbuf;
         if (stat(curr_lib_name, &statbuf)) {
             qemu_log_mask(LAT_LOG_AOT, "ERROR stat %s failed\n", curr_lib_name);
-            return;
+            free(p_header);
+            return false;
         }
         for (int i = first_seg_in_lib; i < end_seg_in_lib; i++) {
             seg_info *seg = seg_info_vector[i];
             if (seg->lib_size != statbuf.st_size ||
                     seg->tv_sec != statbuf.st_mtim.tv_sec) {
                 fprintf(stderr, "error, orignal lib changed %s\n", curr_lib_name);
-                return;
+                free(p_header);
+                return false;
             }
         }
         p_header->lib_size = statbuf.st_size;
@@ -760,7 +765,8 @@ void do_generate_aot(int first_seg_in_lib, int end_seg_in_lib)
         fill_tb_table(p_aot_tbs, p_header, p_segments);
     uintptr_t tb_table_end = table_end_addr;
     if(total_code_cache_size == 0) {
-        return;
+        free(p_header);
+        return false;
     }
     /* fill relocation table */
     fill_rel_table(p_header);
@@ -780,12 +786,13 @@ void do_generate_aot(int first_seg_in_lib, int end_seg_in_lib)
     }
 
     int lockfd = -1;
-    write_aot_file(&lockfd, p_header, p_insn, 
+    bool success = write_aot_file(&lockfd, p_header, p_insn,
             insn_buffer, total_code_cache_size,
-            p_ir1, ir1_buffer, ir1_size);
+            p_ir1, ir1_buffer, ir1_size) == 0;
     free(insn_buffer);
     free(ir1_buffer);
     free(p_header);
+    return success;
 }
 
 static const char lib_black_list[][PATH_MAX] =
@@ -904,9 +911,10 @@ static inline int need_gen_aot(CPUState *cpu,
         return -1;
     }
     get_aot_path(curr_lib_name, aot_file_path);
-    strcpy(aot_file_lock, aot_file_path);
-    strcat(aot_file_lock, ".lock");
-    assert(aot_file_lock);
+    if (aot_file_get_lock_path(aot_file_path, aot_file_lock,
+                               PATH_MAX) < 0) {
+        return -1;
+    }
     
     if (file_lock(aot_file_lock, lockfd, F_WRLCK, false) < 0) {
         return -1;
@@ -943,8 +951,11 @@ void pre_translate(int begin_id, int end_id, CPUState *cpu,
 
     get_aot_path(curr_lib_name, aot_file_path);
     if (access(aot_file_path, 0) >= 0) {
-        strcat(aot_file_path, "A");
-        if (access(aot_file_path, 0) >= 0) {
+        char tmp_file_path[PATH_MAX];
+
+        if (aot_file_get_tmp_path(aot_file_path, tmp_file_path,
+                                  sizeof(tmp_file_path)) < 0 ||
+            access(tmp_file_path, 0) >= 0) {
             tb_num = 0;
             return;
         }
@@ -955,16 +966,25 @@ void pre_translate(int begin_id, int end_id, CPUState *cpu,
     tb_vector = ts_vector;
 }
 
-static void rename_aot_file(char *lib_name)
+static bool rename_aot_file(char *lib_name)
 {
     char tmp_file_path[PATH_MAX];
+
     get_aot_path(lib_name, aot_file_path);
-    strcpy(tmp_file_path, aot_file_path);
-    strcat(tmp_file_path, "A");
-    if (access(tmp_file_path, 0) < 0) {
-        return;
+    if (aot_file_get_tmp_path(aot_file_path, tmp_file_path,
+                              sizeof(tmp_file_path)) < 0) {
+        return false;
     }
-    rename(tmp_file_path, aot_file_path);
+    if (access(tmp_file_path, 0) < 0) {
+        return false;
+    }
+    int ret = aot_file_publish(tmp_file_path, aot_file_path);
+    if (ret < 0) {
+        qemu_log_mask(LAT_LOG_AOT, "publish AOT file failed: %s\n",
+                      strerror(-ret));
+        return false;
+    }
+    return true;
 }
 
 static inline void gen_aot_by_lib(int first_seg_id, int end_seg_id,
@@ -973,10 +993,22 @@ static inline void gen_aot_by_lib(int first_seg_id, int end_seg_id,
     curr_lib_name = seg_info_vector[first_seg_id]->file_name;
     int lockfd = -1;
     if (need_gen_aot(cpu, curr_lib_name, &lockfd, tb_count) >= 0) {
+        char tmp_file_path[PATH_MAX];
+
+        get_aot_path(curr_lib_name, aot_file_path);
+        if (aot_file_get_tmp_path(aot_file_path, tmp_file_path,
+                                  sizeof(tmp_file_path)) < 0) {
+            goto unlock;
+        }
+        if (unlink(tmp_file_path) && errno != ENOENT) {
+            goto unlock;
+        }
         pre_translate(first_seg_id, end_seg_id, cpu, NULL);
-        do_generate_aot(first_seg_id, end_seg_id);
-        aot2_merge(curr_lib_name, first_seg_id, end_seg_id, cpu);
-        rename_aot_file(curr_lib_name);
+        if (do_generate_aot(first_seg_id, end_seg_id)) {
+            aot2_merge(curr_lib_name, first_seg_id, end_seg_id, cpu);
+            generated_aot_file |= rename_aot_file(curr_lib_name);
+        }
+unlock:
         flock_set(lockfd, F_UNLCK, true);
         close(lockfd);
     }
