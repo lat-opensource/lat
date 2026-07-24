@@ -396,9 +396,14 @@ const bool syscall_optimize_confirm[] = {
     false,      /*  sys_io_pgetevents           385 */
     false       /*  sys_rseq                    386 */
 };
+const int syscall_optimize_confirm_count =
+    ARRAY_SIZE(syscall_optimize_confirm);
 
 bool syscall_is_optimized(int64_t sys_num)
 {
+    if (sys_num < 0 || sys_num >= syscall_optimize_confirm_count) {
+        return false;
+    }
     return syscall_optimize_confirm[sys_num];
 }
 

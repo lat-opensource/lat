@@ -12,6 +12,7 @@
 
 bool syscall_is_optimized(int64_t sys_num);
 extern const bool syscall_optimize_confirm[];
+extern const int syscall_optimize_confirm_count;
 bool translate_int_syscall(IR1_INST *pir1);
 
 #endif

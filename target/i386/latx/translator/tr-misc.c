@@ -1134,6 +1134,8 @@ bool translate_int_syscall(IR1_INST *pir1)
     /* 3. add itmp2 to itmp1, so we get the array member corresponding to      */
     /*    the syscall;                                                         */
     /* 4. if itmp2 equals to 0, goes optimized way, otherwise traditional way. */
+    li_wu(syscall_specified, syscall_optimize_confirm_count);
+    la_bgeu(eax_opnd, syscall_specified, label_traditionanl);
     aot_load_host_addr(syscall_optimize_arr,
                         (ADDR)lsenv->syscall_optimize_confirm,
                         LOAD_SYSCALL_OPTIMIZE_CONFIRM, 0);
