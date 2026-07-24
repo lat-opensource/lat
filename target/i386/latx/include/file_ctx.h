@@ -18,7 +18,12 @@ int aot_file_get_tmp_path(const char *aot_file, char *tmp_path,
 int aot_file_get_lock_path(const char *aot_file, char *lock_path,
                            size_t lock_path_size);
 int aot_file_complete_write(FILE *file, const char *tmp_path);
+/*
+ * Negative: rename failed. Zero: rename and directory sync succeeded.
+ * Positive errno: rename succeeded, but directory durability is uncertain.
+ */
 int aot_file_publish(const char *tmp_path, const char *aot_file);
+int aot_file_remove_legacy_fragments(const char *aot_file);
 int aot_file_unlink_if_same(const char *aot_file, int file_fd,
                             const char *lock_path);
 int flock_set(int fd, int type, bool wait);

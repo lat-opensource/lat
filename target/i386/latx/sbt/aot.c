@@ -653,6 +653,9 @@ static int write_aot_file(int *lockfd, aot_header *p_header, uint32_t *p_insn,
         uint8_t *p_ir1, uint8_t *ir1_buffer, int ir1_size)
 {
     char tmp_file_path[PATH_MAX];
+    FILE *pfile;
+    size_t write_size;
+    int fd;
 
     get_aot_path(curr_lib_name, aot_file_path);
     if (aot_file_get_tmp_path(aot_file_path, tmp_file_path,
@@ -662,19 +665,19 @@ static int write_aot_file(int *lockfd, aot_header *p_header, uint32_t *p_insn,
     }
 
     /* Write file metadata infomation(aot_buffer) into aot. */
-    int fd = open(tmp_file_path, O_CREAT | O_EXCL | O_WRONLY, 0644);
+    fd = open(tmp_file_path, O_CREAT | O_EXCL | O_WRONLY, 0644);
     if (fd < 0) {
         qemu_log_mask(LAT_LOG_AOT, "open AOT temporary file failed: %s\n",
                       strerror(errno));
         return -1;
     }
-    FILE *pfile = fdopen(fd, "w");
+    pfile = fdopen(fd, "w");
     if (!pfile) {
         close(fd);
         unlink(tmp_file_path);
         return -1;
     }
-    size_t write_size = (uintptr_t)p_insn - (uintptr_t)p_header;
+    write_size = (uintptr_t)p_insn - (uintptr_t)p_header;
 
     /* FILE *tp = pfile; */
     if (fwrite(p_header, write_size, 1, pfile) != 1) {
@@ -711,6 +714,9 @@ write_error:
 
 int do_generate_aot(int first_seg_in_lib, int end_seg_in_lib)
 {
+    int lockfd = -1;
+    int success;
+
     if (tb_num == 0) {
         return false;
     }
@@ -785,8 +791,7 @@ int do_generate_aot(int first_seg_in_lib, int end_seg_in_lib)
             p_aot_tbs, tb_table_end, &ir1_size);
     }
 
-    int lockfd = -1;
-    int success = write_aot_file(&lockfd, p_header, p_insn,
+    success = write_aot_file(&lockfd, p_header, p_insn,
             insn_buffer, total_code_cache_size,
             p_ir1, ir1_buffer, ir1_size) == 0;
     free(insn_buffer);
@@ -969,6 +974,7 @@ void pre_translate(int begin_id, int end_id, CPUState *cpu,
 static bool rename_aot_file(char *lib_name)
 {
     char tmp_file_path[PATH_MAX];
+    int ret;
 
     get_aot_path(lib_name, aot_file_path);
     if (aot_file_get_tmp_path(aot_file_path, tmp_file_path,
@@ -978,11 +984,16 @@ static bool rename_aot_file(char *lib_name)
     if (access(tmp_file_path, 0) < 0) {
         return false;
     }
-    int ret = aot_file_publish(tmp_file_path, aot_file_path);
+    ret = aot_file_publish(tmp_file_path, aot_file_path);
     if (ret < 0) {
         qemu_log_mask(LAT_LOG_AOT, "publish AOT file failed: %s\n",
                       strerror(-ret));
         return false;
+    }
+    if (ret > 0) {
+        qemu_log_mask(LAT_LOG_AOT,
+                      "AOT file published without directory sync: %s\n",
+                      strerror(ret));
     }
     return true;
 }
@@ -990,11 +1001,13 @@ static bool rename_aot_file(char *lib_name)
 static inline void gen_aot_by_lib(int first_seg_id, int end_seg_id,
 		CPUState *cpu, uint32_t tb_count)
 {
-    curr_lib_name = seg_info_vector[first_seg_id]->file_name;
+    char tmp_file_path[PATH_MAX];
+    AOTMergeResult merge_result;
     int lockfd = -1;
-    if (need_gen_aot(cpu, curr_lib_name, &lockfd, tb_count) >= 0) {
-        char tmp_file_path[PATH_MAX];
 
+    curr_lib_name = seg_info_vector[first_seg_id]->file_name;
+
+    if (need_gen_aot(cpu, curr_lib_name, &lockfd, tb_count) >= 0) {
         get_aot_path(curr_lib_name, aot_file_path);
         if (aot_file_get_tmp_path(aot_file_path, tmp_file_path,
                                   sizeof(tmp_file_path)) < 0) {
@@ -1003,10 +1016,19 @@ static inline void gen_aot_by_lib(int first_seg_id, int end_seg_id,
         if (unlink(tmp_file_path) && errno != ENOENT) {
             goto unlock;
         }
+        if (aot_file_remove_legacy_fragments(aot_file_path) < 0) {
+            goto unlock;
+        }
         pre_translate(first_seg_id, end_seg_id, cpu, NULL);
         if (do_generate_aot(first_seg_id, end_seg_id)) {
-            aot2_merge(curr_lib_name, first_seg_id, end_seg_id, cpu);
-            generated_aot_file |= rename_aot_file(curr_lib_name);
+            merge_result =
+                aot2_merge(curr_lib_name, first_seg_id, end_seg_id, cpu);
+            if (merge_result == AOT_MERGE_NO_BASE ||
+                merge_result == AOT_MERGE_READY) {
+                generated_aot_file |= rename_aot_file(curr_lib_name);
+            } else {
+                unlink(tmp_file_path);
+            }
         }
 unlock:
         flock_set(lockfd, F_UNLCK, true);

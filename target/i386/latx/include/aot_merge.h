@@ -26,10 +26,16 @@ typedef struct merge_tb_info {
     aot_rel *aot_rel_table;
     int rel_table_num;
 } merge_tb_info;
-void do_merge_seg_aot(void);
+typedef enum AOTMergeResult {
+    AOT_MERGE_ERROR = -1,
+    AOT_MERGE_NO_BASE,
+    AOT_MERGE_READY,
+    AOT_MERGE_DUPLICATE,
+} AOTMergeResult;
+bool do_merge_seg_aot(void);
 void merge_segment_tree_init(void);
 int is_tb_in_aot(char *seg_name, size_t offset, size_t pc_offset);
 
-void aot2_merge(char *curr_lib_name, int first_seg_id,
-		int last_seg_id, CPUState *cpu);
+AOTMergeResult aot2_merge(char *curr_lib_name, int first_seg_id,
+                          int last_seg_id, CPUState *cpu);
 #endif

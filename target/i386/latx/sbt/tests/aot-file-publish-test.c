@@ -9,6 +9,32 @@ char aot_file_path_buffer[PATH_MAX];
 char aot_file_lock_buffer[PATH_MAX];
 char *aot_file_path = aot_file_path_buffer;
 char *aot_file_lock = aot_file_lock_buffer;
+int qemu_loglevel;
+
+int qemu_log(const char *fmt, ...)
+{
+    return 0;
+}
+
+void pstrcpy(char *buf, int buf_size, const char *str)
+{
+    g_strlcpy(buf, str, buf_size);
+}
+
+int aot_get_file_name(char *aot_file, char *buf, int index)
+{
+    int len;
+
+    if (index == 0) {
+        pstrcpy(buf, PATH_MAX, aot_file);
+        return access(buf, F_OK) < 0 ? -1 : 0;
+    }
+    len = snprintf(buf, PATH_MAX, "%s%c", aot_file, 'A' + index - 1);
+    if (len < 0 || len >= PATH_MAX || access(buf, F_OK) < 0) {
+        return -1;
+    }
+    return 0;
+}
 
 int __wrap_fsync(int fd)
 {
@@ -45,6 +71,7 @@ int main(void)
     g_autofree char *legacy_b_path = NULL;
     g_autofree char *cache_dir = NULL;
     g_autofree char *cache_parent = NULL;
+    g_autofree char *stale_lock_path = NULL;
     g_autofree char *stale_tmp_path = NULL;
     g_autofree char *stale_contents = NULL;
     g_autofree char *old_home = NULL;
@@ -138,6 +165,8 @@ int main(void)
     g_assert(g_setenv("HOME", test_dir, true));
     g_assert(aot_file_ctx(2, 1) == 0);
     g_assert(!g_file_test(stale_tmp_path, G_FILE_TEST_EXISTS));
+    stale_lock_path = g_build_filename(cache_dir, "stale.aot2.lock", NULL);
+    g_assert(unlink(stale_lock_path) == 0);
     if (old_home) {
         g_assert(g_setenv("HOME", old_home, true));
     } else {

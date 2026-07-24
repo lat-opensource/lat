@@ -69,6 +69,8 @@ int aot_file_complete_write(FILE *file, const char *tmp_path)
 
 int aot_file_publish(const char *tmp_path, const char *aot_file)
 {
+    char *dir_name;
+    int dir_fd;
     int saved_errno = 0;
 
     if (rename(tmp_path, aot_file)) {
@@ -77,20 +79,41 @@ int aot_file_publish(const char *tmp_path, const char *aot_file)
         return -saved_errno;
     }
 
-    char *dir_name = g_path_get_dirname(aot_file);
-    int dir_fd = open(dir_name, O_RDONLY | O_DIRECTORY);
+    dir_name = g_path_get_dirname(aot_file);
+    dir_fd = open(dir_name, O_RDONLY | O_DIRECTORY);
 
-    g_free(dir_name);
     if (dir_fd < 0) {
-        return -errno;
+        saved_errno = errno;
+        g_free(dir_name);
+        return saved_errno;
     }
+    g_free(dir_name);
     if (fsync(dir_fd)) {
         saved_errno = errno;
     }
     if (close(dir_fd) && !saved_errno) {
         saved_errno = errno;
     }
-    return -saved_errno;
+    return saved_errno;
+}
+
+int aot_file_remove_legacy_fragments(const char *aot_file)
+{
+    char legacy_path[PATH_MAX];
+    int len;
+
+    len = snprintf(legacy_path, sizeof(legacy_path), "%sA", aot_file);
+    if (len < 0 || (size_t)len >= sizeof(legacy_path)) {
+        return -ENAMETOOLONG;
+    }
+
+    for (int i = 0; i < 99; i++) {
+        legacy_path[len - 1] = 'A' + i;
+        if (unlink(legacy_path) && errno != ENOENT) {
+            return -errno;
+        }
+    }
+    return 0;
 }
 
 int flock_set(int fd, int type, bool wait)
@@ -235,6 +258,11 @@ static bool is_aot_file(char *file_name)
     return ends_with(file_name, "aot2") || ends_with(file_name, ".aot2");
 }
 
+static bool is_aot_tmp(char *file_name)
+{
+    return ends_with(file_name, ".aot2.tmp");
+}
+
 static bool is_aot_lock(char *file_name)
 {
     return ends_with(file_name, ".lock");
@@ -248,16 +276,54 @@ static void aot_file_release_oldfile(struct aot_info **f_info,
     assert(needRelaeseMB);
     int fd = -1;
     for (int i = 0; i < count; i++) {
+        if (is_aot_tmp(f_info[i]->d_name)) {
+            char final_path[PATH_MAX];
+            struct stat statbuf;
+            size_t final_len = strlen(f_info[i]->d_name) - strlen(".tmp");
+
+            pstrcpy(final_path, sizeof(final_path), f_info[i]->d_name);
+            final_path[final_len] = '\0';
+            if (aot_file_get_lock_path(final_path, aot_file_lock,
+                                       PATH_MAX) < 0) {
+                continue;
+            }
+            if (file_lock(aot_file_lock, &fd, F_WRLCK, false) < 0) {
+                if (fd >= 0) {
+                    close(fd);
+                    fd = -1;
+                }
+                continue;
+            }
+            if (!stat(f_info[i]->d_name, &statbuf) &&
+                !unlink(f_info[i]->d_name)) {
+                hasReleaseSize += statbuf.st_size / (1024 * 1024);
+            }
+            flock_set(fd, F_UNLCK, true);
+            close(fd);
+            fd = -1;
+            if (hasReleaseSize >= needRelaeseMB) {
+                break;
+            }
+            continue;
+        }
         if (is_aot_lock(f_info[i]->d_name)) {
+            char tmp_path[PATH_MAX];
+            int l;
+
             strcpy(aot_file_path, f_info[i]->d_name);
-            int l = strlen(aot_file_path);
+            l = strlen(aot_file_path);
             for (int j = l - 1; j > 0; j--) {
                 if (aot_file_path[j] == '.') {
                    aot_file_path[j] = '\0';
                    break;
                 }
             }
-            if(access(aot_file_path, R_OK) < 0) {
+            if (aot_file_get_tmp_path(aot_file_path, tmp_path,
+                                      sizeof(tmp_path)) < 0) {
+                continue;
+            }
+            if (access(aot_file_path, R_OK) < 0 &&
+                access(tmp_path, F_OK) < 0) {
                 if (file_lock(f_info[i]->d_name, &fd, F_WRLCK, false) >= 0) {
                     remove(f_info[i]->d_name);
                 }
@@ -307,11 +373,13 @@ int aot_file_ctx(uint64_t maxSize, uint64_t leftMinSize)
         snprintf(subdir, PATH_MAX, "%s%s", aot_dir, p_dirent->d_name);
         if (stat(subdir, &statbuf)) {
             qemu_log_mask(LAT_LOG_AOT, "(%s:%d)lstat error\n", __FILE__, __LINE__);
-	    qemu_log_mask(LAT_LOG_AOT, "lstat %s \n", subdir);
-	    qemu_log_mask(LAT_LOG_AOT, "lstat %d \n", errno);
+            qemu_log_mask(LAT_LOG_AOT, "lstat %s\n", subdir);
+            qemu_log_mask(LAT_LOG_AOT, "lstat %d\n", errno);
             continue;
         }
-        if (!is_aot_file(p_dirent->d_name) && !is_aot_lock(p_dirent->d_name)) {
+        if (!is_aot_file(p_dirent->d_name) &&
+            !is_aot_tmp(p_dirent->d_name) &&
+            !is_aot_lock(p_dirent->d_name)) {
             continue;
         }
         aot_total_size += statbuf.st_size;

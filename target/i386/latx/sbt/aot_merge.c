@@ -417,8 +417,15 @@ static void fill_page_table(struct aot_segment *curr_seg, aot_header *p_header,
 	}
 }
 
-static void merge_aot_generate(void)
+static bool merge_aot_generate(void)
 {
+    char tmp_file_path[PATH_MAX];
+    FILE *pfile;
+    uint32_t *insn_buffer = NULL;
+    size_t write_size;
+    bool success = false;
+    int fd;
+
     /*
      * Prepare all TBs which will be handled later.
      * 1. Calculate TBs number.
@@ -440,7 +447,7 @@ static void merge_aot_generate(void)
     struct stat statbuf;
     if (stat(merge_seg_info_vector[0]->file_name, &statbuf)) {
         qemu_log_mask(LAT_LOG_AOT, "ERROT stat %s failed\n", merge_seg_info_vector[0]->file_name);
-        return;
+        goto out;
     }
     p_header->lib_size = statbuf.st_size;
     p_header->last_modify_time = statbuf.st_mtim;
@@ -540,7 +547,7 @@ static void merge_aot_generate(void)
     p_header->rel_entry_num = merge_rel_entry_num;
     uint32_t *p_insn =
         (uint32_t *)ROUND_UP((uintptr_t)(p_aot_rel + merge_rel_entry_num), 8);
-    uint32_t *insn_buffer = (uint32_t *)malloc(total_code_cache_size);
+    insn_buffer = (uint32_t *)malloc(total_code_cache_size);
     assert(insn_buffer && "insn_buffer malloc failed!");
 
     uint64_t two_buffer_off = (void *)insn_buffer - (void *)p_insn;
@@ -559,7 +566,6 @@ static void merge_aot_generate(void)
     }
     /* Write file metadata infomation(aot_buffer) into aot. */
 
-    char tmp_file_path[PATH_MAX];
     if (aot_file_get_tmp_path(aot_file_path, tmp_file_path,
                               sizeof(tmp_file_path)) < 0) {
         goto out;
@@ -567,18 +573,18 @@ static void merge_aot_generate(void)
     if (unlink(tmp_file_path) && errno != ENOENT) {
         goto out;
     }
-    int fd = open(tmp_file_path, O_CREAT | O_EXCL | O_WRONLY, 0644);
+    fd = open(tmp_file_path, O_CREAT | O_EXCL | O_WRONLY, 0644);
     if (fd < 0) {
         goto out;
     }
-    FILE *pfile = fdopen(fd, "w");
+    pfile = fdopen(fd, "w");
     if (pfile == NULL) {
         close(fd);
         unlink(tmp_file_path);
         qemu_log_mask(LAT_LOG_AOT, "Error! write aot metadata failed!\n");
         goto out;
     }
-    size_t write_size = (uintptr_t)p_insn - (uintptr_t)p_header;
+    write_size = (uintptr_t)p_insn - (uintptr_t)p_header;
     if (fwrite(p_header, write_size, 1, pfile) != 1) {
         qemu_log_mask(LAT_LOG_AOT, "Error! write aot metadata failed!\n");
         goto write_error;
@@ -595,6 +601,7 @@ static void merge_aot_generate(void)
         qemu_log_mask(LAT_LOG_AOT, "Error! sync aot file failed\n");
         goto out;
     }
+    success = true;
     goto out;
 
 write_error:
@@ -604,14 +611,15 @@ out:
     free(p_header);
     free(insn_buffer);
     free(merge_seg_info_vector);
-    return;
+    return success;
 }
 
-void do_merge_seg_aot(void)
+bool do_merge_seg_aot(void)
 {
     struct stat statbuf;
     TaskState *ts = (TaskState *)thread_cpu->opaque;
     sigset_t oldmask, mask;
+    bool success = false;
     sigfillset(&mask);
     sigdelset(&mask, SIGSEGV);
     sigprocmask(SIG_BLOCK, &mask, &oldmask);
@@ -665,14 +673,23 @@ void do_merge_seg_aot(void)
                 aot_buffer_all[buf_index].p);
         }
     }
-    merge_aot_generate();
+    success = merge_aot_generate();
 out:
     sigprocmask(SIG_SETMASK, &oldmask, NULL);
     qatomic_xchg(&ts->signal_pending, 0);
+    return success;
 }
 
 static int aot_load_no_lock(char *lib_name)
 {
+    void *buffer;
+    struct stat statbuf;
+    int count = 2;
+    int j = 0;
+    char aot_version[sizeof(AOT_VERSION)];
+    char tmp_file_path[PATH_MAX];
+    char path[PATH_MAX];
+
     aot_buffer_all_num = 0;
     if (lib_name == NULL) {
         return -1;
@@ -681,14 +698,6 @@ static int aot_load_no_lock(char *lib_name)
     if (access(aot_file_path, 0) < 0) {
         return -1;
     }
-    void *buffer;
-    struct stat statbuf;
-    int count = 2;
-    size_t total_file_sz = 0;
-    char aot_version[strlen(AOT_VERSION) + 1];
-    char tmp_file_path[PATH_MAX];
-    char path[PATH_MAX];
-
     if (lstat(aot_file_path, &statbuf)) {
         aot_buffer_all_num = 0;
         return -1;
@@ -697,70 +706,85 @@ static int aot_load_no_lock(char *lib_name)
                               sizeof(tmp_file_path)) < 0) {
         return -1;
     }
-    aot_buffer_all = calloc(count, sizeof(*aot_buffer_all));
-    if (!aot_buffer_all) {
-        return -1;
-    }
+    aot_buffer_all = g_new0(aot_file_info, count);
     aot_buffer_all_num = count;
     aot_st_ctime = statbuf.st_ctime;
-    int j = 0;
     for (int i = 0; i < count; i++) {
+        FILE *pf;
+        long file_end;
+        size_t file_sz;
+        int fd;
+
         pstrcpy(path, sizeof(path), i ? tmp_file_path : aot_file_path);
-        int fd = open(path, O_RDONLY);
+        fd = open(path, O_RDONLY);
         if (fd < 0) {
-            continue;
+            goto load_error;
         }
-        FILE *pf = fdopen(fd, "r");
+        pf = fdopen(fd, "r");
         if (!pf) {
             close(fd);
-            continue;
+            goto load_error;
         }
         /* Get file size */
-        fseek(pf, 0, SEEK_END);      /* seek to end of file */
-        size_t file_sz = ftell(pf);  /* get current file pointer */
+        if (fseek(pf, 0, SEEK_END)) {
+            fclose(pf);
+            goto load_error;
+        }
+        file_end = ftell(pf);
+        if (file_end < 0) {
+            fclose(pf);
+            goto load_error;
+        }
+        file_sz = file_end;
         /*check aot complete.*/
         if (fseek(pf, -strlen(AOT_VERSION), SEEK_END) != 0) {
-            aot_buffer_all_num--;
             fclose(pf);
-            continue;
+            goto load_error;
         }
+        memset(aot_version, 0, sizeof(aot_version));
         if (fread(aot_version, strlen(AOT_VERSION), 1, pf) != 1) {
-            aot_buffer_all_num--;
             fclose(pf);
-            continue;
+            goto load_error;
         }
-        if (!strstr(aot_version, AOT_VERSION)) {
+        if (memcmp(aot_version, AOT_VERSION, strlen(AOT_VERSION))) {
             fclose(pf);
-            unlink(path);
-            aot_buffer_all_num = j;
-            return 0;
+            goto load_error;
         }
 
-        fseek(pf, 0, SEEK_SET);      /* seek back to beginning of file */
+        if (fseek(pf, 0, SEEK_SET)) {
+            fclose(pf);
+            goto load_error;
+        }
 
         /* Read aot file */
         buffer = malloc(file_sz);
         assert(buffer);
-        aot_buffer_all[j].maplen = file_sz;
         if ((int)(intptr_t)buffer == -1) {
-            aot_buffer_all_num--;
             fclose(pf);
-            continue;
+            goto load_error;
         }
         if (fread(buffer, file_sz, 1, pf) != 1) {
             qemu_log_mask(LAT_LOG_AOT, "fread error %s.\n", strerror(errno));
-            aot_buffer_all_num--;
+            free(buffer);
             fclose(pf);
-            continue;
+            goto load_error;
         }
         fclose(pf);
         aot_buffer_all[j].p = buffer;
+        aot_buffer_all[j].maplen = file_sz;
         j++;
-        /* align with 8 bytes. */
-        total_file_sz += file_sz;
     }
     aot_buffer_all_num = j;
-    return total_file_sz;
+    return 0;
+
+load_error:
+    for (int i = 0; i < j; i++) {
+        free(aot_buffer_all[i].p);
+    }
+    g_free(aot_buffer_all);
+    aot_buffer_all = NULL;
+    aot_buffer_all_num = 0;
+    return -1;
 }
 
 #ifdef CONFIG_LATX_TU
@@ -887,9 +911,11 @@ static void get_seg_tb(int first_seg_id, int last_seg_id)
     }
 }
 
-static void aot2_merge_tu(char *curr_lib_name, int first_seg_id,
-		int last_seg_id, CPUState *cpu)
+static AOTMergeResult aot2_merge_tu(char *curr_lib_name, int first_seg_id,
+                                    int last_seg_id, CPUState *cpu)
 {
+    char tmp_file_path[PATH_MAX];
+    bool generated;
     void *buffer1 = aot_buffer_all[0].p;
     void *buffer2 = aot_buffer_all[1].p;
     assert(buffer1);
@@ -903,7 +929,7 @@ static void aot2_merge_tu(char *curr_lib_name, int first_seg_id,
     int seg_num1 = p_header1->segments_num;
     int seg_num2 = p_header2->segments_num;
     if (seg_num1 > 1200000) {
-    	return;
+        return AOT_MERGE_ERROR;
     }
     int tb_num1 = get_tb_num(p_segment1, seg_num1);
     int tb_num2 = get_tb_num(p_segment2, seg_num2);
@@ -957,42 +983,53 @@ static void aot2_merge_tu(char *curr_lib_name, int first_seg_id,
     }
 #endif
 
-    char tmp_file_path[PATH_MAX];
     if (aot_file_get_tmp_path(aot_file_path, tmp_file_path,
                               sizeof(tmp_file_path)) < 0) {
         free(tb_message_vector);
-        return;
+        return AOT_MERGE_ERROR;
     }
-    unlink(tmp_file_path);
+    if (unlink(tmp_file_path) && errno != ENOENT) {
+        free(tb_message_vector);
+        return AOT_MERGE_ERROR;
+    }
     /* The second and first AOT files are duplicated. */
     if (curr_tb_num <= tb_num1) {
     	assert(curr_tb_num >= tb_num1);
     	free(tb_message_vector);
-    	return;
+        return AOT_MERGE_DUPLICATE;
     }
     pre_translate(first_seg_id, last_seg_id, cpu, tb_message_vector);
-    do_generate_aot(first_seg_id, last_seg_id);
+    generated = do_generate_aot(first_seg_id, last_seg_id);
     free(tb_message_vector);
+    return generated ? AOT_MERGE_READY : AOT_MERGE_ERROR;
 }
 #endif
 
 #include<sys/syscall.h>
-void aot2_merge(char *curr_lib_name, int first_seg_id, 
-		int last_seg_id, CPUState *cpu)
+AOTMergeResult aot2_merge(char *curr_lib_name, int first_seg_id,
+                          int last_seg_id, CPUState *cpu)
 {
+    AOTMergeResult result;
+
     get_aot_path(curr_lib_name, aot_file_path);
-    aot_load_no_lock(curr_lib_name);
+    if (access(aot_file_path, F_OK) < 0) {
+        return errno == ENOENT ? AOT_MERGE_NO_BASE : AOT_MERGE_ERROR;
+    }
+    if (aot_load_no_lock(curr_lib_name) < 0) {
+        return AOT_MERGE_ERROR;
+    }
     if (aot_buffer_all_num < 2) {
-        return;
+        return AOT_MERGE_ERROR;
     }
 #ifdef CONFIG_LATX_TU
-	aot2_merge_tu(curr_lib_name, first_seg_id, last_seg_id, cpu);
+    result = aot2_merge_tu(curr_lib_name, first_seg_id, last_seg_id, cpu);
 #else
     g_tree_destroy(merge_segment_tree);
     merge_segment_tree_init();
     merge_rel_entry_num = 0;
-    do_merge_seg_aot();
+    result = do_merge_seg_aot() ? AOT_MERGE_READY : AOT_MERGE_ERROR;
 #endif
     aot_buffer_all_num = 0;
+    return result;
 }
 #endif
