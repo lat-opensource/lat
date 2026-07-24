@@ -310,7 +310,7 @@ void clear_rel_table(void);
 void recover_aot_tb(char *lib_name, uint64_t aot_offset,
         abi_long start, abi_long len);
 
-bool do_generate_aot(int first_seg_in_lib, int end_seg_in_lib);
+int do_generate_aot(int first_seg_in_lib, int end_seg_in_lib);
 struct aot_segment *aot_find_segment(char *path, int offset,
         void *curr_aot_buffer);
 

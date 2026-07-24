@@ -709,7 +709,7 @@ write_error:
     return -1;
 }
 
-bool do_generate_aot(int first_seg_in_lib, int end_seg_in_lib)
+int do_generate_aot(int first_seg_in_lib, int end_seg_in_lib)
 {
     if (tb_num == 0) {
         return false;
@@ -786,7 +786,7 @@ bool do_generate_aot(int first_seg_in_lib, int end_seg_in_lib)
     }
 
     int lockfd = -1;
-    bool success = write_aot_file(&lockfd, p_header, p_insn,
+    int success = write_aot_file(&lockfd, p_header, p_insn,
             insn_buffer, total_code_cache_size,
             p_ir1, ir1_buffer, ir1_size) == 0;
     free(insn_buffer);
