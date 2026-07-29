@@ -2786,9 +2786,13 @@ static abi_long do_setsockopt(int sockfd, int level, int optname,
             break;
         }
 
-        if (optname != SCTP_SOCKOPT_BINDX_ADD &&
-            optname != SCTP_SOCKOPT_BINDX_REM) {
-            goto unimplemented;
+        if (optname == SCTP_INITMSG) {
+            if (optlen != sizeof(struct sctp_initmsg)) {
+                goto unimplemented;
+            }
+        } else if (optname != SCTP_SOCKOPT_BINDX_ADD &&
+                   optname != SCTP_SOCKOPT_BINDX_REM) {
+                goto unimplemented;
         }
 
         sctp_opt = lock_user(VERIFY_READ, optval_addr, optlen, 1);
