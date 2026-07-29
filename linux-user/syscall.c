@@ -2685,6 +2685,7 @@ static abi_long do_setsockopt(int sockfd, int level, int optname,
     struct group_req *group_req;
     struct tpacket_req *req;
     struct sctp_event_subscribe sctp_events;
+    void *sctp_opt;
 
     switch(level) {
     case SOL_TCP:
@@ -2768,19 +2769,34 @@ static abi_long do_setsockopt(int sockfd, int level, int optname,
         }
         break;
     case IPPROTO_SCTP:
-        if (optname != SCTP_EVENTS || optlen != sizeof(target_sctp_events)) {
+        if (optname == SCTP_EVENTS) {
+            if (optlen != sizeof(target_sctp_events)) {
+                goto unimplemented;
+            }
+
+            /* The x86 JDK uses the legacy eight-byte subscription structure. */
+            memset(&sctp_events, 0, sizeof(sctp_events));
+            if (copy_from_user(&target_sctp_events, optval_addr,
+                               sizeof(target_sctp_events))) {
+                return -TARGET_EFAULT;
+            }
+            memcpy(&sctp_events, &target_sctp_events, sizeof(target_sctp_events));
+            ret = get_errno(setsockopt(sockfd, level, optname, &sctp_events,
+                                       sizeof(sctp_events)));
+            break;
+        }
+
+        if (optname != SCTP_SOCKOPT_BINDX_ADD &&
+            optname != SCTP_SOCKOPT_BINDX_REM) {
             goto unimplemented;
         }
 
-        /* The x86 JDK uses the legacy eight-byte subscription structure. */
-        memset(&sctp_events, 0, sizeof(sctp_events));
-        if (copy_from_user(&target_sctp_events, optval_addr,
-                           sizeof(target_sctp_events))) {
+        sctp_opt = lock_user(VERIFY_READ, optval_addr, optlen, 1);
+        if (!sctp_opt && optlen > 0) {
             return -TARGET_EFAULT;
         }
-        memcpy(&sctp_events, &target_sctp_events, sizeof(target_sctp_events));
-        ret = get_errno(setsockopt(sockfd, level, optname, &sctp_events,
-                                   sizeof(sctp_events)));
+        ret = get_errno(setsockopt(sockfd, level, optname, sctp_opt, optlen));
+        unlock_user(sctp_opt, optval_addr, 0);
         break;
     case SOL_IPV6:
         switch (optname) {
@@ -3251,6 +3267,7 @@ static abi_long do_getsockopt(int sockfd, int level, int optname,
     abi_long ret;
     int len, val;
     socklen_t lv;
+    void *sctp_opt;
 
     switch(level) {
     case TARGET_SOL_SOCKET:
@@ -3689,6 +3706,32 @@ get_timeout:
         }
         break;
 #endif /* SOL_NETLINK */
+    case IPPROTO_SCTP:
+        if (optname != SCTP_GET_LOCAL_ADDRS &&
+            optname != SCTP_GET_PEER_ADDRS) {
+            goto unimplemented;
+        }
+        if (get_user_u32(len, optlen)) {
+            return -TARGET_EFAULT;
+        }
+        if (len < sizeof(struct sctp_getaddrs)) {
+            return -TARGET_EINVAL;
+        }
+        sctp_opt = lock_user(VERIFY_WRITE, optval_addr, len, 1);
+        if (!sctp_opt) {
+            return -TARGET_EFAULT;
+        }
+        lv = len;
+        ret = get_errno(getsockopt(sockfd, level, optname, sctp_opt, &lv));
+        if (ret < 0) {
+            unlock_user(sctp_opt, optval_addr, 0);
+            return ret;
+        }
+        unlock_user(sctp_opt, optval_addr, lv);
+        if (put_user_u32(lv, optlen)) {
+            return -TARGET_EFAULT;
+        }
+        break;
     case SOL_CAN_RAW:
     {
         char * can_raw_val;
