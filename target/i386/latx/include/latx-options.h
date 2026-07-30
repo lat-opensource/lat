@@ -228,6 +228,4 @@ void conf_init(char **target_argv);
 char* guest_program(char **argv);
 void load_conf_file(const char *file, char* program);
 void find_option(const char *name, const char *val);
-int option_line_init(char *line, char **name, char **value);
-char* trim(char *s);
 #endif

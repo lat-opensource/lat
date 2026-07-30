@@ -61,6 +61,8 @@ if cs_latx_debug or cs_git
                                   include_directories: capstone_git_incdir_dependency)
 endif
 
+latx_string_utils = files('latx-string-utils.c')
+
 i386_ss.add(when: 'CONFIG_LATX', if_true: files(
   'error.c',
   'mem.c',
@@ -70,7 +72,7 @@ i386_ss.add(when: 'CONFIG_LATX', if_true: files(
   'latx-name-demangling.cpp',
   'latx-special-args.c',
   'latx-signal.c',
-))
+) + latx_string_utils)
 
 lazydis_lib = static_library('lazydis',
                          build_by_default: false,

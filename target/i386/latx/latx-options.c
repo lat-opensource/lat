@@ -9,6 +9,7 @@
 #include "qemu/cutils.h"
 #include "reg-alloc.h"
 #include "latx-debug.h"
+#include "latx-string-utils.h"
 #include "translate.h"
 
 #if defined(CONFIG_LATX_KZT)
@@ -110,28 +111,6 @@ unsigned long long counter_tb_tr;
 unsigned long long counter_ir1_tr;
 unsigned long long counter_mips_tr;
 
-char* trim(char *s)
-{
-    while (isspace((unsigned char)*s)) s++;
-    char *end = s + strlen(s) - 1;
-    while (isspace((unsigned char)*end)) end--;
-    end[1] = '\0';
-    return s;
-}
-
-// find env var and value
-int option_line_init(char *line, char **name, char **value)
-{
-    while (isspace((unsigned char)*line)) line++;
-    if (*line == '#' || *line == '\0') { return false; }
-    char *eq = strchr(line, '=');
-    if (eq == NULL) { return false; }
-    *eq = '\0';
-    *name = trim(line);
-    *value = trim(eq + 1);
-    return true;
-}
-
 void load_conf_file(const char *file, char *program)
 {
     FILE *fp = fopen(file, "r");
@@ -145,7 +124,8 @@ void load_conf_file(const char *file, char *program)
     while(getline(&line, &len, fp) != -1) {
         char *option_name, *option_value;
         // env var
-        if(flag != 1 && option_line_init(line, &option_name, &option_value)) {
+        if (flag != 1 &&
+            latx_option_line_init(line, &option_name, &option_value)) {
             find_option(option_name, option_value);
         }
         // guest name
