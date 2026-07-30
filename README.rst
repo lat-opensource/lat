@@ -183,7 +183,7 @@ STEP2:
 
 .. code-block:: bash
 
-    dnf install gcc g++ make git ninja-build meson openssl-devel glib2-devel
+    dnf install gcc g++ make git ninja-build meson openssl-devel glib2-devel tar
 
 
 STEP3:
