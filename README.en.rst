@@ -19,6 +19,14 @@ the box64 project.
 
 `中文版本点击这里 >> <README.rst>`_
 
+Contributing
+============
+
+Before opening a pull request, read the
+`contribution guide <CONTRIBUTING.md>`_. Every commit must include a DCO
+``Signed-off-by`` trailer.
+
+
 Commit Convention
 ========
 

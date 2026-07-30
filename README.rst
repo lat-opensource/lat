@@ -14,6 +14,13 @@ LATX 基于 QEMU 6 版本开发并进行了深度优化，性能相比原生 QEM
 
 `See the English Version Here >> <README.en.rst>`_
 
+参与贡献
+========
+
+提交 Pull Request 前，请阅读 `贡献指南 <CONTRIBUTING.md>`_。每个提交都必须
+包含 DCO ``Signed-off-by`` 签署。
+
+
 提交规范
 ========
 
