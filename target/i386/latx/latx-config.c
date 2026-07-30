@@ -6,6 +6,7 @@
 
 #include "config-host.h"
 #include "common.h"
+#include "qemu/rcu.h"
 #include "ir1.h"
 #include "ir2.h"
 #include "lsenv.h"
@@ -455,6 +456,30 @@ static __thread TRANSLATION_DATA tr_data_real;
 __thread ENV *lsenv;
 
 #ifdef CONFIG_LATX_FAST_JMPCACHE
+typedef struct LatxFastJmpCache {
+    struct rcu_head rcu;
+    FastTB entries[TB_JMP_CACHE_SIZE];
+} LatxFastJmpCache;
+
+static void latx_fast_jmp_cache_free(LatxFastJmpCache *cache)
+{
+    free(cache);
+}
+
+void latx_fast_jmp_cache_free_rcu(void *ptr)
+{
+    FastTB (*entries)[TB_JMP_CACHE_SIZE];
+    LatxFastJmpCache *cache;
+
+    if (ptr == NULL) {
+        return;
+    }
+
+    entries = ptr;
+    cache = container_of(entries, LatxFastJmpCache, entries);
+    call_rcu(cache, latx_fast_jmp_cache_free, rcu);
+}
+
 void latx_fast_jmp_cache_add(CPUState *cs, int h, struct TranslationBlock *tb)
 {
     X86CPU *cpu = X86_CPU(cs);
@@ -486,13 +511,15 @@ void latx_fast_jmp_cache_clear_all(CPUState *cs)
 
 bool latx_fast_jmp_cache_init(void *env)
 {
+    LatxFastJmpCache *cache;
     FastTB *fast_jmp_cache;
     CPUX86State *x86env = env;
 
-    fast_jmp_cache = calloc(TB_JMP_CACHE_SIZE, sizeof(struct FastTB));
-    if (!fast_jmp_cache) {
+    cache = calloc(1, sizeof(*cache));
+    if (!cache) {
         return false;
     }
+    fast_jmp_cache = cache->entries;
     for (int i = 0; i < TB_JMP_CACHE_SIZE; i++) {
         fast_jmp_cache[i].pc = FASTTB_INVALID_PC;
     }
