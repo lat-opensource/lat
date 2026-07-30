@@ -1729,6 +1729,10 @@ static void do_tb_phys_invalidate(TranslationBlock *tb, bool rm_from_page_list)
     qatomic_set(&tb->cflags, tb->cflags | CF_INVALID);
     qemu_spin_unlock(&tb->jmp_lock);
 
+#ifdef CONFIG_LATX_AOT
+    aot_unmark_tb(tb);
+#endif
+
     /* remove the TB from the hash list */
     phys_pc = tb_page_addr0(tb);
 
@@ -2332,6 +2336,9 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
         tcg_tb_remove(tb);
         return existing_tb;
     }
+#ifdef CONFIG_LATX_AOT
+    aot_mark_dynamic_tb(tb);
+#endif
     return tb;
 }
 
@@ -2363,6 +2370,7 @@ void aot_tb_register(TranslationBlock *tb)
 #endif
     }
     tcg_tb_insert(tb);
+    aot_mark_recovered_tb(tb);
 }
 
 #endif

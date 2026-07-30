@@ -839,6 +839,17 @@ static void handle_arg_latx_aot(const char *arg)
     }
 }
 
+static void handle_arg_latx_aot_generate(const char *arg)
+{
+    long value;
+
+    if (qemu_strtol(arg, NULL, 0, &value) < 0 || value < -1 || value > 1) {
+        fprintf(stderr, "LATX_AOT_GENERATE must be -1, 0, or 1\n");
+        exit(EXIT_FAILURE);
+    }
+    option_aot_generate = value;
+}
+
 static void handle_arg_latx_aot_pe_profile(const char *arg)
 {
     option_aot_pe_profile = strtol(arg, NULL, 0);
@@ -964,6 +975,9 @@ static const struct qemu_argument arg_table[] = {
 #ifdef CONFIG_LATX_AOT
     {"latx-aot",    "LATX_AOT",     true,  handle_arg_latx_aot,
     "",           "enable aot"},
+    {"latx-aot-generate", "LATX_AOT_GENERATE", true,
+    handle_arg_latx_aot_generate, "",
+    "AOT generation: auto (-1), off (0), or force (1)"},
     {"latx-aot-pe-profile", "LATX_AOT_PE_PROFILE", true,
     handle_arg_latx_aot_pe_profile, "", "split libcef PE AOT by process role"},
     {"latx-aot-file-size", "LAT_AOT_FILE_SIZE", false,
