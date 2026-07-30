@@ -303,7 +303,12 @@ int aot_get_file_name(char *aot_file, char *buff, int index);
 int add_rel_entry(aot_rel_kind kind, uint32_t **tc_offset,
                   uint32_t **rel_slots_num, uint32_t x86_rip_offset,
                   target_ulong extra_addent);
-void aot_exit_entry(CPUState *cpu, int is_end);
+typedef enum AOTExitReason {
+    AOT_EXIT_THREAD,
+    AOT_EXIT_FINAL,
+} AOTExitReason;
+
+void aot_exit_entry(CPUState *cpu, AOTExitReason reason);
 void aot_init(void);
 target_ulong aot_get_call_offset(ADDRX addr);
 void aot_generate(CPUState *cpu);

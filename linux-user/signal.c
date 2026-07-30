@@ -1495,9 +1495,7 @@ static void handle_pending_signal(CPUArchState *cpu_env, int sig,
                    sig != TARGET_SIGWINCH &&
                    sig != TARGET_SIGCONT) {
 #ifdef CONFIG_LATX_AOT
-        if (sig == TARGET_SIGTERM) {
-            aot_exit_entry(cpu, true);
-        }
+        aot_exit_entry(cpu, AOT_EXIT_FINAL);
 #endif
             dump_core_and_abort(sig);
         }

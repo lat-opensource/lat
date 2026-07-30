@@ -913,6 +913,17 @@ void cpu_exec_end(CPUState *cpu);
 void start_exclusive(void);
 
 /**
+ * start_exclusive_timeout:
+ * @timeout_ms: maximum time to wait in milliseconds.
+ *
+ * Like start_exclusive(), but returns false if other CPUs do not quiesce
+ * within the condition-wait budget. Lock acquisition and platform condition
+ * variable semantics may extend the elapsed wall-clock time. On false, no
+ * exclusive section is held.
+ */
+bool start_exclusive_timeout(int timeout_ms);
+
+/**
  * end_exclusive:
  *
  * Concludes an exclusive execution section started by start_exclusive.

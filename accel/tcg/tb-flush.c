@@ -116,7 +116,7 @@ done:
 static void gen_aot_and_flush(CPUState *cpu, run_on_cpu_data tb_flush_count)
 {
 #ifdef CONFIG_LATX_AOT
-    aot_exit_entry(cpu, false);
+    aot_exit_entry(cpu, AOT_EXIT_THREAD);
 #endif
     do_tb_flush(cpu, tb_flush_count);
 }

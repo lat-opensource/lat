@@ -177,6 +177,35 @@ static inline void exclusive_idle(void)
     }
 }
 
+static int64_t monotonic_ms(void)
+{
+    return g_get_monotonic_time() / 1000;
+}
+
+static bool exclusive_timedwait(QemuCond *cond, int64_t deadline_ms)
+{
+    int64_t timeout_ms = deadline_ms - monotonic_ms();
+
+    if (timeout_ms <= 0) {
+        return false;
+    }
+    if (timeout_ms > INT_MAX) {
+        timeout_ms = INT_MAX;
+    }
+    return qemu_cond_timedwait(cond, &qemu_cpu_list_lock, timeout_ms);
+}
+
+static void exclusive_cancel_waiters(void)
+{
+    CPUState *other_cpu;
+
+    CPU_FOREACH(other_cpu) {
+        other_cpu->has_waiter = false;
+    }
+    qatomic_set(&pending_cpus, 0);
+    qemu_cond_broadcast(&exclusive_resume);
+}
+
 /* Start an exclusive operation.
    Must only be called from outside cpu_exec.  */
 void start_exclusive(void)
@@ -217,6 +246,63 @@ void start_exclusive(void)
     qemu_mutex_unlock(&qemu_cpu_list_lock);
 
     current_cpu->exclusive_context_count = 1;
+}
+
+/*
+ * Try to start an exclusive operation, but do not wait forever for CPUs that
+ * are stuck in host/native code. Returns true with the same state as
+ * start_exclusive(), or false with no exclusive operation held.
+ */
+bool start_exclusive_timeout(int timeout_ms)
+{
+    CPUState *other_cpu;
+    int64_t deadline_ms;
+    int running_cpus;
+
+    if (current_cpu->exclusive_context_count) {
+        current_cpu->exclusive_context_count++;
+        return true;
+    }
+    if (timeout_ms <= 0) {
+        return false;
+    }
+    deadline_ms = monotonic_ms() + timeout_ms;
+
+    qemu_mutex_lock(&qemu_cpu_list_lock);
+    while (pending_cpus) {
+        if (!exclusive_timedwait(&exclusive_resume, deadline_ms)) {
+            qemu_mutex_unlock(&qemu_cpu_list_lock);
+            return false;
+        }
+    }
+
+    /* Make all other cpus stop executing.  */
+    qatomic_set(&pending_cpus, 1);
+
+    /* Write pending_cpus before reading other_cpu->running.  */
+    smp_mb();
+    running_cpus = 0;
+    CPU_FOREACH(other_cpu) {
+        if (qatomic_read(&other_cpu->running)) {
+            other_cpu->has_waiter = true;
+            running_cpus++;
+            qemu_cpu_kick(other_cpu);
+        }
+    }
+
+    qatomic_set(&pending_cpus, running_cpus + 1);
+    while (pending_cpus > 1) {
+        if (!exclusive_timedwait(&exclusive_cond, deadline_ms)) {
+            exclusive_cancel_waiters();
+            qemu_mutex_unlock(&qemu_cpu_list_lock);
+            return false;
+        }
+    }
+
+    qemu_mutex_unlock(&qemu_cpu_list_lock);
+
+    current_cpu->exclusive_context_count = 1;
+    return true;
 }
 
 /* Finish an exclusive operation.  */

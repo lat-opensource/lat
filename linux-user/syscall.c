@@ -9275,7 +9275,7 @@ static void QEMU_NORETURN seccomp_kill_thread(CPUArchState *env)
     pthread_mutex_lock(&clone_lock);
 #ifdef CONFIG_LATX_AOT
     if (current_cpu->cpu_index == 0) {
-        aot_exit_entry(cpu, false);
+        aot_exit_entry(cpu, AOT_EXIT_THREAD);
     }
 #endif
     if (CPU_NEXT(first_cpu)) {
@@ -12067,7 +12067,7 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
         pthread_mutex_lock(&clone_lock);
 #ifdef CONFIG_LATX_AOT
         if(current_cpu->cpu_index == 0) {
-            aot_exit_entry(cpu, false);
+            aot_exit_entry(cpu, AOT_EXIT_THREAD);
         }
 #endif
 
@@ -12818,9 +12818,9 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
 #endif
     case TARGET_NR_kill:
 #ifdef CONFIG_LATX_AOT
-        if (arg1 == getpid())
+        if (arg1 == getpid() && target_to_host_signal(arg2) == SIGKILL)
         {
-            aot_exit_entry(cpu, true);
+            aot_exit_entry(cpu, AOT_EXIT_FINAL);
         }
 #endif
         return get_errno(safe_kill(arg1, target_to_host_signal(arg2)));
@@ -14481,7 +14481,7 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
         preexit_cleanup(cpu_env, arg1);
         /* dump basic block here. TODO */
 #ifdef CONFIG_LATX_AOT
-        aot_exit_entry(cpu, true);
+        aot_exit_entry(cpu, AOT_EXIT_FINAL);
 #endif
         return get_errno(exit_group(arg1));
 #endif
@@ -16862,9 +16862,10 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
 
     case TARGET_NR_tgkill:
 #ifdef CONFIG_LATX_AOT
-        if (arg2 == syscall(SYS_gettid))
+        if (arg1 == getpid() && arg2 == syscall(SYS_gettid) &&
+            target_to_host_signal(arg3) == SIGKILL)
         {
-            aot_exit_entry(cpu, true);
+            aot_exit_entry(cpu, AOT_EXIT_FINAL);
         }
 #endif
         return get_errno(safe_tgkill((int)arg1, (int)arg2,

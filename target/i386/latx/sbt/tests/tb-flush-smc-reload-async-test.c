@@ -34,7 +34,8 @@ int qemu_log(const char *fmt G_GNUC_UNUSED, ...)
     return 0;
 }
 
-void aot_exit_entry(CPUState *cpu G_GNUC_UNUSED, int is_end G_GNUC_UNUSED)
+void aot_exit_entry(CPUState *cpu G_GNUC_UNUSED,
+                    AOTExitReason reason G_GNUC_UNUSED)
 {
 }
 

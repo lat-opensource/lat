@@ -1844,7 +1844,9 @@ static void creat_daemon(bool is_end)
     umask(0);
 }
 
-void aot_exit_entry(CPUState *cpu, int is_end)
+#define AOT_EXIT_EXCLUSIVE_TIMEOUT_MS 1000
+
+void aot_exit_entry(CPUState *cpu, AOTExitReason reason)
 {
     if (!option_aot) {
         return;
@@ -1854,9 +1856,19 @@ void aot_exit_entry(CPUState *cpu, int is_end)
 	_exit(0);
     }
 
+    bool exclusive_started = false;
     bool in_exclusive_context = cpu_in_exclusive_context(cpu);
     if (!in_exclusive_context) {
-        start_exclusive();
+        if (reason == AOT_EXIT_FINAL) {
+            if (!start_exclusive_timeout(AOT_EXIT_EXCLUSIVE_TIMEOUT_MS)) {
+                qemu_log_mask(LAT_LOG_AOT,
+                              "skip final aot: exclusive wait timeout\n");
+                return;
+            }
+        } else {
+            start_exclusive();
+        }
+        exclusive_started = true;
     }
 
     sigset_t sigset;
@@ -1913,13 +1925,13 @@ void aot_exit_entry(CPUState *cpu, int is_end)
         }
 
 parent_exit:
-	if (!in_exclusive_context) {
-	    end_exclusive();
-	}
-	return;
+        if (exclusive_started) {
+            end_exclusive();
+        }
+        return;
     }
 
-    creat_daemon(is_end);
+    creat_daemon(reason == AOT_EXIT_FINAL);
 
     aot_generate(cpu);
     _exit(EXIT_SUCCESS);
