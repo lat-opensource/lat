@@ -467,6 +467,7 @@ static int isChromeApp(elfheader_t* h, int con_score)
 int CheckEnableKZT(elfheader_t* h, char** target_argv, int target_argc)
 {
     path_collection_t   lib_path = {0,0,0};
+    char *rpathref;
     char *rpath;
 
     int needlibcnt = 0;
@@ -476,10 +477,13 @@ int CheckEnableKZT(elfheader_t* h, char** target_argv, int target_argc)
         switch(h->Dynamic[i].d_tag) {
             case DT_RPATH:
             case DT_RUNPATH:
-                rpath =  h->DynStrTab+h->Dynamic[i].d_un.d_val + h->delta;
-                    printf_log(LOG_INFO, "RPATH : %s\n", rpath);
-                rpath = GenPathList(rpath, h->path);
+                rpathref = h->DynStrTab+h->Dynamic[i].d_un.d_val + h->delta;
+                    printf_log(LOG_INFO, "RPATH : %s\n", rpathref);
+                rpath = GenPathList(rpathref, h->path);
                 AppendListExistAndNotSys(&lib_path, rpath, 1);
+                if (rpath != rpathref) {
+                    box_free(rpath);
+                }
                 break;
             case DT_NEEDED:
                 if (strstr(h->DynStrTab+h->delta+h->Dynamic[i].d_un.d_val, "libgtk-3.so")||//skip gtk
