@@ -20,7 +20,6 @@
 #include "qemu/bitops.h"
 #include <sys/ucontext.h>
 #include <sys/resource.h>
-#include <sys/syscall.h>
 
 #include "qemu.h"
 #include "trace.h"
@@ -1116,11 +1115,10 @@ static void host_signal_handler(int host_signum, siginfo_t *info,
             return;
         }
 #endif
+#ifdef CONFIG_LATX
     if (option_fork_unlink && host_signum == SIGRTMIN + 1 &&
-        info->si_code == SI_QUEUE && info->si_int == FORK_UNLINK_MAGIC) {
-#if defined(CONFIG_LATX_DEBUG)
-        fprintf(stderr, "[LAT SIGNAL] receive unlink signal pid=%d tid=%ld sig=%d\n", getpid(), syscall(SYS_gettid), host_signum);
-#endif
+        info->si_code == SI_QUEUE &&
+        info->si_int == FORK_UNLINK_MAGIC) {
         /* Reuse the normal signal exit path, including TU split chains. */
         rewind_if_in_safe_syscall(puc);
         qatomic_set(&ts->signal_pending, 1);
@@ -1128,6 +1126,7 @@ static void host_signal_handler(int host_signum, siginfo_t *info,
         cpu_exit(cpu);
         return;
     }
+#endif
     /* #define LA_HOOK_PTRACE SIGSEGV */
     if (host_signum == LA_HOOK_PTRACE && info->si_code == SI_QUEUE) {
         void *trace_page = info->si_value.sival_ptr;

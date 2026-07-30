@@ -463,7 +463,7 @@ typedef struct LatxFastJmpCache {
 
 static void latx_fast_jmp_cache_free(LatxFastJmpCache *cache)
 {
-    free(cache);
+    g_free(cache);
 }
 
 void latx_fast_jmp_cache_free_rcu(void *ptr)
@@ -515,7 +515,7 @@ bool latx_fast_jmp_cache_init(void *env)
     FastTB *fast_jmp_cache;
     CPUX86State *x86env = env;
 
-    cache = calloc(1, sizeof(*cache));
+    cache = g_try_new0(LatxFastJmpCache, 1);
     if (!cache) {
         return false;
     }

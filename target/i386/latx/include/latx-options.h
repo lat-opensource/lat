@@ -84,6 +84,7 @@ extern int option_real_maps;
 extern int option_monitor_shared_mem;
 extern int option_shadow_file;
 extern int option_smc_opt;
+#define FORK_UNLINK_MAGIC 0x88888889
 extern int option_fork_unlink;
 extern int option_set_rounding_opt;
 extern int option_cvt_opt;
