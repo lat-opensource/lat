@@ -9,9 +9,19 @@
 
 char *latx_trim(char *s)
 {
-    while (isspace((unsigned char)*s)) s++;
-    char *end = s + strlen(s) - 1;
-    while (isspace((unsigned char)*end)) end--;
+    char *end;
+
+    while (isspace((unsigned char)*s)) {
+        s++;
+    }
+    if (*s == '\0') {
+        return s;
+    }
+
+    end = s + strlen(s) - 1;
+    while (end > s && isspace((unsigned char)*end)) {
+        end--;
+    }
     end[1] = '\0';
     return s;
 }
