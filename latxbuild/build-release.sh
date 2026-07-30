@@ -8,7 +8,7 @@ srcdir=$(realpath "$(dirname "$0")/../")
 pkgdir=$srcdir/pkg
 tarballs=$pkgname-$pkgver-$pkgdate.tar.xz
 
-parpare() {
+prepare() {
     [ -d $srcdir/build32 ] || mkdir -p $srcdir/build32
     [ -d $srcdir/build64 ] || mkdir -p $srcdir/build64
     [ -d $pkgdir ] && rm -rf $pkgdir
@@ -99,6 +99,6 @@ EOF
     )
 }
 
-parpare
+prepare
 build
 package

@@ -9,7 +9,7 @@ help() {
     echo "Usage:"
     echo "  -c              configure"
     echo "  -O              [options]"
-    echo "                  defaule: -O 1"
+    echo "                  default: -O 1"
     echo "                  -O 0 : Disable all optimization, include basic"
     echo "                  -O 1 : Open stable optimization"
     echo "                  -O 2 : Open unstable optimization, include O1"
