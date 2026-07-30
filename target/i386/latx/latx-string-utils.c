@@ -63,6 +63,7 @@ void latx_extract_filename(const char *filename, char *buffer,
     }
 
     strncpy(buffer, filename_only, buffer_size - 1);
+    buffer[buffer_size - 1] = '\0';
 
     extension = strchr(buffer, '.');
     if (extension != NULL) {
