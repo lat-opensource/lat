@@ -36,7 +36,12 @@ jobs:
           - { NAME: 'latx-runner-aosc', ARCH_NAME: 'loong64' }
           - { NAME: 'latx-runner-debian', ARCH_NAME: 'loong64' }
           - { NAME: 'latx-runner-fedora', ARCH_NAME: 'loongarch64' }
-        type: [ 'build-release', 'build32', 'build32-dbg', 'build64', 'build64-dbg' ]
+        type:
+          - { NAME: 'build-release', OPT: '' }
+          - { NAME: 'build32', OPT: '-c -a' }
+          - { NAME: 'build32-dbg', OPT: '-c' }
+          - { NAME: 'build64', OPT: '-c -a' }
+          - { NAME: 'build64-dbg', OPT: '-c' }
 
     steps:
       - uses: actions/checkout@v7
@@ -47,8 +52,8 @@ jobs:
         uses: actions/cache@v6
         with:
           path: /tmp/.cache
-          key: ${{ matrix.container.NAME }}-${{ matrix.type }}-${{ github.sha }}
-          restore-keys: ${{ matrix.container.NAME }}-${{ matrix.type }}-
+          key: ${{ matrix.container.NAME }}-${{ matrix.type.NAME }}-${{ github.sha }}
+          restore-keys: ${{ matrix.container.NAME }}-${{ matrix.type.NAME }}-
 
       - name: Setup QEMU
         uses: docker/setup-qemu-action@v4
@@ -59,7 +64,7 @@ jobs:
       - name: "Build LATX"
         run: |
           DOCKER_IMAGE="ghcr.io/${{ github.repository_owner }}/${{ matrix.container.NAME }}:${{ matrix.container.ARCH_NAME }}"
-          DOCKER_CMD="./latxbuild/${{ matrix.type }}.sh -c"
+          DOCKER_CMD="./latxbuild/${{ matrix.type.NAME }}.sh ${{ matrix.type.OPT }}"
           docker run --rm \
             --platform linux/loong64 \
             --volume /tmp/.cache:/root/.cache \
@@ -75,10 +80,10 @@ jobs:
       - name: "Upload Artifact"
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ matrix.container.NAME }}-${{ matrix.type }}-${{ env.SHORT_COMMIT }}
+          name: ${{ matrix.container.NAME }}-${{ matrix.type.NAME }}-${{ env.SHORT_COMMIT }}
           path: |
-            ${{ matrix.type }}/latx-i386
-            ${{ matrix.type }}/latx-x86_64
+            ${{ matrix.type.NAME }}/latx-i386
+            ${{ matrix.type.NAME }}/latx-x86_64
             *.tar.xz
           retention-days: 7
 
