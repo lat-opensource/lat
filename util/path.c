@@ -14,6 +14,32 @@ static const char *base;
 static GHashTable *hash;
 static QemuMutex lock;
 
+#ifdef CONFIG_LATX
+static bool path_is_proc_namespace(const char *name)
+{
+    static const char proc_root[] = "/proc";
+    const char *component;
+    size_t length = sizeof(proc_root) - 1;
+
+    if (strncmp(name, proc_root, length) ||
+        (name[length] && name[length] != '/')) {
+        return false;
+    }
+
+    component = name + length;
+    while (*component) {
+        component += strspn(component, "/");
+        if (component[0] == '.' && component[1] == '.' &&
+            (component[2] == '\0' || component[2] == '/')) {
+            return false;
+        }
+        component += strcspn(component, "/");
+    }
+
+    return true;
+}
+#endif
+
 void init_paths(const char *prefix)
 {
     if (prefix[0] == '\0' || !strcmp(prefix, "/")) {
@@ -43,6 +69,17 @@ const char *path(const char *name)
             || (name[0]  == '/' && name[1] == '\0')) {
         return name;
     }
+
+#ifdef CONFIG_LATX
+    /*
+     * LAT's packaged x86 runtime may contain an inert /proc mount point.
+     * Resolve procfs in the calling task's current namespace instead of
+     * letting that directory shadow the live filesystem.
+     */
+    if (path_is_proc_namespace(name)) {
+        return name;
+    }
+#endif
 
     qemu_mutex_lock(&lock);
 

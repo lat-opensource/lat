@@ -24,3 +24,18 @@ test(
   test_exclusive_timeout,
   suite: 'lat-pr-fast',
 )
+
+if 'CONFIG_LATX' in config_host
+  test_util_path = executable(
+    'test-util-path',
+    files('test-util-path.c'),
+    dependencies: [glib, qemuutil],
+    build_by_default: false,
+  )
+
+  test(
+    'test-util-path',
+    test_util_path,
+    suite: 'lat-pr-fast',
+  )
+endif
