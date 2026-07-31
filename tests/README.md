@@ -53,6 +53,8 @@ test_program = executable(
 ```
 
 If those headers also include TCG trace helpers, add `tcg_trace_genh` as well.
+Tests that include generated Linux-user syscall headers must also add the
+target's `syscall_nr_generated` sources.
 
 ## Run the suites
 

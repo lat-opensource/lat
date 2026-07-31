@@ -526,6 +526,7 @@ foreach target : target_dirs
   arch = config_target['TARGET_BASE_ARCH']
   arch_srcs = [config_target_h[target]]
   arch_deps = []
+  syscall_nr_generated = []
   c_args = ['-DNEED_CPU_H',
             '-DCONFIG_TARGET="@0@-config-target.h"'.format(target),
             '-DCONFIG_DEVICES="@0@-config-devices.h"'.format(target)]
@@ -546,9 +547,12 @@ foreach target : target_dirs
       dir = base_dir / abi
       arch_srcs += files(dir / 'signal.c', dir / 'cpu_loop.c')
       if config_target.has_key('TARGET_SYSTBL_ABI')
-        arch_srcs += \
-          syscall_nr_generators[abi].process(base_dir / abi / config_target['TARGET_SYSTBL'],
-                                             extra_args : config_target['TARGET_SYSTBL_ABI'])
+        syscall_nr_generated = \
+          syscall_nr_generators[abi].process(
+            base_dir / abi / config_target['TARGET_SYSTBL'],
+            extra_args : config_target['TARGET_SYSTBL_ABI']
+          )
+        arch_srcs += syscall_nr_generated
       endif
     if 'CONFIG_LATX' in config_host
       if config_host['ARCH'] in ['loongarch64', 'loongarch']
@@ -598,7 +602,7 @@ foreach target : target_dirs
         'target/i386/latx/sbt/smc_reload.c',
         'target/i386/latx/sbt/aot_smc_reload.c',
         'accel/tcg/tb-jump.c'
-      ) + genh + tcg_trace_genh,
+      ) + genh + tcg_trace_genh + syscall_nr_generated,
       c_args: smc_reload_test_c_args,
       dependencies: [glib],
       include_directories: target_inc,
@@ -618,7 +622,7 @@ foreach target : target_dirs
         'target/i386/latx/sbt/aot_smc_reload.c',
         'accel/tcg/tb-jump.c',
         'util/pagesize.c'
-      ) + genh + tcg_trace_genh,
+      ) + genh + tcg_trace_genh + syscall_nr_generated,
       c_args: smc_reload_test_c_args,
       dependencies: [glib],
       include_directories: target_inc,
@@ -636,7 +640,7 @@ foreach target : target_dirs
         'target/i386/latx/sbt/tests/tb-flush-smc-reload-async-test.c',
         'target/i386/latx/sbt/smc_reload.c',
         'accel/tcg/tb-flush.c'
-      ) + genh + tcg_trace_genh,
+      ) + genh + tcg_trace_genh + syscall_nr_generated,
       c_args: smc_reload_test_c_args,
       dependencies: [glib],
       include_directories: target_inc,
@@ -653,7 +657,7 @@ foreach target : target_dirs
       files(
         'target/i386/latx/sbt/tests/aot-file-publish-test.c',
         'target/i386/latx/sbt/file_ctx.c'
-      ) + genh + tcg_trace_genh,
+      ) + genh + tcg_trace_genh + syscall_nr_generated,
       c_args: smc_reload_test_c_args,
       dependencies: [glib],
       include_directories: target_inc,
@@ -674,7 +678,7 @@ foreach target : target_dirs
         'target/i386/latx/sbt/tests/aot-pe-load-address-test.c',
         'target/i386/latx/sbt/segment.c',
         'target/i386/latx/sbt/aot_lib.c'
-      ) + genh + tcg_trace_genh,
+      ) + genh + tcg_trace_genh + syscall_nr_generated,
       c_args: smc_reload_test_c_args,
       dependencies: [glib],
       include_directories: target_inc,
