@@ -42,6 +42,16 @@ test(
 Use `suite: 'latx-integration'` instead when the test needs special host
 facilities.
 
+If the test includes QEMU headers that refer to generated QAPI headers, add
+`genh` to the executable sources so Meson records the generator dependency:
+
+```meson
+test_program = executable(
+  'test-example',
+  files('test-example.c') + genh,
+)
+```
+
 ## Run the suites
 
 Configure the build with `--enable-tests`, then run:
