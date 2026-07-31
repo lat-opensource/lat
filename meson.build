@@ -604,7 +604,11 @@ foreach target : target_dirs
       include_directories: target_inc,
       link_args: smc_reload_test_link_args
     )
-    test('latx-smc-reload-tu', smc_reload_tu_test)
+    test(
+      'latx-smc-reload-tu',
+      smc_reload_tu_test,
+      suite: 'lat-pr-fast',
+    )
 
     smc_reload_guest_base_test = executable(
       'test-latx-smc-reload-guest-base',
@@ -620,7 +624,11 @@ foreach target : target_dirs
       include_directories: target_inc,
       link_args: smc_reload_test_link_args + ['-Wl,--wrap=mprotect']
     )
-    test('latx-smc-reload-guest-base', smc_reload_guest_base_test)
+    test(
+      'latx-smc-reload-guest-base',
+      smc_reload_guest_base_test,
+      suite: 'lat-pr-fast',
+    )
 
     smc_reload_async_flush_test = executable(
       'test-latx-tb-flush-smc-reload-async',
@@ -634,7 +642,11 @@ foreach target : target_dirs
       include_directories: target_inc,
       link_args: smc_reload_test_link_args
     )
-    test('latx-tb-flush-smc-reload-async', smc_reload_async_flush_test)
+    test(
+      'latx-tb-flush-smc-reload-async',
+      smc_reload_async_flush_test,
+      suite: 'lat-pr-fast',
+    )
 
     aot_file_publish_test = executable(
       'test-latx-aot-file-publish',
@@ -650,7 +662,11 @@ foreach target : target_dirs
         '-Wl,--wrap=rename'
       ]
     )
-    test('latx-aot-file-publish', aot_file_publish_test)
+    test(
+      'latx-aot-file-publish',
+      aot_file_publish_test,
+      suite: 'lat-pr-fast',
+    )
 
     aot_pe_load_address_test = executable(
       'test-latx-aot-pe-load-address',
@@ -664,7 +680,11 @@ foreach target : target_dirs
       include_directories: target_inc,
       link_args: smc_reload_test_link_args
     )
-    test('latx-aot-pe-load-address', aot_pe_load_address_test)
+    test(
+      'latx-aot-pe-load-address',
+      aot_pe_load_address_test,
+      suite: 'lat-pr-fast',
+    )
   endif
 
     execs = [{

@@ -8,6 +8,7 @@ if host_machine.cpu_family() == 'loongarch64' and \
       files('cef-userns-nested.S'),
     ],
     protocol: 'exitcode',
+    suite: 'latx-integration',
     timeout: 30,
   )
   test(
@@ -18,6 +19,7 @@ if host_machine.cpu_family() == 'loongarch64' and \
       files('cef-userns-exec.S'),
     ],
     protocol: 'exitcode',
+    suite: 'latx-integration',
     timeout: 30,
   )
 endif

@@ -5,7 +5,11 @@ test_elfload_pagesize = executable(
   dependencies: glib,
 )
 
-test('test-elfload-pagesize', test_elfload_pagesize)
+test(
+  'test-elfload-pagesize',
+  test_elfload_pagesize,
+  suite: 'lat-pr-fast',
+)
 
 test_exclusive_timeout = executable(
   'test-exclusive-timeout',
@@ -15,4 +19,8 @@ test_exclusive_timeout = executable(
   dependencies: [glib, qemuutil, qom],
 )
 
-test('test-exclusive-timeout', test_exclusive_timeout)
+test(
+  'test-exclusive-timeout',
+  test_exclusive_timeout,
+  suite: 'lat-pr-fast',
+)
