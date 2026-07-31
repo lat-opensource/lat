@@ -5,6 +5,8 @@
 #include "segment.h"
 
 int qemu_loglevel;
+int option_aot_pe_profile;
+const char *aot_process_profile = "browser";
 
 int qemu_log(const char *fmt G_GNUC_UNUSED, ...)
 {
