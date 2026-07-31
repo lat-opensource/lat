@@ -52,6 +52,8 @@ test_program = executable(
 )
 ```
 
+If those headers also include TCG trace helpers, add `tcg_trace_genh` as well.
+
 ## Run the suites
 
 Configure the build with `--enable-tests`, then run:

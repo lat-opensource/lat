@@ -61,6 +61,7 @@ trace_events_all = custom_target('trace-events-all',
                                  install: false,
                                  install_dir: qemu_datadir)
 
+tcg_trace_genh = []
 foreach d : [
   ['generated-tcg-tracers.h', 'tcg-h'],
   ['generated-helpers.c', 'tcg-helper-c'],
@@ -73,6 +74,9 @@ foreach d : [
                 command: [ tracetool, '--group=root', '--format=@0@'.format(d[1]), '@INPUT@', '@OUTPUT@' ],
                 depend_files: tracetool_depends)
   specific_ss.add(when: 'CONFIG_TCG', if_true: gen)
+  if d[0].endswith('.h')
+    tcg_trace_genh += gen
+  endif
 endforeach
 
 if 'CONFIG_TRACE_UST' in config_host
