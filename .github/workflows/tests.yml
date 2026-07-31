@@ -1,0 +1,80 @@
+name: LAT Tests
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+    paths:
+      - "**/*.c"
+      - "**/*.h"
+      - "**/*.S"
+      - "**/*.inc"
+      - "**/*.py"
+      - "**/meson.build"
+      - "meson_options.txt"
+      - "configure"
+      - ".github/.ci/**"
+      - ".github/workflows/tests.yml"
+  pull_request:
+    paths:
+      - "**/*.c"
+      - "**/*.h"
+      - "**/*.S"
+      - "**/*.inc"
+      - "**/*.py"
+      - "**/meson.build"
+      - "meson_options.txt"
+      - "configure"
+      - ".github/.ci/**"
+      - ".github/workflows/tests.yml"
+
+permissions:
+  contents: read
+
+# Test registration and suite selection rules are documented in tests/README.md.
+jobs:
+  meson-fast:
+    name: "test (latx-runner-debian, lat-pr-fast)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          submodules: true
+
+      - name: Setup QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Run fast Meson tests
+        run: |
+          docker run --rm \
+            --platform linux/loong64 \
+            --volume "$(pwd):/io" \
+            --workdir /io \
+            ghcr.io/lat-opensource/latx-runner-debian:loong64 \
+            sh -eux -c '
+              export CFLAGS="-Wno-error=unused-but-set-variable -Wno-error=unused-function -Wformat -Werror=format-y2k"
+              mkdir -p build64-tests
+              cd build64-tests
+              ../configure \
+                --target-list=x86_64-linux-user \
+                --enable-latx \
+                --enable-debug \
+                --enable-tests \
+                --enable-sanitizers \
+                --disable-werror \
+                --optimize-O1 \
+                --extra-ldflags=-ldl \
+                --disable-docs \
+                --with-git-submodules=ignore
+              cd ..
+              ASAN_OPTIONS=detect_leaks=0 \
+              UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
+                python3 -B meson/meson.py test \
+                  -C build64-tests \
+                  --suite lat-pr-fast \
+                  --print-errorlogs
+            '
