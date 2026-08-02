@@ -48,6 +48,37 @@ int latx_option_line_init(char *line, char **name, char **value)
     return true;
 }
 
+int latx_user_config_home_is_safe(const char *home, uid_t real_uid,
+                                  uid_t effective_uid, gid_t real_gid,
+                                  gid_t effective_gid)
+{
+    return home != NULL && home[0] == '/' && real_uid == effective_uid &&
+           real_gid == effective_gid;
+}
+
+int latx_user_config_path(char *buffer, size_t buffer_size,
+                          const char *home, const char *filename)
+{
+    int length;
+
+    if (buffer == NULL || buffer_size == 0) {
+        return false;
+    }
+    buffer[0] = '\0';
+    if (filename == NULL || filename[0] == '\0' ||
+        !latx_user_config_home_is_safe(home, getuid(), geteuid(),
+                                       getgid(), getegid())) {
+        return false;
+    }
+
+    length = snprintf(buffer, buffer_size, "%s/.config/%s", home, filename);
+    if (length < 0 || (size_t)length >= buffer_size) {
+        buffer[0] = '\0';
+        return false;
+    }
+    return true;
+}
+
 void latx_extract_filename(const char *filename, char *buffer,
                            size_t buffer_size)
 {

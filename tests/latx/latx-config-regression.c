@@ -38,6 +38,45 @@ static void test_release_loader_prefix_config(void)
     g_assert_true(config_option_registered("LAT_LD_PREFIX"));
 }
 
+static void test_user_config_path(void)
+{
+    char expected[PATH_MAX];
+    char path[PATH_MAX] = "must be cleared";
+    char truncated[8] = "unclear";
+
+    g_assert_true(latx_user_config_home_is_safe("/home/test", 1000, 1000,
+                                                1000, 1000));
+    g_assert_false(latx_user_config_home_is_safe("/home/test", 1000, 0,
+                                                 1000, 1000));
+    g_assert_false(latx_user_config_home_is_safe("/home/test", 1000, 1000,
+                                                 1000, 0));
+    g_assert_false(latx_user_config_home_is_safe("relative/home", 1000, 1000,
+                                                 1000, 1000));
+
+    g_assert_cmpint(snprintf(expected, sizeof(expected),
+                             "/home/test/.config/%s",
+                             LATX_USER_CONFIG_FILE), >, 0);
+    g_assert_true(latx_user_config_path(path, sizeof(path), "/home/test",
+                                       LATX_USER_CONFIG_FILE));
+    g_assert_cmpstr(path, ==, expected);
+
+    g_assert_false(latx_user_config_path(path, sizeof(path), NULL,
+                                        LATX_USER_CONFIG_FILE));
+    g_assert_cmpstr(path, ==, "");
+    g_assert_false(latx_user_config_path(path, sizeof(path), "relative/home",
+                                        LATX_USER_CONFIG_FILE));
+    g_assert_cmpstr(path, ==, "");
+    g_assert_false(latx_user_config_path(truncated, sizeof(truncated),
+                                        "/home/test",
+                                        LATX_USER_CONFIG_FILE));
+    g_assert_cmpstr(truncated, ==, "");
+    g_assert_false(latx_user_config_path(path, sizeof(path), "/home/test",
+                                        NULL));
+    g_assert_cmpstr(path, ==, "");
+    g_assert_false(latx_user_config_path(NULL, 0, "/home/test",
+                                        LATX_USER_CONFIG_FILE));
+}
+
 static void test_empty_config_value(void)
 {
     char line[] = "LATX_CLOSE_PARALLEL=\n";
@@ -113,6 +152,8 @@ int main(int argc, char **argv)
                     test_target_config_files);
     g_test_add_func("/latx/config/release-loader-prefix",
                     test_release_loader_prefix_config);
+    g_test_add_func("/latx/config/user-config-path",
+                    test_user_config_path);
 
     return g_test_run();
 }

@@ -189,11 +189,10 @@ void conf_init(char **argv)
 
     /* load /etc/latx-*.conf */
     load_conf_file(LATX_SYSTEM_CONFIG_FILE, program);
-    snprintf(path, PATH_MAX, "%s/.config/%s", home_path,
-             LATX_USER_CONFIG_FILE);
-
-    /* load ~/.config/latx-*.conf */
-    load_conf_file(path, program);
+    if (latx_user_config_path(path, sizeof(path), home_path,
+                              LATX_USER_CONFIG_FILE)) {
+        load_conf_file(path, program);
+    }
 }
 
 void options_init(void)
