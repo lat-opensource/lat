@@ -8,6 +8,35 @@
 #include <glib.h>
 
 #include "latx-string-utils.h"
+#include "latx-options.h"
+
+static bool config_option_registered(const char *expected)
+{
+#define ENVFUN(NAME, handler) \
+    if (g_str_equal(expected, #NAME)) { \
+        return true; \
+    }
+    ENVS
+#undef ENVFUN
+    return false;
+}
+
+static void test_target_config_files(void)
+{
+#ifdef TARGET_X86_64
+    g_assert_cmpstr(LATX_SYSTEM_CONFIG_FILE, ==,
+                    "/etc/latx-x86_64.conf");
+    g_assert_cmpstr(LATX_USER_CONFIG_FILE, ==, "latx-x86_64.conf");
+#else
+    g_assert_cmpstr(LATX_SYSTEM_CONFIG_FILE, ==, "/etc/latx-i386.conf");
+    g_assert_cmpstr(LATX_USER_CONFIG_FILE, ==, "latx-i386.conf");
+#endif
+}
+
+static void test_release_loader_prefix_config(void)
+{
+    g_assert_true(config_option_registered("LAT_LD_PREFIX"));
+}
 
 static void test_empty_config_value(void)
 {
@@ -80,6 +109,10 @@ int main(int argc, char **argv)
                     test_single_byte_filename_buffer);
     g_test_add_func("/latx/config/filename-path-and-extension",
                     test_filename_path_and_extension);
+    g_test_add_func("/latx/config/target-config-files",
+                    test_target_config_files);
+    g_test_add_func("/latx/config/release-loader-prefix",
+                    test_release_loader_prefix_config);
 
     return g_test_run();
 }

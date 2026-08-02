@@ -161,6 +161,9 @@ extern unsigned long long counter_mips_tr;
 #define ENVSUP_AOT
 #endif
 
+#define ENVSUP_RUNTIME \
+    ENVFUN(LAT_LD_PREFIX, handle_arg_ld_prefix)
+
 #if defined(CONFIG_LATX_DEBUG) || defined(CONFIG_DEBUG_TCG)
 #define ENVSUP_DEBUG \
     ENVFUN(LAT_GDB, handle_arg_gdb) \
@@ -182,7 +185,6 @@ extern unsigned long long counter_mips_tr;
     ENVFUN(LAT_STRACE_ERROR, handle_arg_strace_error) \
     ENVFUN(LAT_RAND_SEED, handle_arg_seed) \
     ENVFUN(LAT_TRACE, handle_arg_trace) \
-    ENVFUN(LAT_LD_PREFIX, handle_arg_ld_prefix) \
     ENVFUN(LAT_VERSION, handle_arg_version)
 #else
 #define ENVSUP_DEBUG
@@ -216,6 +218,7 @@ extern unsigned long long counter_mips_tr;
     ENVSUP_AVX \
     ENVSUP_KZT \
     ENVSUP_AOT \
+    ENVSUP_RUNTIME \
     ENVSUP_DEBUG \
     ENVSUP_LATX_DEBUG \
     ENVSUP_PLUGIN
