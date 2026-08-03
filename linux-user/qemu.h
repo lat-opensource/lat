@@ -143,7 +143,8 @@ typedef struct TaskState {
     struct emulated_sigtable sigtab[TARGET_NSIG];
     /* This thread's signal mask, as requested by the guest program.
      * The actual signal mask of this thread may differ:
-     *  + we don't let SIGSEGV and SIGBUS be blocked while running guest code
+     *  + we don't let internal synchronous signals be blocked while running
+     *    guest code
      *  + sometimes we block all signals to avoid races
      */
     sigset_t signal_mask;

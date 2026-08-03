@@ -1240,10 +1240,10 @@ static void host_signal_handler(int host_signum, siginfo_t *info,
     ts->signal_pending = 1;
 
     /* Block host signals until target signal handler entered. We
-     * can't block SIGSEGV or SIGBUS while we're executing guest
-     * code in case the guest code provokes one in the window between
-     * now and it getting out to the main loop. Signals will be
-     * unblocked again in process_pending_signals().
+     * can't block the synchronous signals used internally while we're
+     * executing guest code, in case the guest code provokes one in the
+     * window between now and it getting out to the main loop. Signals
+     * will be unblocked again in process_pending_signals().
      *
      * WARNING: we cannot use sigfillset() here because the uc_sigmask
      * field is a kernel sigset_t, which is much smaller than the
@@ -1259,10 +1259,12 @@ static void host_signal_handler(int host_signum, siginfo_t *info,
     memset(puc_sigmask, 0xff, SIGSET_T_SIZE);
     sigdelset(puc_sigmask, SIGSEGV);
     sigdelset(puc_sigmask, SIGBUS);
+    sigdelset(puc_sigmask, SIGILL);
 #else
     memset(&uc->uc_sigmask, 0xff, SIGSET_T_SIZE);
     sigdelset(&uc->uc_sigmask, SIGSEGV);
     sigdelset(&uc->uc_sigmask, SIGBUS);
+    sigdelset(&uc->uc_sigmask, SIGILL);
 #endif
 
     /* interrupt the virtual CPU as soon as possible */
@@ -1612,6 +1614,7 @@ void process_pending_signals(CPUArchState *cpu_env)
         set = ts->signal_mask;
         sigdelset(&set, SIGSEGV);
         sigdelset(&set, SIGBUS);
+        sigdelset(&set, SIGILL);
         sigprocmask(SIG_SETMASK, &set, 0);
     }
     ts->in_sigsuspend = 0;
