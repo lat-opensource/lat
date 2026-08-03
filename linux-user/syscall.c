@@ -12136,7 +12136,6 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
             abi_ulong guest_envp;
             abi_ulong addr;
             char **q;
-            int total_size = 0;
             argc = 0;
             guest_argp = arg3;
             for (gp = guest_argp; gp; gp += sizeof(abi_ulong)) {
@@ -12175,7 +12174,6 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
                 if (!(*q)) {
                     goto execveat_efault;
                 }
-                total_size += strlen(*q) + 1;
             }
             *q = NULL;
 
@@ -12191,7 +12189,6 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
                 if (!(*q)) {
                     goto execveat_efault;
                 }
-                total_size += strlen(*q) + 1;
             }
             *q = NULL;
 
@@ -12308,7 +12305,6 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
             abi_ulong guest_envp;
             abi_ulong addr;
             char **q;
-            int total_size = 0;
             argc = 0;
             guest_argp = arg2;
             for (gp = guest_argp; gp; gp += sizeof(abi_ulong)) {
@@ -12339,7 +12335,6 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
                     break;
                 if (!(*q = lock_user_string(addr)))
                     goto execve_efault;
-                total_size += strlen(*q) + 1;
             }
             *q = NULL;
 
@@ -12351,7 +12346,6 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
                     break;
                 if (!(*q = lock_user_string(addr)))
                     goto execve_efault;
-                total_size += strlen(*q) + 1;
             }
             *q = NULL;
 

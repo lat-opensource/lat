@@ -172,7 +172,7 @@ static gboolean merge_dump_rel_table_tree_node(gpointer key, gpointer val,
     seg->tb->rel_start_index = start;
     seg->tb->rel_end_index = end;
 /* #ifdef AOT_DEBUG */
-    uint32_t *pinsn;
+    uint32_t *pinsn __attribute__((unused));
     for (int i = start; i != -1 && i <= end; i++) {
         pinsn = (uint32_t *)(seg->tb->tb_cache_addr +
             merge_rel_table[i].tc_offset);

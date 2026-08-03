@@ -70,7 +70,6 @@ static void handle_Operands(struct la_dt_insn *ret,
     const ZydisDecodedInstruction *instruction,
     const ZydisDecodedOperand *operands)
 {
-    ZyanU8 imm_id = 0;
     int opcount = 0;
     uint8_t iopc = instruction->operand_count > 5 ?
          5 : instruction->operand_count;
@@ -117,7 +116,6 @@ static void handle_Operands(struct la_dt_insn *ret,
                 ret->x86.operands[opcount].size = dt_lazydis_mode / 8;
             }
             opcount++;
-            ++imm_id;
             break;
         case ZYDIS_OPERAND_TYPE_UNUSED:
             continue;
