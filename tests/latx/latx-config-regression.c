@@ -66,6 +66,11 @@ static void test_runtime_prefix_source(void)
 #else
     g_assert_cmpstr(latx_runtime_guest_abi(), ==, "i386");
 #endif
+
+    g_assert_cmpstr(latx_runtime_loader_errno_name(ENOENT), ==, "not_found");
+    g_assert_cmpstr(latx_runtime_loader_errno_name(EACCES), ==,
+                    "permission_denied");
+    g_assert_cmpstr(latx_runtime_loader_errno_name(EIO), ==, "io_error");
 }
 
 static void test_user_config_path(void)

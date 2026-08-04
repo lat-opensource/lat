@@ -20,5 +20,6 @@ void latx_runtime_option_source_set(LatxRuntimeSource source);
 void latx_runtime_prefix_selected(void);
 const char *latx_runtime_prefix_source_name(void);
 const char *latx_runtime_guest_abi(void);
+const char *latx_runtime_loader_errno_name(int errnum);
 
 #endif

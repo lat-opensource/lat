@@ -52,3 +52,15 @@ const char *latx_runtime_guest_abi(void)
     return "i386";
 #endif
 }
+
+const char *latx_runtime_loader_errno_name(int errnum)
+{
+    switch (errnum) {
+    case ENOENT:
+        return "not_found";
+    case EACCES:
+        return "permission_denied";
+    default:
+        return "io_error";
+    }
+}

@@ -2970,25 +2970,85 @@ static bool load_elf_image(const char *image_name, const ImageSource *src,
     exit(-1);
 }
 
+#ifdef CONFIG_LATX
+static void latx_report_runtime_loader_failure(const char *filename,
+                                               const char *configured_path,
+                                               const char *attempted_path,
+                                               const char *reason,
+                                               const char *detail)
+{
+    g_autofree char *escaped_abi = NULL;
+    g_autofree char *escaped_interp = NULL;
+    g_autofree char *escaped_root = NULL;
+    g_autofree char *escaped_configured = NULL;
+    g_autofree char *escaped_attempted = NULL;
+    g_autofree char *escaped_detail = NULL;
+
+    escaped_abi = g_strescape(latx_runtime_guest_abi(), NULL);
+    escaped_interp = g_strescape(filename, NULL);
+    escaped_root = g_strescape(interp_prefix, NULL);
+    escaped_configured = g_strescape(configured_path, NULL);
+    escaped_attempted = g_strescape(attempted_path, NULL);
+    escaped_detail = g_strescape(detail, NULL);
+
+    error_report("LATU: guest runtime loader failure");
+    error_printf("  guest ABI: %s\n"
+                 "  PT_INTERP: %s\n"
+                 "  runtime root: %s\n"
+                 "  runtime source: %s\n"
+                 "  configured loader: %s\n"
+                 "  attempted loader: %s\n"
+                 "  failure reason: %s\n"
+                 "  detail: %s\n"
+                 "  next step: run 'latu-runtime-manager status'\n",
+                 escaped_abi, escaped_interp, escaped_root,
+                 latx_runtime_prefix_source_name(), escaped_configured,
+                 escaped_attempted, reason, escaped_detail);
+}
+#endif
+
 static void load_elf_interp(const char *filename, struct image_info *info,
                             char bprm_buf[BPRM_BUF_SIZE])
 {
     struct elfhdr ehdr;
     ImageSource src;
+    const char *loader_path = path(filename);
     int fd, retval;
     Error *err = NULL;
+#ifdef CONFIG_LATX
+    g_autofree char *configured_path = path_get_prefixed(filename);
+    bool header_valid = false;
+#endif
 
-    fd = open(path(filename), O_RDONLY);
+    fd = open(loader_path, O_RDONLY);
     if (fd < 0) {
+#ifdef CONFIG_LATX
+        int saved_errno = errno;
+
+        latx_report_runtime_loader_failure(
+            filename, configured_path, loader_path,
+            latx_runtime_loader_errno_name(saved_errno),
+            strerror(saved_errno));
+#else
         error_setg_file_open(&err, errno, filename);
         error_report_err(err);
+#endif
         exit(-1);
     }
 
     retval = read(fd, bprm_buf, BPRM_BUF_SIZE);
     if (retval < 0) {
+#ifdef CONFIG_LATX
+        int saved_errno = errno;
+
+        latx_report_runtime_loader_failure(
+            filename, configured_path, loader_path,
+            latx_runtime_loader_errno_name(saved_errno),
+            strerror(saved_errno));
+#else
         error_setg_errno(&err, errno, "Error reading file header");
         error_reportf_err(err, "%s: ", filename);
+#endif
         exit(-1);
     }
 
@@ -2996,8 +3056,27 @@ static void load_elf_interp(const char *filename, struct image_info *info,
     src.cache = bprm_buf;
     src.cache_size = retval;
 
+#ifdef CONFIG_LATX
+    if ((size_t)retval >= sizeof(ehdr)) {
+        memcpy(&ehdr, bprm_buf, sizeof(ehdr));
+        header_valid = elf_check_ident(&ehdr);
+        if (header_valid) {
+            bswap_ehdr(&ehdr);
+            header_valid = elf_check_ehdr(&ehdr);
+        }
+    }
+#endif
+
     if (!load_elf_image(filename, &src, info, &ehdr, NULL, &err)) {
+#ifdef CONFIG_LATX
+        latx_report_runtime_loader_failure(
+            filename, configured_path, loader_path,
+            header_valid ? "load_error" : "invalid_elf",
+            error_get_pretty(err));
+        error_free(err);
+#else
         error_reportf_err(err, "%s: ", filename);
+#endif
         exit(-1);
     }
     close(fd);
