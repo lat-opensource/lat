@@ -37,6 +37,8 @@
 #include "qemu/cutils.h"
 #include "qemu/error-report.h"
 #include "qemu/help_option.h"
+#include "qapi/qmp/qdict.h"
+#include "qapi/qmp/qjson.h"
 #include "qemu/module.h"
 #include "qemu/plugin.h"
 #include "exec/exec-all.h"
@@ -54,6 +56,7 @@ int mydebug = 1;
 #ifdef CONFIG_LATX
 #include "latx-config.h"
 #include "latx-options.h"
+#include "latx-runtime.h"
 #include "aot.h"
 #include <openssl/evp.h>
 #endif
@@ -186,6 +189,7 @@ static void usage(int exitcode);
 
 const char *interp_prefix = CONFIG_QEMU_INTERP_PREFIX;
 const char *qemu_uname_release;
+static bool runtime_info_requested;
 
 /* XXX: on x86 MAP_GROWSDOWN only works if ESP <= address + 32, so
    we allocate a bigger stack. Need a better solution, for example
@@ -604,9 +608,15 @@ static void handle_arg_version(const char *arg)
     exit(EXIT_SUCCESS);
 }
 
+static void handle_arg_runtime_info(const char *arg)
+{
+    runtime_info_requested = true;
+}
+
 static void handle_arg_ld_prefix(const char *arg)
 {
     interp_prefix = strdup(arg);
+    latx_runtime_prefix_selected();
 }
 
 static void handle_arg_optimize(const char *arg)
@@ -994,6 +1004,8 @@ static const struct qemu_argument arg_table[] = {
 #endif
     {"L",          "LAT_LD_PREFIX",   true,  handle_arg_ld_prefix,
      "path",       "set the elf interpreter prefix to 'path'"},
+    {"runtime-info", NULL,             false, handle_arg_runtime_info,
+     "",           "display selected guest runtime information and exit"},
     {"version",    "LAT_VERSION",     false, handle_arg_version,
      "",           "display version information and exit"},
     {NULL, NULL, false, NULL, NULL, NULL}
@@ -1082,6 +1094,10 @@ static int arg_count = 0;
 
 void find_option(const char* key, const char* val)
 {
+    if (runtime_info_requested && strcmp(key, "LAT_LD_PREFIX")) {
+        return;
+    }
+
 #define ENVFUN(NAME, name) \
     else if (!strcmp(key, #NAME)) { \
         name(val); \
@@ -1090,8 +1106,15 @@ void find_option(const char* key, const char* val)
     ENVS
 #undef ENVFUN
     else {
-        printf("no option %s\n", key);
+        error_report("no option %s", key);
     }
+}
+
+static bool runtime_info_option_applies(const struct qemu_argument *arginfo)
+{
+    /* A runtime query must not execute unrelated option side effects. */
+    return arginfo->handle_opt == handle_arg_runtime_info ||
+           arginfo->handle_opt == handle_arg_ld_prefix;
 }
 
 static void options_set(char **target_argv)
@@ -1103,8 +1126,14 @@ static void options_set(char **target_argv)
     const struct qemu_argument *arginfo;
 
     /* set env */
+    latx_runtime_option_source_set(LATX_RUNTIME_SOURCE_ENVIRONMENT);
     for (arginfo = arg_table; arginfo->handle_opt != NULL; arginfo++) {
         if (arginfo->env == NULL) {
+            continue;
+        }
+
+        if (runtime_info_requested &&
+            !runtime_info_option_applies(arginfo)) {
             continue;
         }
 
@@ -1115,18 +1144,38 @@ static void options_set(char **target_argv)
     }
 
     /* set argv */
+    latx_runtime_option_source_set(LATX_RUNTIME_SOURCE_COMMAND_LINE);
     for (int i = 0; i < arg_count; i++) {
         for (arginfo = arg_table; arginfo->handle_opt != NULL; arginfo++) {
             if (!strcmp(parse_options[i].opt_name, arginfo->argv)) {
-                if (arginfo->has_arg) {
-                    arginfo->handle_opt(parse_options[i].opt_arg);
-                } else {
-                    arginfo->handle_opt(NULL);
+                if (!runtime_info_requested ||
+                    runtime_info_option_applies(arginfo)) {
+                    if (arginfo->has_arg) {
+                        arginfo->handle_opt(parse_options[i].opt_arg);
+                    } else {
+                        arginfo->handle_opt(NULL);
+                    }
                 }
                 break;
             }
         }
     }
+}
+
+static void print_runtime_info(void)
+{
+    QDict *info = qdict_new();
+    g_autoptr(GString) json = NULL;
+
+    qdict_put_int(info, "schema_version", 1);
+    qdict_put_str(info, "guest_abi", latx_runtime_guest_abi());
+    qdict_put_str(info, "runtime_root", interp_prefix);
+    qdict_put_str(info, "runtime_source",
+                  latx_runtime_prefix_source_name());
+
+    json = qobject_to_json(QOBJECT(info));
+    printf("%s\n", json->str);
+    qobject_unref(info);
 }
 
 static int parse_args(int argc, char **argv)
@@ -1166,10 +1215,17 @@ static int parse_args(int argc, char **argv)
                     parse_options[arg_count].opt_arg = argv[optind];
                     optind++;
                 } else {
-					if (!strcmp(r, "version") || !strcmp(r, "h")
-							|| !strcmp(r, "help")) {
-						arginfo->handle_opt(NULL);
-					}
+                    if (!strcmp(r, "version") || !strcmp(r, "h")
+                        || !strcmp(r, "help")
+                        || !strcmp(r, "runtime-info")) {
+                        /*
+                         * runtime-info must take effect here so it can be used
+                         * without a guest.  options_set() intentionally
+                         * replays its idempotent handler with the other
+                         * command-line options.
+                         */
+                        arginfo->handle_opt(NULL);
+                    }
                     parse_options[arg_count].opt_name = arginfo->argv;
                     parse_options[arg_count].opt_arg = NULL;
                 }
@@ -1185,13 +1241,15 @@ static int parse_args(int argc, char **argv)
         }
     }
 
-    if (optind >= argc) {
+    if (optind >= argc && !runtime_info_requested) {
         (void) fprintf(stderr, "no user program specified\n");
         exit(EXIT_FAILURE);
     }
 
-    exec_path = argv[optind];
-    real_path = realpath(exec_path, (char *)malloc(MAX_PATH));
+    if (optind < argc) {
+        exec_path = argv[optind];
+        real_path = realpath(exec_path, (char *)malloc(MAX_PATH));
+    }
 
     return optind;
 }
@@ -1301,6 +1359,11 @@ int main(int argc, char **argv, char **envp)
 
     /* set environment variables */
     options_set(target_argv);
+
+    if (runtime_info_requested) {
+        print_runtime_info();
+        return EXIT_SUCCESS;
+    }
 
     error_init(argv[0]);
     module_call_init(MODULE_INIT_TRACE);

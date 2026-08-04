@@ -11,6 +11,7 @@
 #include "optimize-config.h"
 #include "latx-disassemble-trace.h"
 #include "latx-debug.h"
+#include "latx-runtime.h"
 
 #ifdef TARGET_X86_64
 #define LATX_SYSTEM_CONFIG_FILE "/etc/latx-x86_64.conf"
@@ -237,6 +238,7 @@ uint8 options_to_save(void);
 void options_parse_latx_disassemble_trace_cmp(const char *args);
 void conf_init(char **target_argv);
 char* guest_program(char **argv);
-void load_conf_file(const char *file, char* program);
+void load_conf_file(const char *file, const char *program,
+                    LatxRuntimeSource runtime_source);
 void find_option(const char *name, const char *val);
 #endif

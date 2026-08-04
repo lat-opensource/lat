@@ -9,6 +9,7 @@
 #include "qemu/cutils.h"
 #include "reg-alloc.h"
 #include "latx-debug.h"
+#include "latx-runtime.h"
 #include "latx-string-utils.h"
 #include "translate.h"
 
@@ -111,15 +112,19 @@ unsigned long long counter_tb_tr;
 unsigned long long counter_ir1_tr;
 unsigned long long counter_mips_tr;
 
-void load_conf_file(const char *file, char *program)
+void load_conf_file(const char *file, const char *program,
+                    LatxRuntimeSource runtime_source)
 {
     FILE *fp = fopen(file, "r");
-    if (!program || !fp)
-        return;
-
     char *line = NULL;
     size_t len = 0;
     int flag = 0;
+
+    if (!fp) {
+        return;
+    }
+
+    latx_runtime_option_source_set(runtime_source);
 
     while(getline(&line, &len, fp) != -1) {
         char *option_name, *option_value;
@@ -134,6 +139,11 @@ void load_conf_file(const char *file, char *program)
             if(!end) continue;
             if (flag == 2)
                 break;
+            if (!program) {
+                /* Without a guest name, only global options apply. */
+                flag = 1;
+                continue;
+            }
             size_t size = end - line;
             line[size] = '\0';
             if (!strcmp(line + 1, program)) {
@@ -188,15 +198,17 @@ void conf_init(char **argv)
     const char *home_path = getenv("HOME");
 
     /* load /etc/latx-*.conf */
-    load_conf_file(LATX_SYSTEM_CONFIG_FILE, program);
+    load_conf_file(LATX_SYSTEM_CONFIG_FILE, program,
+                   LATX_RUNTIME_SOURCE_SYSTEM_CONFIG);
     if (latx_user_config_path(path, sizeof(path), home_path,
                               LATX_USER_CONFIG_FILE)) {
-        load_conf_file(path, program);
+        load_conf_file(path, program, LATX_RUNTIME_SOURCE_USER_CONFIG);
     }
 }
 
 void options_init(void)
 {
+    latx_runtime_reset();
     option_debug_lative = 0;
     option_save_xmm = 0xff;
     option_dump_host = 0;

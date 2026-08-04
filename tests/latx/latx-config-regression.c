@@ -9,6 +9,7 @@
 
 #include "latx-string-utils.h"
 #include "latx-options.h"
+#include "latx-runtime.h"
 
 static bool config_option_registered(const char *expected)
 {
@@ -36,6 +37,35 @@ static void test_target_config_files(void)
 static void test_release_loader_prefix_config(void)
 {
     g_assert_true(config_option_registered("LAT_LD_PREFIX"));
+}
+
+static void test_runtime_prefix_source(void)
+{
+    latx_runtime_reset();
+    g_assert_cmpstr(latx_runtime_prefix_source_name(), ==, "default");
+
+    latx_runtime_option_source_set(LATX_RUNTIME_SOURCE_SYSTEM_CONFIG);
+    latx_runtime_prefix_selected();
+    g_assert_cmpstr(latx_runtime_prefix_source_name(), ==,
+                    "system_config");
+
+    latx_runtime_option_source_set(LATX_RUNTIME_SOURCE_USER_CONFIG);
+    latx_runtime_prefix_selected();
+    g_assert_cmpstr(latx_runtime_prefix_source_name(), ==, "user_config");
+
+    latx_runtime_option_source_set(LATX_RUNTIME_SOURCE_ENVIRONMENT);
+    latx_runtime_prefix_selected();
+    g_assert_cmpstr(latx_runtime_prefix_source_name(), ==, "environment");
+
+    latx_runtime_option_source_set(LATX_RUNTIME_SOURCE_COMMAND_LINE);
+    latx_runtime_prefix_selected();
+    g_assert_cmpstr(latx_runtime_prefix_source_name(), ==, "command_line");
+
+#ifdef TARGET_X86_64
+    g_assert_cmpstr(latx_runtime_guest_abi(), ==, "x86_64");
+#else
+    g_assert_cmpstr(latx_runtime_guest_abi(), ==, "i386");
+#endif
 }
 
 static void test_user_config_path(void)
@@ -152,6 +182,8 @@ int main(int argc, char **argv)
                     test_target_config_files);
     g_test_add_func("/latx/config/release-loader-prefix",
                     test_release_loader_prefix_config);
+    g_test_add_func("/latx/config/runtime-prefix-source",
+                    test_runtime_prefix_source);
     g_test_add_func("/latx/config/user-config-path",
                     test_user_config_path);
 

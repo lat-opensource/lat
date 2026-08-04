@@ -587,7 +587,7 @@ foreach target : target_dirs
     latx_config_regression_test = executable(
       'test-' + target + '-latx-config-regression',
       files('tests/latx/latx-config-regression.c'),
-      objects: lib.extract_objects(latx_string_utils),
+      objects: lib.extract_objects(latx_string_utils, latx_runtime),
       c_args: c_args,
       dependencies: [glib],
       include_directories: target_inc,
@@ -747,6 +747,19 @@ foreach target : target_dirs
                gui_app: exe['gui'])
 
     emulators += {exe['name']: emulator}
+
+    if get_option('tests').enabled() and \
+       'CONFIG_LATX' in config_target
+      test(
+        target + '-latx-runtime-info',
+        find_program('tests/runtime/test-latx-runtime-info.sh'),
+        args: [python.full_path(), emulator.full_path(), target_name],
+        depends: emulator,
+        protocol: 'exitcode',
+        suite: 'lat-pr-fast',
+        timeout: 300,
+      )
+    endif
 
   endforeach
 endforeach
