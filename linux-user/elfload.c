@@ -2644,18 +2644,20 @@ static bool parse_elf_properties(const ImageSource *src,
  * @info: info collected from the loaded image.
  * @ehdr: the ELF header, not yet bswapped.
  * @pinterp_name: record any PT_INTERP string found.
+ * @errp: optionally return an error instead of terminating the process.
  *
- * On return: @info values will be filled in, as necessary or available.
+ * On success, @info values will be filled in, as necessary or available.
  */
 
-static void load_elf_image(const char *image_name, const ImageSource *src,
+static bool load_elf_image(const char *image_name, const ImageSource *src,
                            struct image_info *info, struct elfhdr *ehdr,
-                           char **pinterp_name)
+                           char **pinterp_name, Error **errp)
 {
     g_autofree struct elf_phdr *phdr = NULL;
     g_autofree ElfLoadMapRange *load_segments = NULL;
     abi_ulong load_addr, load_bias, loaddr, hiaddr, error, len;
     int i, prot_exec;
+    bool mmap_locked = false;
     Error *err = NULL;
 
     /*
@@ -2689,6 +2691,7 @@ static void load_elf_image(const char *image_name, const ImageSource *src,
     info->pt_dynamic_addr = 0;
 
     mmap_lock();
+    mmap_locked = true;
 
     /*
      * Find the maximum size of the image and allocate an appropriate
@@ -2948,13 +2951,21 @@ static void load_elf_image(const char *image_name, const ImageSource *src,
     }
 
     mmap_unlock();
+    mmap_locked = false;
 
-    return;
+    return true;
 
  exit_mmap:
     error_setg_errno(&err, errno, "Error mapping file");
     goto exit_errmsg;
  exit_errmsg:
+    if (mmap_locked) {
+        mmap_unlock();
+    }
+    if (errp) {
+        error_propagate(errp, err);
+        return false;
+    }
     error_reportf_err(err, "%s: ", image_name);
     exit(-1);
 }
@@ -2985,7 +2996,10 @@ static void load_elf_interp(const char *filename, struct image_info *info,
     src.cache = bprm_buf;
     src.cache_size = retval;
 
-    load_elf_image(filename, &src, info, &ehdr, NULL);
+    if (!load_elf_image(filename, &src, info, &ehdr, NULL, &err)) {
+        error_reportf_err(err, "%s: ", filename);
+        exit(-1);
+    }
     close(fd);
 }
 
@@ -3006,7 +3020,7 @@ static void load_elf_vdso(struct image_info *info, const VdsoImageInfo *vdso)
     src.cache = vdso->image;
     src.cache_size = vdso->image_size;
 
-    load_elf_image("<internal-vdso>", &src, info, &ehdr, NULL);
+    load_elf_image("<internal-vdso>", &src, info, &ehdr, NULL, NULL);
     load_addr = info->load_addr;
     load_bias = info->load_bias;
 
@@ -3251,7 +3265,8 @@ int load_elf_binary(struct linux_binprm *bprm, struct image_info *info)
 
     info->start_mmap = (abi_ulong)ELF_START_MMAP;
 
-    load_elf_image(bprm->filename, &bprm->src, info, &ehdr, &elf_interpreter);
+    load_elf_image(bprm->filename, &bprm->src, info, &ehdr,
+                   &elf_interpreter, NULL);
 #if !(defined(CONFIG_LATX_KZT) && defined(TARGET_X86_64))
     close(bprm->src.fd);
 #else

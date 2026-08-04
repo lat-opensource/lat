@@ -44,7 +44,6 @@
 #include "fileutils.h"
 #include "bridge_private.h"
 void *getAlternate(void *addr);
-extern const char *interp_prefix;
 extern struct elfheader_s * elf_header;
 #endif
 #if defined(TARGET_I386) && !defined(CONFIG_USER_ONLY)

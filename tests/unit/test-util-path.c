@@ -109,6 +109,23 @@ static void test_proc_namespace_boundaries(void)
     g_free(escaped);
 }
 
+static void test_configured_path(void)
+{
+    const char *absolute = "/lib/missing-loader.so";
+    const char *relative = "lib/missing-loader.so";
+    char *expected = g_build_filename(prefix, absolute, NULL);
+    g_autofree char *absolute_configured = path_get_prefixed(absolute);
+    g_autofree char *relative_configured = path_get_prefixed(relative);
+    g_autofree char *proc_configured = path_get_prefixed("/proc/self/status");
+
+    g_assert_cmpstr(absolute_configured, ==, expected);
+    g_assert_cmpstr(path(absolute), ==, absolute);
+    g_assert_cmpstr(relative_configured, ==, relative);
+    g_assert_cmpstr(path(relative), ==, relative);
+    g_assert_cmpstr(proc_configured, ==, "/proc/self/status");
+    g_free(expected);
+}
+
 int main(int argc, char **argv)
 {
     GError *error = NULL;
@@ -146,6 +163,7 @@ int main(int argc, char **argv)
                     test_proc_namespace_ignores_prefix);
     g_test_add_func("/util/path/proc-namespace-boundaries",
                     test_proc_namespace_boundaries);
+    g_test_add_func("/util/path/configured-path", test_configured_path);
 
     ret = g_test_run();
 

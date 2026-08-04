@@ -58,6 +58,31 @@ void init_paths(const char *prefix)
     qemu_mutex_init(&lock);
 }
 
+static bool path_has_prefix(const char *name)
+{
+    if (!base || !name || name[0] != '/' || name[1] == '\0') {
+        return false;
+    }
+
+#ifdef CONFIG_LATX
+    /* Keep live procfs visible even when the runtime contains /proc. */
+    if (path_is_proc_namespace(name)) {
+        return false;
+    }
+#endif
+
+    return true;
+}
+
+char *path_get_prefixed(const char *name)
+{
+    if (!path_has_prefix(name)) {
+        return g_strdup(name);
+    }
+
+    return g_build_filename(base, name, NULL);
+}
+
 /* Look for path in emulation dir, otherwise return name. */
 const char *path(const char *name)
 {
@@ -65,21 +90,9 @@ const char *path(const char *name)
     const char *ret;
 
     /* Only do absolute paths: quick and dirty, but should mostly be OK.  */
-    if (!base || !name || name[0] != '/'
-            || (name[0]  == '/' && name[1] == '\0')) {
+    if (!path_has_prefix(name)) {
         return name;
     }
-
-#ifdef CONFIG_LATX
-    /*
-     * LAT's packaged x86 runtime may contain an inert /proc mount point.
-     * Resolve procfs in the calling task's current namespace instead of
-     * letting that directory shadow the live filesystem.
-     */
-    if (path_is_proc_namespace(name)) {
-        return name;
-    }
-#endif
 
     qemu_mutex_lock(&lock);
 
@@ -88,7 +101,7 @@ const char *path(const char *name)
         ret = value ? value : name;
     } else {
         char *save = g_strdup(name);
-        char *full = g_build_filename(base, name, NULL);
+        char *full = path_get_prefixed(name);
 
         /* Look for the path; record the result, pass or fail.  */
         if (access(full, F_OK) == 0) {

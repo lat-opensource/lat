@@ -169,6 +169,7 @@ typedef struct TaskState {
 
 extern char *exec_path;
 extern char *real_path;
+extern const char *interp_prefix;
 void init_task_state(TaskState *ts);
 void task_settid(TaskState *);
 void stop_all_tasks(void);

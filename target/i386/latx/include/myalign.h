@@ -19,7 +19,6 @@
 #include "callback.h"
 
 extern elfheader_t* elf_header;
-extern const char *interp_prefix;
 extern int latx_wine;
 extern int is_user_map;
 #define M_F_FD_WINE 0
