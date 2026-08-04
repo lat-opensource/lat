@@ -1,0 +1,76 @@
+#!/bin/sh
+set -u
+
+usage()
+{
+    echo 'usage: latu-runtime-manager status [--root ROOT]' >&2
+    exit 2
+}
+
+probe_translator()
+{
+    name=$1
+    if [ "$translator_dir_status" = unknown ]; then
+        echo unknown
+        return
+    fi
+    path=$translator_dir/$name
+
+    if [ ! -L "$path" ] && [ -f "$path" ] && [ -x "$path" ]; then
+        echo present
+    else
+        echo missing
+    fi
+}
+
+case "$#" in
+    1)
+        [ "$1" = status ] || usage
+        if ! translator_dir=$(CDPATH= cd -P -- "$(dirname -- "$0")" \
+            2>/dev/null && pwd); then
+            echo 'latu-runtime-manager: cannot locate its installation directory' >&2
+            exit 2
+        fi
+        translator_dir_status=known
+        ;;
+    3)
+        [ "$1" = status ] || usage
+        [ "$2" = --root ] || usage
+        [ -n "$3" ] || usage
+        if ! root=$(CDPATH= cd -P -- "$3" 2>/dev/null && pwd); then
+            echo "latu-runtime-manager: invalid root directory: $3" >&2
+            exit 2
+        fi
+
+        translator_dir=$root/usr/bin
+        translator_dir_status=known
+        if resolved_dir=$(CDPATH= cd -P -- "$translator_dir" \
+            2>/dev/null && pwd); then
+            case "$root" in
+                /)
+                    translator_dir=$resolved_dir
+                    ;;
+                *)
+                    case "$resolved_dir" in
+                        "$root"|"$root"/*)
+                            translator_dir=$resolved_dir
+                            ;;
+                        *)
+                            translator_dir_status=unknown
+                            ;;
+                    esac
+                    ;;
+            esac
+        elif [ -e "$translator_dir" ] || [ -L "$translator_dir" ]; then
+            translator_dir_status=unknown
+        elif [ -d "$root/usr" ] && [ ! -x "$root/usr" ]; then
+            translator_dir_status=unknown
+        fi
+        ;;
+    *)
+        usage
+        ;;
+esac
+
+printf 'translator_x86_64=%s\n' "$(probe_translator latx-x86_64)"
+printf 'translator_i386=%s\n' "$(probe_translator latx-i386)"
