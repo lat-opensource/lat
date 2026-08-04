@@ -223,6 +223,35 @@ bool signal_in_glue(CPUArchState *env, ucontext_t *uc)
     return true;
 }
 
+static void unlink_tb_jmp(CPUArchState *env, TranslationBlock *current_tb,
+                          ucontext_t *uc)
+{
+#ifdef CONFIG_LATX_TU
+    if (current_tb->bool_flags & IS_TU_SPLIT) {
+        TranslationBlock *next_tb = current_tb;
+        /* The split TB cannot be unlinked, so we need to found an unsplit TB. */
+        while (next_tb && (next_tb->bool_flags & IS_TU_SPLIT)) {
+            uintptr_t next_pc = (uintptr_t) current_tb->tc.ptr + current_tb->tc.size + 1;
+            next_tb = tcg_tb_lookup(next_pc);
+            if (next_tb) {
+                current_tb = next_tb;
+            }
+        }
+    }
+    if (use_tu_jmp(current_tb)) {
+        assert(current_tb->tu_jmp[TU_TB_INDEX_TARGET] != TB_JMP_RESET_OFFSET_INVALID);
+        unlink_tu_jmp(current_tb);
+        return;
+    }
+#endif
+    if (use_indirect_jmp(current_tb) &&
+            current_tb->jmp_indirect != TB_JMP_RESET_OFFSET_INVALID) {
+        unlink_indirect_jmp(env, current_tb, uc);
+    } else {
+        unlink_direct_jmp(current_tb);
+    }
+}
+
 void tb_exit_to_qemu(CPUArchState *env, ucontext_t *uc)
 {
     TranslationBlock *current_tb = NULL;
@@ -230,30 +259,7 @@ void tb_exit_to_qemu(CPUArchState *env, ucontext_t *uc)
 
     current_tb = tcg_tb_lookup(pc);
     if (current_tb) {
-#ifdef CONFIG_LATX_TU
-        if (current_tb->bool_flags & IS_TU_SPLIT) {
-            TranslationBlock *next_tb = current_tb;
-            /* The split TB cannot be unlinked, so we need to found an unsplit TB. */
-            while (next_tb && (next_tb->bool_flags & IS_TU_SPLIT)) {
-                uintptr_t next_pc = (uintptr_t) current_tb->tc.ptr + current_tb->tc.size + 1;
-                next_tb = tcg_tb_lookup(next_pc);
-                if (next_tb) {
-                    current_tb = next_tb;
-                }
-            }
-        }
-        if (use_tu_jmp(current_tb)) {
-            assert(current_tb->tu_jmp[TU_TB_INDEX_TARGET] != TB_JMP_RESET_OFFSET_INVALID);
-            unlink_tu_jmp(current_tb);
-            return;
-        }
-#endif
-        if (use_indirect_jmp(current_tb) &&
-                current_tb->jmp_indirect != TB_JMP_RESET_OFFSET_INVALID) {
-            unlink_indirect_jmp(env, current_tb, uc);
-        } else {
-            unlink_direct_jmp(current_tb);
-        }
+        unlink_tb_jmp(env, current_tb, uc);
     } else {
         if (!signal_in_glue(env, uc)) {
 #ifdef SIGNAL_UNLINK_DBG
