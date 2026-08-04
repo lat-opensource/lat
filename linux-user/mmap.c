@@ -306,6 +306,35 @@ int target_mprotect_guest(abi_ulong start, abi_ulong len, int target_prot)
     return target_mprotect_internal(start, len, target_prot, true);
 }
 
+static bool fd_is_writable_sqlite_file(int fd)
+{
+    static const char sqlite_header[] = "SQLite format 3";
+    char header[sizeof(sqlite_header)];
+    int fd_flags, saved_errno;
+    ssize_t bytes_read;
+    bool result = false;
+
+    saved_errno = errno;
+    if (fd < 0) {
+        goto out;
+    }
+
+    fd_flags = fcntl(fd, F_GETFL);
+    if (fd_flags < 0 || (fd_flags & O_ACCMODE) == O_RDONLY) {
+        goto out;
+    }
+
+    do {
+        bytes_read = pread(fd, header, sizeof(header), 0);
+    } while (bytes_read < 0 && errno == EINTR);
+
+    result = bytes_read == sizeof(header) &&
+             memcmp(header, sqlite_header, sizeof(header)) == 0;
+out:
+    errno = saved_errno;
+    return result;
+}
+
 /* map an incomplete host page */
 static int mmap_frag(abi_ulong real_start,
                      abi_ulong start, abi_ulong end,
@@ -314,6 +343,7 @@ static int mmap_frag(abi_ulong real_start,
     abi_ulong real_end, addr;
     void *host_start;
     int prot1, prot2, prot_new;
+    bool writable_sqlite_mapping;
 
     real_end = real_start + qemu_host_page_size;
     host_start = g2h_untagged(real_start);
@@ -348,6 +378,12 @@ static int mmap_frag(abi_ulong real_start,
     }
     prot1 &= PAGE_BITS;
 
+    /* A pread-backed SQLite fragment cannot observe later writes via fd. */
+    writable_sqlite_mapping = option_private_mmap_shadow &&
+                              !(flags & MAP_ANONYMOUS) &&
+                              (flags & MAP_TYPE) == MAP_PRIVATE &&
+                              fd_is_writable_sqlite_file(fd);
+
     int shadow_mask = hostpage_exist_shadow_page(start);
     int page_mask = 0;
     for (addr = start; addr < end;  addr += TARGET_PAGE_SIZE) {
@@ -367,8 +403,12 @@ static int mmap_frag(abi_ulong real_start,
 
     prot_new = prot | prot1;
     if (!(flags & MAP_ANONYMOUS)) {
-        if ((flags & MAP_TYPE) == MAP_SHARED) {
+        if (writable_sqlite_mapping) {
+            create_shadow_page_chunk(start, end, prot, flags, fd, offset);
+            return 1;
+        } else if ((flags & MAP_TYPE) == MAP_SHARED) {
             struct stat stat_info;
+
             fstat(fd, &stat_info);
             if (!stat_info.st_nlink ||
                 (prot & PROT_WRITE)) {

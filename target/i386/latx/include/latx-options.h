@@ -100,6 +100,7 @@ extern uint64_t imm_skip_pc;
 extern int option_mem_test;
 extern int option_real_maps;
 extern int option_monitor_shared_mem;
+extern int option_private_mmap_shadow;
 extern int option_shadow_file;
 extern int option_smc_opt;
 #define FORK_UNLINK_MAGIC 0x88888889
@@ -138,6 +139,7 @@ extern unsigned long long counter_mips_tr;
     ENVFUN(LATX_MT, handle_arg_latx_mem_test) \
     ENVFUN(LATX_REAL_MAPS, handle_arg_latx_real_maps) \
     ENVFUN(LATX_MONITOR_SHARED_MEM, handle_arg_latx_monitor_shared_mem) \
+    ENVFUN(LATX_PRIVATE_MMAP_SHADOW, handle_arg_latx_private_mmap_shadow) \
     ENVFUN(LATX_FORK_UNLINK, handle_arg_latx_fork_unlink) \
     ENVFUN(LATX_ANONYM, handle_arg_latx_anonym) \
     ENVFUN(LATX_MMAP_START, handle_arg_mmap_start) \

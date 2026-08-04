@@ -102,6 +102,7 @@ int option_anonym;
 int option_mem_test;
 int option_real_maps;
 int option_monitor_shared_mem;
+int option_private_mmap_shadow;
 int option_shadow_file;
 int option_smc_opt;
 /* Disabled by default; LATX_FORK_UNLINK enables the internal signal. */
@@ -269,6 +270,7 @@ void options_init(void)
     option_mem_test = 0;
     option_real_maps = 0;
     option_monitor_shared_mem = 0;
+    option_private_mmap_shadow = 0;
 #ifdef LOW_MEM_MODE_0
     option_shadow_file = 1;
 #endif

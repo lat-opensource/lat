@@ -797,6 +797,11 @@ static void handle_arg_latx_monitor_shared_mem(const char *arg)
     option_monitor_shared_mem = strtol(arg, NULL, 0);
 }
 
+static void handle_arg_latx_private_mmap_shadow(const char *arg)
+{
+    option_private_mmap_shadow = strtol(arg, NULL, 0);
+}
+
 static void handle_arg_smc_reload(const char *arg)
 {
     long value = 0;
@@ -941,6 +946,9 @@ static const struct qemu_argument arg_table[] = {
     "",           "enable get real self maps"},
     {"latx-monitor-shared-mem",    "LATX_MONITOR_SHARED_MEM",     true,  handle_arg_latx_monitor_shared_mem,
     "",           "monitor shared memory, retranslate self modifying page"},
+    {"latx-private-mmap-shadow", "LATX_PRIVATE_MMAP_SHADOW", true,
+    handle_arg_latx_private_mmap_shadow, "",
+    "shadow writable private SQLite file mapping fragments"},
     {"smc_reload",    "LATX_SMC_RELOAD",     true,  handle_arg_smc_reload,
     "",           "reload SMC TB"},
     {"latx-wine-pe-fixed-base", "LATX_WINE_PE_FIXED_BASE", true,
