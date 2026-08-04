@@ -260,8 +260,17 @@ void tb_exit_to_qemu(CPUArchState *env, ucontext_t *uc)
     current_tb = tcg_tb_lookup(pc);
     if (current_tb) {
         unlink_tb_jmp(env, current_tb, uc);
-    } else {
-        if (!signal_in_glue(env, uc)) {
+    } else if (!signal_in_glue(env, uc)) {
+        /*
+         * A leaf C helper is called directly from translated code, so the
+         * saved return address points into its translated caller. A lookup
+         * miss means the signal did not interrupt such a helper, so it is
+         * safe to leave every TB linked as before.
+         */
+        current_tb = tcg_tb_lookup(UC_GR(uc)[1] - sizeof(uint32_t));
+        if (current_tb) {
+            unlink_tb_jmp(env, current_tb, uc);
+        } else {
 #ifdef SIGNAL_UNLINK_DBG
             fprintf(stderr, "lhl-debug %s current_tb NULL pid %d\n", __func__, getpid());
 #endif
