@@ -582,24 +582,28 @@ foreach target : target_dirs
                  name_suffix: 'fa')
 
   if get_option('tests').enabled() and \
-     target == 'x86_64-linux-user' and \
+     target in ['x86_64-linux-user', 'i386-linux-user'] and \
      'CONFIG_LATX_O1' in config_host
     latx_config_regression_test = executable(
-      'test-latx-config-regression',
-      files('tests/latx-x86_64/latx-config-regression.c'),
+      'test-' + target + '-latx-config-regression',
+      files('tests/latx/latx-config-regression.c'),
       objects: lib.extract_objects(latx_string_utils),
       c_args: c_args,
       dependencies: [glib],
       include_directories: target_inc,
     )
     test(
-      'latx-config-regression',
+      target + '-latx-config-regression',
       latx_config_regression_test,
       suite: 'lat-pr-fast',
       env: ['ASAN_OPTIONS=detect_leaks=0'],
       timeout: 30,
     )
+  endif
 
+  if get_option('tests').enabled() and \
+     target == 'x86_64-linux-user' and \
+     'CONFIG_LATX_O1' in config_host
     smc_reload_test_c_args = c_args + [
       '-ffunction-sections',
       '-fvisibility=hidden',

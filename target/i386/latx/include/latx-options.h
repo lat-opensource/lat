@@ -12,6 +12,14 @@
 #include "latx-disassemble-trace.h"
 #include "latx-debug.h"
 
+#ifdef TARGET_X86_64
+#define LATX_SYSTEM_CONFIG_FILE "/etc/latx-x86_64.conf"
+#define LATX_USER_CONFIG_FILE "latx-x86_64.conf"
+#else
+#define LATX_SYSTEM_CONFIG_FILE "/etc/latx-i386.conf"
+#define LATX_USER_CONFIG_FILE "latx-i386.conf"
+#endif
+
 #ifdef CONFIG_LATX_INSTS_PATTERN
 extern int option_instptn;
 #endif

@@ -11,7 +11,7 @@
 
 static void test_empty_config_value(void)
 {
-    char line[] = "LATX_CLOSE_PARALLEL=   \n";
+    char line[] = "LATX_CLOSE_PARALLEL=\n";
     char *name = NULL;
     char *value = NULL;
 

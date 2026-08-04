@@ -187,14 +187,10 @@ void conf_init(char **argv)
     char *program = guest_program(argv);
     const char *home_path = getenv("HOME");
 
-#ifdef TARGET_X86_64
     /* load /etc/latx-*.conf */
-    load_conf_file("/etc/latx-x86_64.conf", program);
-    snprintf(path, PATH_MAX, "%s/.config/latx-x86_64.conf", home_path);
-#else
-    load_conf_file("/etc/latx-i386.conf", program);
-    snprintf(path, PATH_MAX, "%s/.config/latx-i386.conf", home_path);
-#endif
+    load_conf_file(LATX_SYSTEM_CONFIG_FILE, program);
+    snprintf(path, PATH_MAX, "%s/.config/%s", home_path,
+             LATX_USER_CONFIG_FILE);
 
     /* load ~/.config/latx-*.conf */
     load_conf_file(path, program);
