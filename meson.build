@@ -755,6 +755,7 @@ endif
 
 subdir('scripts')
 subdir('docs')
+subdir('runtime')
 subdir('tests')
 
 #########################

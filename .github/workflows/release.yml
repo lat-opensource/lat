@@ -14,6 +14,8 @@ on:
       - "meson.options"
       - "**/*.inc"
       - "**/*.yml"
+      - "runtime/**"
+      - "tests/runtime/**"
   pull_request:
     types: [assigned, opened, synchronize, reopened]
     paths:
@@ -25,6 +27,8 @@ on:
       - "meson.options"
       - "**/*.inc"
       - "**/*.yml"
+      - "runtime/**"
+      - "tests/runtime/**"
 
 jobs:
   build:
