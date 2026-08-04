@@ -16,7 +16,27 @@ probe_translator()
     fi
     path=$translator_dir/$name
 
-    if [ ! -L "$path" ] && [ -f "$path" ] && [ -x "$path" ]; then
+    if [ -L "$path" ]; then
+        if ! resolved_path=$(readlink -f -- "$path" 2>/dev/null); then
+            echo unknown
+            return
+        fi
+        case "$translator_root" in
+            /|'') ;;
+            *)
+                case "$resolved_path" in
+                    "$translator_root"|"$translator_root"/*) ;;
+                    *)
+                        echo unknown
+                        return
+                        ;;
+                esac
+                ;;
+        esac
+        path=$resolved_path
+    fi
+
+    if [ -f "$path" ] && [ -x "$path" ]; then
         echo present
     else
         echo missing
@@ -26,12 +46,29 @@ probe_translator()
 case "$#" in
     1)
         [ "$1" = status ] || usage
-        if ! translator_dir=$(CDPATH= cd -P -- "$(dirname -- "$0")" \
+        manager_path=$0
+        case "$manager_path" in
+            */*) ;;
+            *)
+                if ! manager_path=$(command -v "$manager_path" 2>/dev/null); then
+                    echo 'latu-runtime-manager: cannot locate its executable' >&2
+                    exit 2
+                fi
+                ;;
+        esac
+        if [ -L "$manager_path" ]; then
+            if ! manager_path=$(readlink -f -- "$manager_path" 2>/dev/null); then
+                echo 'latu-runtime-manager: cannot resolve its executable' >&2
+                exit 2
+            fi
+        fi
+        if ! translator_dir=$(CDPATH= cd -P -- "$(dirname -- "$manager_path")" \
             2>/dev/null && pwd); then
             echo 'latu-runtime-manager: cannot locate its installation directory' >&2
             exit 2
         fi
         translator_dir_status=known
+        translator_root=
         ;;
     3)
         [ "$1" = status ] || usage
@@ -44,6 +81,7 @@ case "$#" in
 
         translator_dir=$root/usr/bin
         translator_dir_status=known
+        translator_root=$root
         if resolved_dir=$(CDPATH= cd -P -- "$translator_dir" \
             2>/dev/null && pwd); then
             case "$root" in

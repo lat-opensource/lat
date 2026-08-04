@@ -65,6 +65,8 @@ neither='translator_x86_64=missing
 translator_i386=missing'
 unknown='translator_x86_64=unknown
 translator_i386=unknown'
+x86_64_unknown='translator_x86_64=unknown
+translator_i386=missing'
 
 root=$workdir/both
 install_translator "$root" latx-x86_64
@@ -101,6 +103,26 @@ run_status "$root"
 assert_status 0 "$status_code" 'non-executable files'
 assert_output "$neither" "$status_output" 'non-executable files'
 
+root=$workdir/translator-symlink
+mkdir -p "$root/usr/libexec/latu" "$root/usr/bin"
+: > "$root/usr/libexec/latu/latx-x86_64"
+chmod +x "$root/usr/libexec/latu/latx-x86_64"
+ln -s ../libexec/latu/latx-x86_64 "$root/usr/bin/latx-x86_64"
+run_status "$root"
+assert_status 0 "$status_code" 'translator symlink inside root'
+assert_output "$x86_64_only" "$status_output" \
+    'translator symlink inside root'
+
+outside=$workdir/translator-outside
+root=$workdir/translator-symlink-escape
+install_translator "$outside" latx-x86_64
+mkdir -p "$root/usr/bin"
+ln -s "$outside/usr/bin/latx-x86_64" "$root/usr/bin/latx-x86_64"
+run_status "$root"
+assert_status 0 "$status_code" 'translator symlink escapes root'
+assert_output "$x86_64_unknown" "$status_output" \
+    'translator symlink escapes root'
+
 outside=$workdir/outside
 root=$workdir/symlink-escape
 install_translator "$outside" latx-x86_64
@@ -136,6 +158,35 @@ case "$default_output" in
 translator_i386='*) ;;
     *) fail 'default status output does not contain both translators' ;;
 esac
+
+real_bin=$workdir/real-bin
+alias_bin=$workdir/alias-bin
+mkdir -p "$real_bin" "$alias_bin"
+cp "$manager" "$real_bin/latu-runtime-manager"
+: > "$real_bin/latx-x86_64"
+: > "$real_bin/latx-i386"
+chmod +x "$real_bin/latx-x86_64" "$real_bin/latx-i386"
+ln -s "$real_bin/latu-runtime-manager" "$alias_bin/latu-runtime-manager"
+set +e
+symlink_output=$("$alias_bin/latu-runtime-manager" status \
+    2> "$workdir/symlink.stderr")
+symlink_status=$?
+set -e
+assert_status 0 "$symlink_status" 'manager invoked through symlink'
+assert_output "$both" "$symlink_output" 'manager invoked through symlink'
+
+alternatives_bin=$workdir/alternatives-bin
+mkdir -p "$alternatives_bin"
+mv "$real_bin/latx-x86_64" "$alternatives_bin/latx-x86_64"
+ln -s "$alternatives_bin/latx-x86_64" "$real_bin/latx-x86_64"
+set +e
+alternatives_output=$("$real_bin/latu-runtime-manager" status \
+    2> "$workdir/alternatives.stderr")
+alternatives_status=$?
+set -e
+assert_status 0 "$alternatives_status" 'translator installed via symlink'
+assert_output "$both" "$alternatives_output" \
+    'translator installed via symlink'
 
 set +e
 "$manager" doctor > "$workdir/usage.stdout" 2> "$workdir/usage.stderr"
