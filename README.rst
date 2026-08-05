@@ -1,6 +1,14 @@
-===========
+================================================
 LATX (LoongArch Architecture Translator for x86)
-===========
+================================================
+
+.. image:: https://img.shields.io/badge/license-GPL--2.0-blue.svg
+   :target: COPYING
+   :alt: GPL-2.0 license
+
+.. image:: https://github.com/lat-opensource/lat/actions/workflows/tests.yml/badge.svg
+   :target: https://github.com/lat-opensource/lat/actions/workflows/tests.yml
+   :alt: LAT Tests
 
 LATX（LoongArch Architecture Translator for x86）即龙芯 x86 架构转译器，是
 一个面向 LoongArch 架构的高性能用户级二进制翻译器，用于在龙架构系
@@ -11,26 +19,7 @@ LATX 基于 QEMU 6 版本开发并进行了深度优化，性能相比原生 QEM
 进行了高效翻译，并采用了AOT（Ahead-of-Time ）预编译、运行时库直通等关键优
 化技术，其中库直通优化思想借鉴及引用了 box64 项目的部分源码。
 
-
 `See the English Version Here >> <README.en.rst>`_
-
-参与贡献
-========
-
-提交 Pull Request 前，请阅读 `贡献指南 <CONTRIBUTING.md>`_。每个提交都必须
-包含 DCO ``Signed-off-by`` 签署。
-
-
-提交规范
-========
-
-`提交规范（中文） <COMMIT_CONVENTION.md>`_
-
-
-配置信息
-========
-
-`配置信息  <docs/user/latx-environment.rst>`_
 
 
 项目背景
@@ -41,162 +30,103 @@ LATX 基于 QEMU 6 版本开发并进行了深度优化，性能相比原生 QEM
 的基础上进行了二次开发，通过引入预编译、库直通以及其他针对性优化，大幅减少
 了指令翻译和执行的开销，努力实现“更快、更稳定、更兼容”的目标。
 
-历史演进
+
+使用前提
 ========
 
-项目历经多个开发阶段：
+- 本文的构建流程需要在 LoongArch Linux 环境中执行，生成的翻译器也运行在
+  LoongArch Linux 上。
+- LATX 运行需要主机 CPU 和内核提供 LSX 与 LBT_X86 扩展。普通 SIMD 翻译也会
+  在主机支持时使用 LASX；启动时未检测到 LASX，LATX 会关闭 LASX 路径并改用
+  128 位 LSX 指令翻译。
+- LATX 支持 LoongArch ABI 1.0 和 ABI 2.0。构建配置会自动检测当前环境的 ABI，
+  因此请在与安装目标 ABI 一致的环境中构建。
+- x86 Linux 程序可直接通过 LATX 运行；运行 x86 Windows 程序还需要 x86 Wine
+  及与 Wine 匹配的运行时环境。
 
-- **2021 年**：项目启动，完成 LATX 到 QEMU 6 的移植，Q3 项目进入 Alpha 阶段。
-- **2022 年**：支持库直通等优化，Q3 项目进入到 Beta 阶段。
-- **2023 年**：持续完善系统调用等接口的支持，以及更细致的指令优化。
-- **2024 年**：项目进入到 RC 阶段。
 
-
-项目结构
+快速开始
 ========
 
-**为保证历史代码呈现的更为简洁，我们在该仓库中将 LATX 的近两千次提交合并为一次提交。**
-
-下面是本项目的主要目录结构:
-
-.. code-block:: text
-
-   lat
-   ├── ...
-   ├── latxbuild/                           # 编译脚本
-   ├── target/
-   │   └── i386/
-   │       └── latx/
-   │           └── context/                 # 库直通相关
-   │           └── convert.py               # 生成 LA 指令函数模板
-   │           └── ir1/
-   │               └── ir1.c                # IR1：x86 指令 IR 表示
-   │           └── ir2/
-   │               └── ir2.c                # IR2：LA 指令 IR 表示
-   │               └── ir2-relocate.c       # label 处理等逻辑
-   │               └── la-append.c          # 项目编译后由 convert.py 生成
-   │               └── ir2-assemble.c
-   │           └── latx-options.c           # LATX 功能选项设置
-   │           └── optimization/
-   │               └── flag-reduction.c     # TB 内 eflags 消除优化
-   │               └── hbr.c                # 寄存器高位计算优化
-   │               └── imm-cache.c          # 立即数加载优化
-   │               └── insts-pattern.c      # 语义级指令组合优化翻译
-   │               └── ir1-optimization.c   # IR1 层面优化扫描函数
-   │               └── ir2-optimization.c   # IR2 层面指令调度函数
-   │               └── tu.c                 # TU 翻译单元优化
-   │               └── ...
-   │           └── sbt/                     # AOT 相关
-   │           └── translator/              # 翻译函数
-   │               └── tr-logic.c           # 逻辑运算指令翻译函数
-   │               └── tr-arith.c           # 算术运算指令翻译函数
-   │               └── ...
-   │           └── wrapper/                 # 库直通相关
-   │           └── ...
-   ├── ...
-   └── README.rst                           # 本文档
-
-
-主要贡献人员
-============
-
-有非常多的伙伴对本项目的成长做出了贡献，下面是代码提交量 Top10 的贡献人员。
-
-1. **Lu Zeng <luzeng87@gmail.com>**
-
-   - 项目 Owner，发起并领导着整体设计与架构
-   - 推动性能优化的方案、评估与落地
-   - 贡献众多兼容性与优化工作
-
-2. **Hanlu Li <heuleehanlu@gmail.com>**
-
-   - 项目 Maintainer
-   - 16K 兼容方案影子页模块的作者
-   - 贡献众多兼容性与优化工作
-
-3. **Wenqiang Wei <weiwenqiang@mail.ustc.edu.cn>**
-
-   - AOT 模块开发者之一，该模块的维护者
-   - TU 优化开发者之一，该优化的维护者
-   - 影子页模块维护者
-
-4. **Jing Li <654224414@qq.com>**
-
-   - AOT 早期开发者
-   - 库直通模块维护者
-
-5. **Qi Hu <spcreply@outlook.com>**
-
-   - eflags 消除相关优化主要作者
-
-6. **Yanzhi Lan <lanyanzhi19@mails.ucas.ac.cn>**
-
-   - TU 优化开发者之一
-   - 贡献很多指令级优化
-
-7. **Chaoyi Liu <lcy285183897@gmail.com>**
-
-   - insts-pattern 优化维护者
-   - 指令级测试负责人
-
-8. **Jinyang Shen <2509109915@qq.com>**
-
-   - 早期开发人员
-   - Capstone 模块部分优化工作
-
-9. **Rengan Yue <y347812075@163.com>**
-
-   - 软浮点模块及相关优化维护者
-
-10. **Xiaotian Wu <yetist@gmail.com>**
-    
-    - 新世界适配
-
-同时感谢在文档编写、社区管理、流程搭建、版本测试等方面做出贡献的所有伙伴。
-
-编译
-====
-
-STEP1:
-
+在 LoongArch Linux 主机上安装 `编译依赖`_ 后，执行：
 
 .. code-block:: bash
 
     git clone --depth=1 --recursive https://github.com/lat-opensource/lat
     cd lat
+    ./latxbuild/build-release.sh
 
-
-STEP2:
-
-- debian
-
-.. code-block:: bash
-
-    apt install -y git meson ninja-build libssl-dev libc6 gcc g++ pkg-config libglib2.0-dev libdrm-dev lsb-release make python3-setuptools
-
-- Arch Linux
+脚本会生成 ``lat-<版本>-<日期>.tar.xz``。安装最新生成的包，并让 binfmt 和
+sysctl 配置立即生效：
 
 .. code-block:: bash
 
-    pacman -S --noconfirm meson ninja gcc pkgconf python3 python-setuptools openssl-static openssl
+    package=$(ls -1t lat-*.tar.xz | head -n 1)
+    sudo tar -Jxf "$package" -C / --strip-components=1
+    sudo systemctl restart systemd-binfmt.service
+    sudo systemctl restart systemd-sysctl.service
 
-- 安同 OS (AOSC OS)
-
-.. code-block:: bash
-
-    oma install -y gcc meson nettle pcre2 libffi gnutls glib zlib glib-static libgcrypt-static libgpg-error-static libnfs-static pcre-static zlib-static zstd-static openssl-static pkg-config ninja
-
-- Fedora
+也可以重启系统使配置生效。确认两个翻译器已经安装：
 
 .. code-block:: bash
 
-    dnf install gcc g++ make git ninja-build meson openssl-devel glib2-devel tar
+    latu-runtime-manager status
+
+第一次验证建议使用静态链接的 x86_64 Linux 程序，因为它不依赖额外的 x86
+运行时：
+
+.. code-block:: bash
+
+    wget -O busybox.pkg.tar.zst \
+        https://archlinux.org/packages/extra/x86_64/busybox/download/
+    tar xf busybox.pkg.tar.zst
+    latx-x86_64 ./usr/bin/busybox uname -m
+
+注册 binfmt 后也可以直接执行 ``./usr/bin/busybox uname -m``。动态链接程序还
+需要在 ``/usr/gnemul`` 下准备与程序匹配的 x86 运行时，详见
+`编译、安装和运行 Wiki`_。
 
 
-STEP3:
+编译依赖
+========
 
-项目会优先使用版本不低于 0.55.3 的系统 Meson；如果系统 Meson 不可用或版本
-过低，则使用 STEP1 中通过子模块获取的 Meson。Python 版本必须不低于 3.6。
+选择当前发行版对应的命令。依赖列表也包含首次 BusyBox 验证使用的 ``file``、
+``wget`` 和 ``zstd``。项目优先使用版本不低于 0.55.3 的系统 Meson；系统 Meson
+不可用或版本过低时，会使用 ``--recursive`` 获取的 Meson 子模块。Python 版本
+必须不低于 3.6。
+
+Debian / Ubuntu：
+
+.. code-block:: bash
+
+    sudo apt install -y git meson ninja-build libssl-dev libc6 gcc g++ \
+        pkg-config libglib2.0-dev libdrm-dev lsb-release make python3 \
+        python3-setuptools binutils file tar wget xz-utils zstd
+
+Arch Linux：
+
+.. code-block:: bash
+
+    sudo pacman -S --needed git make meson ninja gcc pkgconf glib2 python \
+        python-setuptools openssl binutils file tar wget xz zstd
+
+安同 OS（AOSC OS）：
+
+.. code-block:: bash
+
+    sudo oma install -y git make gcc meson nettle pcre2 libffi gnutls glib zlib \
+        glib-static libgcrypt-static libgpg-error-static libnfs-static \
+        pcre-static zlib-static zstd-static openssl-static pkg-config ninja \
+        binutils file tar wget xz zstd
+
+Fedora：
+
+.. code-block:: bash
+
+    sudo dnf install gcc gcc-c++ make git ninja-build meson openssl-devel \
+        glib2-devel binutils file tar wget xz zstd
+
+可以在构建前检查基础工具：
 
 .. code-block:: bash
 
@@ -204,27 +134,52 @@ STEP3:
     ninja --version
 
 
-STEP4:
+构建与产物
+==========
+
+默认发布构建同时生成 32 位和 64 位翻译器：
 
 .. code-block:: bash
 
     ./latxbuild/build-release.sh
 
+生成的 ``tar.xz`` 包包含：
 
-构建产物
-========
-
-构建完成后，生成的 ``tar.xz`` 包内包含以下可执行文件：
-
-- ``usr/bin/latx-i386``：用于运行 32 位 i386 x86 程序。
-- ``usr/bin/latx-x86_64``：用于运行 64 位 x86_64 程序。
+- ``usr/bin/latx-i386``：运行 32 位 i386 程序。
+- ``usr/bin/latx-x86_64``：运行 64 位 x86_64 程序。
+- ``usr/bin/latu-runtime-manager``：检查翻译器安装状态。
+- ``usr/lib/binfmt.d/*.conf``：注册 x86 ELF 的 binfmt 配置。
+- ``usr/lib/sysctl.d/mmap_min_addr.conf``：LATX 所需的地址映射配置。
 
 打包时会移除符号表和调试信息，因此包内二进制比 ``build32/`` 和
-``build64/`` 中的原始构建产物更小，这是正常行为。安装和实际使用时应以
-``tar.xz`` 包中的二进制为准；构建目录中的未剥离文件适用于调试。
+``build64/`` 中的原始产物更小。安装和日常使用以包内二进制为准；构建目录中
+的未剥离文件适用于调试。
 
-AVX指令支持
-==============
+运行动态链接程序
+================
+
+动态链接的 x86 程序需要匹配的 guest 运行时。可以查看当前翻译器选择的目录：
+
+.. code-block:: bash
+
+    latx-x86_64 -runtime-info
+    latx-i386 -runtime-info
+
+默认目录因宿主 ABI 而异。ABI 1.0 使用 ``/usr/gnemul/latx-*``，ABI 2.0 使用
+``/usr/gnemul/lat-*``。运行时的安装、Wine 配套关系、升级和卸载说明见
+`编译、安装和运行 Wiki`_。
+
+
+配置
+====
+
+LATX 支持系统配置文件、用户配置文件、环境变量和命令行参数。优先级、常用配置
+及示例见 `LATX 配置信息 <docs/user/latx-environment.rst>`_。
+
+
+AVX 指令支持
+============
+
 当前 ``build-release.sh`` 不提供 AVX 打包参数。``build32.sh`` 和
 ``build64.sh`` 均支持 ``-a``；该选项会在配置阶段传入
 ``--enable-latx-avx-opt``，为当前构建目标启用 x86 AVX 指令翻译支持：
@@ -247,18 +202,20 @@ AVX 构建默认向 guest 上报相关 CPUID 信息。如需隐藏该信息，�
 guest 运行期间热切换。
 
 
-未来规划（TODO）
-===============
+文档与问题反馈
+==============
 
-项目未来的优化与完善方向包括但不限于：
+- `LAT Wiki <https://github.com/lat-opensource/lat/wiki>`_
+- `编译、安装和运行 Wiki`_
+- `调试与问题定位指南`_
+- `Issues <https://github.com/lat-opensource/lat/issues>`_
+- `Discussions <https://github.com/lat-opensource/lat/discussions>`_
 
-- [ ] 进一步完善 x86 指令集兼容性。
-- [ ] 进一步提升库直通优化的覆盖范围。
-- [ ] 提供详细的性能分析工具链，帮助开发者快速定位性能瓶颈。
-- [ ] 维护更详细的文档与使用指南。
+提交 Pull Request 前，请阅读 `贡献指南 <CONTRIBUTING.md>`_ 和
+`提交规范 <COMMIT_CONVENTION.md>`_。历史主要贡献者名单见
+`CONTRIBUTORS.md <CONTRIBUTORS.md>`_。每个提交都必须包含 DCO
+``Signed-off-by`` 签署。
 
-欢迎大家通过 Issues 等方式讨论新特性需求、Bug 反馈以及优化思路。我们期待更
-多开发者与社区力量的加入，一同推进 LoongArch  生态建设！
 
 许可证
 ======
@@ -267,6 +224,7 @@ guest 运行期间热切换。
 （GNU General Public License, version 2，简称 GPLv2）发布。
 
 因此，本项目同样遵循 GPLv2 协议。
+
 
 致谢
 ====
@@ -277,3 +235,7 @@ guest 运行期间热切换。
 ------------
 
 如有任何问题或建议，欢迎通过 `Issue <https://github.com/lat-opensource/lat/issues>`_ 与我们交流！
+
+
+.. _编译、安装和运行 Wiki: https://github.com/lat-opensource/lat/wiki/%E7%BC%96%E8%AF%91%E4%B8%8E%E8%BF%90%E8%A1%8C
+.. _调试与问题定位指南: https://github.com/lat-opensource/lat/wiki/%E8%B0%83%E8%AF%95%E4%B8%8E%E9%97%AE%E9%A2%98%E5%AE%9A%E4%BD%8D%E6%8C%87%E5%8D%97
