@@ -195,9 +195,12 @@ STEP2:
 
 STEP3:
 
+项目会优先使用版本不低于 0.55.3 的系统 Meson；如果系统 Meson 不可用或版本
+过低，则使用 STEP1 中通过子模块获取的 Meson。Python 版本必须不低于 3.6。
+
 .. code-block:: bash
 
-    meson --version
+    python3 --version
     ninja --version
 
 
@@ -222,18 +225,26 @@ STEP4:
 
 AVX指令支持
 ==============
-编译支持AVX指令的版本需要在编译时添加参数
-例如：
+当前 ``build-release.sh`` 不提供 AVX 打包参数。``build32.sh`` 和
+``build64.sh`` 均支持 ``-a``；该选项会在配置阶段传入
+``--enable-latx-avx-opt``，为当前构建目标启用 x86 AVX 指令翻译支持：
 
 .. code-block:: bash
 
+    ./latxbuild/build32.sh -c -a
     ./latxbuild/build64.sh -c -a
 
-为满足软件兼容性相关需求，LATX上报AVX指令相关CPUID信息需要单独设置：
+``-c`` 会重新生成构建配置，切换 AVX 支持时不能省略。
+
+AVX 构建默认向 guest 上报相关 CPUID 信息。如需隐藏该信息，必须在启动 guest
+前设置：
 
 .. code-block:: bash
 
-    export LATX_AVX_CPUID=1
+    export LATX_AVX_CPUID=0
+
+该设置会改变 CPUID 上报，但不会关闭已经编译的 AVX 指令翻译，也不支持在
+guest 运行期间热切换。
 
 
 未来规划（TODO）
@@ -241,7 +252,7 @@ AVX指令支持
 
 项目未来的优化与完善方向包括但不限于：
 
-- [ ] 支持更复杂的 x86 指令集扩展（如 AVX）。
+- [ ] 进一步完善 x86 指令集兼容性。
 - [ ] 进一步提升库直通优化的覆盖范围。
 - [ ] 提供详细的性能分析工具链，帮助开发者快速定位性能瓶颈。
 - [ ] 维护更详细的文档与使用指南。

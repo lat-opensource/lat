@@ -12,13 +12,21 @@ LATX 提供了配置文件、环境变量、命令行参数等多种方法，控
 ========
 
 
-LATX 的配置文件分为32位版本和64位版本，分别位于 ``/etc/latx-i386.conf`` ``/etc/latx-x8664.conf``\* 和 \*``~/.config/latx-i386.conf`` ``~/.config/latx-x86_64.conf``，均为 ``.ini`` 格式的文件。
+LATX 的配置文件分为 32 位和 64 位版本。系统配置文件分别为
+``/etc/latx-i386.conf`` 和 ``/etc/latx-x86_64.conf``；用户配置文件分别为
+``~/.config/latx-i386.conf`` 和 ``~/.config/latx-x86_64.conf``。这些文件均
+采用 ``.ini`` 格式。
 
 
-配置文件位于代码库的 ``lat/configs/`` 目录，安装时会自动安装到 ``/etc/`` 目录下，运行时根据 guest 程序选择 32 位或 64 位的配置信息。
+配置文件模板位于代码库的 ``configs/`` 目录。Meson 安装目标会把模板安装到
+configure 指定的 ``sysconfdir``；默认值是 ``/usr/local/etc``，而 LATX 运行时
+读取 ``/etc/latx-*.conf``。若要让安装的系统配置直接生效，配置构建时需要指定
+``--sysconfdir=/etc``。当前 ``build-release.sh`` 生成的 ``tar.xz`` 包不包含这些
+模板。运行时会根据 guest 程序的位数选择对应配置文件。
 
 
-您可以通过复制系统配置文件来自定义用户配置，将配置文件复制到 ``~/.config/`` 目录下，并添加自己的配置信息。
+您可以将已安装的系统配置文件或代码库中的模板复制到 ``~/.config/`` 目录，
+然后添加自己的配置信息。
 
 .. code-block:: ini
 
@@ -43,8 +51,8 @@ LATX 的配置的逐级流程如下：
     main()
     ├── options_init()          # 初始化默认值
     ├── conf_init()             # 加载配置文件
-    │    ├── /etc/latx.conf
-    │    └── ~/.config/latx.conf
+    │    ├── /etc/latx-x86_64.conf 或 /etc/latx-i386.conf
+    │    └── ~/.config/latx-x86_64.conf 或 ~/.config/latx-i386.conf
     ├── 读取环境变量
     ├── 解析命令行参数
     └── handle_arg_latx_*       # 写入 option_* 变量
@@ -66,7 +74,7 @@ LATX 的配置的逐级流程如下：
 .. code-block:: text
 
 
-    main.c → struct qemu_argument arg_table
+    linux-user/main.c → struct qemu_argument arg_table
 
 
 每个参数包含：
@@ -98,7 +106,7 @@ LATX 支持三种方式设置运行参数（以软浮点功能为例）：
 2.  环境变量\
     ``export LATX_SOFTFPU=1``
 3.  命令行\
-    ``latx-x8664 -latx-softfpu 1 guest_program``
+    ``latx-x86_64 -latx-softfpu 1 guest_program``
 
 
 三种方式最终都会调用同一处理函数：
@@ -117,7 +125,8 @@ LATX 支持三种方式设置运行参数（以软浮点功能为例）：
 配置参数可分为优化类和调试类，部分配置不支持环境变量和命令行设置，仅支持初始化或编译信息设置。
 
 
-AOT（预翻译）会保存恢复预翻译信息，某些配置与 AOT 冲突，开启时会自动关闭 AOT 优化（在处理函数中执行关闭逻辑）部分配置开启时会关闭 AOT 优化。
+AOT（预翻译）会保存和恢复预翻译信息。部分配置与 AOT 冲突，启用这些配置时，
+对应的参数处理函数会自动关闭 AOT。
 
 
 以下未特殊说明的均为置 1 时开启。
@@ -189,9 +198,11 @@ AOT（预翻译）会保存恢复预翻译信息，某些配置与 AOT 冲突，
    * - LATX\_AVX\_CPUID
      - ``-latx-avx-cpuid``
      - option\_avx\_cpuid
-     - AVX 上报 CPUID
+     - 控制 AVX 相关 CPUID 上报
      - 
-     - 编译加参数 -a 开启
+     - 仅在启用 AVX 指令翻译支持的构建中可用，默认值为 1；设为 0 会隐藏
+       AVX 相关 CPUID，但不会禁用 AVX 指令翻译。必须在 guest 启动前设置，
+       运行期间不能切换
    * - LATX\_KZT
      - ``-latx-kzt``
      - option\_kzt

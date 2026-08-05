@@ -206,9 +206,13 @@ STEP2:
 
 STEP3:
 
+The build uses a system Meson version of at least 0.55.3 when one is
+available. Otherwise, it uses the Meson submodule fetched in STEP1. Python
+3.6 or newer is required.
+
 .. code-block:: bash
 
-    meson --version
+    python3 --version
     ninja --version
 
 
@@ -234,24 +238,35 @@ installation and normal use; retain the unstripped build outputs for debugging.
 
 AVX Instruction Support
 ==============
-To build a version that supports AVX instructions, you need to add parameters during compilation:
+``build-release.sh`` does not currently provide an AVX packaging option. Both
+``build32.sh`` and ``build64.sh`` accept ``-a``. The option passes
+``--enable-latx-avx-opt`` to ``configure``, enabling x86 AVX instruction
+translation support for the selected build target:
 
 .. code-block:: bash
 
-    ./latxbuild/build-release.sh -a
+    ./latxbuild/build32.sh -c -a
+    ./latxbuild/build64.sh -c -a
 
-To meet software compatibility requirements, enabling the reporting of AVX-related CPUID information in LATX requires a separate setting:
+The ``-c`` option regenerates the build configuration and must be included
+when changing AVX support.
+
+An AVX build reports the corresponding CPUID information to the guest by
+default. To hide it, set the following before starting the guest:
 
 .. code-block:: bash
 
-    export LATX_AVX_CPUID=1
+    export LATX_AVX_CPUID=0
+
+This setting changes CPUID reporting. It does not disable the compiled AVX
+instruction translators and cannot be changed while the guest is running.
 
 Future Plans (TODO)
 ===============
 
 Future optimizations and improvements include but are not limited to:
 
-- [ ] Support for advanced x86 instruction extensions (e.g., AVX).
+- [ ] Further improve x86 instruction-set compatibility.
 - [ ] Further expansion of library pass-through optimization coverage.
 - [ ] Development of detailed performance analysis toolchains for quick bottleneck identification.
 - [ ] Enhanced documentation and user guidance.
