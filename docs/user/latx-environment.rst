@@ -1,494 +1,207 @@
-===========
-LATX 配置信息
-===========
+LATX 配置参考
+=============
+
+LATX 的默认配置适合先验证程序能否运行。只有在准备 guest 运行时、排查兼容性
+问题或收集调试信息时，才建议修改配置；每次只改一个选项，便于判断实际影响。
+
+配置在 guest 启动时读取。运行中的 guest 不会因为配置文件或环境变量变化而
+热切换行为。
 
 
-LATX 提供了配置文件、环境变量、命令行参数等多种方法，控制LATX运行时的行为、优化策略和调试功能。
+快速用法
+========
 
-配置项的优先级为 命令行 > 环境变量 > ``~/.config/latx-*.conf`` > ``/etc/latx-*.conf``。
+仅为一次运行设置选项：
+
+.. code-block:: bash
+
+    LATX_SOFTFPU=1 latx-x86_64 /path/to/x86_64-program
+
+使用命令行参数得到相同效果：
+
+.. code-block:: bash
+
+    latx-x86_64 -latx-softfpu 1 /path/to/x86_64-program
+
+为某个 guest 持久设置选项，可以把配置写入用户配置文件：
+
+.. code-block:: ini
+
+    [guest_program]
+    LATX_SOFTFPU = 1
+
+节名使用 guest 可执行文件的 basename，区分大小写。例如
+``/opt/example/guest_program`` 对应 ``[guest_program]``。
+
+
+配置优先级
+==========
+
+同一个选项出现在多个位置时，从高到低依次为：
+
+1. 命令行参数。
+2. 环境变量。
+3. 用户配置文件 ``~/.config/latx-*.conf``。
+4. 系统配置文件 ``/etc/latx-*.conf``。
+5. 程序内置默认值。
+
+高优先级设置会覆盖低优先级设置。为了避免难以追踪的组合，普通用户优先使用
+一次性环境变量，确认有效后再写入配置文件。
 
 
 配置文件
 ========
 
+LATX 根据 guest 位数读取不同文件：
 
-LATX 的配置文件分为 32 位和 64 位版本。系统配置文件分别为
-``/etc/latx-i386.conf`` 和 ``/etc/latx-x86_64.conf``；用户配置文件分别为
-``~/.config/latx-i386.conf`` 和 ``~/.config/latx-x86_64.conf``。这些文件均
-采用 ``.ini`` 格式。
+.. list-table::
+   :header-rows: 1
 
+   * - Guest
+     - 系统配置
+     - 用户配置
+   * - i386
+     - ``/etc/latx-i386.conf``
+     - ``~/.config/latx-i386.conf``
+   * - x86_64
+     - ``/etc/latx-x86_64.conf``
+     - ``~/.config/latx-x86_64.conf``
 
-配置文件模板位于代码库的 ``configs/`` 目录。Meson 安装目标会把模板安装到
-configure 指定的 ``sysconfdir``；默认值是 ``/usr/local/etc``，而 LATX 运行时
-读取 ``/etc/latx-*.conf``。若要让安装的系统配置直接生效，配置构建时需要指定
-``--sysconfdir=/etc``。当前 ``build-release.sh`` 生成的 ``tar.xz`` 包不包含这些
-模板。运行时会根据 guest 程序的位数选择对应配置文件。
+配置文件模板位于代码库的 ``configs/`` 目录。可以从模板创建用户配置：
 
+.. code-block:: bash
 
-您可以将已安装的系统配置文件或代码库中的模板复制到 ``~/.config/`` 目录，
-然后添加自己的配置信息。
+    mkdir -p ~/.config
+    cp configs/latx-x86_64.conf ~/.config/
+
+文件中第一个 section 之前的键对所有 guest 生效，section 内的键仅对对应程序
+生效：
 
 .. code-block:: ini
 
+    # 全局设置必须放在第一个 section 之前
+    LATX_AOT = 0
 
-    LATX_XXX=X # 对所有 guest 生效的总配置
+    [guest_program]
+    LATX_SOFTFPU = 1
+
+    [another-program]
+    LATX_ANONYM = 1
+
+Meson 安装目标会把模板安装到 configure 指定的 ``sysconfdir``。默认值是
+``/usr/local/etc``，但 LATX 运行时读取 ``/etc/latx-*.conf``；需要系统配置
+直接生效时，请使用 ``--sysconfdir=/etc`` 配置构建。
+
+``build-release.sh`` 生成的 ``tar.xz`` 包不包含配置模板，因此安装发布包不会
+覆盖现有的 LATX 配置文件。
 
 
-    [guest_program] # 对guest_program生效的配置
-    LATX_YYY=Y
-
-
-配置流程
+常用选项
 ========
 
+下表以当前 O1 release 构建的默认行为为准。只有编译进翻译器的功能才接受对应
+选项；配置文件包含不支持的选项时，LATX 会报告 ``no option``。
 
-LATX 的配置的逐级流程如下：
+.. list-table::
+   :header-rows: 1
+   :widths: 22 12 66
 
-
-.. code-block:: text
-
-
-    main()
-    ├── options_init()          # 初始化默认值
-    ├── conf_init()             # 加载配置文件
-    │    ├── /etc/latx-x86_64.conf 或 /etc/latx-i386.conf
-    │    └── ~/.config/latx-x86_64.conf 或 ~/.config/latx-i386.conf
-    ├── 读取环境变量
-    ├── 解析命令行参数
-    └── handle_arg_latx_*       # 写入 option_* 变量
-
-
-所有默认值在 ``latx-options.c`` 中的 ``options_init()`` 中统一设置，这些默认值决定了 LATX 在无任何配置时的行为。
-
-
-随后逐级加载配置信息，冲突的配置由高优先覆盖低优先级。
-
-
-参数注册与入口
-==============
-
-
-所有支持的参数（包括环境变量和命令行）统一定义在：
-
-
-.. code-block:: text
-
-
-    linux-user/main.c → struct qemu_argument arg_table
-
-
-每个参数包含：
-
-
-.. code-block:: c
+   * - 选项
+     - 默认值
+     - 用途与注意事项
+   * - ``LATX_AOT``
+     - ``1``
+     - 控制 AOT 预翻译。设为 ``0`` 可在排查缓存或翻译差异时关闭 AOT。软浮点、
+       隐藏虚拟化和部分调试模式会自动关闭 AOT。
+   * - ``LATX_KZT``
+     - ``0``
+     - 控制 64 位构建中的库直通。``1`` 表示按兼容性检查启用，``2`` 是供测试
+       使用的强制模式。32 位构建不提供该选项。
+   * - ``LATX_SOFTFPU``
+     - ``0``
+     - 浮点结果异常时可尝试 ``1``；``2`` 是另一种软浮点模式。非零值会自动
+       关闭 AOT 和 rounding 优化，通常会降低性能。
+   * - ``LATX_ANONYM``
+     - ``0``
+     - 设为 ``1``，对会检测虚拟化环境的 guest 隐藏部分 LATX 特征。启用时会
+       自动关闭 AOT。
+   * - ``LATX_SMC``
+     - ``0``
+     - 选择自修改代码处理策略。``0`` 按页失效，``1`` 按 TB 失效，``2`` 额外
+       启用共享内存监控，``6`` 再启用 store helper。它不是简单的开关。
+   * - ``LATX_AVX_CPUID``
+     - ``1``
+     - 仅 AVX 构建可用。设为 ``0`` 会改变 AVX 相关 CPUID 上报，但不会关闭
+       已编译的 AVX 翻译；必须在 guest 启动前设置。
+   * - ``LAT_LD_PREFIX``
+     - ABI 路径
+     - 覆盖动态链接 guest 的运行时根目录，等价于 ``-L <path>``。先用
+       ``-runtime-info`` 确认当前选择，避免掩盖运行时安装问题。
 
 
-    struct qemu_argument {
-        const char *argv; #命令行名称
-        const char *env; #环境变量
-        bool has_arg; #是否带参数
-        void (*handle_opt)(const char *arg); #处理函数
-        const char *example;
-        const char *help; #help信息
-    };
+指定 guest 运行时
+==================
+
+查看 64 位或 32 位翻译器当前选择的运行时：
+
+.. code-block:: bash
+
+    latx-x86_64 -runtime-info
+    latx-i386 -runtime-info
+
+输出中的 ``runtime_root`` 是动态链接器和 guest 库的查找根目录，
+``runtime_source`` 说明该值来自内置默认、配置文件、环境变量还是命令行。
+
+临时使用自定义运行时：
+
+.. code-block:: bash
+
+    LAT_LD_PREFIX=/path/to/x86_64-root \
+        latx-x86_64 /path/to/x86_64-program
+
+也可以使用命令行参数：
+
+.. code-block:: bash
+
+    latx-x86_64 -L /path/to/x86_64-root /path/to/x86_64-program
+
+ABI 1.0 的默认目录是 ``/usr/gnemul/latx-i386`` 和
+``/usr/gnemul/latx-x86_64``；ABI 2.0 的默认目录是
+``/usr/gnemul/lat-i386`` 和 ``/usr/gnemul/lat-x86_64``。
 
 
-参数设置方式
-============
-
-
-LATX 支持三种方式设置运行参数（以软浮点功能为例）：
-
-
-1.  配置文件\
-    ``[guest_program]``\
-    ``LATX_SOFTFPU = 1``
-2.  环境变量\
-    ``export LATX_SOFTFPU=1``
-3.  命令行\
-    ``latx-x86_64 -latx-softfpu 1 guest_program``
-
-
-三种方式最终都会调用同一处理函数：
-
-
-.. code-block:: text
-
-
-    handle_arg_latx_softfpu
-
-
-配置介绍
+调试选项
 ========
 
-
-配置参数可分为优化类和调试类，部分配置不支持环境变量和命令行设置，仅支持初始化或编译信息设置。
-
-
-AOT（预翻译）会保存和恢复预翻译信息。部分配置与 AOT 冲突，启用这些配置时，
-对应的参数处理函数会自动关闭 AOT。
-
-
-以下未特殊说明的均为置 1 时开启。
-
-
-优化类配置参数
---------------
-
+``latxbuild/build32-dbg.sh`` 和 ``latxbuild/build64-dbg.sh`` 生成的 debug
+翻译器提供额外日志参数。常用入口包括：
 
 .. list-table::
    :header-rows: 1
-   :widths: auto
+
+   * - 命令行
+     - 环境变量
+     - 用途
+   * - ``-strace``
+     - ``LAT_STRACE``
+     - 记录 guest 系统调用。
+   * - ``-strace-error``
+     - ``LAT_STRACE_ERROR``
+     - 仅记录失败的 guest 系统调用。
+   * - ``-d <items>``
+     - ``LAT_LOG``
+     - 启用指定 QEMU/LATX 日志类别。
+   * - ``-D <file>``
+     - ``LAT_LOG_FILENAME``
+     - 把日志写入文件，默认输出到 stderr。
+   * - ``-g <port>``
+     - ``LAT_GDB``
+     - 启动后等待 guest GDB 远程连接。
+
+低层优化和调试参数会随实现变化。完整注册表以
+``linux-user/main.c`` 中的 ``arg_table`` 为准，默认值以
+``target/i386/latx/latx-options.c`` 中的 ``options_init()`` 为准。问题定位流程
+请参阅 `调试与问题定位指南`_。
 
 
-   * - 环境变量
-     - 命令行
-     - 对应代码变量
-     - 功能
-     - AOT关系
-     - 备注
-   * - LATX\_OPTIMIZE
-     - ``-latx-optimize tunnel-lib``
-     - option\_tunnel\_lib
-     - 影响reg\_priv\_plt执行
-     - 
-     - 
-   * - LATX\_SMC
-     - ``-latx-smc 0/1/2/6``
-     - option\_smc\_opt
-     - 自修改代码优化
-     - 
-     - 
-   * - LATX\_CLOSE\_PARALLEL
-     - ``-latx-close-parallel``
-     - close\_latx\_parallel
-     - 关闭并行
-     - 
-     - 
-   * - LATX\_SOFTFPU
-     - ``-latx-softfpu 1/2``
-     - option\_softfpu
-     - 软件浮点
-     - 冲突
-     - 关闭AOT
-   * - LATX\_SOFTFPU\_FAST
-     - ``-latx-softfpu-fast 0xffffff``
-     - option\_softfpu\_fast
-     - 位控制的软浮点进阶优化
-     - 冲突
-     - 仅 softfpu=2 有效
-   * - LATX\_PRLIMIT
-     - ``-latx-prlimit``
-     - option\_prlimit
-     - 资源限制
-     - 
-     - 
-   * - LATX\_ROUNDING\_OPT
-     - ``-latx-rounding``
-     - option\_set\_rounding\_opt
-     - 浮点优化
-     - 冲突
-     - 与 softfpu 冲突
-   * - LATX\_CVT\_OPT
-     - ``-latx-cvt-opt``
-     - option\_cvt\_opt
-     - 转换优化
-     - 
-     - 
-   * - LATX\_AVX\_CPUID
-     - ``-latx-avx-cpuid``
-     - option\_avx\_cpuid
-     - 控制 AVX 相关 CPUID 上报
-     - 
-     - 仅在启用 AVX 指令翻译支持的构建中可用，默认值为 1；设为 0 会隐藏
-       AVX 相关 CPUID，但不会禁用 AVX 指令翻译。必须在 guest 启动前设置，
-       运行期间不能切换
-   * - LATX\_KZT
-     - ``-latx-kzt``
-     - option\_kzt
-     - 库直通
-     - 
-     - 
-   * - LATX\_FPUTAG
-     - ``-latx-fputag``
-     - option\_fputag
-     - 使用软件 FPU tag
-     - 
-     - 
-   * - SAVE\_XMM
-     - ``-save-xmm``
-     - option\_save\_xmm
-     - xmm 保存控制
-     - 
-     - 
-   * - LATX\_JRRA
-     - ``-latx-jrra``
-     - | option\_jr\_ra
-       | option\_jr\_ra\_stack
-     - jr ra 优化
-     - 冲突
-     - 
-   * - LATX\_IMM\_REG
-     - ``-latx-imm-reg 1111``
-     - | option\_imm\_reg
-       | option\_imm\_rip
-       | option\_imm\_complex
-       | option\_imm\_precache
-     - imm 优化
-     - 
-     - 位域控制
-   * - LATX\_MT
-     - ``-latx-mem-test``
-     - option\_mem\_test
-     - 内存权限检测
-     - 冲突
-     - 
-   * - LATX\_REAL\_MAPS
-     - ``-latx-real-maps``
-     - option\_real\_maps
-     - 使用真实 maps
-     - 冲突
-     - 
-   * - LATX\_MONITOR\_SHARED\_MEM
-     - ``-latx-monitor-shared-mem``
-     - option\_monitor\_shared\_mem
-     - 共享内存监控
-     - 
-     - 
-   * - LATX\_AOT
-     - ``-latx-aot``
-     - | option\_aot
-       | option\_load\_aot
-       | option\_aot\_wine
-     - 预翻译
-     - 
-     - 部分优化下关闭
-   * - LAT\_AOT\_FILE\_SIZE
-     - ``-latx-aot-file-size file``
-     - aot\_file\_size\_optarg
-     - 
-     - 
-     - 
-   * - LAT\_AOT\_LEFT\_FILE\_SIZE
-     - ``-latx-aot-left-file-size``
-     - aot\_left\_file\_minsize\_optarg
-     - 预翻译相关
-     - 
-     - 
-   * - LATX\_AOT\_WINE\_PEFILES\_CACHE
-     - ``-latx-aot-wine-pefiles-cache``
-     - latx\_aot\_wine\_pefiles\_cache
-     - 
-     - 
-     - 
-   * - LATX\_ANONYM
-     - ``-latx-anonym``
-     - option\_anonym
-     - 隐藏虚拟化
-     - 冲突
-     - 
-   * - LATX\_MMAP\_START
-     - ``-latx-mmap_start addr``
-     - mmap\_next\_start
-     - 设置mmap初始地址
-     - 
-     - 
-   * - LATX\_MMAP\_FIXED
-     - ``-latx-mmap_fixed abi_ulong``
-     - option\_mmap\_fixed
-     - 设置强制强制使用 MAP\_FIXED 的 mmap
-     - 
-     - 
-   * - LATX\_UNIMP\_DUMP
-     - ``-latx-unimp-dump``
-     - option\_mmap\_fixed
-     - 打印不支持的 syscall
-     - 
-     - 
-
-
-部分无环境变量和命令行控制的优化选项可在 ``optimize-config.h`` 修改编译信息开启或关闭
-
-
-.. list-table::
-   :header-rows: 1
-   :widths: auto
-
-
-   * - 对应宏
-     - 对应代码变量
-     - 功能
-   * - CONFIG\_LATX\_FLAG\_REDUCTION
-     - option\_flag\_reduction
-     - flag 优化
-   * - CONFIG\_LATX\_INSTS\_PATTERN
-     - option\_instptn
-     - inst pattern 优化
-   * - CONFIG\_LATX\_SPLIT\_TB
-     - option\_split\_tb
-     - TB分离
-   * - 自动检测
-     - option\_enable\_lasx
-     - LASX 启用
-   * - 自动检测
-     - option\_fast\_atomic
-     - 原子优化
-   * - LOW\_MEM\_MODE\_0
-     - option\_shadow\_file
-     - shadow 页
-   * - 无
-     - option\_lative
-     - 随机测试用
-   * - CONFIG\_LATX\_AOT
-     - option\_load\_aot
-     - AOT 加载控制
-   * - 无
-     - option\_aot\_wine
-     - AOT wine
-
-
-调试类配置参数
---------------
-
-
-调试类配置需在 debug 模式的 LATX 下使用，添加编译参数 ``--enable-debug`` 或使用 debug 模式编译脚本 ``latxbuild/build64-dbg.sh``
-
-
-下表总结了 debug 模式下可开启的调试信息开关：
-
-
-.. list-table::
-   :header-rows: 1
-   :widths: auto
-
-
-   * - 环境变量
-     - 命令行
-     - 对应代码变量
-     - 功能
-   * - LATX\_BEGIN\_TRACE
-     - ``-latx-runtime-trace-begin``
-     - option\_begin\_trace\_addr
-     - trace 起点
-   * - LATX\_END\_TRACE
-     - ``-latx-runtime-trace-end``
-     - option\_end\_trace\_addr
-     - trace 终点
-   * - LATX\_DUMP
-     - ``-latx-dump 11111``
-     - | option\_dump
-       | option\_dump\_ir1
-       | option\_dump\_ir2
-       | option\_dump\_host
-       | option\_dump\_profile
-     - dump 信息
-   * - LATX\_SHOW\_TB
-     - ``-latx-show-tb``
-     - debug\_tb\_pc
-     - 打印指定 TB
-   * - LATX\_TRACE\_MEM
-     - ``-latx-trace-mem``
-     - latx\_trace\_mem
-     - 内存写追踪
-   * - LATX\_BREAK\_INSN
-     - ``-latx-break-insn``
-     - latx\_break\_insn
-     - 指令断点
-   * - LATX\_DEBUG\_LATIVE
-     - ``-latx-debug-lative``
-     - option\_debug\_lative
-     - 调试模式
-   * - LATX\_ENABLE\_FCSR\_EXC
-     - ``-latx-enable-fcsr-exc``
-     - option\_enable\_fcsr\_exc
-     - 浮点异常
-   * - LATX\_UNLINK
-     - ``-latx-unlink``
-     - | latx\_unlink\_count
-       | latx\_unlink\_cpu
-     - TB unlink 控制
-   * - LATX\_TRACE
-     - ``-latx-trace 11``
-     - | option\_trace\_tb
-       | option\_trace\_ir1
-     - 打印 TB 信息
-   * - LATX\_DISASSEMBLE\_TRACE\_CMP
-     - ``-latx-disassemble-trace-cmp a:b``
-     - option\_latx\_disassemble\_trace\_cmp
-     - 对比不同反汇编器结果
-
-
-.. list-table::
-   :header-rows: 1
-   :widths: auto
-
-
-   * - 环境变量
-     - 命令行
-     - 功能说明
-   * - 无
-     - ``-h or help``
-     - 打印帮助信息
-   * - LAT\_GDB
-     - ``-g <port>``
-     - 启动时暂停执行，并在指定端口等待 GDB 远程连接（用于调试 guest 程序）
-   * - LAT\_STACK\_SIZE
-     - ``-s <size>``
-     - 设置 guest 程序的栈大小（单位：字节）
-   * - LAT\_CPU
-     - ``-cpu <model>``
-     - 指定模拟 CPU 类型（影响指令集与特性支持）
-   * - LAT\_SET\_ENV
-     - ``-E var=value``
-     - 为 guest 程序设置环境变量
-   * - LAT\_UNSET\_ENV
-     - ``-U var``
-     - 从 guest 环境中移除指定变量
-   * - LAT\_ARGV0
-     - ``-0 <argv0>``
-     - 强制指定 guest 程序的 argv[0]
-   * - LAT\_UNAME
-     - ``-r <string>``
-     - 修改 uname 返回值（用于绕过兼容性检查）
-   * - LAT\_GUEST\_BASE
-     - ``-B <addr>``
-     - 设置 guest 内存基地址（用于地址空间布局控制）
-   * - LAT\_RESERVED\_VA
-     - ``-R <size>``
-     - 预留一段虚拟地址空间给 guest 使用
-   * - LAT\_LOG
-     - ``-d <items>``
-     - 启用调试日志（如 cpu、exec、in\_asm 等）
-   * - LAT\_IMM\_SKIP\_PC
-     - ``-imm-skip``
-     - imm\_re优化跳过的pc
-   * - LAT\_DFILTER
-     - ``-dfilter``
-     - 基于地址范围过滤日志记录
-   * - LAT\_LOG\_FILENAME
-     - ``-D <file>``
-     - 指定日志输出文件（默认 stderr）
-   * - LAT\_PAGESIZE
-     - ``-p <size>``
-     - 强制指定 host 页大小
-   * - LAT\_SINGLESTEP
-     - ``-singlestep``
-     - 启用单步执行模式（每条指令执行后返回）
-   * - LAT\_STRACE
-     - ``-strace``
-     - 跟踪 guest 的系统调用
-   * - LAT\_STRACE\_ERROR
-     - ``-strace-error``
-     - 仅打印失败的系统调用
-   * - LAT\_RAND\_SEED
-     - ``-seed <value>``
-     - 设置随机数种子（用于可重复测试）
-   * - LAT\_TRACE
-     - ``-trace``
-     - 启用 trace 事件系统
-   * - LAT\_PLUGIN
-     - ``-plugin <file>``
-     - 加载插件（用于扩展功能或分析）
-   * - LAT\_LD\_PREFIX
-     - ``-L <path>``
-     - 指定 ELF loader 路径（用于自定义运行环境）
+.. _调试与问题定位指南: https://github.com/lat-opensource/lat/wiki/%E8%B0%83%E8%AF%95%E4%B8%8E%E9%97%AE%E9%A2%98%E5%AE%9A%E4%BD%8D%E6%8C%87%E5%8D%97
