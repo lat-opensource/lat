@@ -69,11 +69,39 @@ struct image_info {
         /* For target-specific processing of NT_GNU_PROPERTY_TYPE_0. */
         uint32_t        note_flags;
 
+#ifdef TARGET_X86_64
+        /* Linux 6.14 x86_64 has 50 native words in mm->saved_auxv. */
+#define TARGET_X86_64_PRCTL_AUXV_WORDS 50
+        abi_ulong       prctl_auxv[TARGET_X86_64_PRCTL_AUXV_WORDS];
+        bool            prctl_auxv_initialized;
+        unsigned int    prctl_mdwe;
+        abi_ulong       prctl_mm_start_code;
+        abi_ulong       prctl_mm_end_code;
+        abi_ulong       prctl_mm_start_data;
+        abi_ulong       prctl_mm_end_data;
+        abi_ulong       prctl_mm_start_brk;
+        abi_ulong       prctl_mm_brk;
+        abi_ulong       prctl_mm_start_stack;
+        abi_ulong       prctl_mm_arg_start;
+        abi_ulong       prctl_mm_arg_end;
+        abi_ulong       prctl_mm_env_start;
+        abi_ulong       prctl_mm_env_end;
+        int             prctl_mm_exe_fd;
+        char            *prctl_mm_exe_path;
+#endif
+
 #ifdef TARGET_MIPS
         int             fp_abi;
         int             interp_fp_abi;
 #endif
 };
+
+#ifdef TARGET_X86_64
+#define LATX_GUEST_MDWE_ENV "_LATX_GUEST_MDWE"
+#define LATX_GUEST_TSC_ENV  "_LATX_GUEST_TSC"
+#define TARGET_PR_MDWE_REFUSE_EXEC_GAIN 1U
+#define TARGET_PR_MDWE_NO_INHERIT      2U
+#endif
 extern struct image_info info1, *info;
 
 #if defined(CONFIG_LATX) && defined(TARGET_I386)
@@ -191,6 +219,10 @@ typedef struct TaskState {
 
     /* This thread's sigaltstack, if it has one */
     struct target_sigaltstack sigaltstack_used;
+    /* This thread's syscall user dispatch state; ~0 means disabled. */
+    abi_ulong sys_dispatch;
+    abi_ulong sys_dispatch_selector;
+    abi_ulong sys_dispatch_len;
     void* ptrace_poke_page;
 } __attribute__((aligned(16))) TaskState;
 

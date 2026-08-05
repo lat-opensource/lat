@@ -86,6 +86,39 @@ if host_machine.cpu_family() == 'loongarch64' and \
     timeout: 30,
   )
   test(
+    'test-syscall-user-dispatch',
+    find_program('test-syscall-user-dispatch.sh'),
+    args: [
+      emulators['latx-x86_64'],
+      files('syscall-user-dispatch.S'),
+    ],
+    protocol: 'exitcode',
+    suite: 'latx-integration',
+    timeout: 30,
+  )
+  test(
+    'test-prctl-x86-abi',
+    find_program('test-prctl-x86-abi.sh'),
+    args: [
+      emulators['latx-x86_64'],
+      files('prctl-x86-abi.S'),
+    ],
+    protocol: 'exitcode',
+    suite: 'latx-integration',
+    timeout: 30,
+  )
+  test(
+    'test-prctl-x86-inherit',
+    find_program('test-prctl-x86-inherit.sh'),
+    args: [
+      emulators['latx-x86_64'],
+      files('prctl-x86-inherit.S'),
+    ],
+    protocol: 'exitcode',
+    suite: 'latx-integration',
+    timeout: 30,
+  )
+  test(
     'test-clone-namespaces',
     find_program('test-clone-namespaces.sh'),
     args: [

@@ -693,6 +693,7 @@ typedef struct target_siginfo {
 } target_siginfo_t;
 
 #define TARGET_SYS_SECCOMP 1
+#define TARGET_SYS_USER_DISPATCH 2
 
 /*
  * si_code values

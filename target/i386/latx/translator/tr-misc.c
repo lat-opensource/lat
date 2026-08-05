@@ -1347,6 +1347,24 @@ bool translate_hlt(IR1_INST *pir1)
 
 bool translate_rdtsc(IR1_INST *pir1)
 {
+    IR2_OPND tsc_mode = ra_alloc_itemp();
+    IR2_OPND tsc_enabled = ra_alloc_label();
+
+    la_ld_d(tsc_mode, env_ir2_opnd, offsetof(CPUX86State, cr[4]));
+    la_andi(tsc_mode, tsc_mode, CR4_TSD_MASK);
+    la_beqz(tsc_mode, tsc_enabled);
+
+    IR2_OPND eip_opnd = ra_alloc_dbt_arg2();
+    li_d(eip_opnd, ir1_addr(pir1));
+    la_store_addrx(eip_opnd, env_ir2_opnd, lsenv_offset_of_eip(lsenv));
+    tr_save_registers_to_env(0xff, 0xff, option_save_xmm, options_to_save());
+    aot_load_host_addr(tsc_mode, (ADDR)helper_raise_gpf,
+                       LOAD_HELPER_RAISE_GPF, 0);
+    la_jirl(zero_ir2_opnd, tsc_mode, 0);
+
+    la_label(tsc_enabled);
+    ra_free_temp(tsc_mode);
+
     IR2_OPND ir2_eax = ra_alloc_gpr(eax_index);
     IR2_OPND ir2_edx = ra_alloc_gpr(edx_index);
     la_rdtime_d(ir2_eax, zero_ir2_opnd);
@@ -1358,6 +1376,24 @@ bool translate_rdtsc(IR1_INST *pir1)
 
 bool translate_rdtscp(IR1_INST *pir1)
 {
+    IR2_OPND tsc_mode = ra_alloc_itemp();
+    IR2_OPND tsc_enabled = ra_alloc_label();
+
+    la_ld_d(tsc_mode, env_ir2_opnd, offsetof(CPUX86State, cr[4]));
+    la_andi(tsc_mode, tsc_mode, CR4_TSD_MASK);
+    la_beqz(tsc_mode, tsc_enabled);
+
+    IR2_OPND eip_opnd = ra_alloc_dbt_arg2();
+    li_d(eip_opnd, ir1_addr(pir1));
+    la_store_addrx(eip_opnd, env_ir2_opnd, lsenv_offset_of_eip(lsenv));
+    tr_save_registers_to_env(0xff, 0xff, option_save_xmm, options_to_save());
+    aot_load_host_addr(tsc_mode, (ADDR)helper_raise_gpf,
+                       LOAD_HELPER_RAISE_GPF, 0);
+    la_jirl(zero_ir2_opnd, tsc_mode, 0);
+
+    la_label(tsc_enabled);
+    ra_free_temp(tsc_mode);
+
     IR2_OPND ir2_eax = ra_alloc_gpr(eax_index);
     IR2_OPND ir2_ecx = ra_alloc_gpr(ecx_index);
     IR2_OPND ir2_edx = ra_alloc_gpr(edx_index);

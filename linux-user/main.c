@@ -303,6 +303,7 @@ void init_task_state(TaskState *ts)
         .ss_size = 0,
         .ss_flags = TARGET_SS_DISABLE,
     };
+    ts->sys_dispatch_len = -1;
 }
 
 CPUArchState *cpu_copy(CPUArchState *env)
@@ -1271,6 +1272,10 @@ int main(int argc, char **argv, char **envp)
     int log_mask;
     unsigned long max_reserved_va;
     bool preserve_argv0;
+#ifdef TARGET_X86_64
+    unsigned int inherited_guest_mdwe = 0;
+    bool inherited_guest_tsc_disabled = false;
+#endif
 
 #if defined(CONFIG_LATX) && defined(__loongarch__)
     /* Lets check hwcap */
@@ -1298,6 +1303,16 @@ int main(int argc, char **argv, char **envp)
     for (wrk = environ; *wrk != NULL; wrk++) {
         (void) envlist_setenv(envlist, *wrk);
     }
+
+#ifdef TARGET_X86_64
+    if (g_strcmp0(getenv(LATX_GUEST_MDWE_ENV), "1") == 0) {
+        inherited_guest_mdwe = TARGET_PR_MDWE_REFUSE_EXEC_GAIN;
+    }
+    inherited_guest_tsc_disabled =
+        g_strcmp0(getenv(LATX_GUEST_TSC_ENV), "1") == 0;
+    (void)envlist_unsetenv(envlist, LATX_GUEST_MDWE_ENV);
+    (void)envlist_unsetenv(envlist, LATX_GUEST_TSC_ENV);
+#endif
 
     /* extracting environment variables */
     optind = parse_args(argc, argv);
@@ -1440,6 +1455,12 @@ int main(int argc, char **argv, char **envp)
     cpu = cpu_create(cpu_type);
     env = cpu->env_ptr;
     cpu_reset(cpu);
+
+#ifdef TARGET_X86_64
+    if (inherited_guest_tsc_disabled) {
+        env->cr[4] |= CR4_TSD_MASK;
+    }
+#endif
 
 
 #ifdef CONFIG_LATX
@@ -1623,6 +1644,9 @@ int main(int argc, char **argv, char **envp)
     /* build Task State */
     ts->info = info;
     ts->bprm = &bprm;
+#ifdef TARGET_X86_64
+    info->prctl_mdwe = inherited_guest_mdwe;
+#endif
     cpu->opaque = ts;
     task_settid(ts);
 #ifdef CONFIG_LATX_AOT
@@ -1635,6 +1659,32 @@ int main(int argc, char **argv, char **envp)
         printf("Error while loading %s: %s\n", exec_path, strerror(-ret));
         _exit(EXIT_FAILURE);
     }
+#ifdef TARGET_X86_64
+    {
+        size_t auxv_size = MIN((size_t)info->auxv_len,
+                               sizeof(info->prctl_auxv));
+
+        memset(info->prctl_auxv, 0, sizeof(info->prctl_auxv));
+        if (auxv_size && copy_from_user(info->prctl_auxv,
+                                        info->saved_auxv, auxv_size)) {
+            fprintf(stderr, "Unable to save guest auxiliary vector\n");
+            _exit(EXIT_FAILURE);
+        }
+        info->prctl_auxv_initialized = true;
+        info->prctl_mm_start_code = info->start_code;
+        info->prctl_mm_end_code = info->end_code;
+        info->prctl_mm_start_data = info->start_data;
+        info->prctl_mm_end_data = info->end_data;
+        info->prctl_mm_start_brk = info->start_brk;
+        info->prctl_mm_brk = info->brk;
+        info->prctl_mm_start_stack = info->start_stack;
+        info->prctl_mm_arg_start = info->arg_strings;
+        info->prctl_mm_arg_end = info->env_strings;
+        info->prctl_mm_env_start = info->env_strings;
+        info->prctl_mm_env_end = info->file_string;
+        info->prctl_mm_exe_fd = -1;
+    }
+#endif
 #ifdef CONFIG_LATX_FAST_JMPCACHE
         if(!latx_fast_jmp_cache_init(env)) {
             fprintf(stderr, "[LATX-ERR] latx_fast_jmp_cache_init error!\n");
