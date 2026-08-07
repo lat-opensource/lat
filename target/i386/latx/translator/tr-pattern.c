@@ -16,6 +16,37 @@
 #ifdef CONFIG_LATX_INSTS_PATTERN
 
 #define WRAP(ins) (dt_X86_INS_##ins)
+#define PARSE_R_IFC_REG(n)                     \
+    ".ifc \\r, $r" #n "\n\t"                 \
+    "\\var = " #n "\n\t"                     \
+    ".endif\n\t"
+/*
+ * LTO may duplicate or reorder file-scope assembly.  Keep the assembler
+ * macro with its users and give each extended asm statement a unique name.
+ */
+#define DEFINE_PARSE_R                         \
+    ".macro parse_r_%= var r\n\t"              \
+    "\\var = -1\n\t"                          \
+    PARSE_R_IFC_REG(0)  PARSE_R_IFC_REG(1)  \
+    PARSE_R_IFC_REG(2)  PARSE_R_IFC_REG(3)  \
+    PARSE_R_IFC_REG(4)  PARSE_R_IFC_REG(5)  \
+    PARSE_R_IFC_REG(6)  PARSE_R_IFC_REG(7)  \
+    PARSE_R_IFC_REG(8)  PARSE_R_IFC_REG(9)  \
+    PARSE_R_IFC_REG(10) PARSE_R_IFC_REG(11) \
+    PARSE_R_IFC_REG(12) PARSE_R_IFC_REG(13) \
+    PARSE_R_IFC_REG(14) PARSE_R_IFC_REG(15) \
+    PARSE_R_IFC_REG(16) PARSE_R_IFC_REG(17) \
+    PARSE_R_IFC_REG(18) PARSE_R_IFC_REG(19) \
+    PARSE_R_IFC_REG(20) PARSE_R_IFC_REG(21) \
+    PARSE_R_IFC_REG(22) PARSE_R_IFC_REG(23) \
+    PARSE_R_IFC_REG(24) PARSE_R_IFC_REG(25) \
+    PARSE_R_IFC_REG(26) PARSE_R_IFC_REG(27) \
+    PARSE_R_IFC_REG(28) PARSE_R_IFC_REG(29) \
+    PARSE_R_IFC_REG(30) PARSE_R_IFC_REG(31) \
+    ".iflt \\var\n\t"                         \
+    ".error \"Unable to parse register name \\r\"\n\t" \
+    ".endif\n\t"                                \
+    ".endm\n\t"
 #define EFLAGS_CACULATE(opnd0, opnd1, inst, i, flags)            \
     do {                                                             \
         bool need_calc_flag = ir1_need_calculate_any_flag(inst);     \
@@ -2445,10 +2476,11 @@ void opt_instptn_fix(CPUState *cpu, TranslationBlock *tb, int index)
                 {
                 case 8:
                     asm volatile (
-                        "parse_r __src, %[src]  \n\t"
-                        "parse_r __dst, %[dst]  \n\t"
+                        DEFINE_PARSE_R
+                        "parse_r_%= __src, %[src]  \n\t"
+                        "parse_r_%= __dst, %[dst]  \n\t"
                         ".word (0x003f0008 | (__src << 10) | (__dst << 5))\n\t" /*x86sub.b*/
-                        "parse_r __flags, %[flags]  \n\t"
+                        "parse_r_%= __flags, %[flags]  \n\t"
                         ".word (0x005c0000 | (0x3f << 10) | __flags)\n\t"  /*x86mfflag*/
                         : [dst]"+r"(a0),
                         [flags]"=r"(eflags)
@@ -2458,10 +2490,11 @@ void opt_instptn_fix(CPUState *cpu, TranslationBlock *tb, int index)
                 break;
                 case 16:
                     asm volatile (
-                        "parse_r __src, %[src]  \n\t"
-                        "parse_r __dst, %[dst]  \n\t"
+                        DEFINE_PARSE_R
+                        "parse_r_%= __src, %[src]  \n\t"
+                        "parse_r_%= __dst, %[dst]  \n\t"
                         ".word (0x003f0009 | (__src << 10) | (__dst << 5))\n\t" /*x86sub.h*/
-                        "parse_r __flags, %[flags]  \n\t"
+                        "parse_r_%= __flags, %[flags]  \n\t"
                         ".word (0x005c0000 | (0x3f << 10) | __flags)\n\t"  /*x86mfflag*/
                         : [dst]"+r"(a0),
                         [flags]"=r"(eflags)
@@ -2471,10 +2504,11 @@ void opt_instptn_fix(CPUState *cpu, TranslationBlock *tb, int index)
                 break;
                 case 32:
                     asm volatile (
-                        "parse_r __src, %[src]  \n\t"
-                        "parse_r __dst, %[dst]  \n\t"
+                        DEFINE_PARSE_R
+                        "parse_r_%= __src, %[src]  \n\t"
+                        "parse_r_%= __dst, %[dst]  \n\t"
                         ".word (0x003f000a | (__src << 10) | (__dst << 5))\n\t" /*x86sub.w*/
-                        "parse_r __flags, %[flags]  \n\t"
+                        "parse_r_%= __flags, %[flags]  \n\t"
                         ".word (0x005c0000 | (0x3f << 10) | __flags)\n\t"  /*x86mfflag*/
                         : [dst]"+r"(a0),
                         [flags]"=r"(eflags)
@@ -2484,10 +2518,11 @@ void opt_instptn_fix(CPUState *cpu, TranslationBlock *tb, int index)
                 break;
                 case 64:
                     asm volatile (
-                        "parse_r __src, %[src]  \n\t"
-                        "parse_r __dst, %[dst]  \n\t"
+                        DEFINE_PARSE_R
+                        "parse_r_%= __src, %[src]  \n\t"
+                        "parse_r_%= __dst, %[dst]  \n\t"
                         ".word (0x003f000b | (__src << 10) | (__dst << 5))\n\t" /*x86sub.d*/
-                        "parse_r __flags, %[flags]  \n\t"
+                        "parse_r_%= __flags, %[flags]  \n\t"
                         ".word (0x005c0000 | (0x3f << 10) | __flags)\n\t"  /*x86mfflag*/
                         : [dst]"+r"(a0),
                         [flags]"=r"(eflags)
@@ -2516,10 +2551,11 @@ void opt_instptn_fix(CPUState *cpu, TranslationBlock *tb, int index)
                 {
                 case 8:
                     asm volatile (
-                        "parse_r __src, %[src]  \n\t"
-                        "parse_r __dst, %[dst]  \n\t"
+                        DEFINE_PARSE_R
+                        "parse_r_%= __src, %[src]  \n\t"
+                        "parse_r_%= __dst, %[dst]  \n\t"
                         ".word (0x003f8010 | (__src << 10) | (__dst << 5))\n\t" /*x86and.b*/
-                        "parse_r __flags, %[flags]  \n\t"
+                        "parse_r_%= __flags, %[flags]  \n\t"
                         ".word (0x005c0000 | (0x3f << 10) | __flags)\n\t"  /*x86mfflag*/
                         : [dst]"+r"(a0),
                         [flags]"=r"(eflags)
@@ -2529,10 +2565,11 @@ void opt_instptn_fix(CPUState *cpu, TranslationBlock *tb, int index)
                 break;
                 case 16:
                     asm volatile (
-                        "parse_r __src, %[src]  \n\t"
-                        "parse_r __dst, %[dst]  \n\t"
+                        DEFINE_PARSE_R
+                        "parse_r_%= __src, %[src]  \n\t"
+                        "parse_r_%= __dst, %[dst]  \n\t"
                         ".word (0x003f8011 | (__src << 10) | (__dst << 5))\n\t" /*x86and.h*/
-                        "parse_r __flags, %[flags]  \n\t"
+                        "parse_r_%= __flags, %[flags]  \n\t"
                         ".word (0x005c0000 | (0x3f << 10) | __flags)\n\t"  /*x86mfflag*/
                         : [dst]"+r"(a0),
                         [flags]"=r"(eflags)
@@ -2542,10 +2579,11 @@ void opt_instptn_fix(CPUState *cpu, TranslationBlock *tb, int index)
                 break;
                 case 32:
                     asm volatile (
-                        "parse_r __src, %[src]  \n\t"
-                        "parse_r __dst, %[dst]  \n\t"
+                        DEFINE_PARSE_R
+                        "parse_r_%= __src, %[src]  \n\t"
+                        "parse_r_%= __dst, %[dst]  \n\t"
                         ".word (0x003f8012 | (__src << 10) | (__dst << 5))\n\t" /*x86and.w*/
-                        "parse_r __flags, %[flags]  \n\t"
+                        "parse_r_%= __flags, %[flags]  \n\t"
                         ".word (0x005c0000 | (0x3f << 10) | __flags)\n\t"  /*x86mfflag*/
                         : [dst]"+r"(a0),
                         [flags]"=r"(eflags)
@@ -2555,10 +2593,11 @@ void opt_instptn_fix(CPUState *cpu, TranslationBlock *tb, int index)
                 break;
                 case 64:
                     asm volatile (
-                        "parse_r __src, %[src]  \n\t"
-                        "parse_r __dst, %[dst]  \n\t"
+                        DEFINE_PARSE_R
+                        "parse_r_%= __src, %[src]  \n\t"
+                        "parse_r_%= __dst, %[dst]  \n\t"
                         ".word (0x003f8013 | (__src << 10) | (__dst << 5))\n\t" /*x86and.d*/
-                        "parse_r __flags, %[flags]  \n\t"
+                        "parse_r_%= __flags, %[flags]  \n\t"
                         ".word (0x005c0000 | (0x3f << 10) | __flags)\n\t"  /*x86mfflag*/
                         : [dst]"+r"(a0),
                         [flags]"=r"(eflags)
