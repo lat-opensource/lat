@@ -304,6 +304,7 @@ void init_task_state(TaskState *ts)
         .ss_flags = TARGET_SS_DISABLE,
     };
     ts->sys_dispatch_len = -1;
+    ts->sys_dispatch_inclusive = false;
 }
 
 CPUArchState *cpu_copy(CPUArchState *env)

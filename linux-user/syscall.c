@@ -272,6 +272,9 @@ out_marker:
 #define SYSCALL_DISPATCH_FILTER_ALLOW 0
 #define SYSCALL_DISPATCH_FILTER_BLOCK 1
 #endif
+#ifndef PR_SYS_DISPATCH_INCLUSIVE_ON
+#define PR_SYS_DISPATCH_INCLUSIVE_ON 2
+#endif
 #ifndef PR_SCHED_CORE
 #define PR_SCHED_CORE 62
 #define PR_SCHED_CORE_GET 0
@@ -9831,6 +9834,8 @@ static int do_fork(CPUArchState *env, unsigned int flags, abi_ulong newsp,
             ts->sys_dispatch = 0;
             ts->sys_dispatch_selector = 0;
             ts->sys_dispatch_len = -1;
+            ts->sys_dispatch_inclusive = false;
+            ts->child_tidptr = 0;
             if (flags & CLONE_NEWIPC) {
                 ts->ipc_namespace_isolated = true;
             }
@@ -11265,39 +11270,50 @@ static void regs_to_seccomp_trace(const struct target_pt_regs *regs,
 }
 #endif
 
-/*
- * Once setproctitle called, the argv should be reinterpted as the name
- * set by setproctitle
- */
-static int open_self_cmdline(void *cpu_env, int fd, const char *oldpath)
-{
-    CPUState *cpu = env_cpu((CPUArchState *)cpu_env);
 #ifdef TARGET_X86_64
-    struct image_info *info = ((TaskState *)cpu->opaque)->info;
-    abi_ulong addr;
-    abi_ulong remaining;
-
-    mmap_lock();
-    addr = info->prctl_mm_arg_start;
-    remaining = info->prctl_mm_arg_end - addr;
-    mmap_unlock();
-
-    while (remaining) {
-        size_t len = MIN((abi_ulong)TARGET_PAGE_SIZE, remaining);
-        void *ptr = lock_user(VERIFY_READ, addr, len, 1);
+static int write_guest_proc_range(int fd, abi_ulong start, abi_ulong end)
+{
+    while (start < end) {
+        size_t len = MIN((abi_ulong)TARGET_PAGE_SIZE, end - start);
+        void *ptr = lock_user(VERIFY_READ, start, len, 1);
         ssize_t written;
 
         if (!ptr) {
             return -1;
         }
         written = write(fd, ptr, len);
-        unlock_user(ptr, addr, 0);
+        unlock_user(ptr, start, 0);
         if (written != len) {
             return -1;
         }
-        addr += len;
-        remaining -= len;
+        start += len;
     }
+    return 0;
+}
+#endif
+
+/* Include the environment tail when userspace has overwritten argv. */
+static int open_self_cmdline(void *cpu_env, int fd, const char *oldpath)
+{
+    CPUState *cpu = env_cpu((CPUArchState *)cpu_env);
+#ifdef TARGET_X86_64
+    struct image_info *info = ((TaskState *)cpu->opaque)->info;
+    abi_ulong start, end, env_end;
+    uint8_t last = 0;
+
+    mmap_lock();
+    start = info->prctl_mm_arg_start;
+    end = info->prctl_mm_arg_end;
+    env_end = info->prctl_mm_env_end;
+    mmap_unlock();
+
+    if (end > start && get_user_u8(last, end - 1)) {
+        return -1;
+    }
+    if (last && env_end > end) {
+        end = env_end;
+    }
+    return write_guest_proc_range(fd, start, end);
 #else
     struct linux_binprm *bprm = ((TaskState *)cpu->opaque)->bprm;
     int i;
@@ -11312,6 +11328,20 @@ static int open_self_cmdline(void *cpu_env, int fd, const char *oldpath)
 #endif
     return 0;
 }
+
+#ifdef TARGET_X86_64
+static int open_self_environ(void *cpu_env, int fd, const char *oldpath)
+{
+    TaskState *ts = env_cpu((CPUArchState *)cpu_env)->opaque;
+    abi_ulong start, end;
+
+    mmap_lock();
+    start = ts->info->prctl_mm_env_start;
+    end = ts->info->prctl_mm_env_end;
+    mmap_unlock();
+    return write_guest_proc_range(fd, start, end);
+}
+#endif
 
 static const char *guest_self_exe_open_path(CPUArchState *env, char *buffer,
                                             size_t size, int *owned_fd)
@@ -11343,15 +11373,28 @@ static const char *guest_self_exe_link_path(CPUArchState *env,
 {
 #ifdef TARGET_X86_64
     TaskState *ts = env_cpu(env)->opaque;
+    char fd_path[64];
     bool overridden;
+    ssize_t len;
+    int fd = -1;
 
     mmap_lock();
-    overridden = ts->info->prctl_mm_exe_path != NULL;
+    overridden = ts->info->prctl_mm_exe_fd >= 0;
     if (overridden) {
-        pstrcpy(buffer, size, ts->info->prctl_mm_exe_path);
+        fd = fcntl(ts->info->prctl_mm_exe_fd, F_DUPFD_CLOEXEC, 0);
     }
     mmap_unlock();
     if (overridden) {
+        if (fd < 0) {
+            return NULL;
+        }
+        snprintf(fd_path, sizeof(fd_path), "/proc/self/fd/%d", fd);
+        len = readlink(fd_path, buffer, size - 1);
+        close(fd);
+        if (len < 0) {
+            return NULL;
+        }
+        buffer[len] = 0;
         return buffer;
     }
 #endif
@@ -11368,14 +11411,12 @@ static bool guest_self_exe_exec_paths(CPUArchState *env, char *link_buffer,
 #ifdef TARGET_X86_64
     TaskState *ts = env_cpu(env)->opaque;
     bool overridden;
+    ssize_t len;
 
     mmap_lock();
     overridden = ts->info->prctl_mm_exe_fd >= 0;
     if (overridden) {
         *owned_fd = fcntl(ts->info->prctl_mm_exe_fd, F_DUPFD_CLOEXEC, 0);
-        if (*owned_fd >= 0) {
-            pstrcpy(link_buffer, link_size, ts->info->prctl_mm_exe_path);
-        }
     }
     mmap_unlock();
     if (overridden) {
@@ -11383,6 +11424,13 @@ static bool guest_self_exe_exec_paths(CPUArchState *env, char *link_buffer,
             return false;
         }
         snprintf(open_buffer, open_size, "/proc/self/fd/%d", *owned_fd);
+        len = readlink(open_buffer, link_buffer, link_size - 1);
+        if (len < 0) {
+            close(*owned_fd);
+            *owned_fd = -1;
+            return false;
+        }
+        link_buffer[len] = 0;
         *link_path = link_buffer;
         *open_path = open_buffer;
         return true;
@@ -11747,7 +11795,8 @@ void guest_vma_name_reset(abi_ulong start, abi_ulong len)
 }
 
 void guest_vma_name_remap(abi_ulong old_start, abi_ulong old_len,
-                          abi_ulong new_start, abi_ulong new_len)
+                          abi_ulong new_start, abi_ulong new_len,
+                          bool keep_old)
 {
     GPtrArray *saved = g_ptr_array_new_with_free_func(
         (GDestroyNotify)guest_vma_name_free);
@@ -11773,7 +11822,9 @@ void guest_vma_name_remap(abi_ulong old_start, abi_ulong old_len,
         }
     }
 
-    guest_vma_name_apply_locked(old_start, old_end, NULL);
+    if (!keep_old) {
+        guest_vma_name_apply_locked(old_start, old_end, NULL);
+    }
     guest_vma_name_apply_locked(new_start, new_end, NULL);
     for (i = 0; i < saved->len; i++) {
         GuestVmaName *entry = g_ptr_array_index(saved, i);
@@ -12670,6 +12721,9 @@ static int do_openat(void *cpu_env, int dirfd, const char *pathname, int flags, 
         { "stat", open_self_stat, is_proc_myself },
         { "auxv", open_self_auxv, is_proc_myself },
         { "cmdline", open_self_cmdline, is_proc_myself },
+#ifdef TARGET_X86_64
+        { "environ", open_self_environ, is_proc_myself },
+#endif
         { "cmdline", open_other_cmdline, is_proc_other},
 #ifndef CONFIG_LOONGARCH_NEW_WORLD
         { "status", open_proc_status, is_proc_other },
@@ -12904,16 +12958,10 @@ static int host_to_target_cpu_mask(const unsigned long *host_mask,
     return 0;
 }
 
-static bool is_x86_file(char *file_name)
+static bool is_x86_elf_fd(int fd)
 {
-    int fd = open(file_name, O_RDONLY);
-    if (fd == -1) {
-        return false;
-    }
-
     Elf64_Ehdr ehdr;
-    int read_size = read(fd, &ehdr, sizeof(ehdr));
-    close(fd);
+    ssize_t read_size = pread(fd, &ehdr, sizeof(ehdr), 0);
 
     if (read_size != sizeof(ehdr)) {
         return false;
@@ -12926,6 +12974,49 @@ static bool is_x86_file(char *file_name)
 
     return (ehdr.e_machine == EM_386) || (ehdr.e_machine == EM_X86_64);
 }
+
+static bool is_x86_file_at(int dirfd, const char *file_name, int flags)
+{
+    int fd;
+    bool ret;
+
+    if (!file_name[0] && (flags & AT_EMPTY_PATH)) {
+        return is_x86_elf_fd(dirfd);
+    }
+    fd = openat(dirfd, path(file_name), O_RDONLY | O_CLOEXEC);
+    if (fd < 0) {
+        return false;
+    }
+    ret = is_x86_elf_fd(fd);
+    close(fd);
+    return ret;
+}
+
+#ifdef TARGET_X86_64
+static bool is_self_file_at(int dirfd, const char *file_name, int flags)
+{
+    struct stat target_st, self_st;
+    int fd = -1;
+    bool ret;
+
+    if (!file_name[0] && (flags & AT_EMPTY_PATH)) {
+        fd = dirfd;
+    } else {
+        fd = openat(dirfd, path(file_name), O_PATH | O_CLOEXEC);
+        if (fd < 0) {
+            return false;
+        }
+    }
+    ret = fstat(fd, &target_st) == 0 &&
+          stat("/proc/self/exe", &self_st) == 0 &&
+          target_st.st_dev == self_st.st_dev &&
+          target_st.st_ino == self_st.st_ino;
+    if (fd != dirfd) {
+        close(fd);
+    }
+    return ret;
+}
+#endif
 
 static abi_long do_prctl_syscall_user_dispatch(CPUArchState *env,
                                                abi_ulong mode,
@@ -12942,9 +13033,12 @@ static abi_long do_prctl_syscall_user_dispatch(CPUArchState *env,
             return -TARGET_EINVAL;
         }
         ts->sys_dispatch_len = -1;
+        ts->sys_dispatch_inclusive = false;
         return 0;
     case PR_SYS_DISPATCH_ON:
-        if (offset && offset + length <= offset) {
+    case PR_SYS_DISPATCH_INCLUSIVE_ON:
+        if ((mode == PR_SYS_DISPATCH_INCLUSIVE_ON && !length) ||
+            (offset && offset + length <= offset)) {
             return -TARGET_EINVAL;
         }
         if (selector && !access_ok(cpu, VERIFY_READ, selector, 1)) {
@@ -12953,6 +13047,8 @@ static abi_long do_prctl_syscall_user_dispatch(CPUArchState *env,
         ts->sys_dispatch = offset;
         ts->sys_dispatch_len = length;
         ts->sys_dispatch_selector = selector;
+        ts->sys_dispatch_inclusive =
+            mode == PR_SYS_DISPATCH_INCLUSIVE_ON;
         return 0;
     default:
         return -TARGET_EINVAL;
@@ -13157,7 +13253,6 @@ static abi_long guest_prctl_set_auxv(struct image_info *info,
 
 struct guest_prctl_exe_file {
     int fd;
-    char *path;
 };
 
 static abi_long guest_prctl_prepare_exe_file(unsigned int fd,
@@ -13165,13 +13260,9 @@ static abi_long guest_prctl_prepare_exe_file(unsigned int fd,
 {
     struct stat st;
     struct statvfs fs;
-    char fd_path[64];
-    char path[PATH_MAX];
-    ssize_t path_len;
     int saved_fd;
 
     file->fd = -1;
-    file->path = NULL;
 
     if (fstat(fd, &st) < 0) {
         return get_errno(-1);
@@ -13188,16 +13279,7 @@ static abi_long guest_prctl_prepare_exe_file(unsigned int fd,
     if (saved_fd < 0) {
         return get_errno(-1);
     }
-    snprintf(fd_path, sizeof(fd_path), "/proc/self/fd/%d", fd);
-    path_len = readlink(fd_path, path, sizeof(path) - 1);
-    if (path_len < 0) {
-        close(saved_fd);
-        return get_errno(-1);
-    }
-    path[path_len] = 0;
-
     file->fd = saved_fd;
-    file->path = g_strdup(path);
     return 0;
 }
 
@@ -13206,16 +13288,12 @@ static void guest_prctl_commit_exe_file(struct image_info *info,
                                         struct guest_prctl_exe_file *file)
 {
     int old_fd = info->prctl_mm_exe_fd;
-    char *old_path = info->prctl_mm_exe_path;
 
     info->prctl_mm_exe_fd = file->fd;
-    info->prctl_mm_exe_path = file->path;
     file->fd = -1;
-    file->path = NULL;
     if (old_fd >= 0) {
         close(old_fd);
     }
-    g_free(old_path);
 }
 
 static abi_long guest_prctl_set_exe_file(struct image_info *info,
@@ -13653,16 +13731,18 @@ static bool guest_prctl_exec_env_reserved(const char *entry, const char *name)
 }
 
 static char **prepare_guest_prctl_exec_env(CPUArchState *env, char **envp,
-                                           int envc, char **mdwe_env,
-                                           char **tsc_env)
+                                           int envc, bool restore,
+                                           char **mdwe_env, char **tsc_env)
 {
     char **exec_envp;
     int kept = 0;
     int extra = 0;
     int i;
 
-    *mdwe_env = guest_prctl_exec_env(env, LATX_GUEST_MDWE_ENV);
-    *tsc_env = guest_prctl_exec_env(env, LATX_GUEST_TSC_ENV);
+    *mdwe_env = restore ?
+        guest_prctl_exec_env(env, LATX_GUEST_MDWE_ENV) : NULL;
+    *tsc_env = restore ?
+        guest_prctl_exec_env(env, LATX_GUEST_TSC_ENV) : NULL;
     extra += *mdwe_env != NULL;
     extra += *tsc_env != NULL;
     exec_envp = g_new(char *, envc + extra + 1);
@@ -13683,7 +13763,8 @@ static char **prepare_guest_prctl_exec_env(CPUArchState *env, char **envp,
 }
 #endif
 
-/* This is an internal helper for do_syscall so that it is easier
+/*
+ * This is an internal helper for do_syscall so that it is easier
  * to have a single return point, so that actions, such as logging
  * of syscall results, can be performed.
  * All errnos that do_syscall() returns must be -TARGET_<errcode>.
@@ -13994,24 +14075,25 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
             }
             *q = NULL;
 
-#ifdef TARGET_X86_64
-            exec_envp = prepare_guest_prctl_exec_env(env, envp, envc,
-                                                     &prctl_mdwe_env,
-                                                     &prctl_tsc_env);
-#else
-            exec_envp = envp;
-#endif
-
             p = lock_user_string(arg2);
             if (!(p)) {
                 goto execveat_efault;
             }
 
-            char* pname = strrchr(p, '/');
-            bool x86_file;
-            if (p) {
-                x86_file = is_x86_file(p);
-            }
+            char *pname = strrchr(p, '/');
+            bool self_exe = is_proc_myself((const char *)p, "exe");
+            bool x86_file = self_exe || is_x86_file_at(arg1, p, arg5);
+#ifdef TARGET_X86_64
+            bool restore_prctl = x86_file ||
+                                 is_self_file_at(arg1, p, arg5);
+
+            exec_envp = prepare_guest_prctl_exec_env(env, envp, envc,
+                                                     restore_prctl,
+                                                     &prctl_mdwe_env,
+                                                     &prctl_tsc_env);
+#else
+            exec_envp = envp;
+#endif
             if (argp[0] && p && pname && strcmp(p, argp[0]) &&
                     strcmp(pname + 1, argp[0]) && x86_file) {
                 argc = argc + 3;
@@ -14065,7 +14147,7 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
              * before the execve completes and makes it the other
              * program's problem.
              */
-            if (is_proc_myself((const char *)p, "exe")) {
+            if (self_exe) {
                 char exe_path_buffer[64];
                 const char *exe_pathname;
                 int exe_fd;
@@ -14086,7 +14168,7 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
                 ret = get_errno(safe_execveat(arg1, p, argp, exec_envp,
                                               arg5));
             }
-            unlock_user(p, arg1, 0);
+            unlock_user(p, arg2, 0);
 
             goto execveat_end;
 
@@ -14180,22 +14262,26 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
             }
             *q = NULL;
 
+            p = lock_user_string(arg1);
+            if (!p) {
+                goto execve_efault;
+            }
+
+            char *pname = strrchr(p, '/');
+            bool self_exe = is_proc_myself((const char *)p, "exe");
+            bool x86_file = self_exe ||
+                            is_x86_file_at(AT_FDCWD, p, 0);
 #ifdef TARGET_X86_64
+            bool restore_prctl = x86_file ||
+                                 is_self_file_at(AT_FDCWD, p, 0);
+
             exec_envp = prepare_guest_prctl_exec_env(env, envp, envc,
+                                                     restore_prctl,
                                                      &prctl_mdwe_env,
                                                      &prctl_tsc_env);
 #else
             exec_envp = envp;
 #endif
-
-            if (!(p = lock_user_string(arg1)))
-                goto execve_efault;
-
-            char* pname = strrchr(p, '/');
-            bool x86_file;
-            if (p) {
-                x86_file = is_x86_file(p);
-            }
             if (argp[0] && p && pname && strcmp(p, argp[0]) &&
                     strcmp(pname + 1, argp[0]) && x86_file) {
                 argc = argc + 3;
@@ -14238,7 +14324,7 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
                 }
             }
 
-            if (is_proc_myself((const char *)p, "exe")) {
+            if (self_exe) {
                 char real[PATH_MAX];
                 char exe_path_buffer[64];
                 const char *temp;
@@ -20086,7 +20172,8 @@ static bool syscall_user_dispatch(CPUArchState *env, int num, uint32_t arch)
     }
 
     cpu_get_tb_cpu_state(env, &pc, &cs_base, &flags);
-    if (likely(pc - ts->sys_dispatch < ts->sys_dispatch_len)) {
+    if (likely((pc - ts->sys_dispatch < ts->sys_dispatch_len) !=
+               ts->sys_dispatch_inclusive)) {
         return false;
     }
     if (unlikely(pc == default_sigreturn || pc == default_rt_sigreturn)) {

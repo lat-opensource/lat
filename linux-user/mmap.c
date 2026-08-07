@@ -21,6 +21,10 @@
 #include "trace.h"
 #include "exec/log.h"
 #include "qemu.h"
+
+#ifndef MREMAP_DONTUNMAP
+#define MREMAP_DONTUNMAP 4
+#endif
 #ifdef CONFIG_LATX
 #include "latx-config.h"
 #endif
@@ -1255,10 +1259,14 @@ abi_long target_mremap(abi_ulong old_addr, abi_ulong old_size,
                        abi_ulong new_size, unsigned long flags,
                        abi_ulong new_addr, int rlimit_as_account)
 {
+    abi_ulong source_size;
+    abi_ulong account_add = 0;
+    abi_ulong account_sub = 0;
+    bool keep_old;
     int prot;
     void *host_addr;
 
-    if (flags & ~(MREMAP_FIXED | MREMAP_MAYMOVE)) {
+    if (flags & ~(MREMAP_FIXED | MREMAP_MAYMOVE | MREMAP_DONTUNMAP)) {
         errno = EINVAL;
         return -1;
     }
@@ -1268,12 +1276,40 @@ abi_long target_mremap(abi_ulong old_addr, abi_ulong old_size,
         return -1;
     }
 
+    if (!new_size) {
+        errno = EINVAL;
+        return -1;
+    }
+    new_size = TARGET_PAGE_ALIGN(new_size);
+    if (!new_size) {
+        errno = ENOMEM;
+        return -1;
+    }
+    if (old_size) {
+        old_size = TARGET_PAGE_ALIGN(old_size);
+        if (!old_size) {
+            errno = ENOMEM;
+            return -1;
+        }
+    } else if (!(flags & MREMAP_MAYMOVE)) {
+        errno = EINVAL;
+        return -1;
+    }
+
+    if ((flags & MREMAP_DONTUNMAP) &&
+        (!(flags & MREMAP_MAYMOVE) || !old_size || old_size != new_size)) {
+        errno = EINVAL;
+        return -1;
+    }
+
     if (old_addr & ~TARGET_PAGE_MASK) {
         errno = EINVAL;
         return -1;
     }
 
-    if (!guest_range_valid_untagged(old_addr, old_size) ||
+    keep_old = !old_size || (flags & MREMAP_DONTUNMAP);
+    source_size = old_size ? old_size : new_size;
+    if (!guest_range_valid_untagged(old_addr, source_size) ||
         ((flags & MREMAP_FIXED) &&
          !guest_range_valid_untagged(new_addr, new_size)) ||
         ((flags & MREMAP_MAYMOVE) == 0 &&
@@ -1282,10 +1318,17 @@ abi_long target_mremap(abi_ulong old_addr, abi_ulong old_size,
         return -1;
     }
 
-    if (option_prlimit && rlimit_as_account && (new_size > old_size)
-        && (vir_rlimit_as != RLIM_INFINITY)) {
-        abi_ulong diff = new_size - old_size;
-        if (diff + vir_rlimit_as_acc > vir_rlimit_as ) {
+    if (keep_old) {
+        account_add = new_size;
+    } else if (new_size > old_size) {
+        account_add = new_size - old_size;
+    } else {
+        account_sub = old_size - new_size;
+    }
+    if (option_prlimit && rlimit_as_account && account_add &&
+        vir_rlimit_as != RLIM_INFINITY) {
+        if (account_add > vir_rlimit_as -
+                          MIN(vir_rlimit_as_acc, vir_rlimit_as)) {
             errno = ENOMEM;
             return -1;
         }
@@ -1293,11 +1336,50 @@ abi_long target_mremap(abi_ulong old_addr, abi_ulong old_size,
 
     mmap_lock();
 
-    if (flags & MREMAP_FIXED) {
+    prot = page_get_flags(old_addr);
+    if (!keep_old && (flags & MREMAP_MAYMOVE) &&
+        (prot & PAGE_ANON) && !(prot & PAGE_MEMSHARE) &&
+        !(old_addr & ~qemu_host_page_mask) &&
+        (HOST_PAGE_ALIGN(old_size) != old_size ||
+         HOST_PAGE_ALIGN(new_size) != new_size)) {
+        abi_ulong mmap_start = new_addr;
+        size_t copy_size = MIN(old_size, new_size);
+        int host_prot = (prot & PAGE_WRITE ? PROT_WRITE : 0) |
+                        (prot & (PAGE_READ | PAGE_EXEC) ? PROT_READ : 0);
+
+        if (!(flags & MREMAP_FIXED)) {
+            mmap_start = mmap_find_vma(0, new_size, TARGET_PAGE_SIZE);
+        }
+        if (mmap_start == (abi_ulong)-1 ||
+            (mmap_start & ~qemu_host_page_mask) ||
+            (mmap_start < old_addr + old_size &&
+             old_addr < mmap_start + new_size)) {
+            errno = mmap_start == (abi_ulong)-1 ? ENOMEM : EINVAL;
+            host_addr = MAP_FAILED;
+        } else {
+            host_addr = mmap(g2h_untagged(mmap_start), new_size,
+                             PROT_READ | PROT_WRITE,
+                             MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS,
+                             -1, 0);
+            if (host_addr != MAP_FAILED) {
+                memcpy(host_addr, g2h_untagged(old_addr), copy_size);
+                if (mprotect(host_addr, HOST_PAGE_ALIGN(new_size),
+                             host_prot) < 0) {
+                    int saved_errno = errno;
+
+                    munmap(host_addr, HOST_PAGE_ALIGN(new_size));
+                    errno = saved_errno;
+                    host_addr = MAP_FAILED;
+                } else {
+                    new_addr = mmap_start;
+                }
+            }
+        }
+    } else if (flags & MREMAP_FIXED) {
         host_addr = mremap(g2h_untagged(old_addr), old_size, new_size,
                            flags, g2h_untagged(new_addr));
 
-        if (reserved_va && host_addr != MAP_FAILED) {
+        if (reserved_va && host_addr != MAP_FAILED && !keep_old) {
             /* If new and old addresses overlap then the above mremap will
                already have failed with EINVAL.  */
             mmap_reserve(old_addr, old_size);
@@ -1317,7 +1399,7 @@ abi_long target_mremap(abi_ulong old_addr, abi_ulong old_size,
             if (host_addr == MAP_FAILED)
                 errno = EFAULT;
             else {
-                if (reserved_va) {
+                if (reserved_va && !keep_old) {
                     mmap_reserve(old_addr, old_size);
                 }
             }
@@ -1335,12 +1417,13 @@ abi_long target_mremap(abi_ulong old_addr, abi_ulong old_size,
             }
         }
         if (prot == 0) {
-            if (reserved_va && new_size > old_size && num_pages)
+            if (reserved_va && new_size > old_size && num_pages) {
                 if (is_shadow_page_shmm(TARGET_PAGE_ALIGN(old_addr + old_size))) {
                     fprintf(stderr, "%s:%d, should not happen\n", __func__, __LINE__);
                 }
                 munmap(g2h_untagged(TARGET_PAGE_ALIGN(old_addr + old_size)),
-                                        num_pages*TARGET_PAGE_SIZE);
+                       num_pages * TARGET_PAGE_SIZE);
+            }
             host_addr = mremap(g2h_untagged(old_addr),
                                old_size, new_size, flags);
 
@@ -1366,38 +1449,42 @@ abi_long target_mremap(abi_ulong old_addr, abi_ulong old_size,
         new_addr = -1;
     } else {
         new_addr = h2g(host_addr);
-        prot = page_get_flags(old_addr);
 #ifdef TARGET_X86_64
-        guest_vma_name_remap(old_addr, old_size, new_addr, new_size);
+        guest_vma_name_remap(old_addr, source_size, new_addr, new_size,
+                             keep_old);
 #endif
-        page_set_flags(old_addr, old_addr + old_size, 0);
-        if (option_monitor_shared_mem && (flags & MAP_TYPE) == MAP_SHARED) {
-            prot |= PAGE_MEMSHARE;
+        if (!keep_old) {
+            page_set_flags(old_addr, old_addr + old_size, 0);
         }
         page_set_flags(new_addr, new_addr + new_size,
                        prot | PAGE_VALID | PAGE_RESET);
-    }
 
 #ifdef CONFIG_LATX_AOT
-    if (option_aot) {
-        seg_info *seg = segment_tree_lookup2(old_addr, old_addr + old_size);
-        if (seg) {
-            segment_tree_remove(seg);
+        if (option_aot) {
+            seg_info *seg;
+
+            if (!keep_old) {
+                seg = segment_tree_lookup2(old_addr, old_addr + old_size);
+                if (seg) {
+                    segment_tree_remove(seg);
+                }
+            }
+            seg = segment_tree_lookup2(new_addr, new_addr + new_size);
+            if (seg) {
+                segment_tree_remove(seg);
+            }
         }
-        seg = segment_tree_lookup2(new_addr, new_addr + new_size);
-        if (seg) {
-            segment_tree_remove(seg);
-        }
-    }
 #endif
+    }
 
     mmap_unlock();
 
-    if (option_prlimit && rlimit_as_account && (new_size != old_size)
-        && (vir_rlimit_as != RLIM_INFINITY)) {
-        abi_long diff = new_size - old_size;
-        if ((diff > 0) || (vir_rlimit_as_acc > -diff)) {
-            vir_rlimit_as_acc += diff;
+    if (host_addr != MAP_FAILED && option_prlimit && rlimit_as_account &&
+        vir_rlimit_as != RLIM_INFINITY) {
+        if (account_add) {
+            vir_rlimit_as_acc += account_add;
+        } else if (vir_rlimit_as_acc > account_sub) {
+            vir_rlimit_as_acc -= account_sub;
         } else {
             vir_rlimit_as_acc = 0;
         }

@@ -1,4 +1,6 @@
 .equ __NR_execve, 59
+.equ __NR_openat, 257
+.equ __NR_execveat, 322
 .equ __NR_rt_sigaction, 13
 .equ __NR_prctl, 157
 .equ __NR_exit, 60
@@ -16,6 +18,8 @@
 .equ PR_GET_MDWE, 66
 .equ PR_MDWE_REFUSE_EXEC_GAIN, 1
 .equ PR_MDWE_NO_INHERIT, 2
+.equ AT_FDCWD, -100
+.equ AT_EMPTY_PATH, 0x1000
 
 .section .text
 .global _start
@@ -124,12 +128,34 @@ fill_exec_argv:
     mov %rbx, 8(%rsi)
     mov %r14, 16(%rsi)
     mov %r15, 24(%rsi)
+    cmpb $'i', (%r14)
+    je exec_self_at_empty
     mov $__NR_execve, %eax
     mov %r15, %rdi
     mov %r9, %rdx
     syscall
+
+exec_failed:
     mov $32, %edi
     jmp exit_now
+
+exec_self_at_empty:
+    mov $__NR_openat, %eax
+    mov $AT_FDCWD, %edi
+    mov %r15, %rsi
+    xor %edx, %edx
+    xor %r10d, %r10d
+    syscall
+    test %rax, %rax
+    js exec_failed
+    mov %eax, %edi
+    lea empty_path(%rip), %rsi
+    lea exec_argv(%rip), %rdx
+    mov %r9, %r10
+    mov $AT_EMPTY_PATH, %r8d
+    mov $__NR_execveat, %eax
+    syscall
+    jmp exec_failed
 
 inherit_stage:
     mov $__NR_prctl, %eax
@@ -204,6 +230,8 @@ no_inherit_arg:
     .asciz "n"
 inherit_arg:
     .asciz "i"
+empty_path:
+    .asciz ""
 untrusted_env_arg:
     .asciz "u"
 fake_mdwe_env:

@@ -225,6 +225,8 @@ blocked_syscall_after:
 inclusive_blocked:
     mov $__NR_getpid, %eax
     syscall
+inclusive_blocked_after:
+    nop
 inclusive_blocked_end:
     cmp $__NR_getpid, %rax
     jne bad_return
@@ -302,7 +304,7 @@ inclusive_dispatch:
     jne bad_siginfo
     cmpl $SYS_USER_DISPATCH, 8(%rsi)
     jne bad_siginfo
-    lea inclusive_blocked_end(%rip), %rax
+    lea inclusive_blocked_after(%rip), %rax
     cmpq %rax, 16(%rsi)
     jne bad_siginfo
     cmpl $__NR_getpid, 24(%rsi)

@@ -27,6 +27,7 @@ typedef long slong;
 #define __NR_set_tid_address  218
 #define __NR_exit_group       231
 #define __NR_openat           257
+#define __NR_execveat         322
 #define __NR_readlink          89
 #define __NR_rename            82
 #define __NR_unlink            87
@@ -52,6 +53,7 @@ typedef long slong;
 #define MREMAP_DONTUNMAP 4
 
 #define AT_FDCWD (-100)
+#define AT_EMPTY_PATH 0x1000
 
 #define IPC_PRIVATE 0
 #define IPC_CREAT   01000
@@ -975,8 +977,8 @@ static int test_set_mm_privileged(const char *self_path)
     }
     len = syscall3(__NR_read, fd, (slong)buffer, sizeof(buffer));
     syscall1(__NR_close, fd);
-    if (len != sizeof(cmdline) ||
-        !bytes_equal(buffer, cmdline, sizeof(cmdline))) {
+    if (len != sizeof(proctitle) ||
+        !bytes_equal(buffer, proctitle, sizeof(proctitle))) {
         return 125;
     }
 
@@ -1060,8 +1062,9 @@ static int test_set_mm_privileged(const char *self_path)
     return 0;
 }
 
-static int test_native_exec_env(const char *helper_path)
+static int test_native_exec_env(const char *helper_path, int at_empty_path)
 {
+    static char empty_path[] = "";
     static char mdwe_env[] = "_LATX_GUEST_MDWE=forged";
     static char tsc_env[] = "_LATX_GUEST_TSC=forged";
     static char keep_env[] = "KEEP=1";
@@ -1073,7 +1076,18 @@ static int test_native_exec_env(const char *helper_path)
         do_prctl(PR_SET_TSC, PR_TSC_SIGSEGV, 0, 0, 0)) {
         return 130;
     }
-    syscall3(__NR_execve, (slong)helper_path, (slong)argv, (slong)envp);
+    if (at_empty_path) {
+        slong fd = syscall4(__NR_openat, AT_FDCWD, (slong)helper_path, 0, 0);
+
+        if (fd < 0) {
+            return 131;
+        }
+        syscall5(__NR_execveat, fd, (slong)empty_path, (slong)argv,
+                 (slong)envp, AT_EMPTY_PATH);
+    } else {
+        syscall3(__NR_execve, (slong)helper_path, (slong)argv,
+                 (slong)envp);
+    }
     return 131;
 }
 
@@ -1112,7 +1126,10 @@ int test_main(ulong *stack)
         return test_set_mm_privileged(argc == 3 ? argv[2] : 0);
     }
     if (mode == 'e') {
-        return test_native_exec_env(argc == 3 ? argv[2] : 0);
+        return test_native_exec_env(argc == 3 ? argv[2] : 0, 0);
+    }
+    if (mode == 'a') {
+        return test_native_exec_env(argc == 3 ? argv[2] : 0, 1);
     }
     return 101;
 }

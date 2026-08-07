@@ -61,4 +61,5 @@ for mode in 0 1; do
     run_case "$mode" "$label" f
     run_case "$mode" "$label" i
     run_case "$mode" "$label" e "$workdir/prctl-native-env-helper"
+    run_case "$mode" "$label" a "$workdir/prctl-native-env-helper"
 done

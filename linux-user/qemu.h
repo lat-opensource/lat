@@ -70,8 +70,8 @@ struct image_info {
         uint32_t        note_flags;
 
 #ifdef TARGET_X86_64
-        /* Linux 6.14 x86_64 has 50 native words in mm->saved_auxv. */
-#define TARGET_X86_64_PRCTL_AUXV_WORDS 50
+        /* Current Linux x86_64 has 54 native words in mm->saved_auxv. */
+#define TARGET_X86_64_PRCTL_AUXV_WORDS 54
         abi_ulong       prctl_auxv[TARGET_X86_64_PRCTL_AUXV_WORDS];
         bool            prctl_auxv_initialized;
         unsigned int    prctl_mdwe;
@@ -87,7 +87,6 @@ struct image_info {
         abi_ulong       prctl_mm_env_start;
         abi_ulong       prctl_mm_env_end;
         int             prctl_mm_exe_fd;
-        char            *prctl_mm_exe_path;
 #endif
 
 #ifdef TARGET_MIPS
@@ -105,7 +104,8 @@ struct image_info {
 /* Called with the linux-user mmap lock held. */
 void guest_vma_name_reset(abi_ulong start, abi_ulong len);
 void guest_vma_name_remap(abi_ulong old_start, abi_ulong old_len,
-                          abi_ulong new_start, abi_ulong new_len);
+                          abi_ulong new_start, abi_ulong new_len,
+                          bool keep_old);
 #endif
 extern struct image_info info1, *info;
 
@@ -228,6 +228,7 @@ typedef struct TaskState {
     abi_ulong sys_dispatch;
     abi_ulong sys_dispatch_selector;
     abi_ulong sys_dispatch_len;
+    bool sys_dispatch_inclusive;
     void* ptrace_poke_page;
 } __attribute__((aligned(16))) TaskState;
 
