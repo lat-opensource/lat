@@ -24,6 +24,7 @@
 #include "qemu/memfd.h"
 #include "qemu/queue.h"
 #include "qemu/rcu.h"
+#include "qemu-common.h"
 #include <elf.h>
 #include <endian.h>
 #include <grp.h>
@@ -9823,13 +9824,6 @@ static int do_fork(CPUArchState *env, unsigned int flags, abi_ulong newsp,
             if (flags & CLONE_CHILD_SETTID)
                 put_user_u32(sys_gettid(), child_tidptr);
             ts = (TaskState *)cpu->opaque;
-#ifdef TARGET_X86_64
-            mmap_lock();
-            if (ts->info->prctl_mdwe & TARGET_PR_MDWE_NO_INHERIT) {
-                ts->info->prctl_mdwe = 0;
-            }
-            mmap_unlock();
-#endif
             /* Linux clears syscall user dispatch in every fork child. */
             ts->sys_dispatch = 0;
             ts->sys_dispatch_selector = 0;
@@ -11281,7 +11275,7 @@ static int write_guest_proc_range(int fd, abi_ulong start, abi_ulong end)
         if (!ptr) {
             return -1;
         }
-        written = write(fd, ptr, len);
+        written = qemu_write_full(fd, ptr, len);
         unlock_user(ptr, start, 0);
         if (written != len) {
             return -1;
@@ -12233,6 +12227,7 @@ static int open_self_stat(void *cpu_env, int fd, const char *oldpath)
     g_autoptr(GString) buf = g_string_new(NULL);
     int i = 0;
     FILE *fp;
+    char *line = NULL;
     char *orig = NULL;
     char *word = NULL;
     size_t orig_len = 0;
@@ -12266,10 +12261,19 @@ static int open_self_stat(void *cpu_env, int fd, const char *oldpath)
 #endif
 
     fp = fopen("/proc/self/stat", "r");
-    if (fp == NULL || getline(&orig, &orig_len, fp) == -1)
+    if (fp == NULL) {
         return -1;
+    }
+    if (getline(&line, &orig_len, fp) == -1) {
+        int saved_errno = errno;
 
-    word = orig;
+        fclose(fp);
+        g_free(line);
+        errno = saved_errno;
+        return -1;
+    }
+
+    word = line;
 
     do {
         orig = word;
@@ -12279,8 +12283,9 @@ static int open_self_stat(void *cpu_env, int fd, const char *oldpath)
         if (NULL == word) {
             /* Find a pointer to '\0' */
             word = strchr(orig, '\0');
-            if (NULL == word)
-                return -1;
+            if (NULL == word) {
+                goto fail;
+            }
             /* \0 not needed */
             word --;
             /* Don't enter the loop next time */
@@ -12337,19 +12342,28 @@ static int open_self_stat(void *cpu_env, int fd, const char *oldpath)
                             ts->info->start_stack);
 #endif
         } else {
-            if (write(fd, orig, word_len) != word_len)
-                return -1;
+            if (qemu_write_full(fd, orig, word_len) != word_len) {
+                goto fail;
+            }
             continue;
         }
 
-        if (write(fd, buf->str, buf->len) != buf->len) {
-            return -1;
+        if (qemu_write_full(fd, buf->str, buf->len) != buf->len) {
+            goto fail;
         }
 
     } while(++i);
 
     fclose(fp);
+    g_free(line);
     return 0;
+
+fail:
+    i = errno;
+    fclose(fp);
+    g_free(line);
+    errno = i;
+    return -1;
 }
 
 static int open_self_auxv(void *cpu_env, int fd, const char *oldpath)
@@ -12358,7 +12372,6 @@ static int open_self_auxv(void *cpu_env, int fd, const char *oldpath)
     TaskState *ts = cpu->opaque;
 #ifdef TARGET_X86_64
     abi_ulong auxv[TARGET_X86_64_PRCTL_AUXV_WORDS];
-    const char *ptr = (const char *)auxv;
     size_t words;
     size_t len;
 
@@ -12371,15 +12384,8 @@ static int open_self_auxv(void *cpu_env, int fd, const char *oldpath)
         }
     }
     len = MIN(words + 2, ARRAY_SIZE(auxv)) * sizeof(auxv[0]);
-
-    while (len > 0) {
-        ssize_t written = write(fd, ptr, len);
-
-        if (written <= 0) {
-            break;
-        }
-        len -= written;
-        ptr += written;
+    if (qemu_write_full(fd, auxv, len) != len) {
+        return -1;
     }
     lseek(fd, 0, SEEK_SET);
 #else
@@ -12393,17 +12399,12 @@ static int open_self_auxv(void *cpu_env, int fd, const char *oldpath)
      */
     ptr = lock_user(VERIFY_READ, auxv, len, 0);
     if (ptr != NULL) {
-        while (len > 0) {
-            ssize_t r;
-            r = write(fd, ptr, len);
-            if (r <= 0) {
-                break;
-            }
-            len -= r;
-            ptr += r;
+        if (qemu_write_full(fd, ptr, len) != len) {
+            unlock_user(ptr, auxv, 0);
+            return -1;
         }
         lseek(fd, 0, SEEK_SET);
-        unlock_user(ptr, auxv, len);
+        unlock_user(ptr, auxv, 0);
     }
 #endif
 
@@ -12795,6 +12796,7 @@ static int do_openat(void *cpu_env, int dirfd, const char *pathname, int flags, 
         if ((r = fake_open->fill(cpu_env, fd, pathname))) {
             int e = errno;
             close(fd);
+            unlink(filename);
             errno = e;
             return r;
         }
@@ -12829,9 +12831,11 @@ static int real_proc_self_fd(int ofd)
 
     /* get filename */
     snprintf(buf_in, sizeof(buf_in), "/proc/self/fd/%d", ofd);
-    if (readlink(buf_in, buf_out, MAX_PATH_SIZE) < 0) {
+    len = readlink(buf_in, buf_out, sizeof(buf_out) - 1);
+    if (len < 0) {
         return fd;
     }
+    buf_out[len] = 0;
 
     /*is /proc/myself */
     tmpdir = getenv("TMPDIR");
@@ -12975,15 +12979,24 @@ static bool is_x86_elf_fd(int fd)
     return (ehdr.e_machine == EM_386) || (ehdr.e_machine == EM_X86_64);
 }
 
+static int open_exec_inspection_file(int dirfd, const char *file_name,
+                                     int flags)
+{
+    char fd_path[64];
+
+    if (!file_name[0] && (flags & AT_EMPTY_PATH)) {
+        snprintf(fd_path, sizeof(fd_path), "/proc/self/fd/%d", dirfd);
+        return open(fd_path, O_RDONLY | O_CLOEXEC);
+    }
+    return openat(dirfd, file_name, O_RDONLY | O_CLOEXEC);
+}
+
 static bool is_x86_file_at(int dirfd, const char *file_name, int flags)
 {
     int fd;
     bool ret;
 
-    if (!file_name[0] && (flags & AT_EMPTY_PATH)) {
-        return is_x86_elf_fd(dirfd);
-    }
-    fd = openat(dirfd, path(file_name), O_RDONLY | O_CLOEXEC);
+    fd = open_exec_inspection_file(dirfd, file_name, flags);
     if (fd < 0) {
         return false;
     }
@@ -12996,23 +13009,108 @@ static bool is_x86_file_at(int dirfd, const char *file_name, int flags)
 static bool is_self_file_at(int dirfd, const char *file_name, int flags)
 {
     struct stat target_st, self_st;
-    int fd = -1;
+    int fd;
+    bool owned = false;
     bool ret;
 
     if (!file_name[0] && (flags & AT_EMPTY_PATH)) {
         fd = dirfd;
     } else {
-        fd = openat(dirfd, path(file_name), O_PATH | O_CLOEXEC);
+        fd = openat(dirfd, file_name, O_PATH | O_CLOEXEC);
         if (fd < 0) {
             return false;
         }
+        owned = true;
     }
     ret = fstat(fd, &target_st) == 0 &&
           stat("/proc/self/exe", &self_st) == 0 &&
           target_st.st_dev == self_st.st_dev &&
           target_st.st_ino == self_st.st_ino;
-    if (fd != dirfd) {
+    if (owned) {
         close(fd);
+    }
+    return ret;
+}
+
+static bool exec_file_restores_guest_state_at(int dirfd,
+                                               const char *file_name,
+                                               int flags, unsigned int depth)
+{
+    char header[256];
+    char interpreter[PATH_MAX];
+    ssize_t len;
+    size_t start, end;
+    int fd;
+
+    if (depth > 4 || is_self_file_at(dirfd, file_name, flags)) {
+        return depth <= 4;
+    }
+    fd = open_exec_inspection_file(dirfd, file_name, flags);
+    if (fd < 0) {
+        return false;
+    }
+    if (is_x86_elf_fd(fd)) {
+        close(fd);
+        return true;
+    }
+    len = pread(fd, header, sizeof(header), 0);
+    close(fd);
+    if (len < 2 || header[0] != '#' || header[1] != '!') {
+        return false;
+    }
+
+    start = 2;
+    while (start < len && (header[start] == ' ' || header[start] == '\t')) {
+        start++;
+    }
+    end = start;
+    while (end < len && header[end] != ' ' && header[end] != '\t' &&
+           header[end] != '\n' && header[end] != '\r') {
+        end++;
+    }
+    if (end == start || end - start >= sizeof(interpreter)) {
+        return false;
+    }
+    memcpy(interpreter, header + start, end - start);
+    interpreter[end - start] = 0;
+    return exec_file_restores_guest_state_at(AT_FDCWD, interpreter, 0,
+                                              depth + 1);
+}
+
+static bool guest_self_exe_restores_guest_state(CPUArchState *env)
+{
+    char path_buffer[64];
+    const char *exe_pathname;
+    bool ret;
+    int owned_fd;
+
+    exe_pathname = guest_self_exe_open_path(env, path_buffer,
+                                            sizeof(path_buffer), &owned_fd);
+    if (!exe_pathname) {
+        return false;
+    }
+    ret = exec_file_restores_guest_state_at(AT_FDCWD, exe_pathname, 0, 0);
+    if (owned_fd >= 0) {
+        close(owned_fd);
+    }
+    return ret;
+}
+
+static bool guest_self_exe_is_x86(CPUArchState *env)
+{
+    char path_buffer[64];
+    const char *exe_pathname;
+    bool ret;
+    int owned_fd;
+
+    exe_pathname = guest_self_exe_open_path(env, path_buffer,
+                                            sizeof(path_buffer), &owned_fd);
+    if (!exe_pathname) {
+        return false;
+    }
+    ret = is_x86_file_at(AT_FDCWD, exe_pathname, 0);
+    if (owned_fd >= 0) {
+        close(owned_fd);
     }
     return ret;
 }
@@ -13267,8 +13365,13 @@ static abi_long guest_prctl_prepare_exe_file(unsigned int fd,
     if (fstat(fd, &st) < 0) {
         return get_errno(-1);
     }
-    if (!S_ISREG(st.st_mode) ||
-        (fstatvfs(fd, &fs) == 0 && (fs.f_flag & ST_NOEXEC))) {
+    if (!S_ISREG(st.st_mode)) {
+        return -TARGET_EACCES;
+    }
+    if (fstatvfs(fd, &fs) < 0) {
+        return get_errno(-1);
+    }
+    if (fs.f_flag & ST_NOEXEC) {
         return -TARGET_EACCES;
     }
     if (faccessat(fd, "", X_OK, AT_EMPTY_PATH | AT_EACCESS) < 0) {
@@ -14009,6 +14112,9 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
     case TARGET_NR_execveat:
         {
             char **argp, **envp, **exec_envp = NULL;
+            char **exec_argp = NULL;
+            char *hash_str = NULL;
+            char *pidof_arg = NULL;
 #ifdef TARGET_X86_64
             char *prctl_mdwe_env = NULL;
             char *prctl_tsc_env = NULL;
@@ -14019,6 +14125,8 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
             abi_ulong guest_envp;
             abi_ulong addr;
             char **q;
+
+            p = NULL;
             argc = 0;
             guest_argp = arg3;
             for (gp = guest_argp; gp; gp += sizeof(abi_ulong)) {
@@ -14081,26 +14189,35 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
             }
 
             char *pname = strrchr(p, '/');
+            const char *exec_pathname = path(p);
             bool self_exe = is_proc_myself((const char *)p, "exe");
-            bool x86_file = self_exe || is_x86_file_at(arg1, p, arg5);
 #ifdef TARGET_X86_64
-            bool restore_prctl = x86_file ||
-                                 is_self_file_at(arg1, p, arg5);
+            bool x86_file = self_exe ? guest_self_exe_is_x86(env) :
+                            is_x86_file_at(arg1, exec_pathname, arg5);
+            bool restore_prctl = self_exe ?
+                guest_self_exe_restores_guest_state(env) :
+                exec_file_restores_guest_state_at(arg1, exec_pathname,
+                                                  arg5, 0);
 
             exec_envp = prepare_guest_prctl_exec_env(env, envp, envc,
                                                      restore_prctl,
                                                      &prctl_mdwe_env,
                                                      &prctl_tsc_env);
 #else
+            bool x86_file = self_exe ||
+                            is_x86_file_at(arg1, exec_pathname, arg5);
+
             exec_envp = envp;
 #endif
+            exec_argp = argp;
             if (argp[0] && p && pname && strcmp(p, argp[0]) &&
                     strcmp(pname + 1, argp[0]) && x86_file) {
-                argc = argc + 3;
-                char **new_argp = g_new0(char *, argc + 1);
+                int exec_argc = argc + 3;
+                char **new_argp = g_new0(char *, exec_argc + 1);
                 long long hash = 0;
-                char *hash_str = g_new0(char, 8 * sizeof(long long));
-                for (int i = 3; i < argc; ++i) {
+
+                hash_str = g_new0(char, 8 * sizeof(long long));
+                for (int i = 3; i < exec_argc; ++i) {
                     new_argp[i] = argp[i - 3];
                     for (int j = 0; argp[i - 3][j] != '\0'; ++j) {
                         hash += argp[i - 3][j];
@@ -14109,28 +14226,34 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
                 sprintf(hash_str, "%lld", hash);
                 new_argp[0] = new_argp[1] = p;
                 new_argp[2] = hash_str;
-                new_argp[argc] = NULL;
-                g_free(argp);
-                argp = new_argp;
+                new_argp[exec_argc] = NULL;
+                exec_argp = new_argp;
             }
 
             if (!x86_file) {
                 for (int i = 0; i < argc; ++i) {
-                    char *found = strstr(argp[i], "pidof");
+                    char *found = strstr(exec_argp[i], "pidof");
                     if (found != NULL) {
                         size_t old_sub_len = strlen("pidof");
                         size_t new_sub_len = strlen("pidof -x");
-                        size_t prefix_len = found - argp[i];
+                        size_t prefix_len = found - exec_argp[i];
                         size_t suffix_len = strlen(found + old_sub_len);
 
                         /* Allocate new string: prefix + "pidof -x" + suffix */
-                        char *new_arg = g_malloc(prefix_len + new_sub_len + suffix_len + 1);
+                        if (exec_argp == argp) {
+                            exec_argp = g_new(char *, argc + 1);
+                            memcpy(exec_argp, argp,
+                                   sizeof(*argp) * (argc + 1));
+                        }
+                        pidof_arg = g_malloc(prefix_len + new_sub_len +
+                                             suffix_len + 1);
 
                         /* Build the new string */
-                        strncpy(new_arg, argp[i], prefix_len);
-                        strcpy(new_arg + prefix_len, "pidof -x");
-                        strcpy(new_arg + prefix_len + new_sub_len, found + strlen("pidof"));
-                        argp[i] = new_arg;
+                        memcpy(pidof_arg, exec_argp[i], prefix_len);
+                        strcpy(pidof_arg + prefix_len, "pidof -x");
+                        strcpy(pidof_arg + prefix_len + new_sub_len,
+                               found + old_sub_len);
+                        exec_argp[i] = pidof_arg;
                         break;
                     }
                 }
@@ -14159,16 +14282,15 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
                     ret = get_errno(-1);
                 } else {
                     ret = get_errno(safe_execveat(AT_FDCWD, exe_pathname,
-                                                  argp, exec_envp, arg5));
+                                                  exec_argp, exec_envp, arg5));
                     if (exe_fd >= 0) {
                         close(exe_fd);
                     }
                 }
             } else {
-                ret = get_errno(safe_execveat(arg1, p, argp, exec_envp,
-                                              arg5));
+                ret = get_errno(safe_execveat(arg1, exec_pathname, exec_argp,
+                                              exec_envp, arg5));
             }
-            unlock_user(p, arg2, 0);
 
             goto execveat_end;
 
@@ -14176,6 +14298,7 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
             ret = -TARGET_EFAULT;
 
         execveat_end:
+            unlock_user(p, arg2, 0);
             for (gp = guest_argp, q = argp; *q;
                   gp += sizeof(abi_ulong), q++) {
                 if (get_user_ual(addr, gp)
@@ -14193,6 +14316,11 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
                 unlock_user(*q, addr, 0);
             }
 
+            if (exec_argp != argp) {
+                g_free(exec_argp);
+            }
+            g_free(pidof_arg);
+            g_free(hash_str);
             g_free(argp);
 #ifdef TARGET_X86_64
             g_free(prctl_mdwe_env);
@@ -14208,6 +14336,9 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
     case TARGET_NR_execve:
         {
             char **argp, **envp, **exec_envp = NULL;
+            char **exec_argp = NULL;
+            char *hash_str = NULL;
+            char *pidof_arg = NULL;
 #ifdef TARGET_X86_64
             char *prctl_mdwe_env = NULL;
             char *prctl_tsc_env = NULL;
@@ -14218,6 +14349,8 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
             abi_ulong guest_envp;
             abi_ulong addr;
             char **q;
+
+            p = NULL;
             argc = 0;
             guest_argp = arg2;
             for (gp = guest_argp; gp; gp += sizeof(abi_ulong)) {
@@ -14269,26 +14402,32 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
 
             char *pname = strrchr(p, '/');
             bool self_exe = is_proc_myself((const char *)p, "exe");
-            bool x86_file = self_exe ||
-                            is_x86_file_at(AT_FDCWD, p, 0);
 #ifdef TARGET_X86_64
-            bool restore_prctl = x86_file ||
-                                 is_self_file_at(AT_FDCWD, p, 0);
+            bool x86_file = self_exe ? guest_self_exe_is_x86(env) :
+                            is_x86_file_at(AT_FDCWD, path(p), 0);
+            bool restore_prctl = self_exe ?
+                guest_self_exe_restores_guest_state(env) :
+                exec_file_restores_guest_state_at(AT_FDCWD, path(p), 0, 0);
 
             exec_envp = prepare_guest_prctl_exec_env(env, envp, envc,
                                                      restore_prctl,
                                                      &prctl_mdwe_env,
                                                      &prctl_tsc_env);
 #else
+            bool x86_file = self_exe ||
+                            is_x86_file_at(AT_FDCWD, path(p), 0);
+
             exec_envp = envp;
 #endif
+            exec_argp = argp;
             if (argp[0] && p && pname && strcmp(p, argp[0]) &&
                     strcmp(pname + 1, argp[0]) && x86_file) {
-                argc = argc + 3;
-                char **new_argp = g_new0(char *, argc + 1);
+                int exec_argc = argc + 3;
+                char **new_argp = g_new0(char *, exec_argc + 1);
                 long long hash = 0;
-                char *hash_str = g_new0(char, 8 * sizeof(long long));
-                for (int i = 3; i < argc; ++i) {
+
+                hash_str = g_new0(char, 8 * sizeof(long long));
+                for (int i = 3; i < exec_argc; ++i) {
                     new_argp[i] = argp[i - 3];
                     for (int j = 0; argp[i - 3][j] != '\0'; ++j) {
                         hash += argp[i - 3][j];
@@ -14297,28 +14436,34 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
                 sprintf(hash_str, "%lld", hash);
                 new_argp[0] = new_argp[1] = p;
                 new_argp[2] = hash_str;
-                new_argp[argc] = NULL;
-                g_free(argp);
-                argp = new_argp;
+                new_argp[exec_argc] = NULL;
+                exec_argp = new_argp;
             }
 
             if (!x86_file) {
                 for (int i = 0; i < argc; ++i) {
-                    char *found = strstr(argp[i], "pidof");
+                    char *found = strstr(exec_argp[i], "pidof");
                     if (found != NULL) {
                         size_t old_sub_len = strlen("pidof");
                         size_t new_sub_len = strlen("pidof -x");
-                        size_t prefix_len = found - argp[i];
+                        size_t prefix_len = found - exec_argp[i];
                         size_t suffix_len = strlen(found + old_sub_len);
 
                         /* Allocate new string: prefix + "pidof -x" + suffix */
-                        char *new_arg = g_malloc(prefix_len + new_sub_len + suffix_len + 1);
+                        if (exec_argp == argp) {
+                            exec_argp = g_new(char *, argc + 1);
+                            memcpy(exec_argp, argp,
+                                   sizeof(*argp) * (argc + 1));
+                        }
+                        pidof_arg = g_malloc(prefix_len + new_sub_len +
+                                             suffix_len + 1);
 
                         /* Build the new string */
-                        strncpy(new_arg, argp[i], prefix_len);
-                        strcpy(new_arg + prefix_len, "pidof -x");
-                        strcpy(new_arg + prefix_len + new_sub_len, found + strlen("pidof"));
-                        argp[i] = new_arg;
+                        memcpy(pidof_arg, exec_argp[i], prefix_len);
+                        strcpy(pidof_arg + prefix_len, "pidof -x");
+                        strcpy(pidof_arg + prefix_len + new_sub_len,
+                               found + old_sub_len);
+                        exec_argp[i] = pidof_arg;
                         break;
                     }
                 }
@@ -14341,10 +14486,17 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
                     }
                     goto execve_end;
                 }
-                if (!strcmp((const char *)*argp, "/proc/self/exe")) {
-                    *argp = (char *)temp;
+                if (exec_argp[0] &&
+                    !strcmp(exec_argp[0], "/proc/self/exe")) {
+                    if (exec_argp == argp) {
+                        exec_argp = g_new(char *, argc + 1);
+                        memcpy(exec_argp, argp,
+                               sizeof(*argp) * (argc + 1));
+                    }
+                    *exec_argp = (char *)temp;
                 }
-                ret = get_errno(safe_execve(exe_pathname, argp, exec_envp));
+                ret = get_errno(safe_execve(exe_pathname, exec_argp,
+                                            exec_envp));
                 if (exe_fd >= 0) {
                     close(exe_fd);
                 }
@@ -14360,9 +14512,8 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
                  * before the execve completes and makes it the other
                  * program's problem.
                  */
-                ret = get_errno(safe_execve(path(p), argp, exec_envp));
+                ret = get_errno(safe_execve(path(p), exec_argp, exec_envp));
             }
-            unlock_user(p, arg1, 0);
 
             goto execve_end;
 
@@ -14370,6 +14521,7 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
             ret = -TARGET_EFAULT;
 
         execve_end:
+            unlock_user(p, arg1, 0);
             for (gp = guest_argp, q = argp; *q;
                   gp += sizeof(abi_ulong), q++) {
                 if (get_user_ual(addr, gp)
@@ -14385,6 +14537,11 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
                 unlock_user(*q, addr, 0);
             }
 
+            if (exec_argp != argp) {
+                g_free(exec_argp);
+            }
+            g_free(pidof_arg);
+            g_free(hash_str);
             g_free(argp);
 #ifdef TARGET_X86_64
             g_free(prctl_mdwe_env);
@@ -15677,35 +15834,35 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
 #ifdef TARGET_NR_readlink
     case TARGET_NR_readlink:
         {
-            void *p2;
+            void *p2 = NULL;
+
             p = lock_user_string(arg1);
-            p2 = lock_user(VERIFY_WRITE, arg2, arg3, 0);
-            if (arg3 < 0) {
-                ret = -TARGET_EINVAL;
-            } else if (!p || !p2) {
+            if (!p) {
                 ret = -TARGET_EFAULT;
-            } else if (!arg3) {
-                /* Short circuit this for the magic exe check. */
+            } else if (arg3 <= 0) {
                 ret = -TARGET_EINVAL;
-            } else if (is_proc_myself((const char *)p, "exe")) {
-                char real[PATH_MAX];
-                const char *temp = guest_self_exe_link_path(cpu_env, real,
-                                                            sizeof(real));
-                /* Return value is # of bytes that we wrote to the buffer. */
-                if (temp == NULL) {
-                    ret = MIN(strlen(real_path), arg3);
-                    memcpy(p2, real_path, ret);
-                } else {
-                    /* Don't worry about sign mismatch as earlier mapping
-                     * logic would have thrown a bad address error. */
-                    ret = MIN(strlen(real), arg3);
-                    /* We cannot NUL terminate the string. */
-                    memcpy(p2, real, ret);
-                }
             } else {
-                ret = get_errno(readlink(path(p), p2, arg3));
+                p2 = lock_user(VERIFY_WRITE, arg2, arg3, 0);
+                if (!p2) {
+                    ret = -TARGET_EFAULT;
+                } else if (is_proc_myself((const char *)p, "exe")) {
+                    char real[PATH_MAX];
+                    const char *temp = guest_self_exe_link_path(
+                        cpu_env, real, sizeof(real));
+
+                    /* Return value is # of bytes written to the buffer. */
+                    if (temp == NULL) {
+                        ret = get_errno(-1);
+                    } else {
+                        ret = MIN(strlen(real), arg3);
+                        /* readlink does not NUL terminate the string. */
+                        memcpy(p2, real, ret);
+                    }
+                } else {
+                    ret = get_errno(readlink(path(p), p2, arg3));
+                }
             }
-            unlock_user(p2, arg2, ret);
+            unlock_user(p2, arg2, ret > 0 ? ret : 0);
             unlock_user(p, arg1, 0);
         }
         return ret;
@@ -15713,26 +15870,33 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
 #if defined(TARGET_NR_readlinkat)
     case TARGET_NR_readlinkat:
         {
-            void *p2;
-            p  = lock_user_string(arg2);
-            p2 = lock_user(VERIFY_WRITE, arg3, arg4, 0);
-            if (!p || !p2) {
-                ret = -TARGET_EFAULT;
-            } else if (is_proc_myself((const char *)p, "exe")) {
-                char real[PATH_MAX];
-                const char *temp = guest_self_exe_link_path(cpu_env, real,
-                                                            sizeof(real));
+            void *p2 = NULL;
 
-                if (temp == NULL) {
-                    ret = get_errno(-1);
-                } else {
-                    ret = MIN(strlen(temp), arg4);
-                    memcpy(p2, temp, ret);
-                }
+            p  = lock_user_string(arg2);
+            if (!p) {
+                ret = -TARGET_EFAULT;
+            } else if (arg4 <= 0) {
+                ret = -TARGET_EINVAL;
             } else {
-                ret = get_errno(readlinkat(arg1, path(p), p2, arg4));
+                p2 = lock_user(VERIFY_WRITE, arg3, arg4, 0);
+                if (!p2) {
+                    ret = -TARGET_EFAULT;
+                } else if (is_proc_myself((const char *)p, "exe")) {
+                    char real[PATH_MAX];
+                    const char *temp = guest_self_exe_link_path(
+                        cpu_env, real, sizeof(real));
+
+                    if (temp == NULL) {
+                        ret = get_errno(-1);
+                    } else {
+                        ret = MIN(strlen(temp), arg4);
+                        memcpy(p2, temp, ret);
+                    }
+                } else {
+                    ret = get_errno(readlinkat(arg1, path(p), p2, arg4));
+                }
             }
-            unlock_user(p2, arg3, ret);
+            unlock_user(p2, arg3, ret > 0 ? ret : 0);
             unlock_user(p, arg2, 0);
         }
         return ret;

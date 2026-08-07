@@ -165,8 +165,11 @@ int target_mprotect(abi_ulong start, abi_ulong len, int target_prot)
     if (!guest_range_valid_untagged(start, len)) {
         return -TARGET_ENOMEM;
     }
-
     mmap_lock();
+    if (!page_check_range(start, len, PAGE_VALID)) {
+        mmap_unlock();
+        return -TARGET_ENOMEM;
+    }
 
     host_start = start & qemu_host_page_mask;
     host_end = HOST_PAGE_ALIGN(end);
@@ -755,8 +758,9 @@ abi_long target_mmap(abi_ulong start, abi_ulong len, int target_prot,
     }
 #endif
 
-    if (option_prlimit && rlimit_as_account && (vir_rlimit_as != RLIM_INFINITY)
-        && (len + vir_rlimit_as_acc >= vir_rlimit_as)) {
+    if (option_prlimit && rlimit_as_account &&
+        vir_rlimit_as != RLIM_INFINITY &&
+        len > vir_rlimit_as - MIN(vir_rlimit_as_acc, vir_rlimit_as)) {
         errno = ENOMEM;
         goto fail;
     }
@@ -1252,7 +1256,8 @@ int target_munmap(abi_ulong start, abi_ulong len, int rlimit_as_account)
     }
     mmap_unlock();
 
-    if (option_prlimit && rlimit_as_account && vir_rlimit_as != RLIM_INFINITY) {
+    if (ret == 0 && option_prlimit && rlimit_as_account &&
+        vir_rlimit_as != RLIM_INFINITY) {
         if (vir_rlimit_as_acc > len) {
             vir_rlimit_as_acc -= len;
         } else {
@@ -1270,6 +1275,9 @@ abi_long target_mremap(abi_ulong old_addr, abi_ulong old_size,
     abi_ulong account_add = 0;
     abi_ulong account_sub = 0;
     bool keep_old;
+    bool manual_move = false;
+    bool can_manual_move = true;
+    bool unreserved_extension = false;
     int prot;
     void *host_addr;
 
@@ -1344,41 +1352,95 @@ abi_long target_mremap(abi_ulong old_addr, abi_ulong old_size,
     mmap_lock();
 
     prot = page_get_flags(old_addr);
-    if (!keep_old && (flags & MREMAP_MAYMOVE) &&
+    if ((prot & (PAGE_VALID | PAGE_ANON)) != (PAGE_VALID | PAGE_ANON) ||
+        (prot & PAGE_MEMSHARE)) {
+        can_manual_move = false;
+    } else {
+        abi_ulong addr;
+
+        for (addr = old_addr; addr < old_addr + old_size;
+             addr += TARGET_PAGE_SIZE) {
+            int page_prot = page_get_flags(addr);
+
+            if ((page_prot & (PAGE_VALID | PAGE_ANON)) !=
+                    (PAGE_VALID | PAGE_ANON) ||
+                (page_prot & PAGE_MEMSHARE) ||
+                (page_prot & PAGE_BITS) != (prot & PAGE_BITS)) {
+                can_manual_move = false;
+                break;
+            }
+        }
+    }
+    if (!keep_old && !can_manual_move && (flags & MREMAP_MAYMOVE) &&
         (prot & PAGE_ANON) && !(prot & PAGE_MEMSHARE) &&
         !(old_addr & ~qemu_host_page_mask) &&
         (HOST_PAGE_ALIGN(old_size) != old_size ||
          HOST_PAGE_ALIGN(new_size) != new_size)) {
+        errno = EFAULT;
+        host_addr = MAP_FAILED;
+    } else if (!keep_old && can_manual_move && (flags & MREMAP_MAYMOVE) &&
+        !(old_addr & ~qemu_host_page_mask) &&
+        (HOST_PAGE_ALIGN(old_size) != old_size ||
+         HOST_PAGE_ALIGN(new_size) != new_size)) {
         abi_ulong mmap_start = new_addr;
+        abi_ulong source_host_size = HOST_PAGE_ALIGN(old_size);
+        abi_ulong target_host_size = HOST_PAGE_ALIGN(new_size);
+        abi_ulong addr;
         size_t copy_size = MIN(old_size, new_size);
-        int host_prot = (prot & PAGE_WRITE ? PROT_WRITE : 0) |
-                        (prot & (PAGE_READ | PAGE_EXEC) ? PROT_READ : 0);
+        int source_host_prot = 0;
+        void *temp = MAP_FAILED;
 
         if (!(flags & MREMAP_FIXED)) {
             mmap_start = mmap_find_vma(0, new_size, TARGET_PAGE_SIZE);
         }
         if (mmap_start == (abi_ulong)-1 ||
-            (mmap_start & ~qemu_host_page_mask) ||
             (mmap_start < old_addr + old_size &&
              old_addr < mmap_start + new_size)) {
             errno = mmap_start == (abi_ulong)-1 ? ENOMEM : EINVAL;
             host_addr = MAP_FAILED;
         } else {
-            host_addr = mmap(g2h_untagged(mmap_start), new_size,
-                             PROT_READ | PROT_WRITE,
-                             MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS,
-                             -1, 0);
-            if (host_addr != MAP_FAILED) {
-                memcpy(host_addr, g2h_untagged(old_addr), copy_size);
-                if (mprotect(host_addr, HOST_PAGE_ALIGN(new_size),
-                             host_prot) < 0) {
-                    int saved_errno = errno;
+            temp = mmap(NULL, target_host_size, PROT_READ | PROT_WRITE,
+                        MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+            host_addr = temp;
+            if (temp != MAP_FAILED) {
+                for (addr = old_addr; addr < old_addr + source_host_size;
+                     addr += TARGET_PAGE_SIZE) {
+                    int page_prot = page_get_flags(addr);
 
-                    munmap(host_addr, HOST_PAGE_ALIGN(new_size));
-                    errno = saved_errno;
+                    source_host_prot |= page_prot & (PAGE_READ | PAGE_WRITE);
+                    if (page_prot & PAGE_EXEC) {
+                        source_host_prot |= PROT_READ;
+                    }
+                }
+                if (!(source_host_prot & PROT_READ) &&
+                    mprotect(g2h_untagged(old_addr), source_host_size,
+                             source_host_prot | PROT_READ) < 0) {
                     host_addr = MAP_FAILED;
                 } else {
-                    new_addr = mmap_start;
+                    memcpy(temp, g2h_untagged(old_addr), copy_size);
+                    if (!(source_host_prot & PROT_READ) &&
+                        mprotect(g2h_untagged(old_addr), source_host_size,
+                                 source_host_prot) < 0) {
+                        abort();
+                    }
+                    new_addr = target_mmap(
+                        mmap_start, new_size, PROT_READ | PROT_WRITE,
+                        MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS,
+                        -1, 0, 0);
+                    if (new_addr == (abi_ulong)-1) {
+                        host_addr = MAP_FAILED;
+                    } else {
+                        memcpy(g2h_untagged(new_addr), temp, copy_size);
+                        if (target_mprotect(new_addr, new_size,
+                                            prot & PAGE_BITS) != 0) {
+                            abort();
+                        }
+                        host_addr = g2h_untagged(new_addr);
+                    }
+                }
+                munmap(temp, target_host_size);
+                if (host_addr != MAP_FAILED) {
+                    manual_move = true;
                 }
             }
         }
@@ -1430,6 +1492,7 @@ abi_long target_mremap(abi_ulong old_addr, abi_ulong old_size,
                 }
                 munmap(g2h_untagged(TARGET_PAGE_ALIGN(old_addr + old_size)),
                        num_pages * TARGET_PAGE_SIZE);
+                unreserved_extension = true;
             }
             host_addr = mremap(g2h_untagged(old_addr),
                                old_size, new_size, flags);
@@ -1453,15 +1516,24 @@ abi_long target_mremap(abi_ulong old_addr, abi_ulong old_size,
     }
 
     if (host_addr == MAP_FAILED) {
+        if (unreserved_extension) {
+            mmap_reserve(old_addr + old_size, new_size - old_size);
+        }
         new_addr = -1;
     } else {
         new_addr = h2g(host_addr);
+        if (manual_move && mmap_unmap_host_range(old_addr, old_size) != 0) {
+            abort();
+        }
 #ifdef TARGET_X86_64
         guest_vma_name_remap(old_addr, source_size, new_addr, new_size,
                              keep_old);
 #endif
         if (!keep_old) {
             page_set_flags(old_addr, old_addr + old_size, 0);
+        } else if (flags & MREMAP_DONTUNMAP) {
+            page_set_flags(old_addr, old_addr + old_size,
+                           prot | PAGE_VALID | PAGE_RESET);
         }
         page_set_flags(new_addr, new_addr + new_size,
                        prot | PAGE_VALID | PAGE_RESET);
@@ -1470,7 +1542,7 @@ abi_long target_mremap(abi_ulong old_addr, abi_ulong old_size,
         if (option_aot) {
             seg_info *seg;
 
-            if (!keep_old) {
+            if (!keep_old || (flags & MREMAP_DONTUNMAP)) {
                 seg = segment_tree_lookup2(old_addr, old_addr + old_size);
                 if (seg) {
                     segment_tree_remove(seg);

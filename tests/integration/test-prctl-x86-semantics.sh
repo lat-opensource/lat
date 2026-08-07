@@ -2,6 +2,7 @@
 set -eu
 
 emulator=$1
+emulator_path=$(realpath "$emulator")
 source_file=$2
 native_helper_source=$3
 workdir=$(mktemp -d)
@@ -21,6 +22,10 @@ fi
     -Wl,--build-id=none "$source_file" -o "$workdir/prctl-x86-semantics"
 "${CC:-cc}" -O2 -Wall -Wextra "$native_helper_source" \
     -o "$workdir/prctl-native-env-helper"
+mkdir "$workdir/relative"
+printf '#!%s %s\n' "$emulator_path" "$workdir/prctl-x86-semantics" \
+    >"$workdir/relative/state-script"
+chmod +x "$workdir/relative/state-script"
 
 run_case()
 {
@@ -62,4 +67,5 @@ for mode in 0 1; do
     run_case "$mode" "$label" i
     run_case "$mode" "$label" e "$workdir/prctl-native-env-helper"
     run_case "$mode" "$label" a "$workdir/prctl-native-env-helper"
+    run_case "$mode" "$label" d "$workdir/relative"
 done

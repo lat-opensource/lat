@@ -27,6 +27,7 @@ typedef long slong;
 #define __NR_set_tid_address  218
 #define __NR_exit_group       231
 #define __NR_openat           257
+#define __NR_readlinkat       267
 #define __NR_execveat         322
 #define __NR_readlink          89
 #define __NR_rename            82
@@ -36,6 +37,7 @@ typedef long slong;
 #define EBADF   9
 #define EFAULT 14
 #define EINVAL 22
+#define ENOMEM 12
 #define ENAMETOOLONG 36
 #define EPERM   1
 
@@ -54,6 +56,7 @@ typedef long slong;
 
 #define AT_FDCWD (-100)
 #define AT_EMPTY_PATH 0x1000
+#define O_DIRECTORY 00200000
 
 #define IPC_PRIVATE 0
 #define IPC_CREAT   01000
@@ -346,6 +349,7 @@ static slong read_file(const char *path, char *buffer, ulong size)
 
 static int test_process_controls(void)
 {
+    static const char exe_path[] = "/proc/self/exe";
     static const char set_name[16] = "lat-prctl-proc";
     char get_name[16] = { 0 };
     int value = -1;
@@ -477,6 +481,12 @@ static int test_process_controls(void)
         do_prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0 ||
         do_prctl(PR_GET_NO_NEW_PRIVS, 0, 0, 0, 0) != 1) {
         return 55;
+    }
+    if (syscall3(__NR_readlink, (slong)exe_path, -1, 0) != -EINVAL ||
+        syscall3(__NR_readlink, (slong)exe_path, -1, -1) != -EINVAL ||
+        syscall4(__NR_readlinkat, AT_FDCWD, (slong)exe_path, -1, 0) !=
+            -EINVAL) {
+        return 56;
     }
     return 0;
 }
@@ -661,6 +671,63 @@ static int test_vma_name(void)
     }
     syscall2(__NR_munmap, remap_target, 12288);
 
+    remap_source = do_mmap(0, 12288, PROT_READ | PROT_WRITE,
+                           MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    remap_target = do_mmap(0, 12288, PROT_READ | PROT_WRITE,
+                           MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (remap_source < 0 || remap_target < 0) {
+        return 69;
+    }
+    *(ulong *)remap_source = 0x123456789abcdef0UL;
+    if (syscall3(__NR_mprotect, remap_source, 12288, 0) != 0 ||
+        syscall2(__NR_munmap, remap_target, 12288) != 0 ||
+        syscall5(__NR_mremap, remap_source, 8193, 8193,
+                 MREMAP_MAYMOVE | MREMAP_FIXED, remap_target) !=
+            remap_target ||
+        syscall3(__NR_mprotect, remap_target, 12288, PROT_READ) != 0 ||
+        *(ulong *)remap_target != 0x123456789abcdef0UL ||
+        syscall3(__NR_mprotect, remap_source, 4096, PROT_READ) != -ENOMEM) {
+        return 69;
+    }
+    syscall2(__NR_munmap, remap_target, 12288);
+
+    remap_source = do_mmap(0, 12288, PROT_READ | PROT_WRITE,
+                           MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    remap_target = do_mmap(0, 16384, PROT_READ | PROT_WRITE,
+                           MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (remap_source < 0 || remap_target < 0) {
+        return 69;
+    }
+    *(ulong *)remap_source = 0x1122334455667788UL;
+    *(ulong *)(remap_target + 12288) = 0x8877665544332211UL;
+    if (syscall5(__NR_mremap, remap_source, 8193, 8193,
+                 MREMAP_MAYMOVE | MREMAP_FIXED, remap_target) !=
+            remap_target ||
+        *(ulong *)remap_target != 0x1122334455667788UL ||
+        *(ulong *)(remap_target + 12288) != 0x8877665544332211UL) {
+        return 69;
+    }
+    syscall2(__NR_munmap, remap_target, 16384);
+
+    remap_source = do_mmap(0, 12288, PROT_READ | PROT_WRITE,
+                           MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    remap_target = do_mmap(0, 16384, PROT_READ | PROT_WRITE,
+                           MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (remap_source < 0 || remap_target < 0 ||
+        syscall3(__NR_mprotect, remap_source + 4096, 4096, PROT_READ) != 0) {
+        return 69;
+    }
+    *(ulong *)remap_target = 0xaabbccddeeff0011UL;
+    *(ulong *)(remap_target + 12288) = 0x1100ffeeddccbbaaUL;
+    if (syscall5(__NR_mremap, remap_source, 8193, 8193,
+                 MREMAP_MAYMOVE | MREMAP_FIXED, remap_target) != -EFAULT ||
+        *(ulong *)remap_target != 0xaabbccddeeff0011UL ||
+        *(ulong *)(remap_target + 12288) != 0x1100ffeeddccbbaaUL) {
+        return 69;
+    }
+    syscall2(__NR_munmap, remap_source, 12288);
+    syscall2(__NR_munmap, remap_target, 16384);
+
     shared_map = do_mmap(0, 16384, PROT_READ | PROT_WRITE,
                          MAP_SHARED | MAP_ANONYMOUS, -1, 0);
     if (shared_map < 0 ||
@@ -811,7 +878,7 @@ static int test_fork_state(int no_inherit)
 {
     int mdwe = PR_MDWE_REFUSE_EXEC_GAIN |
                (no_inherit ? PR_MDWE_NO_INHERIT : 0);
-    int expected_child_mdwe = no_inherit ? 0 : mdwe;
+    int expected_child_mdwe = mdwe;
     int tsc_mode = 0;
     int status = -1;
     ulong clear_tid = 0;
@@ -1091,6 +1158,37 @@ static int test_native_exec_env(const char *helper_path, int at_empty_path)
     return 131;
 }
 
+static int test_script_exec(const char *dir_path)
+{
+    static char script_name[] = "state-script";
+    static char stage_name[] = "k";
+    char *argv[] = { script_name, stage_name, 0 };
+    slong dirfd;
+
+    if (!dir_path ||
+        do_prctl(PR_SET_MDWE, PR_MDWE_REFUSE_EXEC_GAIN, 0, 0, 0) ||
+        do_prctl(PR_SET_TSC, PR_TSC_SIGSEGV, 0, 0, 0)) {
+        return 132;
+    }
+    dirfd = syscall4(__NR_openat, AT_FDCWD, (slong)dir_path,
+                     O_DIRECTORY, 0);
+    if (dirfd < 0) {
+        return 132;
+    }
+    syscall5(__NR_execveat, dirfd, (slong)script_name, (slong)argv, 0, 0);
+    return 132;
+}
+
+static int test_script_inherit(void)
+{
+    int tsc_mode = 0;
+
+    return do_prctl(PR_GET_MDWE, 0, 0, 0, 0) ==
+               PR_MDWE_REFUSE_EXEC_GAIN &&
+           do_prctl(PR_GET_TSC, (slong)&tsc_mode, 0, 0, 0) == 0 &&
+           tsc_mode == PR_TSC_SIGSEGV ? 0 : 133;
+}
+
 int test_main(ulong *stack)
 {
     ulong argc = stack[0];
@@ -1099,6 +1197,9 @@ int test_main(ulong *stack)
 
     if (argc < 2 || argc > 3 || !argv[1]) {
         return 100;
+    }
+    if (argc == 3 && argv[2] && argv[2][0] == 'k') {
+        return test_script_inherit();
     }
     mode = argv[1][0];
     if (mode == 'p') {
@@ -1130,6 +1231,12 @@ int test_main(ulong *stack)
     }
     if (mode == 'a') {
         return test_native_exec_env(argc == 3 ? argv[2] : 0, 1);
+    }
+    if (mode == 'd') {
+        return test_script_exec(argc == 3 ? argv[2] : 0);
+    }
+    if (mode == 'k') {
+        return test_script_inherit();
     }
     return 101;
 }
