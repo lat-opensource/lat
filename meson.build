@@ -1,8 +1,11 @@
 project('latx', ['c'], meson_version: '>=0.55.0',
         default_options: ['warning_level=1', 'c_std=gnu99', 'cpp_std=gnu++11', 'b_colorout=auto'] +
                          (meson.version().version_compare('>=0.56.0') ? [ 'b_staticpic=false' ] : []),
-        version: run_command('head', meson.source_root() / 'VERSION',
+        version: run_command('head', meson.current_source_dir() / 'VERSION',
                              check: true).stdout().strip())
+
+project_source_root = meson.current_source_dir()
+project_build_root = meson.current_build_dir()
 
 not_found = dependency('', required: false)
 if meson.version().version_compare('>=0.56.0')
@@ -328,21 +331,21 @@ genh += configure_file(output: 'config-host.h', configuration: config_host_data)
 
 hxtool = find_program('scripts/hxtool')
 qapi_gen = find_program('scripts/qapi-gen.py')
-qapi_gen_depends = [ meson.source_root() / 'scripts/qapi/__init__.py',
-                     meson.source_root() / 'scripts/qapi/commands.py',
-                     meson.source_root() / 'scripts/qapi/common.py',
-                     meson.source_root() / 'scripts/qapi/error.py',
-                     meson.source_root() / 'scripts/qapi/events.py',
-                     meson.source_root() / 'scripts/qapi/expr.py',
-                     meson.source_root() / 'scripts/qapi/gen.py',
-                     meson.source_root() / 'scripts/qapi/introspect.py',
-                     meson.source_root() / 'scripts/qapi/parser.py',
-                     meson.source_root() / 'scripts/qapi/schema.py',
-                     meson.source_root() / 'scripts/qapi/source.py',
-                     meson.source_root() / 'scripts/qapi/types.py',
-                     meson.source_root() / 'scripts/qapi/visit.py',
-                     meson.source_root() / 'scripts/qapi/common.py',
-                     meson.source_root() / 'scripts/qapi-gen.py'
+qapi_gen_depends = [ project_source_root / 'scripts/qapi/__init__.py',
+                     project_source_root / 'scripts/qapi/commands.py',
+                     project_source_root / 'scripts/qapi/common.py',
+                     project_source_root / 'scripts/qapi/error.py',
+                     project_source_root / 'scripts/qapi/events.py',
+                     project_source_root / 'scripts/qapi/expr.py',
+                     project_source_root / 'scripts/qapi/gen.py',
+                     project_source_root / 'scripts/qapi/introspect.py',
+                     project_source_root / 'scripts/qapi/parser.py',
+                     project_source_root / 'scripts/qapi/schema.py',
+                     project_source_root / 'scripts/qapi/source.py',
+                     project_source_root / 'scripts/qapi/types.py',
+                     project_source_root / 'scripts/qapi/visit.py',
+                     project_source_root / 'scripts/qapi/common.py',
+                     project_source_root / 'scripts/qapi-gen.py'
 ]
 
 tracetool = [
@@ -730,7 +733,6 @@ foreach target : target_dirs
 
     execs = [{
       'name': 'latx-' + target_name,
-      'gui': false,
       'sources': [],
       'dependencies': []
     }]
@@ -744,8 +746,7 @@ foreach target : target_dirs
                objects: lib.extract_all_objects(recursive: true),
                link_language: link_language,
                link_depends: exe.get('link_depends', []),
-               link_args: link_args,
-               gui_app: exe['gui'])
+               link_args: link_args)
 
     emulators += {exe['name']: emulator}
 

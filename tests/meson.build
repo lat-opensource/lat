@@ -19,8 +19,8 @@ endforeach
 test(
   'test-latu-install',
   find_program('runtime/test-latu-install.sh'),
-  args: [python.full_path(), meson.source_root() / 'meson' / 'meson.py',
-         meson.build_root(), get_option('prefix')],
+  args: [python.full_path(), project_source_root / 'meson' / 'meson.py',
+         project_build_root, get_option('prefix')],
   depends: latu_install_depends,
   protocol: 'exitcode',
   suite: 'lat-pr-fast',
