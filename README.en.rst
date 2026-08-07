@@ -188,6 +188,43 @@ ABI 2.0 uses ``/usr/gnemul/lat-*``. See the `build, installation, and runtime
 Wiki guide`_ for runtime installation, Wine matching, upgrades, and removal.
 
 
+Compatibility Scope and Known Limitations
+=========================================
+
+Guest program scope:
+
+- Runs 32-bit (i386) and 64-bit (x86_64) x86 Linux user-space programs.
+  Full-system x86 emulation is not provided.
+- x86 Windows programs run through x86 Wine and require a matching runtime
+  environment; see the `build, installation, and runtime Wiki guide`_.
+- 16-bit real-mode (vm86) programs are outside the supported scope and are
+  not verified.
+
+x86 instruction set coverage:
+
+- Release builds (O1 tier) translate and report x87, MMX, SSE, SSE2, and
+  SSE3, plus SSSE3, SSE4.1, SSE4.2, POPCNT, AES, PCLMULQDQ, and CMPXCHG16B.
+- AVX, AVX2, FMA, F16C, and BMI1/BMI2 belong to the testing optimization
+  tier (-O 3). They are disabled by default and are not included in release
+  packages. To use them, build manually as described in
+  `AVX Instruction Support`_.
+
+Runtime behavior notes:
+
+- Library pass-through (``LATX_KZT``) is available only in 64-bit builds and
+  is enabled subject to compatibility checks by default. 32-bit builds do
+  not provide this option.
+- Multi-threaded guests use the QEMU user-mode threading model; atomic
+  instructions select an optimized path according to host kernel
+  capabilities.
+- Self-modifying code is invalidated per page by default. For programs with
+  compatibility issues, adjust the ``LATX_SMC`` policy; for programs with
+  abnormal floating-point results, try ``LATX_SOFTFPU`` (which reduces
+  performance and automatically disables AOT). The
+  `LATX configuration reference <docs/user/latx-environment.rst>`_ describes
+  these options and is currently available in Chinese.
+
+
 Configuration
 =============
 
