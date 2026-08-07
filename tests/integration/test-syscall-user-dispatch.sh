@@ -18,15 +18,20 @@ fi
 "$clang" --target=x86_64-linux-gnu -fuse-ld=lld -nostdlib -static \
     -Wl,--build-id=none "$source_file" -o "$workdir/syscall-user-dispatch"
 
-set +e
-LATX_AOT=0 LATX_KZT=0 timeout -s KILL 10 \
-    "$emulator" "$workdir/syscall-user-dispatch"
-ret=$?
-set -e
+run_mode()
+{
+    mode=$1
+    label=$2
 
-case $ret in
+    set +e
+    LATX_AOT=0 LATX_KZT=0 LATX_TU="$mode" timeout -s KILL 10 \
+        "$emulator" "$workdir/syscall-user-dispatch"
+    ret=$?
+    set -e
+
+    case $ret in
 0)
-    echo "PASS: syscall user dispatch delivered guest SIGSYS"
+    echo "PASS: $label syscall user dispatch delivered guest SIGSYS"
     ;;
 10)
     echo "FAIL: blocked guest syscall was executed" >&2
@@ -43,6 +48,15 @@ case $ret in
 14)
     echo "FAIL: syscall user dispatch was inherited across fork" >&2
     ;;
+15)
+    echo "FAIL: syscall user dispatch parameter validation" >&2
+    ;;
+16)
+    echo "FAIL: syscall inside the allowed dispatch range was blocked" >&2
+    ;;
+17)
+    echo "FAIL: PR_SYS_DISPATCH_OFF did not disable dispatch" >&2
+    ;;
 124)
     echo "FAIL: syscall user dispatch test timed out" >&2
     ;;
@@ -50,8 +64,12 @@ case $ret in
     echo "FAIL: guest syscall dispatch leaked into the host (SIGSYS)" >&2
     ;;
 *)
-    echo "FAIL: unexpected guest exit status $ret" >&2
+    echo "FAIL: $label unexpected guest exit status $ret" >&2
     ;;
-esac
+    esac
 
-exit "$ret"
+    test "$ret" -eq 0
+}
+
+run_mode 0 non-tu
+run_mode 1 tu

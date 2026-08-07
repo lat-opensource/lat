@@ -1079,6 +1079,9 @@ abi_long target_mmap(abi_ulong start, abi_ulong len, int target_prot,
     }
 
  the_end:
+#ifdef TARGET_X86_64
+    guest_vma_name_reset(start, len);
+#endif
     trace_target_mmap_complete(start);
     if (qemu_loglevel_mask(CPU_LOG_PAGE)) {
         log_page_dump(__func__);
@@ -1232,6 +1235,9 @@ int target_munmap(abi_ulong start, abi_ulong len, int rlimit_as_account)
         }
 #endif
         page_set_flags(start, start + len, 0);
+#ifdef TARGET_X86_64
+        guest_vma_name_reset(start, len);
+#endif
     }
     mmap_unlock();
 
@@ -1361,6 +1367,9 @@ abi_long target_mremap(abi_ulong old_addr, abi_ulong old_size,
     } else {
         new_addr = h2g(host_addr);
         prot = page_get_flags(old_addr);
+#ifdef TARGET_X86_64
+        guest_vma_name_remap(old_addr, old_size, new_addr, new_size);
+#endif
         page_set_flags(old_addr, old_addr + old_size, 0);
         if (option_monitor_shared_mem && (flags & MAP_TYPE) == MAP_SHARED) {
             prot |= PAGE_MEMSHARE;

@@ -18,15 +18,20 @@ fi
 "$clang" --target=x86_64-linux-gnu -fuse-ld=lld -nostdlib -static \
     -Wl,--build-id=none "$source_file" -o "$workdir/prctl-x86-inherit"
 
-set +e
-LATX_AOT=0 LATX_KZT=0 timeout -s KILL 10 \
-    "$emulator" "$workdir/prctl-x86-inherit" "$emulator"
-ret=$?
-set -e
+run_mode()
+{
+    mode=$1
+    label=$2
 
-case $ret in
+    set +e
+    LATX_AOT=0 LATX_KZT=0 LATX_TU="$mode" timeout -s KILL 10 \
+        "$emulator" "$workdir/prctl-x86-inherit" "$emulator"
+    ret=$?
+    set -e
+
+    case $ret in
 0)
-    echo "PASS: x86_64 prctl state inheritance"
+    echo "PASS: $label x86_64 prctl state inheritance"
     ;;
 31)
     echo "FAIL: unexpected exec test stage" >&2
@@ -50,8 +55,12 @@ case $ret in
     echo "FAIL: x86_64 prctl inheritance test timed out" >&2
     ;;
 *)
-    echo "FAIL: unexpected guest exit status $ret" >&2
+    echo "FAIL: $label unexpected guest exit status $ret" >&2
     ;;
-esac
+    esac
 
-exit "$ret"
+    test "$ret" -eq 0
+}
+
+run_mode 0 non-tu
+run_mode 1 tu

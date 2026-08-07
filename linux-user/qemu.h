@@ -101,6 +101,11 @@ struct image_info {
 #define LATX_GUEST_TSC_ENV  "_LATX_GUEST_TSC"
 #define TARGET_PR_MDWE_REFUSE_EXEC_GAIN 1U
 #define TARGET_PR_MDWE_NO_INHERIT      2U
+
+/* Called with the linux-user mmap lock held. */
+void guest_vma_name_reset(abi_ulong start, abi_ulong len);
+void guest_vma_name_remap(abi_ulong old_start, abi_ulong old_len,
+                          abi_ulong new_start, abi_ulong new_len);
 #endif
 extern struct image_info info1, *info;
 

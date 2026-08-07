@@ -5834,6 +5834,9 @@ abi_ulong latx_is_shm(abi_ulong maddr)
     }
     return 0;
 }
+#ifdef TARGET_X86_64
+static abi_long guest_mdwe_mmap(CPUState *cpu, abi_ulong len, int prot);
+#endif
 static inline abi_ulong do_shmat(CPUArchState *cpu_env,
                                  int shmid, abi_ulong shmaddr, int shmflg)
 {
@@ -5852,6 +5855,16 @@ static inline abi_ulong do_shmat(CPUArchState *cpu_env,
         /* can't get length, bail out */
         return ret;
     }
+
+#ifdef TARGET_X86_64
+    ret = guest_mdwe_mmap(cpu, shm_info.shm_segsz,
+                          PROT_READ |
+                          (shmflg & SHM_RDONLY ? 0 : PROT_WRITE) |
+                          (shmflg & SHM_EXEC ? PROT_EXEC : 0));
+    if (ret) {
+        return ret;
+    }
+#endif
 
     shmlba = target_shmlba(cpu_env);
 
@@ -5907,7 +5920,8 @@ static inline abi_ulong do_shmat(CPUArchState *cpu_env,
 
     page_set_flags(raddr, raddr + shm_info.shm_segsz,
                    PAGE_VALID | PAGE_RESET | PAGE_READ |
-                   (shmflg & SHM_RDONLY ? 0 : PAGE_WRITE));
+                   (shmflg & SHM_RDONLY ? 0 : PAGE_WRITE) |
+                   (shmflg & SHM_EXEC ? PAGE_EXEC : 0));
 
     for (i = 0; i < N_SHM_REGIONS; i++) {
         if (!shm_regions[i].in_use) {
@@ -11549,6 +11563,173 @@ struct open_self_maps_data {
     bool smaps;
 };
 
+#ifdef TARGET_X86_64
+typedef struct GuestVmaName {
+    abi_ulong start;
+    abi_ulong end;
+    char *name;
+} GuestVmaName;
+
+static GList *guest_vma_names;
+
+static GuestVmaName *guest_vma_name_new(abi_ulong start, abi_ulong end,
+                                        const char *name)
+{
+    GuestVmaName *entry = g_new(GuestVmaName, 1);
+
+    entry->start = start;
+    entry->end = end;
+    entry->name = g_strdup(name);
+    return entry;
+}
+
+static void guest_vma_name_free(GuestVmaName *entry)
+{
+    g_free(entry->name);
+    g_free(entry);
+}
+
+static gint guest_vma_name_compare(gconstpointer lhs, gconstpointer rhs)
+{
+    const GuestVmaName *a = lhs;
+    const GuestVmaName *b = rhs;
+
+    return a->start < b->start ? -1 : a->start != b->start;
+}
+
+static void guest_vma_name_merge_locked(void)
+{
+    GList *link = guest_vma_names;
+
+    guest_vma_names = g_list_sort(guest_vma_names, guest_vma_name_compare);
+    link = guest_vma_names;
+    while (link && link->next) {
+        GuestVmaName *entry = link->data;
+        GuestVmaName *next = link->next->data;
+
+        if (entry->end == next->start &&
+            strcmp(entry->name, next->name) == 0) {
+            GList *next_link = link->next;
+
+            entry->end = next->end;
+            guest_vma_names = g_list_delete_link(guest_vma_names,
+                                                  next_link);
+            guest_vma_name_free(next);
+        } else {
+            link = link->next;
+        }
+    }
+}
+
+static void guest_vma_name_apply_locked(abi_ulong start, abi_ulong end,
+                                        const char *name)
+{
+    GList *link;
+
+    for (link = guest_vma_names; link; ) {
+        GList *next_link = link->next;
+        GuestVmaName *entry = link->data;
+
+        if (entry->start < end && start < entry->end) {
+            if (entry->start < start) {
+                guest_vma_names = g_list_prepend(
+                    guest_vma_names,
+                    guest_vma_name_new(entry->start, start, entry->name));
+            }
+            if (end < entry->end) {
+                guest_vma_names = g_list_prepend(
+                    guest_vma_names,
+                    guest_vma_name_new(end, entry->end, entry->name));
+            }
+            guest_vma_names = g_list_delete_link(guest_vma_names, link);
+            guest_vma_name_free(entry);
+        }
+        link = next_link;
+    }
+    if (name) {
+        guest_vma_names = g_list_prepend(
+            guest_vma_names, guest_vma_name_new(start, end, name));
+    }
+    guest_vma_name_merge_locked();
+}
+
+static const GuestVmaName *guest_vma_name_find_locked(abi_ulong addr,
+                                                       abi_ulong *next)
+{
+    GList *link;
+
+    for (link = guest_vma_names; link; link = link->next) {
+        const GuestVmaName *entry = link->data;
+
+        if (addr < entry->start) {
+            *next = entry->start;
+            return NULL;
+        }
+        if (addr < entry->end) {
+            *next = entry->end;
+            return entry;
+        }
+    }
+    *next = -1;
+    return NULL;
+}
+
+void guest_vma_name_reset(abi_ulong start, abi_ulong len)
+{
+    abi_ulong end = start + len;
+
+    if (len && end > start) {
+        guest_vma_name_apply_locked(start, end, NULL);
+    }
+}
+
+void guest_vma_name_remap(abi_ulong old_start, abi_ulong old_len,
+                          abi_ulong new_start, abi_ulong new_len)
+{
+    GPtrArray *saved = g_ptr_array_new_with_free_func(
+        (GDestroyNotify)guest_vma_name_free);
+    abi_ulong old_end = old_start + old_len;
+    abi_ulong new_end = new_start + new_len;
+    char *tail_name = NULL;
+    GList *link;
+    guint i;
+
+    for (link = guest_vma_names; link; link = link->next) {
+        GuestVmaName *entry = link->data;
+        abi_ulong start = MAX(entry->start, old_start);
+        abi_ulong end = MIN(entry->end, old_end);
+
+        if (start < end) {
+            g_ptr_array_add(saved, guest_vma_name_new(start - old_start,
+                                                      end - old_start,
+                                                      entry->name));
+            if (end == old_end) {
+                g_free(tail_name);
+                tail_name = g_strdup(entry->name);
+            }
+        }
+    }
+
+    guest_vma_name_apply_locked(old_start, old_end, NULL);
+    guest_vma_name_apply_locked(new_start, new_end, NULL);
+    for (i = 0; i < saved->len; i++) {
+        GuestVmaName *entry = g_ptr_array_index(saved, i);
+
+        if (entry->start >= new_len) {
+            continue;
+        }
+        guest_vma_name_apply_locked(new_start + entry->start,
+                                    new_start + MIN(entry->end, new_len),
+                                    entry->name);
+    }
+    if (new_len > old_len && tail_name) {
+        guest_vma_name_apply_locked(new_start + old_len, new_end, tail_name);
+    }
+    g_free(tail_name);
+    g_ptr_array_free(saved, true);
+}
+#endif
+
 /*
  * Subroutine to output one line of /proc/self/maps,
  * or one region of /proc/self/smaps.
@@ -11660,7 +11841,19 @@ static void open_self_maps_4(const struct open_self_maps_data *d,
                              const MapInfo *mi, abi_ptr start,
                              abi_ptr end, unsigned flags)
 {
+#ifdef TARGET_X86_64
+    while (start < end) {
+        abi_ulong next;
+        const GuestVmaName *entry = guest_vma_name_find_locked(start, &next);
+
+        next = MIN(next, end);
+        open_self_maps_4_line(d, mi, start, next, flags,
+                              entry ? entry->name : NULL);
+        start = next;
+    }
+#else
     open_self_maps_4_line(d, mi, start, end, flags, NULL);
+#endif
 }
 
 /*
@@ -11768,9 +11961,18 @@ static int open_self_maps_1(CPUArchState *cpu_env, int fd, bool smaps)
     CPUState *cpu = env_cpu((CPUArchState *)cpu_env);
     TaskState *ts = cpu->opaque;
     IntervalTreeRoot *map_info = read_self_maps();
+#ifdef TARGET_X86_64
+    struct open_self_maps_data data = {
+        .ts = ts,
+        .host_maps = map_info,
+        .fd = fd,
+        .smaps = smaps,
+    };
+#endif
     IntervalTreeNode *s;
     int count;
 
+    mmap_lock();
     for (s = interval_tree_iter_first(map_info, 0, -1); s;
          s = interval_tree_iter_next(s, 0, -1)) {
         MapInfo *e = container_of(s, MapInfo, itree);
@@ -11780,6 +11982,10 @@ static int open_self_maps_1(CPUArchState *cpu_env, int fd, bool smaps)
             unsigned long max = e->itree.last + 1;
             int flags = page_get_flags(h2g(min));
             const char *path;
+#ifdef TARGET_X86_64
+            abi_ulong next_name;
+            const GuestVmaName *name;
+#endif
 
             max = h2g_valid(max - 1) ?
                 max : (uintptr_t) g2h_untagged(GUEST_ADDR_MAX) + 1;
@@ -11787,6 +11993,15 @@ static int open_self_maps_1(CPUArchState *cpu_env, int fd, bool smaps)
             if (!page_check_range(h2g(min), max - min, flags)) {
                 continue;
             }
+
+#ifdef TARGET_X86_64
+            name = guest_vma_name_find_locked(h2g(min), &next_name);
+            if (name || next_name < h2g(max - 1) + 1) {
+                open_self_maps_4(&data, e, h2g(min), h2g(max - 1) + 1,
+                                 flags);
+                continue;
+            }
+#endif
 
             if (h2g(min) == ts->info->stack_limit) {
                 path = "[stack]";
@@ -11823,6 +12038,7 @@ static int open_self_maps_1(CPUArchState *cpu_env, int fd, bool smaps)
             }
         }
     }
+    mmap_unlock();
 
     free_self_maps(map_info);
 
@@ -13077,44 +13293,78 @@ static abi_long do_prctl_set_vma(abi_ulong operation, abi_ulong start,
                                  abi_ulong len,
                                  abi_ulong name_addr)
 {
-    char *name = NULL;
+    char name_buffer[80];
+    const char *name = NULL;
     abi_ulong rounded_len;
+    abi_ulong end;
+    abi_ulong addr;
+    abi_ulong anon_start = 0;
+    bool in_anon = false;
     abi_long ret;
+    size_t name_len;
 
     if (operation != PR_SET_VMA_ANON_NAME) {
         return -TARGET_EINVAL;
     }
     if (name_addr) {
-        name = lock_user_string(name_addr);
-        if (!name) {
-            return -TARGET_EFAULT;
+        for (name_len = 0; name_len < sizeof(name_buffer); name_len++) {
+            uint8_t ch;
+
+            if (get_user_u8(ch, name_addr + name_len)) {
+                return -TARGET_EFAULT;
+            }
+            name_buffer[name_len] = ch;
+            if (!ch) {
+                break;
+            }
+            if (ch <= 0x1f || ch >= 0x7f || strchr("\\`$[]", ch)) {
+                return -TARGET_EINVAL;
+            }
         }
+        if (name_len == sizeof(name_buffer)) {
+            return -TARGET_ENAMETOOLONG;
+        }
+        name = name_buffer;
     }
     if (start & ~TARGET_PAGE_MASK) {
-        ret = -TARGET_EINVAL;
-        goto out;
+        return -TARGET_EINVAL;
     }
     rounded_len = TARGET_PAGE_ALIGN(len);
     if ((len && !rounded_len) || start + rounded_len < start) {
-        ret = -TARGET_EINVAL;
-        goto out;
+        return -TARGET_EINVAL;
     }
     if (!rounded_len) {
-        ret = 0;
-        goto out;
+        return 0;
     }
-    if (!page_check_range(start, rounded_len, PAGE_VALID)) {
-        ret = -TARGET_ENOMEM;
-        goto out;
-    }
+    end = start + rounded_len;
+    ret = 0;
 
-    ret = get_errno(prctl(PR_SET_VMA, PR_SET_VMA_ANON_NAME,
-                          (uintptr_t)g2h_untagged(start), rounded_len,
-                          (uintptr_t)name));
-out:
-    if (name) {
-        unlock_user(name, name_addr, 0);
+    mmap_lock();
+    for (addr = start; addr < end; addr += TARGET_PAGE_SIZE) {
+        int flags = page_get_flags(addr);
+
+        if ((flags & (PAGE_VALID | PAGE_ANON)) ==
+            (PAGE_VALID | PAGE_ANON)) {
+            if (!in_anon) {
+                anon_start = addr;
+                in_anon = true;
+            }
+            continue;
+        }
+        if (in_anon) {
+            guest_vma_name_apply_locked(anon_start, addr, name);
+            in_anon = false;
+        }
+        if (flags & PAGE_VALID) {
+            ret = -TARGET_EBADF;
+            break;
+        }
+        ret = -TARGET_ENOMEM;
     }
+    if (in_anon) {
+        guest_vma_name_apply_locked(anon_start, addr, name);
+    }
+    mmap_unlock();
     return ret;
 }
 
@@ -13122,10 +13372,16 @@ static abi_long guest_mdwe_mmap(CPUState *cpu, abi_ulong len, int prot)
 {
     TaskState *ts = cpu->opaque;
     int valid = PROT_READ | PROT_WRITE | PROT_EXEC | TARGET_PROT_SEM;
+    int current_personality;
 
     if (!(ts->info->prctl_mdwe & TARGET_PR_MDWE_REFUSE_EXEC_GAIN) ||
         !len || (prot & ~valid)) {
         return 0;
+    }
+    current_personality = personality(0xffffffffUL);
+    if ((prot & PROT_READ) && current_personality != -1 &&
+        (current_personality & READ_IMPLIES_EXEC)) {
+        prot |= PROT_EXEC;
     }
     return (prot & (PROT_WRITE | PROT_EXEC)) ==
            (PROT_WRITE | PROT_EXEC) ? -TARGET_EACCES : 0;
@@ -18353,9 +18609,10 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
     }
 #endif
 
-#if defined(TARGET_NR_set_tid_address) && defined(__NR_set_tid_address)
+#ifdef TARGET_NR_set_tid_address
     case TARGET_NR_set_tid_address:
-        return get_errno(set_tid_address((int *)g2h(cpu, arg1)));
+        ((TaskState *)cpu->opaque)->child_tidptr = arg1;
+        return get_errno(sys_gettid());
 #endif
 
     case TARGET_NR_tkill:

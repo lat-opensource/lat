@@ -128,7 +128,7 @@ inherit_stage:
     test %rax, %rax
     js fail_tsc
 
-    rdtsc
+    rdtscp
     mov $33, %edi
     jmp exit_now
 
