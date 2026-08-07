@@ -13,6 +13,7 @@ typedef long slong;
 #define __NR_mmap               9
 #define __NR_mprotect          10
 #define __NR_munmap            11
+#define __NR_brk               12
 #define __NR_shmget            29
 #define __NR_shmat             30
 #define __NR_shmctl            31
@@ -71,6 +72,22 @@ typedef long slong;
 #define PR_TASK_PERF_EVENTS_ENABLE  32
 #define PR_MCE_KILL                 33
 #define PR_MCE_KILL_GET             34
+#define PR_SET_MM                   35
+#define PR_SET_MM_START_CODE         1
+#define PR_SET_MM_END_CODE           2
+#define PR_SET_MM_START_DATA         3
+#define PR_SET_MM_END_DATA           4
+#define PR_SET_MM_START_STACK        5
+#define PR_SET_MM_START_BRK          6
+#define PR_SET_MM_BRK                7
+#define PR_SET_MM_ARG_START          8
+#define PR_SET_MM_ARG_END            9
+#define PR_SET_MM_ENV_START         10
+#define PR_SET_MM_ENV_END           11
+#define PR_SET_MM_AUXV              12
+#define PR_SET_MM_EXE_FILE          13
+#define PR_SET_MM_MAP               14
+#define PR_SET_MM_MAP_SIZE          15
 #define PR_MCE_KILL_CLEAR            0
 #define PR_MCE_KILL_SET              1
 #define PR_MCE_KILL_DEFAULT          2
@@ -95,8 +112,26 @@ typedef long slong;
 #define PR_GET_MEMORY_MERGE         68
 #define PR_SET_VMA          0x53564d41
 #define PR_SET_VMA_ANON_NAME         0
+#define PR_GET_AUXV         0x41555856
 
 #define CAP_CHOWN 0
+
+struct prctl_mm_map {
+    ulong start_code;
+    ulong end_code;
+    ulong start_data;
+    ulong end_data;
+    ulong start_brk;
+    ulong brk;
+    ulong start_stack;
+    ulong arg_start;
+    ulong arg_end;
+    ulong env_start;
+    ulong env_end;
+    ulong auxv;
+    unsigned int auxv_size;
+    unsigned int exe_fd;
+};
 
 static inline slong syscall1(slong nr, slong a1)
 {
@@ -651,6 +686,132 @@ static int test_fork_state(int no_inherit)
     return 0;
 }
 
+static int test_set_mm_privileged(void)
+{
+    static const char cmdline[] = "lat-prctl-mm";
+    static const char cmdline_path[] = "/proc/self/cmdline";
+    static const char auxv_path[] = "/proc/self/auxv";
+    static const char exe_path[] = "/proc/self/exe";
+    ulong replacement_auxv[4] = { 123, 456, 0, 0 };
+    ulong second_auxv[4] = { 789, 321, 0, 0 };
+    ulong auxv_buffer[4] = { 0 };
+    struct prctl_mm_map mm;
+    char buffer[64];
+    slong map;
+    slong fd;
+    slong len;
+    ulong i;
+
+    map = do_mmap(0, 16384, PROT_READ | PROT_WRITE,
+                  MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (map < 0) {
+        return 120;
+    }
+    for (i = 0; i < sizeof(cmdline); i++) {
+        ((char *)map)[i] = cmdline[i];
+    }
+    for (i = 0; i < 4; i++) {
+        ((char *)map)[128 + i] = "E=1\0"[i];
+    }
+    mm.start_code = map;
+    mm.end_code = map + 64;
+    mm.start_data = map + 128;
+    mm.end_data = map + 256;
+    mm.start_brk = map + 4096;
+    mm.brk = map + 8192;
+    mm.start_stack = map + 12288;
+    mm.arg_start = map;
+    mm.arg_end = map + sizeof(cmdline);
+    mm.env_start = map + 128;
+    mm.env_end = map + 132;
+    mm.auxv = (ulong)replacement_auxv;
+    mm.auxv_size = sizeof(replacement_auxv);
+    mm.exe_fd = ~0U;
+
+    if (do_prctl(PR_SET_MM, PR_SET_MM_MAP, (slong)&mm, sizeof(mm), 0)) {
+        return 121;
+    }
+    fd = syscall4(__NR_openat, AT_FDCWD, (slong)cmdline_path, 0, 0);
+    if (fd < 0) {
+        return 122;
+    }
+    len = syscall3(__NR_read, fd, (slong)buffer, sizeof(buffer));
+    syscall1(__NR_close, fd);
+    if (len != sizeof(cmdline) ||
+        !bytes_equal(buffer, cmdline, sizeof(cmdline)) ||
+        syscall1(__NR_brk, 0) != map + 8192) {
+        return 122;
+    }
+
+    if (do_prctl(PR_GET_AUXV, (slong)auxv_buffer,
+                 sizeof(auxv_buffer), 0, 0) < 0 ||
+        !bytes_equal((char *)auxv_buffer, (char *)replacement_auxv,
+                     sizeof(replacement_auxv))) {
+        return 123;
+    }
+    fd = syscall4(__NR_openat, AT_FDCWD, (slong)auxv_path, 0, 0);
+    if (fd < 0) {
+        return 123;
+    }
+    len = syscall3(__NR_read, fd, (slong)auxv_buffer,
+                   sizeof(auxv_buffer));
+    syscall1(__NR_close, fd);
+    if (len != sizeof(auxv_buffer) ||
+        !bytes_equal((char *)auxv_buffer, (char *)replacement_auxv,
+                     sizeof(replacement_auxv))) {
+        return 123;
+    }
+
+    if (do_prctl(PR_SET_MM, PR_SET_MM_START_CODE, map, 0, 0) ||
+        do_prctl(PR_SET_MM, PR_SET_MM_END_CODE, map + 64, 0, 0) ||
+        do_prctl(PR_SET_MM, PR_SET_MM_START_DATA, map + 128, 0, 0) ||
+        do_prctl(PR_SET_MM, PR_SET_MM_END_DATA, map + 256, 0, 0) ||
+        do_prctl(PR_SET_MM, PR_SET_MM_START_BRK, map + 4096, 0, 0) ||
+        do_prctl(PR_SET_MM, PR_SET_MM_BRK, map + 8192, 0, 0) ||
+        do_prctl(PR_SET_MM, PR_SET_MM_START_STACK, map + 12288, 0, 0) ||
+        do_prctl(PR_SET_MM, PR_SET_MM_ARG_START, map, 0, 0) ||
+        do_prctl(PR_SET_MM, PR_SET_MM_ARG_END, map + 4, 0, 0) ||
+        do_prctl(PR_SET_MM, PR_SET_MM_ENV_START, map + 128, 0, 0) ||
+        do_prctl(PR_SET_MM, PR_SET_MM_ENV_END, map + 132, 0, 0)) {
+        return 124;
+    }
+    fd = syscall4(__NR_openat, AT_FDCWD, (slong)cmdline_path, 0, 0);
+    if (fd < 0) {
+        return 125;
+    }
+    len = syscall3(__NR_read, fd, (slong)buffer, sizeof(buffer));
+    syscall1(__NR_close, fd);
+    if (len != 4 || !bytes_equal(buffer, cmdline, 4)) {
+        return 125;
+    }
+
+    if (do_prctl(PR_SET_MM, PR_SET_MM_AUXV, (slong)second_auxv,
+                 sizeof(second_auxv), 0) ||
+        do_prctl(PR_GET_AUXV, (slong)auxv_buffer,
+                 sizeof(auxv_buffer), 0, 0) < 0 ||
+        !bytes_equal((char *)auxv_buffer, (char *)second_auxv,
+                     sizeof(second_auxv))) {
+        return 126;
+    }
+    if (do_prctl(PR_SET_MM, PR_SET_MM_START_STACK,
+                 map + 0x100000, 0, 0) != -EFAULT ||
+        do_prctl(PR_SET_MM, 99, map, 0, 0) != -EINVAL) {
+        return 127;
+    }
+
+    fd = syscall4(__NR_openat, AT_FDCWD, (slong)exe_path, 0, 0);
+    if (fd < 0 || do_prctl(PR_SET_MM, PR_SET_MM_EXE_FILE, fd, 0, 0)) {
+        return 128;
+    }
+    syscall1(__NR_close, fd);
+    fd = syscall4(__NR_openat, AT_FDCWD, (slong)exe_path, 0, 0);
+    if (fd < 0) {
+        return 128;
+    }
+    syscall1(__NR_close, fd);
+    return 0;
+}
+
 int test_main(ulong *stack)
 {
     ulong argc = stack[0];
@@ -681,6 +842,9 @@ int test_main(ulong *stack)
     }
     if (mode == 'i') {
         return test_fork_state(0);
+    }
+    if (mode == 'x') {
+        return test_set_mm_privileged();
     }
     return 101;
 }

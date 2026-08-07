@@ -130,6 +130,17 @@ if host_machine.cpu_family() == 'loongarch64' and \
     timeout: 120,
   )
   test(
+    'test-prctl-x86-privileged',
+    find_program('test-prctl-x86-privileged.sh'),
+    args: [
+      emulators['latx-x86_64'],
+      files('prctl-x86-semantics.c'),
+    ],
+    protocol: 'exitcode',
+    suite: 'latx-integration',
+    timeout: 120,
+  )
+  test(
     'test-clone-namespaces',
     find_program('test-clone-namespaces.sh'),
     args: [
