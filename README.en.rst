@@ -109,7 +109,12 @@ Use the command for the host distribution. The lists also include ``file``,
 Meson version of at least 0.55.3 when available. Otherwise, it uses the Meson
 submodule fetched by ``--recursive``. Python 3.6 or newer is required.
 
-Debian / Ubuntu:
+Expand the entry for the host distribution:
+
+.. raw:: html
+
+   <details>
+   <summary>Debian / Ubuntu</summary>
 
 .. code-block:: bash
 
@@ -117,14 +122,22 @@ Debian / Ubuntu:
         pkg-config libglib2.0-dev libdrm-dev lsb-release make python3 \
         python3-setuptools binutils file tar wget xz-utils zstd
 
-Arch Linux:
+.. raw:: html
+
+   </details>
+   <details>
+   <summary>Arch Linux</summary>
 
 .. code-block:: bash
 
     sudo pacman -S --needed git make meson ninja gcc pkgconf glib2 python \
         python-setuptools openssl binutils file tar wget xz zstd
 
-AOSC OS:
+.. raw:: html
+
+   </details>
+   <details>
+   <summary>AOSC OS</summary>
 
 .. code-block:: bash
 
@@ -133,12 +146,20 @@ AOSC OS:
         pcre-static zlib-static zstd-static openssl-static pkg-config ninja \
         binutils file tar wget xz zstd
 
-Fedora:
+.. raw:: html
+
+   </details>
+   <details>
+   <summary>Fedora</summary>
 
 .. code-block:: bash
 
     sudo dnf install gcc gcc-c++ make git ninja-build meson openssl-devel \
         glib2-devel binutils file tar wget xz zstd
+
+.. raw:: html
+
+   </details>
 
 Check the basic tools before building:
 
@@ -280,7 +301,39 @@ Every commit must include a DCO ``Signed-off-by`` trailer.
 Contributors
 ============
 
-|contrib-luzeng| |contrib-hanlu| |contrib-wenqiang| |contrib-jing| |contrib-qi| |contrib-chaoyi| |contrib-rengan| |contrib-xiaotian| |contrib-haiyong| |contrib-niugenen|
+.. raw:: html
+
+   <table>
+     <tr>
+       <td align="center" colspan="8"><b>Internal development phase (2021–2024)</b></td>
+     </tr>
+     <tr>
+       <td align="center"><a href="https://github.com/luzeng87"><img src="https://github.com/luzeng87.png?size=64" width="64" height="64" alt="Lu Zeng"><br><sub><b>Lu Zeng</b></sub></a></td>
+       <td align="center"><a href="https://github.com/LaurenIsACoder"><img src="https://github.com/LaurenIsACoder.png?size=64" width="64" height="64" alt="Hanlu Li"><br><sub><b>Hanlu Li</b></sub></a></td>
+       <td align="center"><a href="https://github.com/ganjue66da"><img src="https://github.com/ganjue66da.png?size=64" width="64" height="64" alt="Wenqiang Wei"><br><sub><b>Wenqiang Wei</b></sub></a></td>
+       <td align="center"><a href="https://github.com/JonLeeTaoShan"><img src="https://github.com/JonLeeTaoShan.png?size=64" width="64" height="64" alt="Jing Li"><br><sub><b>Jing Li</b></sub></a></td>
+       <td align="center"><a href="https://github.com/specialpointcentral"><img src="https://github.com/specialpointcentral.png?size=64" width="64" height="64" alt="Qi Hu"><br><sub><b>Qi Hu</b></sub></a></td>
+       <td align="center"><a href="https://github.com/rmjskhy"><img src="https://github.com/rmjskhy.png?size=64" width="64" height="64" alt="Chaoyi Liu"><br><sub><b>Chaoyi Liu</b></sub></a></td>
+       <td align="center"><a href="https://github.com/y347812075"><img src="https://github.com/y347812075.png?size=64" width="64" height="64" alt="Rengan Yue"><br><sub><b>Rengan Yue</b></sub></a></td>
+       <td align="center"><a href="https://github.com/yetist"><img src="https://github.com/yetist.png?size=64" width="64" height="64" alt="Xiaotian Wu"><br><sub><b>Xiaotian Wu</b></sub></a></td>
+     </tr>
+     <tr>
+       <td align="center" colspan="8"><b>Open-source community (2025–)</b></td>
+     </tr>
+     <tr>
+       <td align="center"><a href="https://github.com/NiuGenen"><img src="https://github.com/NiuGenen.png?size=64" width="64" height="64" alt="NiuGenen"><br><sub><b>NiuGenen</b></sub></a></td>
+       <td align="center"><a href="https://github.com/xiezyang"><img src="https://github.com/xiezyang.png?size=64" width="64" height="64" alt="Zhaoyang Xie"><br><sub><b>Zhaoyang Xie</b></sub></a></td>
+       <td align="center"><a href="https://github.com/xiangzhai"><img src="https://github.com/xiangzhai.png?size=64" width="64" height="64" alt="Leslie Zhai"><br><sub><b>Leslie Zhai</b></sub></a></td>
+       <td align="center"><a href="https://github.com/sunhaiyong1978"><img src="https://github.com/sunhaiyong1978.png?size=64" width="64" height="64" alt="Sun Haiyong"><br><sub><b>Sun Haiyong</b></sub></a></td>
+       <td align="center"><a href="https://github.com/baibaidashixiong"><img src="https://github.com/baibaidashixiong.png?size=64" width="64" height="64" alt="zqz"><br><sub><b>zqz</b></sub></a></td>
+       <td align="center"><a href="https://github.com/zhaodongru"><img src="https://github.com/zhaodongru.png?size=64" width="64" height="64" alt="Dongru Zhao"><br><sub><b>Dongru Zhao</b></sub></a></td>
+       <td align="center"><a href="https://github.com/phorcys"><img src="https://github.com/phorcys.png?size=64" width="64" height="64" alt="phorcys"><br><sub><b>phorcys</b></sub></a></td>
+       <td align="center"><a href="https://github.com/wojiushixiaobai"><img src="https://github.com/wojiushixiaobai.png?size=64" width="64" height="64" alt="wojiushixiaobai"><br><sub><b>wojiushixiaobai</b></sub></a></td>
+     </tr>
+   </table>
+
+The avatars above show a subset of contributors; the order is for
+presentation only and implies no contribution ranking.
 
 LATX thanks every contributor. See `CONTRIBUTORS.md <CONTRIBUTORS.md>`_
 for contributors of each development phase and their contribution areas,
@@ -311,34 +364,3 @@ If you have any questions or suggestions, please feel free to engage with us thr
 
 .. _build, installation, and runtime Wiki guide: https://github.com/lat-opensource/lat/wiki/%E7%BC%96%E8%AF%91%E4%B8%8E%E8%BF%90%E8%A1%8C
 .. _Troubleshooting guide: https://github.com/lat-opensource/lat/wiki/%E8%B0%83%E8%AF%95%E4%B8%8E%E9%97%AE%E9%A2%98%E5%AE%9A%E4%BD%8D%E6%8C%87%E5%8D%97
-
-.. |contrib-luzeng| image:: https://github.com/luzeng87.png?size=64
-   :target: https://github.com/luzeng87
-   :alt: Lu Zeng
-.. |contrib-hanlu| image:: https://github.com/LaurenIsACoder.png?size=64
-   :target: https://github.com/LaurenIsACoder
-   :alt: Hanlu Li
-.. |contrib-wenqiang| image:: https://github.com/ganjue66da.png?size=64
-   :target: https://github.com/ganjue66da
-   :alt: Wenqiang Wei
-.. |contrib-jing| image:: https://github.com/JonLeeTaoShan.png?size=64
-   :target: https://github.com/JonLeeTaoShan
-   :alt: Jing Li
-.. |contrib-qi| image:: https://github.com/specialpointcentral.png?size=64
-   :target: https://github.com/specialpointcentral
-   :alt: Qi Hu
-.. |contrib-chaoyi| image:: https://github.com/rmjskhy.png?size=64
-   :target: https://github.com/rmjskhy
-   :alt: Chaoyi Liu
-.. |contrib-rengan| image:: https://github.com/y347812075.png?size=64
-   :target: https://github.com/y347812075
-   :alt: Rengan Yue
-.. |contrib-xiaotian| image:: https://github.com/yetist.png?size=64
-   :target: https://github.com/yetist
-   :alt: Xiaotian Wu
-.. |contrib-haiyong| image:: https://github.com/sunhaiyong1978.png?size=64
-   :target: https://github.com/sunhaiyong1978
-   :alt: Sun Haiyong
-.. |contrib-niugenen| image:: https://github.com/NiuGenen.png?size=64
-   :target: https://github.com/NiuGenen
-   :alt: NiuGenen

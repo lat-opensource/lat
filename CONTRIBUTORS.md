@@ -37,18 +37,20 @@ LATX 感谢每一位贡献者。项目经历了两个发展阶段：2021 年至 
 
 开源后的完整贡献记录以提交历史和
 [GitHub Contributors](https://github.com/lat-opensource/lat/graphs/contributors)
-页面为准。特别感谢以下社区贡献者，排名不分先后：
+页面为准。请注意：该页面的统计包含本项目保留的 QEMU 上游历史提交，其中的
+提交次数不代表对 LATX 本身的贡献量。特别感谢以下社区贡献者，按开源后的
+活跃程度排序：
 
-- <a href="https://github.com/sunhaiyong1978"><img src="https://github.com/sunhaiyong1978.png?size=32" width="32" alt="@sunhaiyong1978"></a> **[Sun Haiyong](https://github.com/sunhaiyong1978)**
 - <a href="https://github.com/NiuGenen"><img src="https://github.com/NiuGenen.png?size=32" width="32" alt="@NiuGenen"></a> **[NiuGenen](https://github.com/NiuGenen)**
 - <a href="https://github.com/xiezyang"><img src="https://github.com/xiezyang.png?size=32" width="32" alt="@xiezyang"></a> **[Zhaoyang Xie](https://github.com/xiezyang)**
 - <a href="https://github.com/xiangzhai"><img src="https://github.com/xiangzhai.png?size=32" width="32" alt="@xiangzhai"></a> **[Leslie Zhai](https://github.com/xiangzhai)**
+- <a href="https://github.com/sunhaiyong1978"><img src="https://github.com/sunhaiyong1978.png?size=32" width="32" alt="@sunhaiyong1978"></a> **[Sun Haiyong](https://github.com/sunhaiyong1978)**
+- <a href="https://github.com/baibaidashixiong"><img src="https://github.com/baibaidashixiong.png?size=32" width="32" alt="@baibaidashixiong"></a> **[zqz](https://github.com/baibaidashixiong)**
 - <a href="https://github.com/zhaodongru"><img src="https://github.com/zhaodongru.png?size=32" width="32" alt="@zhaodongru"></a> **[Dongru Zhao](https://github.com/zhaodongru)**
 - <a href="https://github.com/phorcys"><img src="https://github.com/phorcys.png?size=32" width="32" alt="@phorcys"></a> **[phorcys](https://github.com/phorcys)**
-- <a href="https://github.com/ksco"><img src="https://github.com/ksco.png?size=32" width="32" alt="@ksco"></a> **[Yang Liu](https://github.com/ksco)**
-- <a href="https://github.com/Mikura-Kyouka"><img src="https://github.com/Mikura-Kyouka.png?size=32" width="32" alt="@Mikura-Kyouka"></a> **[Mikura Kyouka](https://github.com/Mikura-Kyouka)**
-- <a href="https://github.com/baibaidashixiong"><img src="https://github.com/baibaidashixiong.png?size=32" width="32" alt="@baibaidashixiong"></a> **[zqz](https://github.com/baibaidashixiong)**
 - <a href="https://github.com/wojiushixiaobai"><img src="https://github.com/wojiushixiaobai.png?size=32" width="32" alt="@wojiushixiaobai"></a> **[吴小白](https://github.com/wojiushixiaobai)**
+- <a href="https://github.com/Mikura-Kyouka"><img src="https://github.com/Mikura-Kyouka.png?size=32" width="32" alt="@Mikura-Kyouka"></a> **[Mikura Kyouka](https://github.com/Mikura-Kyouka)**
+- <a href="https://github.com/ksco"><img src="https://github.com/ksco.png?size=32" width="32" alt="@ksco"></a> **[Yang Liu](https://github.com/ksco)**
 
 以及所有通过 Issue 反馈、文档改进、版本测试参与项目的伙伴。
 
@@ -97,19 +99,21 @@ community management, workflow automation, and release testing.
 The complete post-open-source contribution record is tracked by the
 commit history and the
 [GitHub Contributors](https://github.com/lat-opensource/lat/graphs/contributors)
-page. Special thanks to the following community contributors, in no
-particular order:
+page. Note that this page's statistics include the upstream QEMU commit
+history retained by this repository, so its commit counts do not reflect
+contributions to LATX itself. Special thanks to the following community
+contributors, ordered by post-open-source activity:
 
-- <a href="https://github.com/sunhaiyong1978"><img src="https://github.com/sunhaiyong1978.png?size=32" width="32" alt="@sunhaiyong1978"></a> **[Sun Haiyong](https://github.com/sunhaiyong1978)**
 - <a href="https://github.com/NiuGenen"><img src="https://github.com/NiuGenen.png?size=32" width="32" alt="@NiuGenen"></a> **[NiuGenen](https://github.com/NiuGenen)**
 - <a href="https://github.com/xiezyang"><img src="https://github.com/xiezyang.png?size=32" width="32" alt="@xiezyang"></a> **[Zhaoyang Xie](https://github.com/xiezyang)**
 - <a href="https://github.com/xiangzhai"><img src="https://github.com/xiangzhai.png?size=32" width="32" alt="@xiangzhai"></a> **[Leslie Zhai](https://github.com/xiangzhai)**
+- <a href="https://github.com/sunhaiyong1978"><img src="https://github.com/sunhaiyong1978.png?size=32" width="32" alt="@sunhaiyong1978"></a> **[Sun Haiyong](https://github.com/sunhaiyong1978)**
+- <a href="https://github.com/baibaidashixiong"><img src="https://github.com/baibaidashixiong.png?size=32" width="32" alt="@baibaidashixiong"></a> **[zqz](https://github.com/baibaidashixiong)**
 - <a href="https://github.com/zhaodongru"><img src="https://github.com/zhaodongru.png?size=32" width="32" alt="@zhaodongru"></a> **[Dongru Zhao](https://github.com/zhaodongru)**
 - <a href="https://github.com/phorcys"><img src="https://github.com/phorcys.png?size=32" width="32" alt="@phorcys"></a> **[phorcys](https://github.com/phorcys)**
-- <a href="https://github.com/ksco"><img src="https://github.com/ksco.png?size=32" width="32" alt="@ksco"></a> **[Yang Liu](https://github.com/ksco)**
-- <a href="https://github.com/Mikura-Kyouka"><img src="https://github.com/Mikura-Kyouka.png?size=32" width="32" alt="@Mikura-Kyouka"></a> **[Mikura Kyouka](https://github.com/Mikura-Kyouka)**
-- <a href="https://github.com/baibaidashixiong"><img src="https://github.com/baibaidashixiong.png?size=32" width="32" alt="@baibaidashixiong"></a> **[zqz](https://github.com/baibaidashixiong)**
 - <a href="https://github.com/wojiushixiaobai"><img src="https://github.com/wojiushixiaobai.png?size=32" width="32" alt="@wojiushixiaobai"></a> **[吴小白](https://github.com/wojiushixiaobai)**
+- <a href="https://github.com/Mikura-Kyouka"><img src="https://github.com/Mikura-Kyouka.png?size=32" width="32" alt="@Mikura-Kyouka"></a> **[Mikura Kyouka](https://github.com/Mikura-Kyouka)**
+- <a href="https://github.com/ksco"><img src="https://github.com/ksco.png?size=32" width="32" alt="@ksco"></a> **[Yang Liu](https://github.com/ksco)**
 
 And everyone who participated through issue reports, documentation
 improvements, and release testing.
