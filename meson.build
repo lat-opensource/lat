@@ -1,7 +1,8 @@
 project('latx', ['c'], meson_version: '>=0.55.0',
         default_options: ['warning_level=1', 'c_std=gnu99', 'cpp_std=gnu++11', 'b_colorout=auto'] +
                          (meson.version().version_compare('>=0.56.0') ? [ 'b_staticpic=false' ] : []),
-        version: run_command('head', meson.source_root() / 'VERSION').stdout().strip())
+        version: run_command('head', meson.source_root() / 'VERSION',
+                             check: true).stdout().strip())
 
 not_found = dependency('', required: false)
 if meson.version().version_compare('>=0.56.0')
@@ -622,7 +623,7 @@ foreach target : target_dirs
         'target/i386/latx/sbt/smc_reload.c',
         'target/i386/latx/sbt/aot_smc_reload.c',
         'accel/tcg/tb-jump.c'
-      ) + genh + tcg_trace_genh + syscall_nr_generated,
+      ) + genh + tcg_trace_genh + [syscall_nr_generated],
       c_args: smc_reload_test_c_args,
       dependencies: [glib],
       include_directories: target_inc,
@@ -642,7 +643,7 @@ foreach target : target_dirs
         'target/i386/latx/sbt/aot_smc_reload.c',
         'accel/tcg/tb-jump.c',
         'util/pagesize.c'
-      ) + genh + tcg_trace_genh + syscall_nr_generated,
+      ) + genh + tcg_trace_genh + [syscall_nr_generated],
       c_args: smc_reload_test_c_args,
       dependencies: [glib],
       include_directories: target_inc,
@@ -660,7 +661,7 @@ foreach target : target_dirs
         'target/i386/latx/sbt/tests/tb-flush-smc-reload-async-test.c',
         'target/i386/latx/sbt/smc_reload.c',
         'accel/tcg/tb-flush.c'
-      ) + genh + tcg_trace_genh + syscall_nr_generated,
+      ) + genh + tcg_trace_genh + [syscall_nr_generated],
       c_args: smc_reload_test_c_args,
       dependencies: [glib],
       include_directories: target_inc,
@@ -677,7 +678,7 @@ foreach target : target_dirs
       files(
         'target/i386/latx/sbt/tests/aot-file-publish-test.c',
         'target/i386/latx/sbt/file_ctx.c'
-      ) + genh + tcg_trace_genh + syscall_nr_generated,
+      ) + genh + tcg_trace_genh + [syscall_nr_generated],
       c_args: smc_reload_test_c_args,
       dependencies: [glib],
       include_directories: target_inc,
@@ -696,7 +697,7 @@ foreach target : target_dirs
       'test-latx-aot-exit-worker',
       files(
         'target/i386/latx/sbt/tests/aot-exit-worker-test.c'
-      ) + genh + tcg_trace_genh + syscall_nr_generated,
+      ) + genh + tcg_trace_genh + [syscall_nr_generated],
       c_args: smc_reload_test_c_args,
       dependencies: [glib],
       include_directories: target_inc,
@@ -714,7 +715,7 @@ foreach target : target_dirs
         'target/i386/latx/sbt/tests/aot-pe-load-address-test.c',
         'target/i386/latx/sbt/segment.c',
         'target/i386/latx/sbt/aot_lib.c'
-      ) + genh + tcg_trace_genh + syscall_nr_generated,
+      ) + genh + tcg_trace_genh + [syscall_nr_generated],
       c_args: smc_reload_test_c_args,
       dependencies: [glib],
       include_directories: target_inc,
