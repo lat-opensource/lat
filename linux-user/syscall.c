@@ -757,9 +757,6 @@ _syscall3(int,sys_syslog,int,type,char*,bufp,int,len)
 #ifdef __NR_exit_group
 _syscall1(int,exit_group,int,error_code)
 #endif
-#if defined(TARGET_NR_set_tid_address) && defined(__NR_set_tid_address)
-_syscall1(int,set_tid_address,int *,tidptr)
-#endif
 #if defined(__NR_futex)
 _syscall6(int,sys_futex,int *,uaddr,int,op,int,val,
           const struct timespec *,timeout,int *,uaddr2,int,val3)
@@ -12062,12 +12059,22 @@ static int open_self_maps_1(CPUArchState *cpu_env, int fd, bool smaps)
 
 static int open_self_maps(void *cpu_env, int fd, const char *oldpath)
 {
+#ifdef TARGET_X86_64
+    if (guest_vma_names) {
+        return open_self_maps_1_real((CPUArchState *)cpu_env, fd, false);
+    }
+#endif
     return option_real_maps ? open_self_maps_1_real((CPUArchState *)cpu_env, fd, false)
         : open_self_maps_1((CPUArchState *)cpu_env, fd, false);
 }
 
 static int open_self_smaps(void *cpu_env, int fd, const char *oldpath)
 {
+#ifdef TARGET_X86_64
+    if (guest_vma_names) {
+        return open_self_maps_1_real((CPUArchState *)cpu_env, fd, true);
+    }
+#endif
     return option_real_maps ? open_self_maps_1_real((CPUArchState *)cpu_env, fd, true)
         : open_self_maps_1((CPUArchState *)cpu_env, fd, true);
 }

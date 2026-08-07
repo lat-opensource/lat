@@ -8,6 +8,7 @@ typedef unsigned long ulong;
 typedef long slong;
 
 #define __NR_read               0
+#define __NR_write              1
 #define __NR_close              3
 #define __NR_mmap               9
 #define __NR_mprotect          10
@@ -444,6 +445,9 @@ static int test_vma_name(void)
         !named_range(buffer, len, marker, sizeof(marker) - 1,
                      &named_start, &named_end) ||
         named_start != (ulong)map + 4096 || named_end != (ulong)map + 8192) {
+        if (len > 0) {
+            syscall3(__NR_write, 2, (slong)buffer, len);
+        }
         return 63;
     }
     if (do_prctl(PR_SET_VMA, PR_SET_VMA_ANON_NAME, map + 4096, 4096, 0)) {
@@ -490,6 +494,9 @@ static int test_vma_name(void)
                      sizeof(shared_marker) - 1, &named_start, &named_end) ||
         named_start != (ulong)shared_map + 4096 ||
         named_end != (ulong)shared_map + 8192) {
+        if (len > 0) {
+            syscall3(__NR_write, 2, (slong)buffer, len);
+        }
         return 68;
     }
     syscall2(__NR_munmap, shared_map, 16384);
