@@ -1667,7 +1667,7 @@ int main(int argc, char **argv, char **envp)
         memset(info->prctl_auxv, 0, sizeof(info->prctl_auxv));
         if (auxv_size && copy_from_user(info->prctl_auxv,
                                         info->saved_auxv, auxv_size)) {
-            fprintf(stderr, "Unable to save guest auxiliary vector\n");
+            error_report("Unable to save guest auxiliary vector");
             _exit(EXIT_FAILURE);
         }
         info->prctl_auxv_initialized = true;

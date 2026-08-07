@@ -5915,8 +5915,11 @@ static inline abi_ulong do_shmat(CPUArchState *cpu_env,
     }
     raddr=h2g((unsigned long)host_raddr);
 
+#ifdef TARGET_X86_64
+    guest_vma_name_reset(raddr, shm_info.shm_segsz);
+#endif
     page_set_flags(raddr, raddr + shm_info.shm_segsz,
-                   PAGE_VALID | PAGE_RESET | PAGE_READ |
+                   PAGE_VALID | PAGE_RESET | PAGE_ANON | PAGE_READ |
                    (shmflg & SHM_RDONLY ? 0 : PAGE_WRITE) |
                    (shmflg & SHM_EXEC ? PAGE_EXEC : 0));
 
@@ -5943,14 +5946,19 @@ static inline abi_long do_shmdt(abi_ulong shmaddr)
 
     mmap_lock();
 
-    for (i = 0; i < N_SHM_REGIONS; ++i) {
-        if (shm_regions[i].in_use && shm_regions[i].start == shmaddr) {
-            shm_regions[i].in_use = false;
-            page_set_flags(shmaddr, shmaddr + shm_regions[i].size, 0);
-            break;
+    rv = get_errno(shmdt(g2h_untagged(shmaddr)));
+    if (!is_error(rv)) {
+        for (i = 0; i < N_SHM_REGIONS; ++i) {
+            if (shm_regions[i].in_use && shm_regions[i].start == shmaddr) {
+#ifdef TARGET_X86_64
+                guest_vma_name_reset(shmaddr, shm_regions[i].size);
+#endif
+                page_set_flags(shmaddr, shmaddr + shm_regions[i].size, 0);
+                shm_regions[i].in_use = false;
+                break;
+            }
         }
     }
-    rv = get_errno(shmdt(g2h_untagged(shmaddr)));
 
     mmap_unlock();
 
@@ -9813,9 +9821,11 @@ static int do_fork(CPUArchState *env, unsigned int flags, abi_ulong newsp,
                 put_user_u32(sys_gettid(), child_tidptr);
             ts = (TaskState *)cpu->opaque;
 #ifdef TARGET_X86_64
+            mmap_lock();
             if (ts->info->prctl_mdwe & TARGET_PR_MDWE_NO_INHERIT) {
                 ts->info->prctl_mdwe = 0;
             }
+            mmap_unlock();
 #endif
             /* Linux clears syscall user dispatch in every fork child. */
             ts->sys_dispatch = 0;
@@ -11264,8 +11274,13 @@ static int open_self_cmdline(void *cpu_env, int fd, const char *oldpath)
     CPUState *cpu = env_cpu((CPUArchState *)cpu_env);
 #ifdef TARGET_X86_64
     struct image_info *info = ((TaskState *)cpu->opaque)->info;
-    abi_ulong addr = info->prctl_mm_arg_start;
-    abi_ulong remaining = info->prctl_mm_arg_end - addr;
+    abi_ulong addr;
+    abi_ulong remaining;
+
+    mmap_lock();
+    addr = info->prctl_mm_arg_start;
+    remaining = info->prctl_mm_arg_end - addr;
+    mmap_unlock();
 
     while (remaining) {
         size_t len = MIN((abi_ulong)TARGET_PAGE_SIZE, remaining);
@@ -11298,15 +11313,25 @@ static int open_self_cmdline(void *cpu_env, int fd, const char *oldpath)
     return 0;
 }
 
-static const char *guest_self_exe_open_path(CPUArchState *env,
-                                            char *buffer, size_t size)
+static const char *guest_self_exe_open_path(CPUArchState *env, char *buffer,
+                                            size_t size, int *owned_fd)
 {
+    *owned_fd = -1;
 #ifdef TARGET_X86_64
     TaskState *ts = env_cpu(env)->opaque;
+    bool overridden;
 
-    if (ts->info->prctl_mm_exe_fd >= 0) {
-        snprintf(buffer, size, "/proc/self/fd/%d",
-                 ts->info->prctl_mm_exe_fd);
+    mmap_lock();
+    overridden = ts->info->prctl_mm_exe_fd >= 0;
+    if (overridden) {
+        *owned_fd = fcntl(ts->info->prctl_mm_exe_fd, F_DUPFD_CLOEXEC, 0);
+    }
+    mmap_unlock();
+    if (overridden) {
+        if (*owned_fd < 0) {
+            return NULL;
+        }
+        snprintf(buffer, size, "/proc/self/fd/%d", *owned_fd);
         return buffer;
     }
 #endif
@@ -11318,13 +11343,54 @@ static const char *guest_self_exe_link_path(CPUArchState *env,
 {
 #ifdef TARGET_X86_64
     TaskState *ts = env_cpu(env)->opaque;
+    bool overridden;
 
-    if (ts->info->prctl_mm_exe_path) {
+    mmap_lock();
+    overridden = ts->info->prctl_mm_exe_path != NULL;
+    if (overridden) {
         pstrcpy(buffer, size, ts->info->prctl_mm_exe_path);
+    }
+    mmap_unlock();
+    if (overridden) {
         return buffer;
     }
 #endif
     return realpath(exec_path, buffer);
+}
+
+static bool guest_self_exe_exec_paths(CPUArchState *env, char *link_buffer,
+                                      size_t link_size,
+                                      const char **link_path,
+                                      char *open_buffer, size_t open_size,
+                                      const char **open_path, int *owned_fd)
+{
+    *owned_fd = -1;
+#ifdef TARGET_X86_64
+    TaskState *ts = env_cpu(env)->opaque;
+    bool overridden;
+
+    mmap_lock();
+    overridden = ts->info->prctl_mm_exe_fd >= 0;
+    if (overridden) {
+        *owned_fd = fcntl(ts->info->prctl_mm_exe_fd, F_DUPFD_CLOEXEC, 0);
+        if (*owned_fd >= 0) {
+            pstrcpy(link_buffer, link_size, ts->info->prctl_mm_exe_path);
+        }
+    }
+    mmap_unlock();
+    if (overridden) {
+        if (*owned_fd < 0) {
+            return false;
+        }
+        snprintf(open_buffer, open_size, "/proc/self/fd/%d", *owned_fd);
+        *link_path = link_buffer;
+        *open_path = open_buffer;
+        return true;
+    }
+#endif
+    *link_path = realpath(exec_path, link_buffer);
+    *open_path = exec_path;
+    return *link_path != NULL;
 }
 
 static char * get_key_value_from_file(const char * key, char * real_path)
@@ -12060,7 +12126,12 @@ static int open_self_maps_1(CPUArchState *cpu_env, int fd, bool smaps)
 static int open_self_maps(void *cpu_env, int fd, const char *oldpath)
 {
 #ifdef TARGET_X86_64
-    if (guest_vma_names) {
+    bool have_guest_vma_names;
+
+    mmap_lock();
+    have_guest_vma_names = guest_vma_names != NULL;
+    mmap_unlock();
+    if (have_guest_vma_names) {
         return open_self_maps_1_real((CPUArchState *)cpu_env, fd, false);
     }
 #endif
@@ -12071,7 +12142,12 @@ static int open_self_maps(void *cpu_env, int fd, const char *oldpath)
 static int open_self_smaps(void *cpu_env, int fd, const char *oldpath)
 {
 #ifdef TARGET_X86_64
-    if (guest_vma_names) {
+    bool have_guest_vma_names;
+
+    mmap_lock();
+    have_guest_vma_names = guest_vma_names != NULL;
+    mmap_unlock();
+    if (have_guest_vma_names) {
         return open_self_maps_1_real((CPUArchState *)cpu_env, fd, true);
     }
 #endif
@@ -12105,12 +12181,38 @@ static int open_self_stat(void *cpu_env, int fd, const char *oldpath)
     TaskState *ts = cpu->opaque;
     g_autoptr(GString) buf = g_string_new(NULL);
     int i = 0;
-
     FILE *fp;
     char *orig = NULL;
     char *word = NULL;
     size_t orig_len = 0;
     int word_len = 0;
+#ifdef TARGET_X86_64
+    struct {
+        abi_ulong start_code;
+        abi_ulong end_code;
+        abi_ulong start_stack;
+        abi_ulong start_data;
+        abi_ulong end_data;
+        abi_ulong start_brk;
+        abi_ulong arg_start;
+        abi_ulong arg_end;
+        abi_ulong env_start;
+        abi_ulong env_end;
+    } mm;
+
+    mmap_lock();
+    mm.start_code = ts->info->prctl_mm_start_code;
+    mm.end_code = ts->info->prctl_mm_end_code;
+    mm.start_stack = ts->info->prctl_mm_start_stack;
+    mm.start_data = ts->info->prctl_mm_start_data;
+    mm.end_data = ts->info->prctl_mm_end_data;
+    mm.start_brk = ts->info->prctl_mm_start_brk;
+    mm.arg_start = ts->info->prctl_mm_arg_start;
+    mm.arg_end = ts->info->prctl_mm_arg_end;
+    mm.env_start = ts->info->prctl_mm_env_start;
+    mm.env_end = ts->info->prctl_mm_env_end;
+    mmap_unlock();
+#endif
 
     fp = fopen("/proc/self/stat", "r");
     if (fp == NULL || getline(&orig, &orig_len, fp) == -1)
@@ -12148,35 +12250,35 @@ static int open_self_stat(void *cpu_env, int fd, const char *oldpath)
 #ifdef TARGET_X86_64
         } else if (i == 25) {
             g_string_printf(buf, TARGET_ABI_FMT_ld " ",
-                            ts->info->prctl_mm_start_code);
+                            mm.start_code);
         } else if (i == 26) {
             g_string_printf(buf, TARGET_ABI_FMT_ld " ",
-                            ts->info->prctl_mm_end_code);
+                            mm.end_code);
         } else if (i == 27) {
             /* stack bottom */
             g_string_printf(buf, TARGET_ABI_FMT_ld " ",
-                            ts->info->prctl_mm_start_stack);
+                            mm.start_stack);
         } else if (i == 44) {
             g_string_printf(buf, TARGET_ABI_FMT_ld " ",
-                            ts->info->prctl_mm_start_data);
+                            mm.start_data);
         } else if (i == 45) {
             g_string_printf(buf, TARGET_ABI_FMT_ld " ",
-                            ts->info->prctl_mm_end_data);
+                            mm.end_data);
         } else if (i == 46) {
             g_string_printf(buf, TARGET_ABI_FMT_ld " ",
-                            ts->info->prctl_mm_start_brk);
+                            mm.start_brk);
         } else if (i == 47) {
             g_string_printf(buf, TARGET_ABI_FMT_ld " ",
-                            ts->info->prctl_mm_arg_start);
+                            mm.arg_start);
         } else if (i == 48) {
             g_string_printf(buf, TARGET_ABI_FMT_ld " ",
-                            ts->info->prctl_mm_arg_end);
+                            mm.arg_end);
         } else if (i == 49) {
             g_string_printf(buf, TARGET_ABI_FMT_ld " ",
-                            ts->info->prctl_mm_env_start);
+                            mm.env_start);
         } else if (i == 50) {
             g_string_printf(buf, TARGET_ABI_FMT_ld " ",
-                            ts->info->prctl_mm_env_end);
+                            mm.env_end);
 #else
         } else if (i == 27) {
             /* stack bottom */
@@ -12204,8 +12306,20 @@ static int open_self_auxv(void *cpu_env, int fd, const char *oldpath)
     CPUState *cpu = env_cpu((CPUArchState *)cpu_env);
     TaskState *ts = cpu->opaque;
 #ifdef TARGET_X86_64
-    const char *ptr = (const char *)ts->info->prctl_auxv;
-    size_t len = sizeof(ts->info->prctl_auxv);
+    abi_ulong auxv[TARGET_X86_64_PRCTL_AUXV_WORDS];
+    const char *ptr = (const char *)auxv;
+    size_t words;
+    size_t len;
+
+    mmap_lock();
+    memcpy(auxv, ts->info->prctl_auxv, sizeof(auxv));
+    mmap_unlock();
+    for (words = 0; words + 1 < ARRAY_SIZE(auxv); words += 2) {
+        if (auxv[words] == 0) {
+            break;
+        }
+    }
+    len = MIN(words + 2, ARRAY_SIZE(auxv)) * sizeof(auxv[0]);
 
     while (len > 0) {
         ssize_t written = write(fd, ptr, len);
@@ -12576,12 +12690,21 @@ static int do_openat(void *cpu_env, int dirfd, const char *pathname, int flags, 
 
     if (is_proc_myself(pathname, "exe")) {
         char exe_path_buffer[64];
+        int exe_fd;
         const char *exe_pathname;
+        int ret;
 
         exe_pathname = guest_self_exe_open_path(cpu_env, exe_path_buffer,
-                                                sizeof(exe_path_buffer));
-
-        return safe_openat(AT_FDCWD, exe_pathname, flags, mode);
+                                                sizeof(exe_path_buffer),
+                                                &exe_fd);
+        if (!exe_pathname) {
+            return -1;
+        }
+        ret = safe_openat(AT_FDCWD, exe_pathname, flags, mode);
+        if (exe_fd >= 0) {
+            close(exe_fd);
+        }
+        return ret;
     }
 
     for (fake_open = fakes; fake_open->filename; fake_open++) {
@@ -12875,6 +12998,7 @@ static abi_long do_prctl_get_auxv(CPUArchState *env, abi_ulong addr,
     struct image_info *info = ts->info;
     size_t size = MIN((size_t)len, sizeof(info->prctl_auxv));
 
+    mmap_lock();
     if (!info->prctl_auxv_initialized) {
         size_t initial_size = MIN((size_t)info->auxv_len,
                                   sizeof(info->prctl_auxv));
@@ -12883,14 +13007,17 @@ static abi_long do_prctl_get_auxv(CPUArchState *env, abi_ulong addr,
         if (initial_size && copy_from_user(info->prctl_auxv,
                                            info->saved_auxv,
                                            initial_size)) {
+            mmap_unlock();
             return -TARGET_EFAULT;
         }
         info->prctl_auxv_initialized = true;
     }
 
     if (size && copy_to_user(addr, info->prctl_auxv, size)) {
+        mmap_unlock();
         return -TARGET_EFAULT;
     }
+    mmap_unlock();
     return sizeof(info->prctl_auxv);
 }
 
@@ -12905,6 +13032,11 @@ static bool guest_has_capability(unsigned int capability)
 
     return word < ARRAY_SIZE(data) && capget(&header, data) == 0 &&
            (data[word].effective & (1U << (capability % 32)));
+}
+
+static bool guest_has_initial_sys_resource_capability(void)
+{
+    return prctl(PR_GET_IO_FLUSHER, 0, 0, 0, 0) >= 0;
 }
 
 static abi_ulong guest_mmap_min_addr(void)
@@ -13013,16 +13145,23 @@ static abi_long guest_prctl_set_auxv(struct image_info *info,
     }
     auxv[ARRAY_SIZE(auxv) - 2] = 0;
     auxv[ARRAY_SIZE(auxv) - 1] = 0;
+    mmap_lock();
     if (replace_all) {
         memcpy(info->prctl_auxv, auxv, sizeof(auxv));
     } else {
         memcpy(info->prctl_auxv, auxv, len);
     }
+    mmap_unlock();
     return 0;
 }
 
-static abi_long guest_prctl_set_exe_file(struct image_info *info,
-                                         unsigned int fd)
+struct guest_prctl_exe_file {
+    int fd;
+    char *path;
+};
+
+static abi_long guest_prctl_prepare_exe_file(unsigned int fd,
+                                             struct guest_prctl_exe_file *file)
 {
     struct stat st;
     struct statvfs fs;
@@ -13030,6 +13169,9 @@ static abi_long guest_prctl_set_exe_file(struct image_info *info,
     char path[PATH_MAX];
     ssize_t path_len;
     int saved_fd;
+
+    file->fd = -1;
+    file->path = NULL;
 
     if (fstat(fd, &st) < 0) {
         return get_errno(-1);
@@ -13054,12 +13196,40 @@ static abi_long guest_prctl_set_exe_file(struct image_info *info,
     }
     path[path_len] = 0;
 
-    if (info->prctl_mm_exe_fd >= 0) {
-        close(info->prctl_mm_exe_fd);
+    file->fd = saved_fd;
+    file->path = g_strdup(path);
+    return 0;
+}
+
+/* Called with the linux-user mmap lock held. */
+static void guest_prctl_commit_exe_file(struct image_info *info,
+                                        struct guest_prctl_exe_file *file)
+{
+    int old_fd = info->prctl_mm_exe_fd;
+    char *old_path = info->prctl_mm_exe_path;
+
+    info->prctl_mm_exe_fd = file->fd;
+    info->prctl_mm_exe_path = file->path;
+    file->fd = -1;
+    file->path = NULL;
+    if (old_fd >= 0) {
+        close(old_fd);
     }
-    g_free(info->prctl_mm_exe_path);
-    info->prctl_mm_exe_fd = saved_fd;
-    info->prctl_mm_exe_path = g_strdup(path);
+    g_free(old_path);
+}
+
+static abi_long guest_prctl_set_exe_file(struct image_info *info,
+                                         unsigned int fd)
+{
+    struct guest_prctl_exe_file file;
+    abi_long ret = guest_prctl_prepare_exe_file(fd, &file);
+
+    if (ret) {
+        return ret;
+    }
+    mmap_lock();
+    guest_prctl_commit_exe_file(info, &file);
+    mmap_unlock();
     return 0;
 }
 
@@ -13085,8 +13255,10 @@ static abi_long do_prctl_set_mm(CPUArchState *env, abi_ulong option,
     if (option == PR_SET_MM_MAP) {
         struct target_prctl_mm_map *target_map;
         abi_ulong new_auxv[TARGET_X86_64_PRCTL_AUXV_WORDS] = { };
+        struct guest_prctl_exe_file new_exe = { .fd = -1 };
         abi_ulong auxv;
         uint32_t auxv_size, exe_fd;
+        bool replace_exe = false;
 
         if (arg4 != sizeof(*target_map)) {
             return -TARGET_EINVAL;
@@ -13137,19 +13309,25 @@ static abi_long do_prctl_set_mm(CPUArchState *env, abi_ulong option,
                 !guest_has_capability(checkpoint_cap)) {
                 return -TARGET_EPERM;
             }
-            ret = guest_prctl_set_exe_file(info, exe_fd);
+            ret = guest_prctl_prepare_exe_file(exe_fd, &new_exe);
             if (ret) {
                 return ret;
             }
+            replace_exe = true;
         }
+        mmap_lock();
         if (auxv_size) {
             memcpy(info->prctl_auxv, new_auxv, sizeof(new_auxv));
         }
+        if (replace_exe) {
+            guest_prctl_commit_exe_file(info, &new_exe);
+        }
         guest_prctl_mm_write(info, &map);
+        mmap_unlock();
         return 0;
     }
 
-    if (!guest_has_capability(CAP_SYS_RESOURCE)) {
+    if (!guest_has_initial_sys_resource_capability()) {
         return -TARGET_EPERM;
     }
     if (option == PR_SET_MM_AUXV) {
@@ -13162,6 +13340,7 @@ static abi_long do_prctl_set_mm(CPUArchState *env, abi_ulong option,
         return -TARGET_EINVAL;
     }
 
+    mmap_lock();
     guest_prctl_mm_read(info, &map);
     switch (option) {
     case PR_SET_MM_START_CODE:
@@ -13198,11 +13377,13 @@ static abi_long do_prctl_set_mm(CPUArchState *env, abi_ulong option,
         map.env_end = addr;
         break;
     default:
+        mmap_unlock();
         return -TARGET_EINVAL;
     }
 
     ret = guest_prctl_mm_validate(&map);
     if (ret) {
+        mmap_unlock();
         return ret;
     }
     switch (option) {
@@ -13212,10 +13393,12 @@ static abi_long do_prctl_set_mm(CPUArchState *env, abi_ulong option,
     case PR_SET_MM_ENV_START:
     case PR_SET_MM_ENV_END:
         if (!page_get_flags(addr)) {
+            mmap_unlock();
             return -TARGET_EFAULT;
         }
     }
     guest_prctl_mm_write(info, &map);
+    mmap_unlock();
     return 0;
 }
 
@@ -13277,22 +13460,30 @@ static abi_long do_prctl_mdwe(CPUArchState *env, bool set,
 {
     struct image_info *info = ((TaskState *)env_cpu(env)->opaque)->info;
     unsigned long valid = PR_MDWE_REFUSE_EXEC_GAIN | PR_MDWE_NO_INHERIT;
+    abi_long ret;
 
+    mmap_lock();
     if (!set) {
         if (arg2 || arg3 || arg4 || arg5) {
+            mmap_unlock();
             return -TARGET_EINVAL;
         }
-        return info->prctl_mdwe;
+        ret = info->prctl_mdwe;
+        mmap_unlock();
+        return ret;
     }
     if (arg3 || arg4 || arg5 || (arg2 & ~valid) ||
         ((arg2 & PR_MDWE_NO_INHERIT) &&
          !(arg2 & PR_MDWE_REFUSE_EXEC_GAIN))) {
+        mmap_unlock();
         return -TARGET_EINVAL;
     }
     if (info->prctl_mdwe && info->prctl_mdwe != arg2) {
+        mmap_unlock();
         return -TARGET_EPERM;
     }
     info->prctl_mdwe = arg2;
+    mmap_unlock();
     return 0;
 }
 
@@ -13378,10 +13569,14 @@ static abi_long do_prctl_set_vma(abi_ulong operation, abi_ulong start,
 static abi_long guest_mdwe_mmap(CPUState *cpu, abi_ulong len, int prot)
 {
     TaskState *ts = cpu->opaque;
+    unsigned int mdwe;
     int valid = PROT_READ | PROT_WRITE | PROT_EXEC | TARGET_PROT_SEM;
     int current_personality;
 
-    if (!(ts->info->prctl_mdwe & TARGET_PR_MDWE_REFUSE_EXEC_GAIN) ||
+    mmap_lock();
+    mdwe = ts->info->prctl_mdwe;
+    mmap_unlock();
+    if (!(mdwe & TARGET_PR_MDWE_REFUSE_EXEC_GAIN) ||
         !len || (prot & ~valid)) {
         return 0;
     }
@@ -13399,9 +13594,13 @@ static abi_long guest_mdwe_mprotect(CPUState *cpu, abi_ulong start,
 {
     TaskState *ts = cpu->opaque;
     abi_ulong end, addr;
+    unsigned int mdwe;
     int valid = PROT_READ | PROT_WRITE | PROT_EXEC | TARGET_PROT_SEM;
 
-    if (!(ts->info->prctl_mdwe & TARGET_PR_MDWE_REFUSE_EXEC_GAIN) ||
+    mmap_lock();
+    mdwe = ts->info->prctl_mdwe;
+    mmap_unlock();
+    if (!(mdwe & TARGET_PR_MDWE_REFUSE_EXEC_GAIN) ||
         !(prot & PROT_EXEC) || (prot & ~valid) ||
         (start & ~TARGET_PAGE_MASK)) {
         return 0;
@@ -13428,7 +13627,12 @@ static char *guest_prctl_exec_env(CPUArchState *env, const char *name)
     TaskState *ts = env_cpu(env)->opaque;
 
     if (strcmp(name, LATX_GUEST_MDWE_ENV) == 0) {
-        if (ts->info->prctl_mdwe == TARGET_PR_MDWE_REFUSE_EXEC_GAIN) {
+        unsigned int mdwe;
+
+        mmap_lock();
+        mdwe = ts->info->prctl_mdwe;
+        mmap_unlock();
+        if (mdwe == TARGET_PR_MDWE_REFUSE_EXEC_GAIN) {
             return g_strdup_printf("%s=1", LATX_GUEST_MDWE_ENV);
         }
     } else if (strcmp(name, LATX_GUEST_TSC_ENV) == 0) {
@@ -13441,29 +13645,41 @@ static char *guest_prctl_exec_env(CPUArchState *env, const char *name)
     return NULL;
 }
 
-static char **append_guest_prctl_exec_env(CPUArchState *env, char **envp,
-                                          int envc, char **mdwe_env,
-                                          char **tsc_env)
+static bool guest_prctl_exec_env_reserved(const char *entry, const char *name)
 {
+    size_t len = strlen(name);
+
+    return strncmp(entry, name, len) == 0 && entry[len] == '=';
+}
+
+static char **prepare_guest_prctl_exec_env(CPUArchState *env, char **envp,
+                                           int envc, char **mdwe_env,
+                                           char **tsc_env)
+{
+    char **exec_envp;
+    int kept = 0;
     int extra = 0;
+    int i;
 
     *mdwe_env = guest_prctl_exec_env(env, LATX_GUEST_MDWE_ENV);
     *tsc_env = guest_prctl_exec_env(env, LATX_GUEST_TSC_ENV);
     extra += *mdwe_env != NULL;
     extra += *tsc_env != NULL;
-    if (!extra) {
-        return envp;
+    exec_envp = g_new(char *, envc + extra + 1);
+    for (i = 0; i < envc; i++) {
+        if (!guest_prctl_exec_env_reserved(envp[i], LATX_GUEST_MDWE_ENV) &&
+            !guest_prctl_exec_env_reserved(envp[i], LATX_GUEST_TSC_ENV)) {
+            exec_envp[kept++] = envp[i];
+        }
     }
-
-    envp = g_renew(char *, envp, envc + extra + 1);
     if (*mdwe_env) {
-        envp[envc++] = *mdwe_env;
+        exec_envp[kept++] = *mdwe_env;
     }
     if (*tsc_env) {
-        envp[envc++] = *tsc_env;
+        exec_envp[kept++] = *tsc_env;
     }
-    envp[envc] = NULL;
-    return envp;
+    exec_envp[kept] = NULL;
+    return exec_envp;
 }
 #endif
 
@@ -13711,7 +13927,7 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
 #ifdef TARGET_NR_execveat
     case TARGET_NR_execveat:
         {
-            char **argp, **envp;
+            char **argp, **envp, **exec_envp = NULL;
 #ifdef TARGET_X86_64
             char *prctl_mdwe_env = NULL;
             char *prctl_tsc_env = NULL;
@@ -13779,9 +13995,11 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
             *q = NULL;
 
 #ifdef TARGET_X86_64
-            envp = append_guest_prctl_exec_env(env, envp, envc,
-                                               &prctl_mdwe_env,
-                                               &prctl_tsc_env);
+            exec_envp = prepare_guest_prctl_exec_env(env, envp, envc,
+                                                     &prctl_mdwe_env,
+                                                     &prctl_tsc_env);
+#else
+            exec_envp = envp;
 #endif
 
             p = lock_user_string(arg2);
@@ -13849,14 +14067,24 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
              */
             if (is_proc_myself((const char *)p, "exe")) {
                 char exe_path_buffer[64];
-                const char *exe_pathname =
-                    guest_self_exe_open_path(cpu_env, exe_path_buffer,
-                                             sizeof(exe_path_buffer));
+                const char *exe_pathname;
+                int exe_fd;
 
-                ret = get_errno(safe_execveat(AT_FDCWD, exe_pathname,
-                                              argp, envp, arg5));
+                exe_pathname = guest_self_exe_open_path(
+                    cpu_env, exe_path_buffer, sizeof(exe_path_buffer),
+                    &exe_fd);
+                if (!exe_pathname) {
+                    ret = get_errno(-1);
+                } else {
+                    ret = get_errno(safe_execveat(AT_FDCWD, exe_pathname,
+                                                  argp, exec_envp, arg5));
+                    if (exe_fd >= 0) {
+                        close(exe_fd);
+                    }
+                }
             } else {
-                ret = get_errno(safe_execveat(arg1, p, argp, envp, arg5));
+                ret = get_errno(safe_execveat(arg1, p, argp, exec_envp,
+                                              arg5));
             }
             unlock_user(p, arg1, 0);
 
@@ -13888,13 +14116,16 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
             g_free(prctl_mdwe_env);
             g_free(prctl_tsc_env);
 #endif
+            if (exec_envp != envp) {
+                g_free(exec_envp);
+            }
             g_free(envp);
         }
         return ret;
 #endif
     case TARGET_NR_execve:
         {
-            char **argp, **envp;
+            char **argp, **envp, **exec_envp = NULL;
 #ifdef TARGET_X86_64
             char *prctl_mdwe_env = NULL;
             char *prctl_tsc_env = NULL;
@@ -13950,9 +14181,11 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
             *q = NULL;
 
 #ifdef TARGET_X86_64
-            envp = append_guest_prctl_exec_env(env, envp, envc,
-                                               &prctl_mdwe_env,
-                                               &prctl_tsc_env);
+            exec_envp = prepare_guest_prctl_exec_env(env, envp, envc,
+                                                     &prctl_mdwe_env,
+                                                     &prctl_tsc_env);
+#else
+            exec_envp = envp;
 #endif
 
             if (!(p = lock_user_string(arg1)))
@@ -14008,20 +14241,27 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
             if (is_proc_myself((const char *)p, "exe")) {
                 char real[PATH_MAX];
                 char exe_path_buffer[64];
-                const char *temp = guest_self_exe_link_path(cpu_env, real,
-                                                            sizeof(real));
-                const char *exe_pathname =
-                    guest_self_exe_open_path(cpu_env, exe_path_buffer,
-                                             sizeof(exe_path_buffer));
+                const char *temp;
+                const char *exe_pathname;
+                int exe_fd;
 
-                if (temp == NULL) {
+                if (!guest_self_exe_exec_paths(
+                        cpu_env, real, sizeof(real), &temp,
+                        exe_path_buffer, sizeof(exe_path_buffer),
+                        &exe_pathname, &exe_fd)) {
                     ret = get_errno(-1);
+                    if (exe_fd >= 0) {
+                        close(exe_fd);
+                    }
                     goto execve_end;
                 }
                 if (!strcmp((const char *)*argp, "/proc/self/exe")) {
                     *argp = (char *)temp;
                 }
-                ret = get_errno(safe_execve(exe_pathname, argp, envp));
+                ret = get_errno(safe_execve(exe_pathname, argp, exec_envp));
+                if (exe_fd >= 0) {
+                    close(exe_fd);
+                }
             } else {
 
                 /* Although execve() is not an interruptible syscall it is
@@ -14034,7 +14274,7 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
                  * before the execve completes and makes it the other
                  * program's problem.
                  */
-                ret = get_errno(safe_execve(path(p), argp, envp));
+                ret = get_errno(safe_execve(path(p), argp, exec_envp));
             }
             unlock_user(p, arg1, 0);
 
@@ -14064,6 +14304,9 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
             g_free(prctl_mdwe_env);
             g_free(prctl_tsc_env);
 #endif
+            if (exec_envp != envp) {
+                g_free(exec_envp);
+            }
             g_free(envp);
         }
         return ret;
@@ -19833,6 +20076,7 @@ static bool syscall_user_dispatch(CPUArchState *env, int num, uint32_t arch)
 {
     CPUState *cpu = env_cpu(env);
     TaskState *ts = cpu->opaque;
+    target_siginfo_t info;
     target_ulong pc;
     target_ulong cs_base;
     uint32_t flags;
@@ -19863,7 +20107,7 @@ static bool syscall_user_dispatch(CPUArchState *env, int num, uint32_t arch)
         }
     }
 
-    target_siginfo_t info = {
+    info = (target_siginfo_t) {
         .si_signo = TARGET_SIGSYS,
         .si_errno = 0,
         .si_code = TARGET_SYS_USER_DISPATCH,
