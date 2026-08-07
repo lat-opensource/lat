@@ -212,9 +212,18 @@ guest 运行期间热切换。
 - `Discussions <https://github.com/lat-opensource/lat/discussions>`_
 
 提交 Pull Request 前，请阅读 `贡献指南 <CONTRIBUTING.md>`_ 和
-`提交规范 <COMMIT_CONVENTION.md>`_。历史主要贡献者名单见
-`CONTRIBUTORS.md <CONTRIBUTORS.md>`_。每个提交都必须包含 DCO
+`提交规范 <COMMIT_CONVENTION.md>`_。每个提交都必须包含 DCO
 ``Signed-off-by`` 签署。
+
+
+贡献者
+======
+
+|contrib-luzeng| |contrib-hanlu| |contrib-wenqiang| |contrib-jing| |contrib-qi| |contrib-chaoyi| |contrib-rengan| |contrib-xiaotian| |contrib-haiyong| |contrib-niugenen|
+
+LATX 感谢每一位贡献者。各阶段贡献者与贡献领域说明见
+`CONTRIBUTORS.md <CONTRIBUTORS.md>`_，开源后的贡献记录见
+`GitHub Contributors <https://github.com/lat-opensource/lat/graphs/contributors>`_。
 
 
 许可证
@@ -239,3 +248,34 @@ guest 运行期间热切换。
 
 .. _编译、安装和运行 Wiki: https://github.com/lat-opensource/lat/wiki/%E7%BC%96%E8%AF%91%E4%B8%8E%E8%BF%90%E8%A1%8C
 .. _调试与问题定位指南: https://github.com/lat-opensource/lat/wiki/%E8%B0%83%E8%AF%95%E4%B8%8E%E9%97%AE%E9%A2%98%E5%AE%9A%E4%BD%8D%E6%8C%87%E5%8D%97
+
+.. |contrib-luzeng| image:: https://github.com/luzeng87.png?size=64
+   :target: https://github.com/luzeng87
+   :alt: Lu Zeng
+.. |contrib-hanlu| image:: https://github.com/LaurenIsACoder.png?size=64
+   :target: https://github.com/LaurenIsACoder
+   :alt: Hanlu Li
+.. |contrib-wenqiang| image:: https://github.com/ganjue66da.png?size=64
+   :target: https://github.com/ganjue66da
+   :alt: Wenqiang Wei
+.. |contrib-jing| image:: https://github.com/JonLeeTaoShan.png?size=64
+   :target: https://github.com/JonLeeTaoShan
+   :alt: Jing Li
+.. |contrib-qi| image:: https://github.com/specialpointcentral.png?size=64
+   :target: https://github.com/specialpointcentral
+   :alt: Qi Hu
+.. |contrib-chaoyi| image:: https://github.com/rmjskhy.png?size=64
+   :target: https://github.com/rmjskhy
+   :alt: Chaoyi Liu
+.. |contrib-rengan| image:: https://github.com/y347812075.png?size=64
+   :target: https://github.com/y347812075
+   :alt: Rengan Yue
+.. |contrib-xiaotian| image:: https://github.com/yetist.png?size=64
+   :target: https://github.com/yetist
+   :alt: Xiaotian Wu
+.. |contrib-haiyong| image:: https://github.com/sunhaiyong1978.png?size=64
+   :target: https://github.com/sunhaiyong1978
+   :alt: Sun Haiyong
+.. |contrib-niugenen| image:: https://github.com/NiuGenen.png?size=64
+   :target: https://github.com/NiuGenen
+   :alt: NiuGenen

@@ -236,9 +236,20 @@ Documentation and Support
 The Wiki guides are currently available in Chinese.
 
 Before opening a pull request, read the `contribution guide
-<CONTRIBUTING.md>`_ and `commit convention <COMMIT_CONVENTION.en.md>`_. See
-`CONTRIBUTORS.md <CONTRIBUTORS.md>`_ for the historical major-contributor list.
+<CONTRIBUTING.md>`_ and `commit convention <COMMIT_CONVENTION.en.md>`_.
 Every commit must include a DCO ``Signed-off-by`` trailer.
+
+
+Contributors
+============
+
+|contrib-luzeng| |contrib-hanlu| |contrib-wenqiang| |contrib-jing| |contrib-qi| |contrib-chaoyi| |contrib-rengan| |contrib-xiaotian| |contrib-haiyong| |contrib-niugenen|
+
+LATX thanks every contributor. See `CONTRIBUTORS.md <CONTRIBUTORS.md>`_
+for contributors of each development phase and their contribution areas,
+and `GitHub Contributors
+<https://github.com/lat-opensource/lat/graphs/contributors>`_ for the
+post-open-source record.
 
 
 License
@@ -263,3 +274,34 @@ If you have any questions or suggestions, please feel free to engage with us thr
 
 .. _build, installation, and runtime Wiki guide: https://github.com/lat-opensource/lat/wiki/%E7%BC%96%E8%AF%91%E4%B8%8E%E8%BF%90%E8%A1%8C
 .. _Troubleshooting guide: https://github.com/lat-opensource/lat/wiki/%E8%B0%83%E8%AF%95%E4%B8%8E%E9%97%AE%E9%A2%98%E5%AE%9A%E4%BD%8D%E6%8C%87%E5%8D%97
+
+.. |contrib-luzeng| image:: https://github.com/luzeng87.png?size=64
+   :target: https://github.com/luzeng87
+   :alt: Lu Zeng
+.. |contrib-hanlu| image:: https://github.com/LaurenIsACoder.png?size=64
+   :target: https://github.com/LaurenIsACoder
+   :alt: Hanlu Li
+.. |contrib-wenqiang| image:: https://github.com/ganjue66da.png?size=64
+   :target: https://github.com/ganjue66da
+   :alt: Wenqiang Wei
+.. |contrib-jing| image:: https://github.com/JonLeeTaoShan.png?size=64
+   :target: https://github.com/JonLeeTaoShan
+   :alt: Jing Li
+.. |contrib-qi| image:: https://github.com/specialpointcentral.png?size=64
+   :target: https://github.com/specialpointcentral
+   :alt: Qi Hu
+.. |contrib-chaoyi| image:: https://github.com/rmjskhy.png?size=64
+   :target: https://github.com/rmjskhy
+   :alt: Chaoyi Liu
+.. |contrib-rengan| image:: https://github.com/y347812075.png?size=64
+   :target: https://github.com/y347812075
+   :alt: Rengan Yue
+.. |contrib-xiaotian| image:: https://github.com/yetist.png?size=64
+   :target: https://github.com/yetist
+   :alt: Xiaotian Wu
+.. |contrib-haiyong| image:: https://github.com/sunhaiyong1978.png?size=64
+   :target: https://github.com/sunhaiyong1978
+   :alt: Sun Haiyong
+.. |contrib-niugenen| image:: https://github.com/NiuGenen.png?size=64
+   :target: https://github.com/NiuGenen
+   :alt: NiuGenen
