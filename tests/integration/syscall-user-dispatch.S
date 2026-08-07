@@ -13,6 +13,7 @@
 .equ PR_SET_SYSCALL_USER_DISPATCH, 59
 .equ PR_SYS_DISPATCH_OFF, 0
 .equ PR_SYS_DISPATCH_ON, 1
+.equ PR_SYS_DISPATCH_INCLUSIVE_ON, 2
 .equ SYSCALL_DISPATCH_FILTER_ALLOW, 0
 .equ SYSCALL_DISPATCH_FILTER_BLOCK, 1
 .equ SYS_USER_DISPATCH, 2
@@ -39,6 +40,26 @@ _start:
     mov $-1, %rsi
     xor %edx, %edx
     xor %r10d, %r10d
+    xor %r8d, %r8d
+    syscall
+    cmp $-EINVAL, %rax
+    jne bad_param_failed
+
+    mov $__NR_prctl, %eax
+    mov $PR_SET_SYSCALL_USER_DISPATCH, %edi
+    mov $PR_SYS_DISPATCH_INCLUSIVE_ON, %esi
+    lea inclusive_blocked(%rip), %rdx
+    xor %r10d, %r10d
+    xor %r8d, %r8d
+    syscall
+    cmp $-EINVAL, %rax
+    jne bad_param_failed
+
+    mov $__NR_prctl, %eax
+    mov $PR_SET_SYSCALL_USER_DISPATCH, %edi
+    mov $PR_SYS_DISPATCH_INCLUSIVE_ON, %esi
+    mov $-1, %rdx
+    mov $2, %r10d
     xor %r8d, %r8d
     syscall
     cmp $-EINVAL, %rax
@@ -188,6 +209,38 @@ blocked_syscall_after:
     test %rax, %rax
     jle disable_failed
 
+    /* Inclusive mode blocks syscalls inside, rather than outside, the range. */
+    movb $3, test_stage(%rip)
+    movb $0, signal_seen(%rip)
+    mov $__NR_prctl, %eax
+    mov $PR_SET_SYSCALL_USER_DISPATCH, %edi
+    mov $PR_SYS_DISPATCH_INCLUSIVE_ON, %esi
+    lea inclusive_blocked(%rip), %rdx
+    mov $(inclusive_blocked_end - inclusive_blocked), %r10d
+    xor %r8d, %r8d
+    syscall
+    test %rax, %rax
+    js setup_failed
+
+inclusive_blocked:
+    mov $__NR_getpid, %eax
+    syscall
+inclusive_blocked_end:
+    cmp $__NR_getpid, %rax
+    jne bad_return
+    cmpb $1, signal_seen(%rip)
+    jne bad_siginfo
+
+    mov $__NR_prctl, %eax
+    mov $PR_SET_SYSCALL_USER_DISPATCH, %edi
+    mov $PR_SYS_DISPATCH_OFF, %esi
+    xor %edx, %edx
+    xor %r10d, %r10d
+    xor %r8d, %r8d
+    syscall
+    test %rax, %rax
+    js setup_failed
+
     xor %edi, %edi
     jmp exit_now
 
@@ -225,6 +278,8 @@ disable_failed:
 dispatch_allowed:
     cmpb $1, test_stage(%rip)
     je fork_dispatch_inherited
+    cmpb $3, test_stage(%rip)
+    je inclusive_dispatch
     cmp $SIGSYS, %edi
     jne bad_siginfo
     cmpl $0, 4(%rsi)
@@ -240,6 +295,21 @@ dispatch_allowed:
     jne bad_siginfo
     movb $1, signal_seen(%rip)
     movb $SYSCALL_DISPATCH_FILTER_ALLOW, selector(%rip)
+    ret
+
+inclusive_dispatch:
+    cmp $SIGSYS, %edi
+    jne bad_siginfo
+    cmpl $SYS_USER_DISPATCH, 8(%rsi)
+    jne bad_siginfo
+    lea inclusive_blocked_end(%rip), %rax
+    cmpq %rax, 16(%rsi)
+    jne bad_siginfo
+    cmpl $__NR_getpid, 24(%rsi)
+    jne bad_siginfo
+    cmpl $AUDIT_ARCH_X86_64, 28(%rsi)
+    jne bad_siginfo
+    movb $1, signal_seen(%rip)
     ret
 
 bad_siginfo:

@@ -40,8 +40,8 @@
 .equ PR_SPEC_STORE_BYPASS, 0
 .equ PR_SPEC_ENABLE, 2
 
-/* Linux 6.14 x86_64: 2 * (AT_VECTOR_SIZE_BASE + AT_VECTOR_SIZE_ARCH + 1). */
-.equ X86_64_AUXV_WORDS, 50
+/* Current Linux x86_64: 2 * (24 base + 2 arch + 1 terminator). */
+.equ X86_64_AUXV_WORDS, 54
 .equ X86_64_AUXV_SIZE, X86_64_AUXV_WORDS * 8
 .equ PRCTL_MM_MAP_SIZE, 104
 

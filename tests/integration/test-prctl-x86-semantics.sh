@@ -3,6 +3,7 @@ set -eu
 
 emulator=$1
 source_file=$2
+native_helper_source=$3
 workdir=$(mktemp -d)
 trap 'rm -rf "$workdir"' EXIT HUP INT TERM
 
@@ -18,16 +19,19 @@ fi
 "$clang" --target=x86_64-linux-gnu -fuse-ld=lld -nostdlib -static -no-pie \
     -ffreestanding -fno-builtin -fno-stack-protector \
     -Wl,--build-id=none "$source_file" -o "$workdir/prctl-x86-semantics"
+"${CC:-cc}" -O2 -Wall -Wextra "$native_helper_source" \
+    -o "$workdir/prctl-native-env-helper"
 
 run_case()
 {
     mode=$1
     label=$2
     case_name=$3
+    shift 3
 
     set +e
     env LATX_AOT=0 LATX_KZT=0 LATX_TU="$mode" timeout -s KILL 10 \
-        "$emulator" "$workdir/prctl-x86-semantics" "$case_name"
+        "$emulator" "$workdir/prctl-x86-semantics" "$case_name" "$@"
     ret=$?
     set -e
 
@@ -56,4 +60,5 @@ for mode in 0 1; do
     run_case "$mode" "$label" s
     run_case "$mode" "$label" f
     run_case "$mode" "$label" i
+    run_case "$mode" "$label" e "$workdir/prctl-native-env-helper"
 done

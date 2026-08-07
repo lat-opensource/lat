@@ -124,6 +124,7 @@ if host_machine.cpu_family() == 'loongarch64' and \
     args: [
       emulators['latx-x86_64'],
       files('prctl-x86-semantics.c'),
+      files('prctl-native-env-helper.c'),
     ],
     protocol: 'exitcode',
     suite: 'latx-integration',

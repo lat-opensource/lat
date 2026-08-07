@@ -10,6 +10,7 @@ typedef long slong;
 #define __NR_read               0
 #define __NR_write              1
 #define __NR_close              3
+#define __NR_execve            59
 #define __NR_mmap               9
 #define __NR_mprotect          10
 #define __NR_munmap            11
@@ -20,11 +21,15 @@ typedef long slong;
 #define __NR_shmdt             67
 #define __NR_fork              57
 #define __NR_wait4             61
+#define __NR_mremap            25
 #define __NR_personality      135
 #define __NR_prctl            157
 #define __NR_set_tid_address  218
 #define __NR_exit_group       231
 #define __NR_openat           257
+#define __NR_readlink          89
+#define __NR_rename            82
+#define __NR_unlink            87
 
 #define EACCES 13
 #define EBADF   9
@@ -41,6 +46,10 @@ typedef long slong;
 #define MAP_PRIVATE   2
 #define MAP_FIXED    16
 #define MAP_ANONYMOUS 32
+
+#define MREMAP_MAYMOVE   1
+#define MREMAP_FIXED     2
+#define MREMAP_DONTUNMAP 4
 
 #define AT_FDCWD (-100)
 
@@ -227,6 +236,16 @@ static int bytes_equal(const char *a, const char *b, ulong len)
     return 1;
 }
 
+static ulong string_length(const char *value)
+{
+    ulong len = 0;
+
+    while (value[len]) {
+        len++;
+    }
+    return len;
+}
+
 static int contains(const char *buf, ulong len, const char *needle,
                     ulong needle_len)
 {
@@ -300,6 +319,19 @@ static slong read_maps(char *buffer, ulong size)
 {
     static const char maps_path[] = "/proc/self/maps";
     slong fd = syscall4(__NR_openat, AT_FDCWD, (slong)maps_path, 0, 0);
+    slong len;
+
+    if (fd < 0) {
+        return fd;
+    }
+    len = syscall3(__NR_read, fd, (slong)buffer, size);
+    syscall1(__NR_close, fd);
+    return len;
+}
+
+static slong read_file(const char *path, char *buffer, ulong size)
+{
+    slong fd = syscall4(__NR_openat, AT_FDCWD, (slong)path, 0, 0);
     slong len;
 
     if (fd < 0) {
@@ -466,6 +498,9 @@ static int test_vma_name(void)
     slong file_map;
     slong shmid;
     slong second_shmid;
+    slong remap_source;
+    slong remap_target;
+    slong remap_copy;
     slong fd;
     slong len;
     ulong named_start;
@@ -600,6 +635,77 @@ static int test_vma_name(void)
         return 69;
     }
     syscall2(__NR_munmap, map, 16384);
+
+    remap_source = do_mmap(0, 16384, PROT_READ | PROT_WRITE,
+                           MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    remap_target = do_mmap(0, 16384, PROT_READ | PROT_WRITE,
+                           MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (remap_source < 0 || remap_target < 0 ||
+        do_prctl(PR_SET_VMA, PR_SET_VMA_ANON_NAME, remap_source, 12288,
+                 (slong)name) != 0 ||
+        syscall2(__NR_munmap, remap_target, 16384) != 0 ||
+        syscall5(__NR_mremap, remap_source, 8193, 8193,
+                 MREMAP_MAYMOVE | MREMAP_FIXED, remap_target) !=
+            remap_target) {
+        return 69;
+    }
+    len = read_maps(buffer, sizeof(buffer));
+    if (len <= 0 ||
+        !named_range(buffer, len, marker, sizeof(marker) - 1,
+                     &named_start, &named_end) ||
+        named_start != (ulong)remap_target ||
+        named_end != (ulong)remap_target + 12288) {
+        return 69;
+    }
+    syscall2(__NR_munmap, remap_target, 12288);
+
+    shared_map = do_mmap(0, 16384, PROT_READ | PROT_WRITE,
+                         MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+    if (shared_map < 0 ||
+        do_prctl(PR_SET_VMA, PR_SET_VMA_ANON_NAME, shared_map, 16384,
+                 (slong)shared_name) != 0) {
+        return 69;
+    }
+    remap_copy = syscall5(__NR_mremap, shared_map, 0, 16384,
+                          MREMAP_MAYMOVE, 0);
+    if (remap_copy < 0 ||
+        do_prctl(PR_SET_VMA, PR_SET_VMA_ANON_NAME, shared_map, 16384, 0)) {
+        return 69;
+    }
+    len = read_maps(buffer, sizeof(buffer));
+    if (len <= 0 ||
+        !named_range(buffer, len, shared_marker,
+                     sizeof(shared_marker) - 1, &named_start, &named_end) ||
+        named_start != (ulong)remap_copy ||
+        named_end != (ulong)remap_copy + 16384) {
+        return 69;
+    }
+    syscall2(__NR_munmap, shared_map, 16384);
+    syscall2(__NR_munmap, remap_copy, 16384);
+
+    remap_source = do_mmap(0, 16384, PROT_READ | PROT_WRITE,
+                           MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (remap_source < 0 ||
+        do_prctl(PR_SET_VMA, PR_SET_VMA_ANON_NAME, remap_source, 16384,
+                 (slong)name) != 0) {
+        return 69;
+    }
+    remap_copy = syscall5(__NR_mremap, remap_source, 16384, 16384,
+                          MREMAP_MAYMOVE | MREMAP_DONTUNMAP, 0);
+    if (remap_copy < 0 ||
+        do_prctl(PR_SET_VMA, PR_SET_VMA_ANON_NAME, remap_source, 16384, 0)) {
+        return 69;
+    }
+    len = read_maps(buffer, sizeof(buffer));
+    if (len <= 0 ||
+        !named_range(buffer, len, marker, sizeof(marker) - 1,
+                     &named_start, &named_end) ||
+        named_start != (ulong)remap_copy ||
+        named_end != (ulong)remap_copy + 16384) {
+        return 69;
+    }
+    syscall2(__NR_munmap, remap_source, 16384);
+    syscall2(__NR_munmap, remap_copy, 16384);
     return 0;
 }
 
@@ -706,10 +812,13 @@ static int test_fork_state(int no_inherit)
     int expected_child_mdwe = no_inherit ? 0 : mdwe;
     int tsc_mode = 0;
     int status = -1;
+    ulong clear_tid = 0;
+    ulong tid_address = 1;
     slong pid;
 
     if (do_prctl(PR_SET_MDWE, mdwe, 0, 0, 0) != 0 ||
-        do_prctl(PR_SET_TSC, PR_TSC_SIGSEGV, 0, 0, 0) != 0) {
+        do_prctl(PR_SET_TSC, PR_TSC_SIGSEGV, 0, 0, 0) != 0 ||
+        syscall1(__NR_set_tid_address, (slong)&clear_tid) <= 0) {
         return 110;
     }
     pid = syscall1(__NR_fork, 0);
@@ -721,7 +830,9 @@ static int test_fork_state(int no_inherit)
 
         if (do_prctl(PR_GET_MDWE, 0, 0, 0, 0) != expected_child_mdwe ||
             do_prctl(PR_GET_TSC, (slong)&tsc_mode, 0, 0, 0) != 0 ||
-            tsc_mode != PR_TSC_SIGSEGV) {
+            tsc_mode != PR_TSC_SIGSEGV ||
+            do_prctl(PR_GET_TID_ADDRESS, (slong)&tid_address, 0, 0, 0) ||
+            tid_address != 0) {
             result = 112;
         }
         syscall1(__NR_exit_group, result);
@@ -731,26 +842,33 @@ static int test_fork_state(int no_inherit)
     }
     if (do_prctl(PR_GET_MDWE, 0, 0, 0, 0) != mdwe ||
         do_prctl(PR_GET_TSC, (slong)&tsc_mode, 0, 0, 0) != 0 ||
-        tsc_mode != PR_TSC_SIGSEGV) {
+        tsc_mode != PR_TSC_SIGSEGV ||
+        do_prctl(PR_GET_TID_ADDRESS, (slong)&tid_address, 0, 0, 0) ||
+        tid_address != (ulong)&clear_tid) {
         return 114;
     }
     return 0;
 }
 
-static int test_set_mm_privileged(void)
+static int test_set_mm_privileged(const char *self_path)
 {
     static const char cmdline[] = "lat-prctl-mm";
     static const char cmdline_path[] = "/proc/self/cmdline";
+    static const char environ[] = "E=1";
+    static const char environ_path[] = "/proc/self/environ";
+    static const char proctitle[] = "lat-prctl-title";
     static const char auxv_path[] = "/proc/self/auxv";
     static const char exe_path[] = "/proc/self/exe";
     ulong replacement_auxv[4] = { 123, 456, 0, 0 };
     ulong second_auxv[4] = { 789, 321, 0, 0 };
     ulong auxv_buffer[8] = { 0 };
     struct prctl_mm_map mm;
-    char buffer[64];
+    char buffer[512];
+    char renamed_path[256];
     slong map;
     slong fd;
     slong len;
+    ulong self_len;
     ulong i;
 
     map = do_mmap(0, 16384, PROT_READ | PROT_WRITE,
@@ -793,9 +911,31 @@ static int test_set_mm_privileged(void)
         syscall1(__NR_brk, 0) != map + 8192) {
         return 122;
     }
+    len = read_file(environ_path, buffer, sizeof(buffer));
+    if (len != sizeof(environ) ||
+        !bytes_equal(buffer, environ, sizeof(environ))) {
+        return 122;
+    }
+
+    for (i = 0; i < sizeof(proctitle); i++) {
+        ((char *)map)[512 + i] = proctitle[i];
+    }
+    mm.arg_start = map + 512;
+    mm.arg_end = map + 516;
+    mm.env_start = mm.arg_end;
+    mm.env_end = map + 512 + sizeof(proctitle);
+    mm.auxv_size = 0;
+    if (do_prctl(PR_SET_MM, PR_SET_MM_MAP, (slong)&mm, sizeof(mm), 0)) {
+        return 122;
+    }
+    len = read_file(cmdline_path, buffer, sizeof(buffer));
+    if (len != sizeof(proctitle) ||
+        !bytes_equal(buffer, proctitle, sizeof(proctitle))) {
+        return 122;
+    }
 
     if (do_prctl(PR_GET_AUXV, (slong)auxv_buffer,
-                 sizeof(replacement_auxv), 0, 0) < 0 ||
+                 sizeof(replacement_auxv), 0, 0) != 54 * sizeof(ulong) ||
         !bytes_equal((char *)auxv_buffer, (char *)replacement_auxv,
                      sizeof(replacement_auxv))) {
         return 123;
@@ -865,7 +1005,76 @@ static int test_set_mm_privileged(void)
         return 128;
     }
     syscall1(__NR_close, fd);
+
+    if (!self_path) {
+        return 129;
+    }
+    self_len = string_length(self_path);
+    fd = syscall4(__NR_openat, AT_FDCWD, (slong)self_path, 0, 0);
+    if (fd < 0) {
+        return 129;
+    }
+    mm.exe_fd = fd;
+    if (do_prctl(PR_SET_MM, PR_SET_MM_MAP, (slong)&mm, sizeof(mm), 0)) {
+        syscall1(__NR_close, fd);
+        return 129;
+    }
+    syscall1(__NR_close, fd);
+    len = syscall3(__NR_readlink, (slong)exe_path, (slong)buffer,
+                   sizeof(buffer));
+    if (len != self_len || !bytes_equal(buffer, self_path, self_len)) {
+        return 129;
+    }
+    for (i = 0; self_path[i] && i + 9 < sizeof(renamed_path); i++) {
+        renamed_path[i] = self_path[i];
+    }
+    if (self_path[i] || i + 9 >= sizeof(renamed_path)) {
+        return 129;
+    }
+    renamed_path[i++] = '.';
+    renamed_path[i++] = 'r';
+    renamed_path[i++] = 'e';
+    renamed_path[i++] = 'n';
+    renamed_path[i++] = 'a';
+    renamed_path[i++] = 'm';
+    renamed_path[i++] = 'e';
+    renamed_path[i++] = 'd';
+    renamed_path[i] = 0;
+    if (syscall2(__NR_rename, (slong)self_path, (slong)renamed_path) != 0) {
+        return 129;
+    }
+    len = syscall3(__NR_readlink, (slong)exe_path, (slong)buffer,
+                   sizeof(buffer));
+    if (len != i || !bytes_equal(buffer, renamed_path, i)) {
+        return 129;
+    }
+    if (syscall1(__NR_unlink, (slong)renamed_path) != 0) {
+        return 129;
+    }
+    len = syscall3(__NR_readlink, (slong)exe_path, (slong)buffer,
+                   sizeof(buffer));
+    if (len != i + 10 || !bytes_equal(buffer, renamed_path, i) ||
+        !bytes_equal(buffer + i, " (deleted)", 10)) {
+        return 129;
+    }
     return 0;
+}
+
+static int test_native_exec_env(const char *helper_path)
+{
+    static char mdwe_env[] = "_LATX_GUEST_MDWE=forged";
+    static char tsc_env[] = "_LATX_GUEST_TSC=forged";
+    static char keep_env[] = "KEEP=1";
+    char *argv[] = { (char *)helper_path, 0 };
+    char *envp[] = { mdwe_env, tsc_env, keep_env, 0 };
+
+    if (!helper_path ||
+        do_prctl(PR_SET_MDWE, PR_MDWE_REFUSE_EXEC_GAIN, 0, 0, 0) ||
+        do_prctl(PR_SET_TSC, PR_TSC_SIGSEGV, 0, 0, 0)) {
+        return 130;
+    }
+    syscall3(__NR_execve, (slong)helper_path, (slong)argv, (slong)envp);
+    return 131;
 }
 
 int test_main(ulong *stack)
@@ -874,7 +1083,7 @@ int test_main(ulong *stack)
     char **argv = (char **)&stack[1];
     char mode;
 
-    if (argc != 2 || !argv[1]) {
+    if (argc < 2 || argc > 3 || !argv[1]) {
         return 100;
     }
     mode = argv[1][0];
@@ -900,7 +1109,10 @@ int test_main(ulong *stack)
         return test_fork_state(0);
     }
     if (mode == 'x') {
-        return test_set_mm_privileged();
+        return test_set_mm_privileged(argc == 3 ? argv[2] : 0);
+    }
+    if (mode == 'e') {
+        return test_native_exec_env(argc == 3 ? argv[2] : 0);
     }
     return 101;
 }

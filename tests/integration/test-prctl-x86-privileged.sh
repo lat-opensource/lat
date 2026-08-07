@@ -29,10 +29,12 @@ for mode in 0 1; do
     else
         label=tu
     fi
+    guest="$workdir/prctl-x86-semantics-$mode"
+    cp "$workdir/prctl-x86-semantics" "$guest"
     set +e
     unshare -Ur env LATX_AOT=0 LATX_KZT=0 LATX_TU="$mode" \
         timeout -s KILL 10 "$emulator" \
-        "$workdir/prctl-x86-semantics" x
+        "$guest" x "$guest"
     ret=$?
     set -e
     if [ "$ret" -ne 0 ]; then
