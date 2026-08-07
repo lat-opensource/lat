@@ -10,6 +10,7 @@
 
 .equ PR_GET_TSC, 25
 .equ PR_SET_TSC, 26
+.equ PR_TSC_ENABLE, 1
 .equ PR_TSC_SIGSEGV, 2
 .equ PR_SET_MDWE, 65
 .equ PR_GET_MDWE, 66
@@ -27,8 +28,40 @@ _start:
     je no_inherit_stage
     cmpb $'i', (%rax)
     je inherit_stage
+    cmpb $'u', (%rax)
+    je untrusted_env_stage
 
-first_stage:
+    lea fake_mdwe_env(%rip), %rax
+    mov %rax, fake_envp(%rip)
+    lea fake_tsc_env(%rip), %rax
+    mov %rax, fake_envp+8(%rip)
+    lea untrusted_env_arg(%rip), %r14
+    lea fake_envp(%rip), %r9
+    jmp exec_self
+
+untrusted_env_stage:
+    mov $__NR_prctl, %eax
+    mov $PR_GET_MDWE, %edi
+    xor %esi, %esi
+    xor %edx, %edx
+    xor %r10d, %r10d
+    xor %r8d, %r8d
+    syscall
+    test %rax, %rax
+    jne fail_untrusted_mdwe
+
+    mov $__NR_prctl, %eax
+    mov $PR_GET_TSC, %edi
+    lea tsc_mode(%rip), %rsi
+    xor %edx, %edx
+    xor %r10d, %r10d
+    xor %r8d, %r8d
+    syscall
+    test %rax, %rax
+    js fail_untrusted_tsc
+    cmpl $PR_TSC_ENABLE, tsc_mode(%rip)
+    jne fail_untrusted_tsc
+
     mov $__NR_prctl, %eax
     mov $PR_SET_MDWE, %edi
     mov $(PR_MDWE_REFUSE_EXEC_GAIN | PR_MDWE_NO_INHERIT), %esi
@@ -40,6 +73,7 @@ first_stage:
     js fail_mdwe
 
     lea no_inherit_arg(%rip), %r14
+    mov %r13, %r9
     jmp exec_self
 
 no_inherit_stage:
@@ -74,6 +108,7 @@ no_inherit_stage:
     js fail_tsc
 
     lea inherit_arg(%rip), %r14
+    mov %r13, %r9
 
 exec_self:
     mov 8(%rsp), %rbx
@@ -91,7 +126,7 @@ fill_exec_argv:
     mov %r15, 24(%rsi)
     mov $__NR_execve, %eax
     mov %r15, %rdi
-    mov %r13, %rdx
+    mov %r9, %rdx
     syscall
     mov $32, %edi
     jmp exit_now
@@ -138,6 +173,12 @@ fail_mdwe:
 fail_tsc:
     mov $35, %edi
     jmp exit_now
+fail_untrusted_mdwe:
+    mov $37, %edi
+    jmp exit_now
+fail_untrusted_tsc:
+    mov $38, %edi
+    jmp exit_now
 .size _start, .-_start
 
 segv_handler:
@@ -163,6 +204,12 @@ no_inherit_arg:
     .asciz "n"
 inherit_arg:
     .asciz "i"
+untrusted_env_arg:
+    .asciz "u"
+fake_mdwe_env:
+    .asciz "_LATX_GUEST_MDWE=1"
+fake_tsc_env:
+    .asciz "_LATX_GUEST_TSC=1"
 action:
     .quad segv_handler
     .quad SA_SIGINFO | SA_RESTORER
@@ -173,6 +220,9 @@ action:
 .p2align 3
 exec_argv:
     .skip 40
+.p2align 3
+fake_envp:
+    .skip 24
 .p2align 2
 tsc_mode:
     .skip 4

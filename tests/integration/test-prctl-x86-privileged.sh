@@ -36,8 +36,8 @@ for mode in 0 1; do
     ret=$?
     set -e
     if [ "$ret" -ne 0 ]; then
-        echo "FAIL: $label privileged PR_SET_MM semantics returned $ret" >&2
+        echo "FAIL: $label user-namespace PR_SET_MM semantics returned $ret" >&2
         exit "$ret"
     fi
-    echo "PASS: $label privileged PR_SET_MM semantics"
+    echo "PASS: $label user-namespace PR_SET_MM semantics"
 done

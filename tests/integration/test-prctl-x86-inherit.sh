@@ -51,6 +51,12 @@ run_mode()
 36)
     echo "FAIL: inherited TSC mode delivered an unexpected signal" >&2
     ;;
+37)
+    echo "FAIL: guest environment forged inherited MDWE state" >&2
+    ;;
+38)
+    echo "FAIL: guest environment forged inherited TSC state" >&2
+    ;;
 124)
     echo "FAIL: x86_64 prctl inheritance test timed out" >&2
     ;;

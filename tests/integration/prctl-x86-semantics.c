@@ -453,13 +453,19 @@ static int test_vma_name(void)
     static const char marker[] = "[anon:lat-vma-inner]";
     static const char shared_name[] = "lat-vma-shared";
     static const char shared_marker[] = "[anon_shmem:lat-vma-shared]";
+    static const char sysv_name[] = "lat-vma-sysv";
+    static const char sysv_marker[] = "[anon_shmem:lat-vma-sysv]";
     static const char invalid_name[] = "lat[vma";
     static const char exe_path[] = "/proc/self/exe";
     char long_name[80];
     char buffer[32768];
     slong map;
     slong shared_map;
+    slong sysv_map;
+    slong sysv_remap;
     slong file_map;
+    slong shmid;
+    slong second_shmid;
     slong fd;
     slong len;
     ulong named_start;
@@ -535,6 +541,51 @@ static int test_vma_name(void)
         return 68;
     }
     syscall2(__NR_munmap, shared_map, 16384);
+
+    shmid = syscall3(__NR_shmget, IPC_PRIVATE, 4096, IPC_CREAT | 0600);
+    if (shmid < 0) {
+        return 69;
+    }
+    sysv_map = syscall3(__NR_shmat, shmid, 0, 0);
+    if (sysv_map < 0 ||
+        do_prctl(PR_SET_VMA, PR_SET_VMA_ANON_NAME, sysv_map, 4096,
+                 (slong)sysv_name) != 0) {
+        syscall3(__NR_shmctl, shmid, IPC_RMID, 0);
+        return 69;
+    }
+    len = read_maps(buffer, sizeof(buffer));
+    if (len <= 0 ||
+        !named_range(buffer, len, sysv_marker, sizeof(sysv_marker) - 1,
+                     &named_start, &named_end) ||
+        named_start != (ulong)sysv_map || named_end != (ulong)sysv_map + 4096) {
+        syscall1(__NR_shmdt, sysv_map);
+        syscall3(__NR_shmctl, shmid, IPC_RMID, 0);
+        return 69;
+    }
+    if (syscall1(__NR_shmdt, sysv_map) != 0 ||
+        syscall3(__NR_shmctl, shmid, IPC_RMID, 0) != 0) {
+        return 69;
+    }
+
+    second_shmid = syscall3(__NR_shmget, IPC_PRIVATE, 4096,
+                            IPC_CREAT | 0600);
+    if (second_shmid < 0) {
+        return 69;
+    }
+    sysv_remap = syscall3(__NR_shmat, second_shmid, sysv_map, 0);
+    if (sysv_remap != sysv_map) {
+        syscall3(__NR_shmctl, second_shmid, IPC_RMID, 0);
+        return 69;
+    }
+    len = read_maps(buffer, sizeof(buffer));
+    if (len <= 0 || contains(buffer, len, sysv_marker,
+                             sizeof(sysv_marker) - 1)) {
+        syscall1(__NR_shmdt, sysv_remap);
+        syscall3(__NR_shmctl, second_shmid, IPC_RMID, 0);
+        return 69;
+    }
+    syscall1(__NR_shmdt, sysv_remap);
+    syscall3(__NR_shmctl, second_shmid, IPC_RMID, 0);
 
     if (do_prctl(PR_SET_VMA, PR_SET_VMA_ANON_NAME, map + 4096, 4096,
                  (slong)name) != 0 ||
@@ -694,7 +745,7 @@ static int test_set_mm_privileged(void)
     static const char exe_path[] = "/proc/self/exe";
     ulong replacement_auxv[4] = { 123, 456, 0, 0 };
     ulong second_auxv[4] = { 789, 321, 0, 0 };
-    ulong auxv_buffer[4] = { 0 };
+    ulong auxv_buffer[8] = { 0 };
     struct prctl_mm_map mm;
     char buffer[64];
     slong map;
@@ -744,7 +795,7 @@ static int test_set_mm_privileged(void)
     }
 
     if (do_prctl(PR_GET_AUXV, (slong)auxv_buffer,
-                 sizeof(auxv_buffer), 0, 0) < 0 ||
+                 sizeof(replacement_auxv), 0, 0) < 0 ||
         !bytes_equal((char *)auxv_buffer, (char *)replacement_auxv,
                      sizeof(replacement_auxv))) {
         return 123;
@@ -756,23 +807,26 @@ static int test_set_mm_privileged(void)
     len = syscall3(__NR_read, fd, (slong)auxv_buffer,
                    sizeof(auxv_buffer));
     syscall1(__NR_close, fd);
-    if (len != sizeof(auxv_buffer) ||
+    if (len != sizeof(replacement_auxv) ||
         !bytes_equal((char *)auxv_buffer, (char *)replacement_auxv,
                      sizeof(replacement_auxv))) {
         return 123;
     }
 
-    if (do_prctl(PR_SET_MM, PR_SET_MM_START_CODE, map, 0, 0) ||
-        do_prctl(PR_SET_MM, PR_SET_MM_END_CODE, map + 64, 0, 0) ||
-        do_prctl(PR_SET_MM, PR_SET_MM_START_DATA, map + 128, 0, 0) ||
-        do_prctl(PR_SET_MM, PR_SET_MM_END_DATA, map + 256, 0, 0) ||
-        do_prctl(PR_SET_MM, PR_SET_MM_START_BRK, map + 4096, 0, 0) ||
-        do_prctl(PR_SET_MM, PR_SET_MM_BRK, map + 8192, 0, 0) ||
-        do_prctl(PR_SET_MM, PR_SET_MM_START_STACK, map + 12288, 0, 0) ||
-        do_prctl(PR_SET_MM, PR_SET_MM_ARG_START, map, 0, 0) ||
-        do_prctl(PR_SET_MM, PR_SET_MM_ARG_END, map + 4, 0, 0) ||
-        do_prctl(PR_SET_MM, PR_SET_MM_ENV_START, map + 128, 0, 0) ||
-        do_prctl(PR_SET_MM, PR_SET_MM_ENV_END, map + 132, 0, 0)) {
+    if (do_prctl(PR_SET_MM, PR_SET_MM_START_CODE, map, 0, 0) != -EPERM ||
+        do_prctl(PR_SET_MM, PR_SET_MM_END_CODE, map + 64, 0, 0) != -EPERM ||
+        do_prctl(PR_SET_MM, PR_SET_MM_START_DATA, map + 128, 0, 0) != -EPERM ||
+        do_prctl(PR_SET_MM, PR_SET_MM_END_DATA, map + 256, 0, 0) != -EPERM ||
+        do_prctl(PR_SET_MM, PR_SET_MM_START_BRK, map + 4096, 0, 0) != -EPERM ||
+        do_prctl(PR_SET_MM, PR_SET_MM_BRK, map + 8192, 0, 0) != -EPERM ||
+        do_prctl(PR_SET_MM, PR_SET_MM_START_STACK, map + 12288,
+                 0, 0) != -EPERM ||
+        do_prctl(PR_SET_MM, PR_SET_MM_ARG_START, map, 0, 0) != -EPERM ||
+        do_prctl(PR_SET_MM, PR_SET_MM_ARG_END, map + 4, 0, 0) != -EPERM ||
+        do_prctl(PR_SET_MM, PR_SET_MM_ENV_START, map + 128,
+                 0, 0) != -EPERM ||
+        do_prctl(PR_SET_MM, PR_SET_MM_ENV_END, map + 132,
+                 0, 0) != -EPERM) {
         return 124;
     }
     fd = syscall4(__NR_openat, AT_FDCWD, (slong)cmdline_path, 0, 0);
@@ -781,26 +835,28 @@ static int test_set_mm_privileged(void)
     }
     len = syscall3(__NR_read, fd, (slong)buffer, sizeof(buffer));
     syscall1(__NR_close, fd);
-    if (len != 4 || !bytes_equal(buffer, cmdline, 4)) {
+    if (len != sizeof(cmdline) ||
+        !bytes_equal(buffer, cmdline, sizeof(cmdline))) {
         return 125;
     }
 
     if (do_prctl(PR_SET_MM, PR_SET_MM_AUXV, (slong)second_auxv,
-                 sizeof(second_auxv), 0) ||
+                 sizeof(second_auxv), 0) != -EPERM ||
         do_prctl(PR_GET_AUXV, (slong)auxv_buffer,
-                 sizeof(auxv_buffer), 0, 0) < 0 ||
-        !bytes_equal((char *)auxv_buffer, (char *)second_auxv,
-                     sizeof(second_auxv))) {
+                 sizeof(replacement_auxv), 0, 0) < 0 ||
+        !bytes_equal((char *)auxv_buffer, (char *)replacement_auxv,
+                     sizeof(replacement_auxv))) {
         return 126;
     }
     if (do_prctl(PR_SET_MM, PR_SET_MM_START_STACK,
-                 map + 0x100000, 0, 0) != -EFAULT ||
-        do_prctl(PR_SET_MM, 99, map, 0, 0) != -EINVAL) {
+                 map + 0x100000, 0, 0) != -EPERM ||
+        do_prctl(PR_SET_MM, 99, map, 0, 0) != -EPERM) {
         return 127;
     }
 
     fd = syscall4(__NR_openat, AT_FDCWD, (slong)exe_path, 0, 0);
-    if (fd < 0 || do_prctl(PR_SET_MM, PR_SET_MM_EXE_FILE, fd, 0, 0)) {
+    if (fd < 0 ||
+        do_prctl(PR_SET_MM, PR_SET_MM_EXE_FILE, fd, 0, 0) != -EPERM) {
         return 128;
     }
     syscall1(__NR_close, fd);
