@@ -740,4 +740,249 @@ make_loader "$dash_root" x86_64
 assert_contains '"inspection_status":"ready","reason":"ready"' \
     "$(cat "$workdir/inspect-dash.stdout")" 'dash-prefixed root'
 
-echo 'PASS: distribution-neutral runtime inspection'
+printf '%s\n' \
+    "$(runtime_info_json x86_64 "$runtime_root" user_config)" \
+    > "$query_bin/latx-x86_64.json"
+printf '%s\n' \
+    "$(runtime_info_json i386 "$runtime_root" system_config)" \
+    > "$query_bin/latx-i386.json"
+set +e
+actual=$("$query_bin/latu-runtime-manager" doctor \
+    2> "$workdir/doctor.stderr")
+actual_status=$?
+set -e
+assert_status 0 "$actual_status" 'healthy dual-ABI doctor'
+doctor_ready_count=$(printf '%s\n' "$actual" | \
+    grep -c '"inspection_status":"ready","readiness":"ready","reason":"ready"')
+assert_status 2 "$doctor_ready_count" 'healthy dual-ABI doctor records'
+
+mv "$query_bin/latx-i386" "$query_bin/latx-i386.absent"
+set +e
+actual=$("$query_bin/latu-runtime-manager" doctor \
+    2> "$workdir/doctor-partial.stderr")
+actual_status=$?
+set -e
+assert_status 0 "$actual_status" 'one ready ABI doctor'
+assert_contains '"guest_abi":"x86_64"' "$actual" \
+    'one ready ABI doctor'
+assert_contains \
+    '"guest_abi":"i386","translator_status":"missing",'\
+'"query_status":"translator_missing"' \
+    "$actual" 'unavailable i386 doctor'
+assert_contains \
+    '"inspection_status":"not_checked","readiness":"unavailable",'\
+'"reason":"translator_missing"' \
+    "$actual" 'unavailable i386 doctor'
+mv "$query_bin/latx-i386.absent" "$query_bin/latx-i386"
+
+printf '%s\n' \
+    "$(runtime_info_json x86_64 "$invalid_root" environment)" \
+    > "$query_bin/latx-x86_64.json"
+set +e
+actual=$("$query_bin/latu-runtime-manager" doctor \
+    2> "$workdir/doctor-broken.stderr")
+actual_status=$?
+set -e
+assert_status 1 "$actual_status" 'broken runtime doctor'
+assert_contains '"guest_abi":"x86_64"' "$actual" \
+    'broken runtime doctor'
+assert_contains \
+    '"inspection_status":"invalid","readiness":"broken",'\
+'"reason":"loader_invalid_elf"' \
+    "$actual" 'broken runtime doctor'
+assert_contains '"guest_abi":"i386"' "$actual" \
+    'healthy peer runtime doctor'
+
+printf '%s\n' '{"schema_version":1,"guest_abi":"x86_64"}' \
+    > "$query_bin/latx-x86_64.json"
+set +e
+actual=$("$query_bin/latu-runtime-manager" doctor \
+    2> "$workdir/doctor-unknown.stderr")
+actual_status=$?
+set -e
+assert_status 2 "$actual_status" 'invalid runtime-info doctor'
+assert_contains '"query_status":"invalid_runtime_info"' "$actual" \
+    'invalid runtime-info doctor'
+assert_contains \
+    '"inspection_status":"not_checked","readiness":"unknown",'\
+'"reason":"invalid_runtime_info"' \
+    "$actual" 'invalid runtime-info doctor'
+
+mv "$query_bin/latx-x86_64" "$query_bin/latx-x86_64.absent"
+mv "$query_bin/latx-i386" "$query_bin/latx-i386.absent"
+set +e
+actual=$("$query_bin/latu-runtime-manager" doctor \
+    2> "$workdir/doctor-unavailable.stderr")
+actual_status=$?
+set -e
+assert_status 1 "$actual_status" 'no translator doctor'
+unavailable_count=$(printf '%s\n' "$actual" | \
+    grep -c '"readiness":"unavailable","reason":"translator_missing"')
+assert_status 2 "$unavailable_count" 'no translator doctor records'
+mv "$query_bin/latx-x86_64.absent" "$query_bin/latx-x86_64"
+mv "$query_bin/latx-i386.absent" "$query_bin/latx-i386"
+
+printf '%s\n' \
+    "$(runtime_info_json x86_64 "$runtime_root" default)" \
+    > "$query_bin/latx-x86_64.json"
+set +e
+actual=$("$query_bin/latu-runtime-manager" doctor --abi x86_64 \
+    2> "$workdir/doctor-one.stderr")
+actual_status=$?
+set -e
+assert_status 0 "$actual_status" 'single-ABI doctor'
+assert_contains '"guest_abi":"x86_64"' "$actual" 'single-ABI doctor'
+case "$actual" in
+    *'"guest_abi":"i386"'*) fail 'single-ABI doctor reported i386' ;;
+esac
+
+program_dir=$workdir/programs
+x86_64_program=$program_dir/x86_64-dynamic
+make_program "$x86_64_program" x86_64 /lib64/ld-linux-x86-64.so.2
+LATU_TEST_ARGV_LOG=$workdir/doctor-program-argv \
+    "$query_bin/latu-runtime-manager" doctor --program "$x86_64_program" \
+    > "$workdir/doctor-program.stdout" ||
+    fail 'program doctor did not infer x86-64 ABI'
+actual=$(cat "$workdir/doctor-program.stdout")
+assert_contains '"guest_abi":"x86_64"' "$actual" \
+    'program doctor inferred x86-64 ABI'
+assert_contains '"loader_path":"/lib64/ld-linux-x86-64.so.2"' "$actual" \
+    'program doctor used PT_INTERP'
+case "$actual" in
+    *'"guest_abi":"i386"'*) fail 'x86-64 program doctor queried i386' ;;
+esac
+[ ! -e "$workdir/doctor-program-argv.i386" ] ||
+    fail 'x86-64 program doctor executed i386 translator'
+
+i386_program=$program_dir/i386-dynamic
+make_program "$i386_program" i386 /lib/ld-linux.so.2
+LATU_TEST_ARGV_LOG=$workdir/doctor-i386-argv \
+    "$query_bin/latu-runtime-manager" doctor --program "$i386_program" \
+    > "$workdir/doctor-i386.stdout" ||
+    fail 'program doctor did not infer i386 ABI'
+actual=$(cat "$workdir/doctor-i386.stdout")
+assert_contains '"guest_abi":"i386"' "$actual" \
+    'program doctor inferred i386 ABI'
+assert_contains '"loader_path":"/lib/ld-linux.so.2"' "$actual" \
+    'i386 program doctor used PT_INTERP'
+case "$actual" in
+    *'"guest_abi":"x86_64"'*) fail 'i386 program doctor queried x86-64' ;;
+esac
+[ ! -e "$workdir/doctor-i386-argv.x86_64" ] ||
+    fail 'i386 program doctor executed x86-64 translator'
+
+set +e
+"$query_bin/latu-runtime-manager" doctor --abi x86_64 \
+    --program "$i386_program" > "$workdir/doctor-mismatch.stdout" \
+    2> "$workdir/doctor-mismatch.stderr"
+actual_status=$?
+set -e
+assert_status 2 "$actual_status" 'program and requested ABI mismatch'
+grep -F 'does not match requested ABI' "$workdir/doctor-mismatch.stderr" \
+    > /dev/null || fail 'program ABI mismatch diagnostic missing'
+
+custom_root=$workdir/runtime-custom-loader
+custom_interp=/opt/latu/lib/ld-custom-x86-64.so.1
+make_loader "$workdir/custom-loader-source" x86_64
+mkdir -p "$custom_root${custom_interp%/*}"
+cp "$workdir/custom-loader-source/lib64/ld-linux-x86-64.so.2" \
+    "$custom_root$custom_interp"
+custom_program=$program_dir/x86_64-custom-interp
+make_program "$custom_program" x86_64 "$custom_interp"
+printf '%s\n' \
+    "$(runtime_info_json x86_64 "$custom_root" user_config)" \
+    > "$query_bin/latx-x86_64.json"
+actual=$("$query_bin/latu-runtime-manager" doctor \
+    --program "$custom_program") || fail 'custom PT_INTERP doctor failed'
+assert_contains '"loader_path":"/opt/latu/lib/ld-custom-x86-64.so.1"' \
+    "$actual" 'custom PT_INTERP path'
+assert_contains '"inspection_status":"ready","readiness":"ready"' \
+    "$actual" 'custom PT_INTERP readiness'
+
+host_loader_root=$workdir/host-loader-source
+make_loader "$host_loader_root" x86_64
+host_loader=$host_loader_root/lib64/ld-linux-x86-64.so.2
+fallback_program=$program_dir/x86_64-host-fallback
+make_program "$fallback_program" x86_64 "$host_loader"
+fallback_root=$workdir/runtime-without-configured-loader
+mkdir -p "$fallback_root"
+printf '%s\n' \
+    "$(runtime_info_json x86_64 "$fallback_root" environment)" \
+    > "$query_bin/latx-x86_64.json"
+actual=$("$query_bin/latu-runtime-manager" doctor \
+    --program "$fallback_program") || fail 'host loader fallback failed'
+assert_contains '"inspection_status":"missing"' "$actual" \
+    'host fallback root status'
+assert_contains '"readiness":"ready_with_host_fallback"' "$actual" \
+    'host fallback readiness'
+assert_contains '"effective_loader_status":"ready"' "$actual" \
+    'host fallback effective loader status'
+assert_contains '"loader_source":"host_fallback"' "$actual" \
+    'host fallback source'
+
+configured_fallback=$fallback_root${host_loader}
+mkdir -p "${configured_fallback%/*}"
+cp "$workdir/custom-loader-source/lib64/ld-linux-x86-64.so.2" \
+    "$configured_fallback"
+python3 - "$configured_fallback" <<'PY'
+import sys
+
+with open(sys.argv[1], "r+b") as loader:
+    loader.seek(18)
+    loader.write(b"\x03\0")
+PY
+set +e
+actual=$("$query_bin/latu-runtime-manager" doctor \
+    --program "$fallback_program" 2> "$workdir/no-fallback.stderr")
+actual_status=$?
+set -e
+assert_status 1 "$actual_status" 'existing invalid root loader'
+assert_contains '"effective_loader_status":"invalid"' "$actual" \
+    'invalid configured loader blocks fallback'
+assert_contains '"loader_source":"runtime_root"' "$actual" \
+    'invalid configured loader source'
+
+static_program=$program_dir/x86_64-static
+make_program "$static_program" x86_64
+printf '%s\n' \
+    "$(runtime_info_json x86_64 "$workdir/no-such-static-runtime" default)" \
+    > "$query_bin/latx-x86_64.json"
+actual=$("$query_bin/latu-runtime-manager" doctor \
+    --program "$static_program") || fail 'static program doctor failed'
+assert_contains '"loader_path":null' "$actual" \
+    'static program has no loader'
+assert_contains '"inspection_status":"not_required",'\
+'"readiness":"ready","reason":"static_program"' "$actual" \
+    'static program readiness'
+
+printf 'not an ELF\n' > "$program_dir/invalid"
+set +e
+"$query_bin/latu-runtime-manager" doctor --program "$program_dir/invalid" \
+    > "$workdir/doctor-invalid.stdout" \
+    2> "$workdir/doctor-invalid.stderr"
+actual_status=$?
+set -e
+assert_status 2 "$actual_status" 'invalid program ELF'
+grep -F 'program_invalid_elf' "$workdir/doctor-invalid.stderr" \
+    > /dev/null || fail 'invalid program diagnostic missing'
+actual=$(cat "$workdir/doctor-invalid.stdout")
+assert_contains '"guest_abi":null' "$actual" \
+    'invalid program ABI is unknown'
+assert_contains '"program_status":"invalid",'\
+'"program_reason":"program_invalid_elf"' "$actual" \
+    'invalid program structured diagnosis'
+
+set +e
+"$query_bin/latu-runtime-manager" doctor \
+    --program "$program_dir/does-not-exist" \
+    > "$workdir/doctor-missing-program.stdout" \
+    2> "$workdir/doctor-missing-program.stderr"
+actual_status=$?
+set -e
+assert_status 2 "$actual_status" 'missing program ELF'
+actual=$(cat "$workdir/doctor-missing-program.stdout")
+assert_contains '"program_status":"invalid",'\
+'"program_reason":"program_not_found"' "$actual" \
+    'missing program structured diagnosis'
+
+echo 'PASS: distribution-neutral runtime queries and diagnosis'

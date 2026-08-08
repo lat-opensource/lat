@@ -199,7 +199,9 @@ static void usage(void)
             " [--program PROGRAM]\n"
             "       latu-runtime-manager list [--program PROGRAM]\n"
             "       latu-runtime-manager inspect-root [--abi ABI]"
-            " [--] ROOT\n");
+            " [--] ROOT\n"
+            "       latu-runtime-manager doctor [--abi ABI]"
+            " [--program PROGRAM]\n");
     exit(2);
 }
 
@@ -1289,6 +1291,144 @@ static bool loader_elf_valid(int fd, const char *guest_abi)
     return have_load;
 }
 
+static bool pread_exact(int fd, void *buffer, size_t size, uint64_t offset)
+{
+    ssize_t length;
+
+    if (offset > INT64_MAX) {
+        return false;
+    }
+    do {
+        length = pread(fd, buffer, size, offset);
+    } while (length < 0 && errno == EINTR);
+    return length == size;
+}
+
+static bool inspect_program(const char *path, ProgramInfo *program,
+                            const char **reason)
+{
+    unsigned char header[64];
+    struct stat statbuf;
+    uint64_t program_offset;
+    uint16_t program_entry_size;
+    uint16_t program_count;
+    uint16_t machine;
+    unsigned char elf_class;
+    bool have_load = false;
+    int fd;
+
+    memset(program, 0, sizeof(*program));
+    program->path = path;
+    fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) {
+        *reason = errno == ENOENT || errno == ENOTDIR ?
+                  "program_not_found" : "program_uninspectable";
+        return false;
+    }
+    if (fstat(fd, &statbuf) < 0 || !S_ISREG(statbuf.st_mode) ||
+        statbuf.st_size < 0 ||
+        !pread_exact(fd, header, sizeof(header), 0) ||
+        memcmp(header, "\177ELF", 4) || header[5] != 1 || header[6] != 1) {
+        *reason = "program_invalid_elf";
+        close(fd);
+        return false;
+    }
+
+    elf_class = header[4];
+    machine = read_le16(header + 18);
+    if (elf_class == 2 && machine == 62) {
+        program->guest_abi = "x86_64";
+        program_offset = read_le64(header + 32);
+        program_entry_size = read_le16(header + 54);
+        program_count = read_le16(header + 56);
+        if (read_le16(header + 52) != 64 || program_entry_size != 56) {
+            goto invalid;
+        }
+    } else if (elf_class == 1 && (machine == 3 || machine == 6)) {
+        program->guest_abi = "i386";
+        program_offset = read_le32(header + 28);
+        program_entry_size = read_le16(header + 42);
+        program_count = read_le16(header + 44);
+        if (read_le16(header + 40) != 52 || program_entry_size != 32) {
+            goto invalid;
+        }
+    } else {
+        goto invalid;
+    }
+
+    if ((read_le16(header + 16) != 2 && read_le16(header + 16) != 3) ||
+        !program_count || program_offset > (uint64_t)statbuf.st_size ||
+        program_count > ((uint64_t)statbuf.st_size - program_offset) /
+                        program_entry_size) {
+        goto invalid;
+    }
+
+    for (uint16_t i = 0; i < program_count; i++) {
+        unsigned char program_header[56];
+        uint64_t offset = program_offset +
+                          (uint64_t)i * program_entry_size;
+        uint32_t type;
+
+        if (!pread_exact(fd, program_header, program_entry_size, offset)) {
+            goto invalid;
+        }
+        type = read_le32(program_header);
+        if (type == 1) {
+            have_load = true;
+        } else if (type == 3) {
+            uint64_t interpreter_offset;
+            uint64_t interpreter_size;
+            char *interpreter;
+
+            if (program->interpreter) {
+                goto invalid;
+            }
+            if (elf_class == 2) {
+                interpreter_offset = read_le64(program_header + 8);
+                interpreter_size = read_le64(program_header + 32);
+            } else {
+                interpreter_offset = read_le32(program_header + 4);
+                interpreter_size = read_le32(program_header + 16);
+            }
+            if (interpreter_size < 2 || interpreter_size > PATH_MAX ||
+                interpreter_offset > (uint64_t)statbuf.st_size ||
+                interpreter_size >
+                    (uint64_t)statbuf.st_size - interpreter_offset) {
+                goto invalid;
+            }
+            interpreter = xmalloc(interpreter_size);
+            if (!pread_exact(fd, interpreter, interpreter_size,
+                             interpreter_offset) ||
+                interpreter[interpreter_size - 1] != '\0' ||
+                memchr(interpreter, '\0', interpreter_size - 1)) {
+                g_free(interpreter);
+                goto invalid;
+            }
+            program->interpreter = interpreter;
+        }
+    }
+    close(fd);
+    if (!have_load) {
+        goto invalid_closed;
+    }
+    program->is_static = !program->interpreter;
+    return true;
+
+invalid:
+    close(fd);
+invalid_closed:
+    g_free(program->interpreter);
+    memset(program, 0, sizeof(*program));
+    *reason = "program_invalid_elf";
+    return false;
+}
+
+static void program_info_free(ProgramInfo *program)
+{
+    g_free(program->interpreter);
+    memset(program, 0, sizeof(*program));
+}
+
 static LoaderCheck inspect_loader_file(const char *guest_abi,
                                        const char *path,
                                        const char *confinement_root)
@@ -1425,6 +1565,34 @@ static RuntimeInspection inspect_runtime_root(const char *guest_abi,
     return inspection;
 }
 
+static void resolve_effective_loader(RuntimeInspection *inspection)
+{
+    LoaderCheck check;
+
+    if (inspection->status == INSPECTION_NOT_REQUIRED) {
+        inspection->effective_status = INSPECTION_NOT_REQUIRED;
+        inspection->effective_reason = "static_program";
+        return;
+    }
+    if (inspection->configured_loader_selected) {
+        inspection->loader_source = LOADER_SOURCE_RUNTIME_ROOT;
+        inspection->effective_status = inspection->status;
+        inspection->effective_reason = inspection->reason;
+        inspection->effective_loader =
+            xstrdup(inspection->resolved_loader ?
+                    inspection->resolved_loader :
+                    inspection->configured_loader);
+        return;
+    }
+
+    inspection->loader_source = LOADER_SOURCE_HOST_FALLBACK;
+    check = inspect_loader_file(inspection->guest_abi,
+                                inspection->loader_path, NULL);
+    inspection->effective_status = check.status;
+    inspection->effective_reason = check.reason;
+    inspection->effective_loader = check.resolved_path;
+}
+
 static const char *inspection_status_name(InspectionStatus status)
 {
     switch (status) {
@@ -1556,6 +1724,305 @@ static int inspect_root_command(int argc, char **argv)
     return status;
 }
 
+static const char *readiness_status_name(ReadinessStatus status)
+{
+    switch (status) {
+    case READINESS_READY:
+        return "ready";
+    case READINESS_READY_WITH_HOST_FALLBACK:
+        return "ready_with_host_fallback";
+    case READINESS_UNAVAILABLE:
+        return "unavailable";
+    case READINESS_BROKEN:
+        return "broken";
+    case READINESS_UNKNOWN:
+        return "unknown";
+    }
+    abort();
+}
+
+static const char *loader_source_name(LoaderSource source)
+{
+    switch (source) {
+    case LOADER_SOURCE_NONE:
+        return "none";
+    case LOADER_SOURCE_RUNTIME_ROOT:
+        return "runtime_root";
+    case LOADER_SOURCE_HOST_FALLBACK:
+        return "host_fallback";
+    }
+    abort();
+}
+
+static ReadinessStatus doctor_readiness(const RuntimeQuery *query,
+                                        const RuntimeInspection *inspection)
+{
+    switch (query->query_status) {
+    case QUERY_TRANSLATOR_MISSING:
+        return READINESS_UNAVAILABLE;
+    case QUERY_TRANSLATOR_UNKNOWN:
+    case QUERY_TRANSLATOR_FAILED:
+    case QUERY_INVALID_OUTPUT:
+        return READINESS_UNKNOWN;
+    case QUERY_SELECTED:
+        break;
+    }
+
+    switch (inspection->effective_status) {
+    case INSPECTION_READY:
+        return inspection->loader_source == LOADER_SOURCE_HOST_FALLBACK ?
+               READINESS_READY_WITH_HOST_FALLBACK : READINESS_READY;
+    case INSPECTION_NOT_REQUIRED:
+        return READINESS_READY;
+    case INSPECTION_MISSING:
+    case INSPECTION_INVALID:
+        return READINESS_BROKEN;
+    case INSPECTION_UNKNOWN:
+        return READINESS_UNKNOWN;
+    }
+    abort();
+}
+
+static void print_doctor_result(const RuntimeQuery *query,
+                                const RuntimeInspection *inspection,
+                                ReadinessStatus readiness,
+                                const ProgramInfo *program)
+{
+    const char *loader_path = inspection ? inspection->loader_path :
+                              default_loader_path(query->guest_abi);
+    const char *reason;
+
+    if (query->query_status != QUERY_SELECTED) {
+        reason = query_status_name(query->query_status);
+    } else if (inspection->status == INSPECTION_NOT_REQUIRED) {
+        reason = "static_program";
+    } else if (readiness == READINESS_READY_WITH_HOST_FALLBACK) {
+        reason = "host_fallback";
+    } else {
+        reason = inspection->effective_reason;
+    }
+
+    fputs("{\"schema_version\":1,\"guest_abi\":", stdout);
+    json_write_string(query->guest_abi);
+    fputs(",\"translator_status\":", stdout);
+    json_write_string(translator_status_name(query->translator_status));
+    fputs(",\"query_status\":", stdout);
+    json_write_string(query_status_name(query->query_status));
+    fputs(",\"runtime_root\":", stdout);
+    if (query->query_status == QUERY_SELECTED) {
+        json_write_string(query->info.runtime_root);
+    } else {
+        fputs("null", stdout);
+    }
+    fputs(",\"runtime_source\":", stdout);
+    if (query->query_status == QUERY_SELECTED) {
+        json_write_string(query->info.runtime_source);
+    } else {
+        fputs("null", stdout);
+    }
+    fputs(",\"loader_path\":", stdout);
+    if (loader_path) {
+        json_write_string(loader_path);
+    } else {
+        fputs("null", stdout);
+    }
+    fputs(",\"configured_loader\":", stdout);
+    if (inspection && inspection->configured_loader) {
+        json_write_string(inspection->configured_loader);
+    } else {
+        fputs("null", stdout);
+    }
+    fputs(",\"resolved_loader\":", stdout);
+    if (inspection && inspection->resolved_loader) {
+        json_write_string(inspection->resolved_loader);
+    } else {
+        fputs("null", stdout);
+    }
+    fputs(",\"inspection_status\":", stdout);
+    if (inspection) {
+        json_write_string(inspection_status_name(inspection->status));
+    } else {
+        json_write_string("not_checked");
+    }
+    fputs(",\"readiness\":", stdout);
+    json_write_string(readiness_status_name(readiness));
+    fputs(",\"reason\":", stdout);
+    json_write_string(reason);
+    fputs(",\"runtime_root_status\":", stdout);
+    if (inspection) {
+        json_write_string(inspection_status_name(inspection->status));
+    } else {
+        json_write_string("not_checked");
+    }
+    fputs(",\"runtime_root_reason\":", stdout);
+    if (inspection) {
+        json_write_string(inspection->reason);
+    } else {
+        json_write_string("not_checked");
+    }
+    fputs(",\"effective_loader\":", stdout);
+    if (inspection && inspection->effective_loader) {
+        json_write_string(inspection->effective_loader);
+    } else {
+        fputs("null", stdout);
+    }
+    fputs(",\"effective_loader_status\":", stdout);
+    if (inspection) {
+        json_write_string(inspection_status_name(
+            inspection->effective_status));
+    } else {
+        json_write_string("not_checked");
+    }
+    fputs(",\"loader_source\":", stdout);
+    json_write_string(inspection ?
+                      loader_source_name(inspection->loader_source) : "none");
+    fputs(",\"program\":", stdout);
+    if (program) {
+        json_write_string(program->path);
+    } else {
+        fputs("null", stdout);
+    }
+    fputs(",\"program_status\":", stdout);
+    json_write_string(program ?
+                      (program->is_static ? "static" : "dynamic") :
+                      "not_checked");
+    fputs(",\"program_reason\":null", stdout);
+    fputs("}\n", stdout);
+}
+
+static void print_program_failure(const char *program, const char *reason)
+{
+    fputs("{\"schema_version\":1,\"guest_abi\":null,"
+          "\"translator_status\":\"not_checked\","
+          "\"query_status\":\"not_checked\",\"runtime_root\":null,"
+          "\"runtime_source\":null,\"loader_path\":null,"
+          "\"configured_loader\":null,\"resolved_loader\":null,"
+          "\"inspection_status\":\"not_checked\","
+          "\"readiness\":\"unknown\",\"reason\":", stdout);
+    json_write_string(reason);
+    fputs(",\"runtime_root_status\":\"not_checked\","
+          "\"runtime_root_reason\":\"not_checked\","
+          "\"effective_loader\":null,"
+          "\"effective_loader_status\":\"not_checked\","
+          "\"loader_source\":\"none\",\"program\":", stdout);
+    json_write_string(program);
+    fputs(",\"program_status\":\"invalid\",\"program_reason\":", stdout);
+    json_write_string(reason);
+    fputs("}\n", stdout);
+}
+
+static ReadinessStatus doctor_one(const TranslatorLocation *location,
+                                  const char *guest_abi,
+                                  const ProgramInfo *program)
+{
+    RuntimeQuery query = query_runtime(location, guest_abi,
+                                       program ? program->path : NULL);
+    RuntimeInspection inspection;
+    RuntimeInspection *inspection_ptr = NULL;
+    ReadinessStatus readiness;
+
+    if (query.query_status == QUERY_SELECTED) {
+        if (program && program->is_static) {
+            inspection = (RuntimeInspection) {
+                .guest_abi = guest_abi,
+                .runtime_root = query.info.runtime_root,
+                .status = INSPECTION_NOT_REQUIRED,
+                .reason = "static_program",
+                .effective_status = INSPECTION_NOT_REQUIRED,
+                .effective_reason = "static_program",
+            };
+        } else {
+            inspection = inspect_runtime_root(
+                guest_abi, query.info.runtime_root,
+                program ? program->interpreter :
+                default_loader_path(guest_abi));
+            resolve_effective_loader(&inspection);
+        }
+        inspection_ptr = &inspection;
+    }
+    readiness = doctor_readiness(&query, inspection_ptr);
+    print_doctor_result(&query, inspection_ptr, readiness, program);
+
+    if (inspection_ptr) {
+        runtime_inspection_free(inspection_ptr);
+    }
+    runtime_info_free(&query.info);
+    return readiness;
+}
+
+static int doctor_command(const TranslatorLocation *location, int argc,
+                          char **argv)
+{
+    const char *guest_abi = NULL;
+    const char *program_path = NULL;
+    const char *program_reason = NULL;
+    ProgramInfo program = { 0 };
+    ProgramInfo *program_ptr = NULL;
+    bool any_ready = false;
+    bool any_broken = false;
+    bool any_unknown = false;
+    int status;
+
+    for (int i = 0; i < argc; ) {
+        if (!strcmp(argv[i], "--abi") && i + 1 < argc && !guest_abi) {
+            guest_abi = argv[i + 1];
+        } else if (!strcmp(argv[i], "--program") && i + 1 < argc &&
+                   !program_path && argv[i + 1][0]) {
+            program_path = argv[i + 1];
+        } else {
+            usage();
+        }
+        i += 2;
+    }
+    if (guest_abi && !guest_abi_valid(guest_abi)) {
+        usage();
+    }
+    if (program_path) {
+        if (!inspect_program(program_path, &program, &program_reason)) {
+            print_program_failure(program_path, program_reason);
+            report_error("cannot inspect program '%s': %s",
+                         program_path, program_reason);
+            return 2;
+        }
+        program_ptr = &program;
+        if (guest_abi && strcmp(guest_abi, program.guest_abi)) {
+            report_error("program ABI %s does not match requested ABI %s",
+                         program.guest_abi, guest_abi);
+            program_info_free(&program);
+            return 2;
+        }
+        guest_abi = program.guest_abi;
+    }
+
+    for (int i = 0; i < 2; i++) {
+        const char *abi = i ? "i386" : "x86_64";
+        ReadinessStatus readiness;
+
+        if (guest_abi && strcmp(guest_abi, abi)) {
+            continue;
+        }
+        readiness = doctor_one(location, abi, program_ptr);
+        switch (readiness) {
+        case READINESS_READY:
+        case READINESS_READY_WITH_HOST_FALLBACK:
+            any_ready = true;
+            break;
+        case READINESS_UNAVAILABLE:
+            break;
+        case READINESS_BROKEN:
+            any_broken = true;
+            break;
+        case READINESS_UNKNOWN:
+            any_unknown = true;
+            break;
+        }
+    }
+
+    status = any_unknown ? 2 : any_broken || !any_ready ? 1 : 0;
+    program_info_free(&program);
+    return status;
+}
+
 static int query_both_runtimes(const TranslatorLocation *location,
                                const char *program)
 {
@@ -1640,14 +2107,18 @@ int main(int argc, char **argv)
     }
 
     if (argc >= 2 &&
-        (!strcmp(argv[1], "current") || !strcmp(argv[1], "list"))) {
+        (!strcmp(argv[1], "current") || !strcmp(argv[1], "list") ||
+         !strcmp(argv[1], "doctor"))) {
         if (!locate_sibling_translators(argv[0], &location)) {
             return 2;
         }
+
         if (!strcmp(argv[1], "current")) {
             status = current_command(&location, argc - 2, argv + 2);
-        } else {
+        } else if (!strcmp(argv[1], "list")) {
             status = list_command(&location, argc - 2, argv + 2);
+        } else {
+            status = doctor_command(&location, argc - 2, argv + 2);
         }
         g_free(location.directory);
         g_free(location.root);
@@ -1662,6 +2133,7 @@ int main(int argc, char **argv)
     } else {
         usage();
     }
+
     if (!located) {
         return 2;
     }
