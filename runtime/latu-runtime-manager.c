@@ -193,7 +193,11 @@ static char *find_program_in_path(const char *name)
 
 static void usage(void)
 {
-    fprintf(stderr, "usage: latu-runtime-manager status [--root ROOT]\n");
+    fprintf(stderr,
+            "usage: latu-runtime-manager status [--root ROOT]\n"
+            "       latu-runtime-manager current [--abi ABI]"
+            " [--program PROGRAM]\n"
+            "       latu-runtime-manager list [--program PROGRAM]\n");
     exit(2);
 }
 
@@ -459,16 +463,820 @@ static TranslatorStatus resolve_translator(const TranslatorLocation *location,
     return TRANSLATOR_MISSING;
 }
 
+static void string_buffer_reserve(StringBuffer *buffer, size_t extra)
+{
+    size_t required = buffer->length + extra + 1;
+
+    if (required <= buffer->capacity) {
+        return;
+    }
+    if (!buffer->capacity) {
+        buffer->capacity = 128;
+    }
+    while (buffer->capacity < required) {
+        if (buffer->capacity > SIZE_MAX / 2) {
+            report_error("runtime information is too large");
+            exit(2);
+        }
+        buffer->capacity *= 2;
+    }
+    buffer->data = g_realloc(buffer->data, buffer->capacity);
+}
+
+static void string_buffer_append_byte(StringBuffer *buffer, unsigned char byte)
+{
+    string_buffer_reserve(buffer, 1);
+    buffer->data[buffer->length++] = byte;
+    buffer->data[buffer->length] = '\0';
+}
+
+static bool string_buffer_append_codepoint(StringBuffer *buffer,
+                                           uint32_t codepoint)
+{
+    if (!codepoint || codepoint > 0x10ffff ||
+        (codepoint >= 0xd800 && codepoint <= 0xdfff)) {
+        return false;
+    }
+    if (codepoint <= 0x7f) {
+        string_buffer_append_byte(buffer, codepoint);
+    } else if (codepoint <= 0x7ff) {
+        string_buffer_append_byte(buffer, 0xc0 | (codepoint >> 6));
+        string_buffer_append_byte(buffer, 0x80 | (codepoint & 0x3f));
+    } else if (codepoint <= 0xffff) {
+        string_buffer_append_byte(buffer, 0xe0 | (codepoint >> 12));
+        string_buffer_append_byte(buffer, 0x80 | ((codepoint >> 6) & 0x3f));
+        string_buffer_append_byte(buffer, 0x80 | (codepoint & 0x3f));
+    } else {
+        string_buffer_append_byte(buffer, 0xf0 | (codepoint >> 18));
+        string_buffer_append_byte(buffer, 0x80 | ((codepoint >> 12) & 0x3f));
+        string_buffer_append_byte(buffer, 0x80 | ((codepoint >> 6) & 0x3f));
+        string_buffer_append_byte(buffer, 0x80 | (codepoint & 0x3f));
+    }
+    return true;
+}
+
+static void json_skip_space(JsonParser *parser)
+{
+    while (parser->cursor < parser->end &&
+           (*parser->cursor == ' ' || *parser->cursor == '\t' ||
+            *parser->cursor == '\r' || *parser->cursor == '\n')) {
+        parser->cursor++;
+    }
+}
+
+static int json_hex_value(char value)
+{
+    if (value >= '0' && value <= '9') {
+        return value - '0';
+    }
+    if (value >= 'a' && value <= 'f') {
+        return value - 'a' + 10;
+    }
+    if (value >= 'A' && value <= 'F') {
+        return value - 'A' + 10;
+    }
+    return -1;
+}
+
+static bool json_parse_hex4(JsonParser *parser, uint32_t *value)
+{
+    uint32_t result = 0;
+
+    if ((size_t)(parser->end - parser->cursor) < 4) {
+        return false;
+    }
+    for (int i = 0; i < 4; i++) {
+        int digit = json_hex_value(*parser->cursor++);
+
+        if (digit < 0) {
+            return false;
+        }
+        result = (result << 4) | digit;
+    }
+    *value = result;
+    return true;
+}
+
+static char *json_parse_string(JsonParser *parser)
+{
+    StringBuffer result = { 0 };
+
+    if (parser->cursor >= parser->end || *parser->cursor++ != '"') {
+        return NULL;
+    }
+
+    while (parser->cursor < parser->end) {
+        unsigned char byte = *parser->cursor++;
+
+        if (byte == '"') {
+            if (!result.data) {
+                result.data = xstrdup("");
+            }
+            return result.data;
+        }
+        if (byte < 0x20) {
+            break;
+        }
+        if (byte != '\\') {
+            string_buffer_append_byte(&result, byte);
+            continue;
+        }
+        if (parser->cursor >= parser->end) {
+            break;
+        }
+
+        byte = *parser->cursor++;
+        switch (byte) {
+        case '"':
+        case '\\':
+        case '/':
+            string_buffer_append_byte(&result, byte);
+            break;
+        case 'b':
+            string_buffer_append_byte(&result, '\b');
+            break;
+        case 'f':
+            string_buffer_append_byte(&result, '\f');
+            break;
+        case 'n':
+            string_buffer_append_byte(&result, '\n');
+            break;
+        case 'r':
+            string_buffer_append_byte(&result, '\r');
+            break;
+        case 't':
+            string_buffer_append_byte(&result, '\t');
+            break;
+        case 'u': {
+            uint32_t codepoint;
+
+            if (!json_parse_hex4(parser, &codepoint)) {
+                goto invalid;
+            }
+            if (codepoint >= 0xd800 && codepoint <= 0xdbff) {
+                uint32_t low;
+
+                if ((size_t)(parser->end - parser->cursor) < 6 ||
+                    parser->cursor[0] != '\\' ||
+                    parser->cursor[1] != 'u') {
+                    goto invalid;
+                }
+                parser->cursor += 2;
+                if (!json_parse_hex4(parser, &low) ||
+                    low < 0xdc00 || low > 0xdfff) {
+                    goto invalid;
+                }
+                codepoint = 0x10000 + ((codepoint - 0xd800) << 10) +
+                            (low - 0xdc00);
+            }
+            if (!string_buffer_append_codepoint(&result, codepoint)) {
+                goto invalid;
+            }
+            break;
+        }
+        default:
+            goto invalid;
+        }
+    }
+
+invalid:
+    g_free(result.data);
+    return NULL;
+}
+
+static bool json_parse_integer(JsonParser *parser, long *value)
+{
+    const char *start = parser->cursor;
+    char *end;
+    gint64 parsed;
+
+    if (parser->cursor < parser->end && *parser->cursor == '-') {
+        parser->cursor++;
+    }
+    if (parser->cursor >= parser->end ||
+        *parser->cursor < '0' || *parser->cursor > '9') {
+        parser->cursor = start;
+        return false;
+    }
+    if (*parser->cursor == '0') {
+        parser->cursor++;
+    } else {
+        while (parser->cursor < parser->end &&
+               *parser->cursor >= '0' && *parser->cursor <= '9') {
+            parser->cursor++;
+        }
+    }
+    if (parser->cursor < parser->end &&
+        (*parser->cursor == '.' || *parser->cursor == 'e' ||
+         *parser->cursor == 'E')) {
+        parser->cursor = start;
+        return false;
+    }
+
+    errno = 0;
+    parsed = g_ascii_strtoll(start, &end, 10);
+    if (errno || end != parser->cursor || parsed < LONG_MIN ||
+        parsed > LONG_MAX) {
+        parser->cursor = start;
+        return false;
+    }
+    *value = parsed;
+    return true;
+}
+
+static bool runtime_source_valid(const char *source)
+{
+    return !strcmp(source, "default") ||
+           !strcmp(source, "system_config") ||
+           !strcmp(source, "user_config") ||
+           !strcmp(source, "environment") ||
+           !strcmp(source, "command_line");
+}
+
+static bool utf8_valid(const char *value)
+{
+    const unsigned char *cursor = (const unsigned char *)value;
+
+    while (*cursor) {
+        size_t length;
+        uint32_t codepoint;
+
+        if (*cursor < 0x80) {
+            cursor++;
+            continue;
+        }
+        if ((*cursor & 0xe0) == 0xc0) {
+            length = 2;
+            codepoint = *cursor & 0x1f;
+        } else if ((*cursor & 0xf0) == 0xe0) {
+            length = 3;
+            codepoint = *cursor & 0x0f;
+        } else if ((*cursor & 0xf8) == 0xf0) {
+            length = 4;
+            codepoint = *cursor & 0x07;
+        } else {
+            return false;
+        }
+        for (size_t i = 1; i < length; i++) {
+            if ((cursor[i] & 0xc0) != 0x80) {
+                return false;
+            }
+            codepoint = (codepoint << 6) | (cursor[i] & 0x3f);
+        }
+        if ((length == 2 && codepoint < 0x80) ||
+            (length == 3 && codepoint < 0x800) ||
+            (length == 4 && codepoint < 0x10000) ||
+            codepoint > 0x10ffff ||
+            (codepoint >= 0xd800 && codepoint <= 0xdfff)) {
+            return false;
+        }
+        cursor += length;
+    }
+    return true;
+}
+
+static bool runtime_info_parse(const char *json, size_t json_length,
+                               const char *expected_abi, RuntimeInfo *info)
+{
+    JsonParser parser = { json, json + json_length };
+    bool have_schema = false;
+    bool have_abi = false;
+    bool have_root = false;
+    bool have_source = false;
+
+    json_skip_space(&parser);
+    if (parser.cursor >= parser.end || *parser.cursor++ != '{') {
+        return false;
+    }
+
+    for (;;) {
+        char *key;
+
+        json_skip_space(&parser);
+        if (parser.cursor < parser.end && *parser.cursor == '}') {
+            parser.cursor++;
+            break;
+        }
+        key = json_parse_string(&parser);
+        if (!key) {
+            goto invalid;
+        }
+        json_skip_space(&parser);
+        if (parser.cursor >= parser.end || *parser.cursor++ != ':') {
+            g_free(key);
+            goto invalid;
+        }
+        json_skip_space(&parser);
+
+        if (!strcmp(key, "schema_version") && !have_schema) {
+            have_schema = json_parse_integer(&parser,
+                                             &info->schema_version);
+            if (!have_schema) {
+                g_free(key);
+                goto invalid;
+            }
+        } else if (!strcmp(key, "guest_abi") && !have_abi) {
+            info->guest_abi = json_parse_string(&parser);
+            have_abi = info->guest_abi != NULL;
+            if (!have_abi) {
+                g_free(key);
+                goto invalid;
+            }
+        } else if (!strcmp(key, "runtime_root") && !have_root) {
+            info->runtime_root = json_parse_string(&parser);
+            have_root = info->runtime_root != NULL;
+            if (!have_root) {
+                g_free(key);
+                goto invalid;
+            }
+        } else if (!strcmp(key, "runtime_source") && !have_source) {
+            info->runtime_source = json_parse_string(&parser);
+            have_source = info->runtime_source != NULL;
+            if (!have_source) {
+                g_free(key);
+                goto invalid;
+            }
+        } else {
+            g_free(key);
+            goto invalid;
+        }
+        g_free(key);
+
+        json_skip_space(&parser);
+        if (parser.cursor < parser.end && *parser.cursor == ',') {
+            parser.cursor++;
+            json_skip_space(&parser);
+            if (parser.cursor < parser.end && *parser.cursor == '}') {
+                goto invalid;
+            }
+            continue;
+        }
+        if (parser.cursor < parser.end && *parser.cursor == '}') {
+            parser.cursor++;
+            break;
+        }
+        goto invalid;
+    }
+
+    json_skip_space(&parser);
+    if (parser.cursor != parser.end || !have_schema || !have_abi ||
+        !have_root || !have_source || info->schema_version != 1 ||
+        strcmp(info->guest_abi, expected_abi) ||
+        !runtime_source_valid(info->runtime_source) ||
+        !utf8_valid(info->guest_abi) || !utf8_valid(info->runtime_root) ||
+        !utf8_valid(info->runtime_source)) {
+        goto invalid;
+    }
+    return true;
+
+invalid:
+    g_free(info->guest_abi);
+    g_free(info->runtime_root);
+    g_free(info->runtime_source);
+    memset(info, 0, sizeof(*info));
+    return false;
+}
+
+static char *read_translator_info(const char *translator,
+                                  const char *program, int *exit_status,
+                                  size_t *output_length)
+{
+    StringBuffer output = { 0 };
+    int pipefd[2];
+    pid_t child;
+    int status;
+    bool overflow = false;
+    bool read_failed = false;
+    bool timed_out = false;
+    struct timespec start_time;
+    int64_t deadline = -1;
+
+    if (pipe(pipefd) < 0) {
+        return NULL;
+    }
+    child = fork();
+    if (child < 0) {
+        close(pipefd[0]);
+        close(pipefd[1]);
+        return NULL;
+    }
+    if (child == 0) {
+        int nullfd;
+
+        close(pipefd[0]);
+        if (dup2(pipefd[1], STDOUT_FILENO) < 0) {
+            _exit(127);
+        }
+        close(pipefd[1]);
+        nullfd = open("/dev/null", O_WRONLY);
+        if (nullfd >= 0) {
+            dup2(nullfd, STDERR_FILENO);
+            close(nullfd);
+        }
+        if (program) {
+            char *const args[] = {
+                (char *)translator, (char *)"--runtime-info", (char *)"--",
+                (char *)program, NULL,
+            };
+            execv(translator, args);
+        } else {
+            char *const args[] = {
+                (char *)translator, (char *)"--runtime-info", NULL,
+            };
+            execv(translator, args);
+        }
+        _exit(127);
+    }
+
+    close(pipefd[1]);
+    if (clock_gettime(CLOCK_MONOTONIC, &start_time) == 0) {
+        deadline = (int64_t)start_time.tv_sec * 1000 +
+                   start_time.tv_nsec / 1000000 +
+                   RUNTIME_INFO_TIMEOUT_MS;
+    }
+    for (;;) {
+        char chunk[4096];
+        struct pollfd pollfd = {
+            .fd = pipefd[0],
+            .events = POLLIN,
+        };
+        int timeout = RUNTIME_INFO_TIMEOUT_MS;
+        int poll_status;
+        ssize_t length;
+
+        if (deadline >= 0) {
+            struct timespec now;
+
+            if (clock_gettime(CLOCK_MONOTONIC, &now) == 0) {
+                int64_t remaining = deadline -
+                    ((int64_t)now.tv_sec * 1000 + now.tv_nsec / 1000000);
+
+                if (remaining <= 0) {
+                    timed_out = true;
+                    break;
+                }
+                timeout = remaining > INT_MAX ? INT_MAX : (int)remaining;
+            }
+        }
+        do {
+            poll_status = poll(&pollfd, 1, timeout);
+        } while (poll_status < 0 && errno == EINTR);
+        if (!poll_status) {
+            timed_out = true;
+            break;
+        }
+        if (poll_status < 0) {
+            read_failed = true;
+            break;
+        }
+
+        do {
+            length = read(pipefd[0], chunk, sizeof(chunk));
+        } while (length < 0 && errno == EINTR);
+
+        if (length < 0) {
+            read_failed = true;
+            break;
+        }
+        if (!length) {
+            break;
+        }
+        if (overflow) {
+            continue;
+        }
+        if (output.length + (size_t)length > RUNTIME_INFO_LIMIT) {
+            g_free(output.data);
+            output.data = NULL;
+            output.length = 0;
+            output.capacity = 0;
+            overflow = true;
+            break;
+        }
+        string_buffer_reserve(&output, length);
+        memcpy(output.data + output.length, chunk, length);
+        output.length += length;
+        output.data[output.length] = '\0';
+    }
+    if (overflow || read_failed || timed_out) {
+        kill(child, SIGKILL);
+    }
+    close(pipefd[0]);
+
+    while (waitpid(child, &status, 0) < 0) {
+        if (errno != EINTR) {
+            g_free(output.data);
+            return NULL;
+        }
+    }
+    if (WIFEXITED(status)) {
+        *exit_status = WEXITSTATUS(status);
+    } else {
+        *exit_status = 128;
+    }
+    if (overflow || read_failed || timed_out) {
+        g_free(output.data);
+    }
+    if (overflow) {
+        *output_length = 0;
+        return xstrdup("");
+    }
+    if (read_failed || timed_out) {
+        *output_length = 0;
+        return NULL;
+    }
+    if (!output.data) {
+        output.data = xstrdup("");
+    }
+    *output_length = output.length;
+    return output.data;
+}
+
+static RuntimeQuery query_runtime(const TranslatorLocation *location,
+                                  const char *guest_abi,
+                                  const char *program)
+{
+    RuntimeQuery query = { .guest_abi = guest_abi };
+    const char *name = !strcmp(guest_abi, "x86_64") ?
+                       "latx-x86_64" : "latx-i386";
+    char *translator = NULL;
+    char *output;
+    int exit_status;
+    size_t output_length;
+
+    query.translator_status = resolve_translator(location, name, &translator);
+    if (query.translator_status == TRANSLATOR_MISSING) {
+        query.query_status = QUERY_TRANSLATOR_MISSING;
+        return query;
+    }
+    if (query.translator_status == TRANSLATOR_UNKNOWN) {
+        query.query_status = QUERY_TRANSLATOR_UNKNOWN;
+        return query;
+    }
+
+    output = read_translator_info(translator, program, &exit_status,
+                                  &output_length);
+    g_free(translator);
+    if (!output || exit_status != 0) {
+        g_free(output);
+        query.query_status = QUERY_TRANSLATOR_FAILED;
+        return query;
+    }
+    if (!runtime_info_parse(output, output_length, guest_abi, &query.info)) {
+        g_free(output);
+        query.query_status = QUERY_INVALID_OUTPUT;
+        return query;
+    }
+    g_free(output);
+    query.query_status = QUERY_SELECTED;
+    return query;
+}
+
+static void runtime_info_free(RuntimeInfo *info)
+{
+    g_free(info->guest_abi);
+    g_free(info->runtime_root);
+    g_free(info->runtime_source);
+    memset(info, 0, sizeof(*info));
+}
+
+static void json_write_string(const char *value)
+{
+    const unsigned char *cursor = (const unsigned char *)value;
+
+    putchar('"');
+    while (*cursor) {
+        switch (*cursor) {
+        case '"':
+            fputs("\\\"", stdout);
+            cursor++;
+            break;
+        case '\\':
+            fputs("\\\\", stdout);
+            cursor++;
+            break;
+        case '\b':
+            fputs("\\b", stdout);
+            cursor++;
+            break;
+        case '\f':
+            fputs("\\f", stdout);
+            cursor++;
+            break;
+        case '\n':
+            fputs("\\n", stdout);
+            cursor++;
+            break;
+        case '\r':
+            fputs("\\r", stdout);
+            cursor++;
+            break;
+        case '\t':
+            fputs("\\t", stdout);
+            cursor++;
+            break;
+        default:
+            if (*cursor < 0x20) {
+                printf("\\u%04x", *cursor++);
+            } else if (*cursor < 0x80) {
+                putchar(*cursor++);
+            } else {
+                size_t length;
+                uint32_t codepoint;
+                bool valid = true;
+
+                if ((*cursor & 0xe0) == 0xc0) {
+                    length = 2;
+                    codepoint = *cursor & 0x1f;
+                } else if ((*cursor & 0xf0) == 0xe0) {
+                    length = 3;
+                    codepoint = *cursor & 0x0f;
+                } else if ((*cursor & 0xf8) == 0xf0) {
+                    length = 4;
+                    codepoint = *cursor & 0x07;
+                } else {
+                    fputs("\\ufffd", stdout);
+                    cursor++;
+                    break;
+                }
+                for (size_t i = 1; i < length; i++) {
+                    if ((cursor[i] & 0xc0) != 0x80) {
+                        valid = false;
+                        break;
+                    }
+                    codepoint = (codepoint << 6) | (cursor[i] & 0x3f);
+                }
+                if ((length == 2 && codepoint < 0x80) ||
+                    (length == 3 && codepoint < 0x800) ||
+                    (length == 4 && codepoint < 0x10000) ||
+                    codepoint > 0x10ffff ||
+                    (codepoint >= 0xd800 && codepoint <= 0xdfff)) {
+                    valid = false;
+                }
+                if (!valid) {
+                    fputs("\\ufffd", stdout);
+                    cursor++;
+                    break;
+                }
+                fwrite(cursor, 1, length, stdout);
+                cursor += length;
+            }
+        }
+    }
+    putchar('"');
+}
+
+static const char *query_status_name(QueryStatus status)
+{
+    switch (status) {
+    case QUERY_SELECTED:
+        return "selected";
+    case QUERY_TRANSLATOR_MISSING:
+        return "translator_missing";
+    case QUERY_TRANSLATOR_UNKNOWN:
+        return "translator_unknown";
+    case QUERY_TRANSLATOR_FAILED:
+        return "translator_query_failed";
+    case QUERY_INVALID_OUTPUT:
+        return "invalid_runtime_info";
+    }
+    abort();
+}
+
+static void print_runtime_query(const RuntimeQuery *query)
+{
+    fputs("{\"schema_version\":1,\"guest_abi\":", stdout);
+    json_write_string(query->guest_abi);
+    fputs(",\"translator_status\":", stdout);
+    json_write_string(translator_status_name(query->translator_status));
+    fputs(",\"query_status\":", stdout);
+    json_write_string(query_status_name(query->query_status));
+    fputs(",\"runtime_root\":", stdout);
+    if (query->query_status == QUERY_SELECTED) {
+        json_write_string(query->info.runtime_root);
+    } else {
+        fputs("null", stdout);
+    }
+    fputs(",\"runtime_source\":", stdout);
+    if (query->query_status == QUERY_SELECTED) {
+        json_write_string(query->info.runtime_source);
+    } else {
+        fputs("null", stdout);
+    }
+    fputs("}\n", stdout);
+}
+
+static int query_exit_status(const RuntimeQuery *query)
+{
+    switch (query->query_status) {
+    case QUERY_SELECTED:
+        return 0;
+    case QUERY_TRANSLATOR_MISSING:
+        return 1;
+    case QUERY_TRANSLATOR_UNKNOWN:
+    case QUERY_TRANSLATOR_FAILED:
+    case QUERY_INVALID_OUTPUT:
+        return 2;
+    }
+    abort();
+}
+
+static bool guest_abi_valid(const char *guest_abi)
+{
+    return !strcmp(guest_abi, "x86_64") || !strcmp(guest_abi, "i386");
+}
+
+static int query_both_runtimes(const TranslatorLocation *location,
+                               const char *program)
+{
+    RuntimeQuery x86_64_query = query_runtime(location, "x86_64", program);
+    RuntimeQuery i386_query = query_runtime(location, "i386", program);
+    int x86_64_status;
+    int i386_status;
+    int status;
+
+    print_runtime_query(&x86_64_query);
+    print_runtime_query(&i386_query);
+    x86_64_status = query_exit_status(&x86_64_query);
+    i386_status = query_exit_status(&i386_query);
+    status = x86_64_status == 2 || i386_status == 2 ? 2 :
+             x86_64_status == 0 || i386_status == 0 ? 0 : 1;
+    runtime_info_free(&x86_64_query.info);
+    runtime_info_free(&i386_query.info);
+    return status;
+}
+
+static int current_command(const TranslatorLocation *location, int argc,
+                           char **argv)
+{
+    const char *guest_abi = NULL;
+    const char *program = NULL;
+    RuntimeQuery query;
+    int status;
+
+    for (int i = 0; i < argc; ) {
+        if (!strcmp(argv[i], "--abi") && i + 1 < argc && !guest_abi) {
+            guest_abi = argv[i + 1];
+        } else if (!strcmp(argv[i], "--program") && i + 1 < argc &&
+                   !program && argv[i + 1][0]) {
+            program = argv[i + 1];
+        } else {
+            usage();
+        }
+        i += 2;
+    }
+    if (guest_abi && !guest_abi_valid(guest_abi)) {
+        usage();
+    }
+
+    if (!guest_abi) {
+        return query_both_runtimes(location, program);
+    }
+
+    query = query_runtime(location, guest_abi, program);
+    print_runtime_query(&query);
+    status = query_exit_status(&query);
+    runtime_info_free(&query.info);
+    return status;
+}
+
+static int list_command(const TranslatorLocation *location, int argc,
+                        char **argv)
+{
+    const char *program = NULL;
+    if (argc == 2 && !strcmp(argv[0], "--program") && argv[1][0]) {
+        program = argv[1];
+    } else if (argc) {
+        usage();
+    }
+
+    return query_both_runtimes(location, program);
+}
+
 int main(int argc, char **argv)
 {
     TranslatorLocation location = { 0 };
-    bool located;
-    TranslatorStatus status;
+    bool located = false;
+    int status;
 
     if (strrchr(argv[0], '/')) {
         program_name = strrchr(argv[0], '/') + 1;
     } else if (argv[0][0]) {
         program_name = argv[0];
+    }
+
+    if (argc >= 2 &&
+        (!strcmp(argv[1], "current") || !strcmp(argv[1], "list"))) {
+        if (!locate_sibling_translators(argv[0], &location)) {
+            return 2;
+        }
+        if (!strcmp(argv[1], "current")) {
+            status = current_command(&location, argc - 2, argv + 2);
+        } else {
+            status = list_command(&location, argc - 2, argv + 2);
+        }
+        g_free(location.directory);
+        g_free(location.root);
+        return status;
     }
 
     if (argc == 2 && !strcmp(argv[1], "status")) {
@@ -483,10 +1291,12 @@ int main(int argc, char **argv)
         return 2;
     }
 
-    status = resolve_translator(&location, "latx-x86_64", NULL);
-    printf("translator_x86_64=%s\n", translator_status_name(status));
-    status = resolve_translator(&location, "latx-i386", NULL);
-    printf("translator_i386=%s\n", translator_status_name(status));
+    printf("translator_x86_64=%s\n",
+           translator_status_name(resolve_translator(
+               &location, "latx-x86_64", NULL)));
+    printf("translator_i386=%s\n",
+           translator_status_name(resolve_translator(
+               &location, "latx-i386", NULL)));
 
     g_free(location.directory);
     g_free(location.root);
