@@ -777,6 +777,21 @@ subdir('docs')
 subdir('runtime')
 
 if get_option('tests').enabled() and host_machine.system() == 'linux'
+  if 'latx-x86_64' in emulators and 'latx-i386' in emulators
+    test(
+      'test-latu-runtime-manager-real',
+      find_program('tests/runtime/test-latu-runtime-manager-real.sh'),
+      args: [python.full_path(), latu_runtime_manager.full_path(),
+             emulators['latx-x86_64'].full_path(),
+             emulators['latx-i386'].full_path()],
+      depends: [latu_runtime_manager, emulators['latx-x86_64'],
+                emulators['latx-i386']],
+      protocol: 'exitcode',
+      suite: 'lat-pr-fast',
+      timeout: 300,
+    )
+  endif
+
   latu_install_depends = [latu_runtime_manager]
   foreach name, emulator : emulators
     latu_install_depends += emulator
