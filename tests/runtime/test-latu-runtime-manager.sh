@@ -545,4 +545,199 @@ abi_status=$?
 set -e
 assert_status 2 "$abi_status" 'unknown guest ABI'
 
-echo 'PASS: distribution-neutral runtime queries'
+runtime_root=$workdir/runtime-both
+make_loader "$runtime_root" x86_64
+make_loader "$runtime_root" i386
+set +e
+actual=$("$query_bin/latu-runtime-manager" inspect-root "$runtime_root" \
+    2> "$workdir/inspect.stderr")
+actual_status=$?
+set -e
+assert_status 0 "$actual_status" 'dual-ABI runtime root'
+assert_contains '"guest_abi":"x86_64"' "$actual" \
+    'dual-ABI x86-64 inspection'
+assert_contains '"guest_abi":"i386"' "$actual" \
+    'dual-ABI i386 inspection'
+ready_count=$(printf '%s\n' "$actual" | \
+    grep -c '"inspection_status":"ready","reason":"ready"')
+assert_status 2 "$ready_count" 'dual-ABI ready records'
+
+set +e
+actual=$("$query_bin/latu-runtime-manager" inspect-root --abi x86_64 \
+    "$runtime_root" 2> "$workdir/inspect-one.stderr")
+actual_status=$?
+set -e
+assert_status 0 "$actual_status" 'single-ABI runtime root'
+assert_contains '"guest_abi":"x86_64"' "$actual" \
+    'single-ABI x86-64 inspection'
+case "$actual" in
+    *'"guest_abi":"i386"'*) fail 'single-ABI inspection reported i386' ;;
+esac
+
+missing_root=$workdir/runtime-missing
+mkdir -p "$missing_root"
+set +e
+actual=$("$query_bin/latu-runtime-manager" inspect-root --abi i386 \
+    "$missing_root" 2> "$workdir/inspect-missing.stderr")
+actual_status=$?
+set -e
+assert_status 1 "$actual_status" 'missing runtime loader'
+assert_contains '"inspection_status":"missing","reason":"loader_not_found"' \
+    "$actual" 'missing runtime loader'
+
+invalid_root=$workdir/runtime-invalid
+make_loader "$invalid_root" i386
+mkdir -p "$invalid_root/lib64"
+cp "$invalid_root/lib/ld-linux.so.2" \
+    "$invalid_root/lib64/ld-linux-x86-64.so.2"
+set +e
+actual=$("$query_bin/latu-runtime-manager" inspect-root --abi x86_64 \
+    "$invalid_root" 2> "$workdir/inspect-invalid.stderr")
+actual_status=$?
+set -e
+assert_status 1 "$actual_status" 'wrong loader ABI'
+assert_contains '"inspection_status":"invalid","reason":"loader_invalid_elf"' \
+    "$actual" 'wrong loader ABI'
+
+truncated_root=$workdir/runtime-truncated
+mkdir -p "$truncated_root/lib64"
+printf '\177ELF\002\001\001' > \
+    "$truncated_root/lib64/ld-linux-x86-64.so.2"
+set +e
+actual=$("$query_bin/latu-runtime-manager" inspect-root --abi x86_64 \
+    "$truncated_root" 2> "$workdir/inspect-truncated.stderr")
+actual_status=$?
+set -e
+assert_status 1 "$actual_status" 'truncated loader'
+assert_contains '"inspection_status":"invalid","reason":"loader_invalid_elf"' \
+    "$actual" 'truncated loader'
+
+bad_ehsize_root=$workdir/runtime-bad-ehsize
+make_loader "$bad_ehsize_root" x86_64
+python3 - "$bad_ehsize_root/lib64/ld-linux-x86-64.so.2" <<'PY'
+import sys
+
+with open(sys.argv[1], "r+b") as loader:
+    loader.seek(52)
+    loader.write(b"\0\0")
+PY
+set +e
+actual=$("$query_bin/latu-runtime-manager" inspect-root --abi x86_64 \
+    "$bad_ehsize_root" 2> "$workdir/inspect-ehsize.stderr")
+actual_status=$?
+set -e
+assert_status 1 "$actual_status" 'invalid ELF header size'
+assert_contains '"inspection_status":"invalid","reason":"loader_invalid_elf"' \
+    "$actual" 'invalid ELF header size'
+
+bad_phentsize_root=$workdir/runtime-bad-phentsize
+make_loader "$bad_phentsize_root" x86_64
+python3 - "$bad_phentsize_root/lib64/ld-linux-x86-64.so.2" <<'PY'
+import sys
+
+with open(sys.argv[1], "r+b") as loader:
+    loader.seek(54)
+    loader.write(b"\x40\0")
+PY
+set +e
+actual=$("$query_bin/latu-runtime-manager" inspect-root --abi x86_64 \
+    "$bad_phentsize_root" 2> "$workdir/inspect-phentsize.stderr")
+actual_status=$?
+set -e
+assert_status 1 "$actual_status" 'invalid ELF program header size'
+assert_contains '"inspection_status":"invalid","reason":"loader_invalid_elf"' \
+    "$actual" 'invalid ELF program header size'
+
+em486_root=$workdir/runtime-em486
+make_loader "$em486_root" i386
+python3 - "$em486_root/lib/ld-linux.so.2" <<'PY'
+import sys
+
+with open(sys.argv[1], "r+b") as loader:
+    loader.seek(18)
+    loader.write(b"\x06\0")
+PY
+set +e
+actual=$("$query_bin/latu-runtime-manager" inspect-root --abi i386 \
+    "$em486_root" 2> "$workdir/inspect-em486.stderr")
+actual_status=$?
+set -e
+assert_status 0 "$actual_status" 'EM_486 loader'
+assert_contains '"inspection_status":"ready","reason":"ready"' \
+    "$actual" 'EM_486 loader'
+
+symlink_root=$workdir/runtime-symlink
+mkdir -p "$symlink_root/usr/lib/runtime" "$symlink_root/lib64"
+make_loader "$workdir/symlink-loader" x86_64
+cp "$workdir/symlink-loader/lib64/ld-linux-x86-64.so.2" \
+    "$symlink_root/usr/lib/runtime/loader.so"
+ln -s ../usr/lib/runtime/loader.so \
+    "$symlink_root/lib64/ld-linux-x86-64.so.2"
+set +e
+actual=$("$query_bin/latu-runtime-manager" inspect-root --abi x86_64 \
+    "$symlink_root" 2> "$workdir/inspect-symlink.stderr")
+actual_status=$?
+set -e
+assert_status 0 "$actual_status" 'root-confined loader symlink'
+assert_contains '"inspection_status":"ready","reason":"ready"' \
+    "$actual" 'root-confined loader symlink'
+
+escape_root=$workdir/runtime-escape
+outside_loader=$workdir/outside-loader
+make_loader "$outside_loader" x86_64
+mkdir -p "$escape_root/lib64"
+ln -s "$outside_loader/lib64/ld-linux-x86-64.so.2" \
+    "$escape_root/lib64/ld-linux-x86-64.so.2"
+set +e
+actual=$("$query_bin/latu-runtime-manager" inspect-root --abi x86_64 \
+    "$escape_root" 2> "$workdir/inspect-escape.stderr")
+actual_status=$?
+set -e
+assert_status 2 "$actual_status" 'escaping loader symlink'
+assert_contains '"inspection_status":"unknown","reason":"loader_escapes_root"' \
+    "$actual" 'escaping loader symlink'
+
+broken_root=$workdir/runtime-broken-link
+mkdir -p "$broken_root/lib"
+ln -s nowhere "$broken_root/lib/ld-linux.so.2"
+set +e
+actual=$("$query_bin/latu-runtime-manager" inspect-root --abi i386 \
+    "$broken_root" 2> "$workdir/inspect-broken.stderr")
+actual_status=$?
+set -e
+assert_status 1 "$actual_status" 'broken loader symlink'
+assert_contains \
+    '"inspection_status":"invalid",'\
+'"reason":"loader_symlink_broken"' \
+    "$actual" 'broken loader symlink'
+
+directory_root=$workdir/runtime-directory-loader
+mkdir -p "$directory_root/lib/ld-linux.so.2"
+set +e
+actual=$("$query_bin/latu-runtime-manager" inspect-root --abi i386 \
+    "$directory_root" 2> "$workdir/inspect-directory.stderr")
+actual_status=$?
+set -e
+assert_status 1 "$actual_status" 'directory loader'
+assert_contains '"inspection_status":"invalid","reason":"loader_not_regular"' \
+    "$actual" 'directory loader'
+
+set +e
+actual=$("$query_bin/latu-runtime-manager" inspect-root --abi x86_64 \
+    "$workdir/no-such-runtime" 2> "$workdir/inspect-no-root.stderr")
+actual_status=$?
+set -e
+assert_status 1 "$actual_status" 'missing runtime root'
+assert_contains '"inspection_status":"missing","reason":"root_not_found"' \
+    "$actual" 'missing runtime root'
+
+dash_root=$workdir/-runtime
+make_loader "$dash_root" x86_64
+(
+    cd "$workdir"
+    "$query_bin/latu-runtime-manager" inspect-root --abi x86_64 -- -runtime
+) > "$workdir/inspect-dash.stdout" || fail 'dash-prefixed root failed'
+assert_contains '"inspection_status":"ready","reason":"ready"' \
+    "$(cat "$workdir/inspect-dash.stdout")" 'dash-prefixed root'
+
+echo 'PASS: distribution-neutral runtime inspection'

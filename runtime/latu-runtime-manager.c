@@ -197,7 +197,9 @@ static void usage(void)
             "usage: latu-runtime-manager status [--root ROOT]\n"
             "       latu-runtime-manager current [--abi ABI]"
             " [--program PROGRAM]\n"
-            "       latu-runtime-manager list [--program PROGRAM]\n");
+            "       latu-runtime-manager list [--program PROGRAM]\n"
+            "       latu-runtime-manager inspect-root [--abi ABI]"
+            " [--] ROOT\n");
     exit(2);
 }
 
@@ -1185,6 +1187,375 @@ static bool guest_abi_valid(const char *guest_abi)
     return !strcmp(guest_abi, "x86_64") || !strcmp(guest_abi, "i386");
 }
 
+static const char *default_loader_path(const char *guest_abi)
+{
+    return !strcmp(guest_abi, "x86_64") ?
+           "/lib64/ld-linux-x86-64.so.2" : "/lib/ld-linux.so.2";
+}
+
+static uint16_t read_le16(const unsigned char *value)
+{
+    return value[0] | ((uint16_t)value[1] << 8);
+}
+
+static uint32_t read_le32(const unsigned char *value)
+{
+    return value[0] | ((uint32_t)value[1] << 8) |
+           ((uint32_t)value[2] << 16) | ((uint32_t)value[3] << 24);
+}
+
+static uint64_t read_le64(const unsigned char *value)
+{
+    return read_le32(value) | ((uint64_t)read_le32(value + 4) << 32);
+}
+
+static bool loader_elf_valid(int fd, const char *guest_abi)
+{
+    unsigned char header[64];
+    uint64_t program_offset;
+    uint16_t program_entry_size;
+    uint16_t program_count;
+    uint16_t machine;
+    size_t header_size;
+    unsigned char expected_class;
+    bool have_load = false;
+    ssize_t length;
+    struct stat statbuf;
+
+    do {
+        length = pread(fd, header, sizeof(header), 0);
+    } while (length < 0 && errno == EINTR);
+
+    if (!strcmp(guest_abi, "x86_64")) {
+        header_size = 64;
+        expected_class = 2;
+    } else {
+        header_size = 52;
+        expected_class = 1;
+    }
+    if (length < 0 || (size_t)length < header_size ||
+        memcmp(header, "\177ELF", 4) || header[4] != expected_class ||
+        header[5] != 1 || header[6] != 1) {
+        return false;
+    }
+    machine = read_le16(header + 18);
+    if ((read_le16(header + 16) != 2 && read_le16(header + 16) != 3) ||
+        (expected_class == 2 ? machine != 62 :
+         (machine != 3 && machine != 6))) {
+        return false;
+    }
+
+    if (expected_class == 2) {
+        program_offset = read_le64(header + 32);
+        program_entry_size = read_le16(header + 54);
+        program_count = read_le16(header + 56);
+        if (read_le16(header + 52) != 64 || program_entry_size != 56) {
+            return false;
+        }
+    } else {
+        program_offset = read_le32(header + 28);
+        program_entry_size = read_le16(header + 42);
+        program_count = read_le16(header + 44);
+        if (read_le16(header + 40) != 52 || program_entry_size != 32) {
+            return false;
+        }
+    }
+    if (!program_count || program_offset > INT64_MAX ||
+        fstat(fd, &statbuf) < 0 || statbuf.st_size < 0 ||
+        program_offset > (uint64_t)statbuf.st_size ||
+        program_count > ((uint64_t)statbuf.st_size - program_offset) /
+                        program_entry_size) {
+        return false;
+    }
+
+    for (uint16_t i = 0; i < program_count; i++) {
+        unsigned char program_type[4];
+        uint64_t offset = program_offset +
+                          (uint64_t)i * program_entry_size;
+
+        if (offset > INT64_MAX) {
+            return false;
+        }
+        do {
+            length = pread(fd, program_type, sizeof(program_type), offset);
+        } while (length < 0 && errno == EINTR);
+        if (length != sizeof(program_type)) {
+            return false;
+        }
+        if (read_le32(program_type) == 1) {
+            have_load = true;
+        }
+    }
+    return have_load;
+}
+
+static LoaderCheck inspect_loader_file(const char *guest_abi,
+                                       const char *path,
+                                       const char *confinement_root)
+{
+    LoaderCheck check = {
+        .status = INSPECTION_UNKNOWN,
+        .reason = "loader_uninspectable",
+    };
+    struct stat statbuf;
+    bool entry_exists;
+    int resolve_errno;
+    int fd;
+
+    check.resolved_path = realpath(path, NULL);
+    if (!check.resolved_path) {
+        resolve_errno = errno;
+        entry_exists = path_exists_without_following(path);
+        if (!entry_exists &&
+            (resolve_errno == ENOENT || resolve_errno == ENOTDIR)) {
+            check.status = INSPECTION_MISSING;
+            check.reason = "loader_not_found";
+        } else if (entry_exists &&
+                   (resolve_errno == ENOENT || resolve_errno == ENOTDIR)) {
+            check.status = INSPECTION_INVALID;
+            check.reason = "loader_symlink_broken";
+        }
+        return check;
+    }
+    if (!utf8_valid(check.resolved_path)) {
+        g_free(check.resolved_path);
+        check.resolved_path = NULL;
+        check.reason = "loader_path_not_utf8";
+        return check;
+    }
+    if (confinement_root &&
+        !path_is_within(confinement_root, check.resolved_path)) {
+        check.reason = "loader_escapes_root";
+        return check;
+    }
+
+    fd = open(check.resolved_path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) {
+        check.status = errno == EACCES ?
+                       INSPECTION_INVALID : INSPECTION_UNKNOWN;
+        check.reason = errno == EACCES ?
+                       "loader_permission_denied" : "loader_uninspectable";
+        return check;
+    }
+    if (fstat(fd, &statbuf) < 0) {
+        close(fd);
+        return check;
+    }
+    if (!S_ISREG(statbuf.st_mode)) {
+        close(fd);
+        check.status = INSPECTION_INVALID;
+        check.reason = "loader_not_regular";
+        return check;
+    }
+    if (!loader_elf_valid(fd, guest_abi)) {
+        close(fd);
+        check.status = INSPECTION_INVALID;
+        check.reason = "loader_invalid_elf";
+        return check;
+    }
+    close(fd);
+    check.status = INSPECTION_READY;
+    check.reason = "ready";
+    return check;
+}
+
+static RuntimeInspection inspect_runtime_root(const char *guest_abi,
+                                              const char *input_root,
+                                              const char *loader_path)
+{
+    RuntimeInspection inspection = {
+        .guest_abi = guest_abi,
+        .runtime_root = input_root,
+        .loader_path = loader_path,
+        .status = INSPECTION_UNKNOWN,
+        .reason = "root_uninspectable",
+        .effective_status = INSPECTION_UNKNOWN,
+        .effective_reason = "not_checked",
+    };
+    g_autofree char *configured_root = NULL;
+    const char *relative_loader = loader_path[0] == '/' ?
+                                  loader_path + 1 : loader_path;
+    LoaderCheck check;
+    struct stat statbuf;
+
+    if (!input_root[0]) {
+        inspection.status = INSPECTION_MISSING;
+        inspection.reason = "runtime_root_empty";
+        return inspection;
+    }
+    configured_root = absolute_path(input_root);
+    inspection.configured_loader = loader_path[0] == '/' ?
+                                   path_join(configured_root,
+                                             relative_loader) :
+                                   xstrdup(loader_path);
+    inspection.configured_loader_selected =
+        loader_path[0] == '/' &&
+        access(inspection.configured_loader, F_OK) == 0;
+
+    inspection.canonical_root = realpath(input_root, NULL);
+    if (!inspection.canonical_root) {
+        if (errno == ENOENT || errno == ENOTDIR) {
+            inspection.status = INSPECTION_MISSING;
+            inspection.reason = "root_not_found";
+        }
+        return inspection;
+    }
+    if (!utf8_valid(inspection.canonical_root)) {
+        g_free(inspection.canonical_root);
+        inspection.canonical_root = NULL;
+        inspection.status = INSPECTION_UNKNOWN;
+        inspection.reason = "root_path_not_utf8";
+        return inspection;
+    }
+    inspection.runtime_root = inspection.canonical_root;
+    if (stat(inspection.canonical_root, &statbuf) < 0) {
+        return inspection;
+    }
+    if (!S_ISDIR(statbuf.st_mode)) {
+        inspection.status = INSPECTION_INVALID;
+        inspection.reason = "root_not_directory";
+        return inspection;
+    }
+
+    check = inspect_loader_file(guest_abi, inspection.configured_loader,
+                                inspection.canonical_root);
+    inspection.resolved_loader = check.resolved_path;
+    inspection.status = check.status;
+    inspection.reason = check.reason;
+    return inspection;
+}
+
+static const char *inspection_status_name(InspectionStatus status)
+{
+    switch (status) {
+    case INSPECTION_READY:
+        return "ready";
+    case INSPECTION_NOT_REQUIRED:
+        return "not_required";
+    case INSPECTION_MISSING:
+        return "missing";
+    case INSPECTION_INVALID:
+        return "invalid";
+    case INSPECTION_UNKNOWN:
+        return "unknown";
+    }
+    abort();
+}
+
+static int inspection_exit_status(const RuntimeInspection *inspection)
+{
+    switch (inspection->status) {
+    case INSPECTION_READY:
+    case INSPECTION_NOT_REQUIRED:
+        return 0;
+    case INSPECTION_MISSING:
+    case INSPECTION_INVALID:
+        return 1;
+    case INSPECTION_UNKNOWN:
+        return 2;
+    }
+    abort();
+}
+
+static void print_runtime_inspection(const RuntimeInspection *inspection)
+{
+    fputs("{\"schema_version\":1,\"guest_abi\":", stdout);
+    json_write_string(inspection->guest_abi);
+    fputs(",\"runtime_root\":", stdout);
+    if (inspection->runtime_root) {
+        json_write_string(inspection->runtime_root);
+    } else {
+        fputs("null", stdout);
+    }
+    fputs(",\"loader_path\":", stdout);
+    json_write_string(inspection->loader_path);
+    fputs(",\"resolved_loader\":", stdout);
+    if (inspection->resolved_loader) {
+        json_write_string(inspection->resolved_loader);
+    } else {
+        fputs("null", stdout);
+    }
+    fputs(",\"inspection_status\":", stdout);
+    json_write_string(inspection_status_name(inspection->status));
+    fputs(",\"reason\":", stdout);
+    json_write_string(inspection->reason);
+    fputs("}\n", stdout);
+}
+
+static void runtime_inspection_free(RuntimeInspection *inspection)
+{
+    g_free(inspection->canonical_root);
+    g_free(inspection->configured_loader);
+    g_free(inspection->resolved_loader);
+    g_free(inspection->effective_loader);
+    memset(inspection, 0, sizeof(*inspection));
+}
+
+static int inspect_root_command(int argc, char **argv)
+{
+    const char *guest_abi = NULL;
+    const char *root = NULL;
+    int status = 0;
+
+    for (int i = 0; i < argc; ) {
+        if (!strcmp(argv[i], "--abi") && i + 1 < argc && !guest_abi) {
+            guest_abi = argv[i + 1];
+            i += 2;
+        } else if (!strcmp(argv[i], "--") && !root && i + 2 == argc) {
+            root = argv[i + 1];
+            i += 2;
+        } else if (argv[i][0] != '-' && !root) {
+            root = argv[i++];
+        } else {
+            usage();
+        }
+    }
+    if (!root || !root[0] || (guest_abi && !guest_abi_valid(guest_abi))) {
+        usage();
+    }
+    if (!utf8_valid(root)) {
+        report_error("runtime root is not valid UTF-8");
+        for (int i = 0; i < 2; i++) {
+            const char *abi = i ? "i386" : "x86_64";
+            RuntimeInspection inspection = {
+                .guest_abi = abi,
+                .runtime_root = NULL,
+                .loader_path = i ? "/lib/ld-linux.so.2" :
+                               "/lib64/ld-linux-x86-64.so.2",
+                .status = INSPECTION_UNKNOWN,
+                .reason = "root_path_not_utf8",
+            };
+
+            if (!guest_abi || !strcmp(guest_abi, abi)) {
+                print_runtime_inspection(&inspection);
+            }
+        }
+        return 2;
+    }
+
+    if (!guest_abi || !strcmp(guest_abi, "x86_64")) {
+        RuntimeInspection inspection = inspect_runtime_root(
+            "x86_64", root, default_loader_path("x86_64"));
+
+        print_runtime_inspection(&inspection);
+        status = inspection_exit_status(&inspection);
+        runtime_inspection_free(&inspection);
+    }
+    if (!guest_abi || !strcmp(guest_abi, "i386")) {
+        RuntimeInspection inspection = inspect_runtime_root(
+            "i386", root, default_loader_path("i386"));
+        int i386_status;
+
+        print_runtime_inspection(&inspection);
+        i386_status = inspection_exit_status(&inspection);
+        if (i386_status > status) {
+            status = i386_status;
+        }
+        runtime_inspection_free(&inspection);
+    }
+    return status;
+}
+
 static int query_both_runtimes(const TranslatorLocation *location,
                                const char *program)
 {
@@ -1262,6 +1633,10 @@ int main(int argc, char **argv)
         program_name = strrchr(argv[0], '/') + 1;
     } else if (argv[0][0]) {
         program_name = argv[0];
+    }
+
+    if (argc >= 2 && !strcmp(argv[1], "inspect-root")) {
+        return inspect_root_command(argc - 2, argv + 2);
     }
 
     if (argc >= 2 &&
