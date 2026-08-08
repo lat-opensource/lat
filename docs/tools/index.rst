@@ -11,6 +11,7 @@ Contents:
    :maxdepth: 2
 
    qemu-img
+   latu-runtime-manager
    qemu-storage-daemon
    qemu-nbd
    qemu-pr-helper
