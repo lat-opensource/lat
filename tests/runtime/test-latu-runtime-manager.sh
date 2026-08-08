@@ -1,8 +1,12 @@
 #!/bin/sh
 set -eu
 
-srcdir=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
-manager=$srcdir/runtime/latu-runtime-manager
+[ "$#" -eq 1 ] || {
+    echo "usage: $0 LATU_RUNTIME_MANAGER" >&2
+    exit 2
+}
+
+manager=$1
 workdir=$(mktemp -d)
 trap 'rm -rf "$workdir"' EXIT HUP INT TERM
 

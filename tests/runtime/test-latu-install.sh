@@ -1,15 +1,14 @@
 #!/bin/sh
 set -eu
 
-[ "$#" -eq 4 ] || {
-    echo "usage: $0 PYTHON MESON_PY BUILD_DIR PREFIX" >&2
+[ "$#" -eq 3 ] || {
+    echo "usage: $0 NINJA BUILD_DIR PREFIX" >&2
     exit 2
 }
 
-python=$1
-meson_py=$2
-builddir=$3
-prefix=$4
+ninja=$1
+builddir=$2
+prefix=$3
 workdir=$(mktemp -d)
 trap 'rm -rf "$workdir"' EXIT HUP INT TERM
 
@@ -21,15 +20,10 @@ fail()
 
 destdir=$workdir/dest
 install_log=$workdir/install.log
-if [ -f "$meson_py" ]; then
-    "$python" "$meson_py" install -C "$builddir" --no-rebuild \
-        --destdir "$destdir" > "$install_log" 2>&1
-else
-    "$python" -m mesonbuild.mesonmain install -C "$builddir" \
-        --no-rebuild --destdir "$destdir" > "$install_log" 2>&1
-fi || {
+DESTDIR="$destdir" "$ninja" -C "$builddir" install \
+    > "$install_log" 2>&1 || {
         cat "$install_log" >&2
-        fail 'meson install into DESTDIR failed'
+        fail 'ninja install into DESTDIR failed'
     }
 
 manager=$destdir$prefix/bin/latu-runtime-manager

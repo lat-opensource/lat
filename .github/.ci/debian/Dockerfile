@@ -14,6 +14,7 @@ ARG DEPENDENCIES="         \
         libssl-dev         \
         lsb-release        \
         make               \
+        meson              \
         ninja-build        \
         pkg-config         \
         python3-setuptools \

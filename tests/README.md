@@ -58,14 +58,19 @@ target's `syscall_nr_generated` sources.
 
 ## Run the suites
 
-Configure the build with `--enable-tests`, then run:
+Configure the build with `--enable-tests` and reuse the same Meson executable
+for both configuration and test execution.  For example, configure with
+`--meson=meson`, then run:
 
 ```sh
-python3 -B meson/meson.py test \
+meson test \
   -C build64-tests \
   --suite lat-pr-fast \
   --print-errorlogs
 ```
+
+Meson build data is version-specific.  Do not configure with a system Meson
+and then run tests with the bundled `meson/meson.py`, or vice versa.
 
 To run the integration suite, replace `lat-pr-fast` with
 `latx-integration`.

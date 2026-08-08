@@ -775,6 +775,23 @@ endif
 subdir('scripts')
 subdir('docs')
 subdir('runtime')
+
+if get_option('tests').enabled() and host_machine.system() == 'linux'
+  latu_install_depends = [latu_runtime_manager]
+  foreach name, emulator : emulators
+    latu_install_depends += emulator
+  endforeach
+
+  test(
+    'test-latu-install',
+    find_program('tests/runtime/test-latu-install.sh'),
+    args: [config_host['NINJA'], project_build_root, get_option('prefix')],
+    depends: latu_install_depends,
+    protocol: 'exitcode',
+    suite: 'lat-pr-fast',
+  )
+endif
+
 subdir('tests')
 
 #########################

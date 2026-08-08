@@ -4,26 +4,15 @@ endif
 
 subdir('unit')
 
-test(
-  'test-latu-runtime-manager',
-  find_program('runtime/test-latu-runtime-manager.sh'),
-  protocol: 'exitcode',
-  suite: 'lat-pr-fast',
-)
-
-latu_install_depends = []
-foreach name, emulator : emulators
-  latu_install_depends += emulator
-endforeach
-
-test(
-  'test-latu-install',
-  find_program('runtime/test-latu-install.sh'),
-  args: [python.full_path(), project_source_root / 'meson' / 'meson.py',
-         project_build_root, get_option('prefix')],
-  depends: latu_install_depends,
-  protocol: 'exitcode',
-  suite: 'lat-pr-fast',
-)
+if host_machine.system() == 'linux'
+  test(
+    'test-latu-runtime-manager',
+    find_program('runtime/test-latu-runtime-manager.sh'),
+    args: [latu_runtime_manager.full_path()],
+    depends: latu_runtime_manager,
+    protocol: 'exitcode',
+    suite: 'lat-pr-fast',
+  )
+endif
 
 subdir('integration')

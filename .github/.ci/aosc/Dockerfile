@@ -12,6 +12,7 @@ ARG DEPENDENCIES="         \
         libglib2.0-dev     \
         libssl-dev         \
         make               \
+        meson              \
         ninja              \
         pkg-config         \
         python3-setuptools \

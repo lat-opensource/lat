@@ -38,46 +38,32 @@ permissions:
 
 # Test registration and suite selection rules are documented in tests/README.md.
 jobs:
-  latu-runtime-manager:
-    name: "latu runtime manager (${{ matrix.container.name }})"
+  meson-fast:
+    name: "test (${{ matrix.container.name }}, lat-pr-fast)"
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 40
 
     strategy:
       fail-fast: false
       matrix:
         container:
-          - { name: "latx-runner-aosc", tag: "loong64" }
-          - { name: "latx-runner-debian", tag: "loong64" }
-          - { name: "latx-runner-fedora", tag: "loongarch64" }
+          - name: "latx-runner-aosc"
+            tag: "loong64"
+            sanitizers: false
+            prepare_meson: "command -v meson >/dev/null || oma install -y meson"
+          - name: "latx-runner-debian"
+            tag: "loong64"
+            sanitizers: true
+            prepare_meson: "command -v meson >/dev/null || { apt-get update && apt-get install -y meson; }"
+          - name: "latx-runner-fedora"
+            tag: "loongarch64"
+            sanitizers: false
+            prepare_meson: "command -v meson >/dev/null"
 
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-
-      - name: Setup QEMU
-        uses: docker/setup-qemu-action@v4
-
-      - name: Run dual-translator status checks
-        run: |
-          docker run --rm \
-            --platform linux/loong64 \
-            --volume "$(pwd):/io" \
-            --workdir /io \
-            "ghcr.io/${{ github.repository_owner }}/${{ matrix.container.name }}:${{ matrix.container.tag }}" \
-            sh tests/runtime/test-latu-runtime-manager.sh
-
-  meson-fast:
-    name: "test (latx-runner-debian, lat-pr-fast)"
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-          submodules: true
 
       - name: Setup QEMU
         uses: docker/setup-qemu-action@v4
@@ -88,27 +74,33 @@ jobs:
             --platform linux/loong64 \
             --volume "$(pwd):/io" \
             --workdir /io \
-            ghcr.io/lat-opensource/latx-runner-debian:loong64 \
+            "ghcr.io/${{ github.repository_owner }}/${{ matrix.container.name }}:${{ matrix.container.tag }}" \
             sh -eux -c '
+              ${{ matrix.container.prepare_meson }}
+              meson --version
               export CFLAGS="-Wno-error=unused-but-set-variable -Wno-error=unused-function -Wformat -Werror=format-y2k"
               mkdir -p build64-tests
               cd build64-tests
+              sanitizer_flags=
+              if [ "${{ matrix.container.sanitizers }}" = true ]; then
+                sanitizer_flags="--enable-debug --enable-sanitizers"
+              fi
               ../configure \
-                --target-list=x86_64-linux-user \
+                --target-list=x86_64-linux-user,i386-linux-user \
                 --enable-latx \
-                --enable-debug \
                 --enable-tests \
-                --enable-sanitizers \
                 --disable-werror \
                 --optimize-O1 \
                 --extra-ldflags=-ldl \
                 --disable-docs \
-                --with-git-submodules=ignore
+                --meson=meson \
+                --with-git-submodules=ignore \
+                $sanitizer_flags
               cd ..
               export LATX_RUNTIME_TEST_SKIP_GUEST_EXECUTION=1
               ASAN_OPTIONS=detect_leaks=0 \
               UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
-                python3 -B meson/meson.py test \
+                meson test \
                   -C build64-tests \
                   --suite lat-pr-fast \
                   --print-errorlogs

@@ -1,5 +1,8 @@
-install_data(
-  'latu-runtime-manager',
-  install_dir: get_option('bindir'),
-  install_mode: 'rwxr-xr-x',
-)
+if host_machine.system() == 'linux'
+  latu_runtime_manager = executable(
+    'latu-runtime-manager',
+    files('latu-runtime-manager.c'),
+    dependencies: glib,
+    install: true,
+  )
+endif

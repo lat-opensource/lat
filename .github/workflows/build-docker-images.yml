@@ -19,7 +19,7 @@ on:
 jobs:
   build:
     runs-on: ${{ matrix.IMAGE.RUNNER }}
-    timeout-minutes: 10
+    timeout-minutes: 20
     permissions:
       contents: read
       packages: write
