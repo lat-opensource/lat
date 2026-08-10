@@ -2600,13 +2600,21 @@ static int kzt_try_bind_observed_object(
     (void)opaque;
     result = kzt_public_loader_object_has_relro(
         object, &kzt_public_loader_reader, &has_relro);
-    if (result == KZT_PUBLIC_LOADER_OK && !has_relro &&
+    /*
+     * Loader ordering differs across glibc releases.  Some publish
+     * RT_CONSISTENT before applying RELRO, so this callback can still be
+     * the last naturally writable point even when PT_GNU_RELRO exists.
+     * kzt_try_bind_loaded_object() rechecks every relocation target under
+     * mmap_lock and fails closed if protection was already applied.
+     */
+    if (result == KZT_PUBLIC_LOADER_OK &&
         kzt_try_bind_loaded_object(
             object, KZT_AFTER_LOADER_CONSISTENT, &processed) == 0 &&
         processed) {
         printf_log(LOG_DEBUG,
-                   "KZT processed no-RELRO link_map=%p after the "
-                   "loader reached a consistent state\n",
+                   "KZT processed link_map=%p after the loader reached "
+                   "a consistent state while its relocation targets "
+                   "were still writable\n",
                    (void *)object->link_map_addr);
         return 0;
     }
