@@ -2881,7 +2881,7 @@ static TranslationBlock *kzt_install_guest_pc_callback(
     int isOverWrite = 0;
     int pos = 0;
     void *callback_context = tcg_ctx->code_gen_ptr;
-    int backlen = target_latx_ld_callback(
+    int backlen = target_latx_emit_callback_bridge(
         tcg_ctx->code_gen_ptr, callback);
     backlen *= 4;
     tcg_ctx->code_gen_ptr += backlen;
@@ -2945,7 +2945,7 @@ static TranslationBlock *kzt_install_guest_pc_callback(
     }
     return tb;
 }
-void init_tb_callback_bridge(CPUState *cpu, void *info)
+void kzt_install_runtime_callbacks(CPUState *cpu, void *info)
 {
     struct image_info * execinfo = (struct image_info *)info;
     static uint32 jmpinst_exec [2] = {0};
@@ -2971,7 +2971,7 @@ void kzt_bridge_init(void)
     kzt_tbbridge_init();
     CPU_FOREACH(cpu_tmp) {
         if (cpu_tmp && elf_header  && option_kzt) {
-            init_tb_callback_bridge(cpu_tmp, &info1);
+            kzt_install_runtime_callbacks(cpu_tmp, &info1);
         }
     }
 }
@@ -3000,7 +3000,7 @@ static void m_handle_ld(char * file_name, abi_ulong start)
     CPUState *cpu_tmp;
     CPU_FOREACH(cpu_tmp) {
             if (cpu_tmp  && option_kzt) {
-                init_tb_callback_bridge(cpu_tmp, &execinfo);
+                kzt_install_runtime_callbacks(cpu_tmp, &execinfo);
             }
     }
 }

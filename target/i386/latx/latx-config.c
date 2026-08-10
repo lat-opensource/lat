@@ -192,30 +192,29 @@ static void kzt_helper1(ADDR func)
 
 void kzt_native_to_wrapper(void);
 void kzt_wrapper_to_native(void);
-static void generate_ld_callback_context(void *code_buf, void (*kzt_tb_callback)(CPUX86State *))
+static void generate_kzt_callback_context(
+    void *code_buf, void (*callback)(CPUX86State *))
 {
     kzt_native_to_wrapper();
-    kzt_helper1((ADDR)kzt_tb_callback);
+    kzt_helper1((ADDR)callback);
     kzt_wrapper_to_native();
     la_nop();//for resolve tb;
     la_nop();//for resolve tb;
     la_nop();//for long jmp
     la_nop();//for long jmp
 }
-/*
- * ld_callback
- */
-int target_latx_ld_callback(void *code_buf_addr, void (*kzt_tb_callback)(CPUX86State *))
+int target_latx_emit_callback_bridge(
+    void *code_buf_addr, void (*callback)(CPUX86State *))
 {
     int code_nr = 0;
     TRANSLATION_DATA *lat_ctx = lsenv->tr_data;
 
     if (option_dump)
-        qemu_log("[LATX] ld_callback_context = %p\n",
+        qemu_log("[LATX] kzt_callback_context = %p\n",
                  (void *)code_buf_addr);
 
     tr_init(NULL);
-    generate_ld_callback_context(code_buf_addr, kzt_tb_callback);
+    generate_kzt_callback_context(code_buf_addr, callback);
     label_dispose(NULL, lat_ctx);
     code_nr = tr_ir2_assemble((void *)code_buf_addr,
                               lat_ctx->first_ir2);

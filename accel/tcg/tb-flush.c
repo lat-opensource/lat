@@ -107,7 +107,7 @@ done:
 #if defined(CONFIG_LATX_KZT)
     CPU_FOREACH(cpu) {
         if (cpu && option_kzt) {
-            init_tb_callback_bridge(cpu, &info1);
+            kzt_install_runtime_callbacks(cpu, &info1);
         }
     }
 #endif

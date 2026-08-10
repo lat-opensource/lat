@@ -46,8 +46,8 @@ void qemu_plugin_flush_cb(void)
 #endif
 
 #if defined(CONFIG_LATX_KZT)
-void init_tb_callback_bridge(CPUState *cpu G_GNUC_UNUSED,
-                             void *opaque G_GNUC_UNUSED)
+void kzt_install_runtime_callbacks(CPUState *cpu G_GNUC_UNUSED,
+                                   void *opaque G_GNUC_UNUSED)
 {
 }
 #endif

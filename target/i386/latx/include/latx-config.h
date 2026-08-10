@@ -15,7 +15,8 @@
 extern void *interpret_glue;
 extern ADDR context_switch_bt_to_native;
 #if defined(CONFIG_LATX_KZT)
-int target_latx_ld_callback(void *code_buf_addr, void (*kzt_tb_callback)(CPUX86State *));
+int target_latx_emit_callback_bridge(
+    void *code_buf_addr, void (*callback)(CPUX86State *));
 #endif
 
 int target_latx_host(CPUArchState *env, struct TranslationBlock *tb, int max_insns);

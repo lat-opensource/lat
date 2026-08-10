@@ -516,7 +516,7 @@ void dump_opcount_info(void);
 /* accel/tcg/cpu-exec.c */
 int cpu_exec(CPUState *cpu);
 void tb_add_jump(TranslationBlock *tb, int n, TranslationBlock *tb_next);
-void init_tb_callback_bridge(CPUState *cpu, void* info);
+void kzt_install_runtime_callbacks(CPUState *cpu, void *info);
 void tcg_exec_realizefn(CPUState *cpu, Error **errp);
 void tcg_exec_unrealizefn(CPUState *cpu);
 #endif /* CONFIG_TCG */
