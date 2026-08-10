@@ -72,6 +72,7 @@ my_file = files(
   'obstack.c',
   'globalsymbols.c',
   'callback.c',
+  'kzt_public_loader_observer.c',
   'wrappertbbridge.c'
   )
 

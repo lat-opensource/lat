@@ -102,3 +102,20 @@ if 'CONFIG_LATX' in config_host
     suite: 'lat-pr-fast',
   )
 endif
+
+test_kzt_public_loader_observer = executable(
+  'test-kzt-public-loader-observer',
+  files(
+    'kzt/test_kzt_public_loader_observer.c',
+    '../../target/i386/latx/context/kzt_public_loader_observer.c',
+  ),
+  include_directories: include_directories(
+    '../../target/i386/latx/include',
+  ),
+)
+
+test(
+  'test-kzt-public-loader-observer',
+  test_kzt_public_loader_observer,
+  suite: 'lat-pr-fast',
+)
