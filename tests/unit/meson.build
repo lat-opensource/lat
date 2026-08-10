@@ -74,3 +74,19 @@ test(
   test_rcu_lazy_thread,
   suite: 'lat-pr-fast',
 )
+
+if 'CONFIG_LATX' in config_host
+  test_x11_async_handler = executable(
+    'test-x11-async-handler',
+    files('test-x11-async-handler.c'),
+    include_directories: include_directories('../..'),
+    dependencies: glib,
+    build_by_default: false,
+  )
+
+  test(
+    'test-x11-async-handler',
+    test_x11_async_handler,
+    suite: 'lat-pr-fast',
+  )
+endif

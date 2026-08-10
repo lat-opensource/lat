@@ -23,6 +23,7 @@
 #include "box64context.h"
 #include "myalign.h"
 #include "wrappertbbridge.h"
+#include "wrappedlibx11_async.h"
 
 #ifdef ANDROID
     const char* libx11Name = "libX11.so";
@@ -120,12 +121,6 @@ struct my_XExten {
         struct my_XExten *next_flush;
 };
 
-struct my_XInternalAsync {
-    struct my_XInternalAsync *next;
-    int (*handler)(void*, void*, char*, int, void*);
-    void* data;
-};
-
 struct my_XLockPtrs {
     void (*lock_display)(void* dpy);
     void (*unlock_display)(void *dpy);
@@ -198,7 +193,7 @@ typedef struct my_XDisplay_s
         int (*wire_vec[128])(void *, void *, void *);
         XID lock_meaning;
         void* lock;
-        struct my_XInternalAsync *async_handlers;
+        latx_XInternalAsync *async_handlers;
         unsigned long bigreq_size;
         struct my_XLockPtrs *lock_fns;
         void (*idlist_alloc)(void *, void *, int);
@@ -1337,22 +1332,15 @@ EXPORT void* my_XSetAfterFunction(void* display, void* f)
     return reverse_XSynchronizeProcFct(my_lib, my->XSetAfterFunction(display, findXSynchronizeProcFct(f)));
 }
 
-static void kzt_handleasync(my_XDisplay_t* dpy,void*(*fct)(void*))
+static void bridge_XInternalAsyncHandlers(my_XDisplay_t *dpy,
+                                          void *(*fct)(void *))
 {
-    if (dpy->async_handlers) {
-        struct my_XInternalAsync *async, *next;
-        for(async = dpy->async_handlers; async; async = next) {
-            next = async->next;
-            if ((uintptr_t)async->handler < reserved_va) {
-                async->handler = fct(async->handler);
-            }
-        }
-    }
+    latx_x11_bridge_async_handler_list(dpy->async_handlers, reserved_va, fct);
 }
 static void* kzt_XSyncFunction;
 static int kzt_XSyncFunctionPre(my_XDisplay_t* dpy)
 {
-    kzt_handleasync(dpy, findXSyncFunctionPreAsyncHandlerFct);
+    bridge_XInternalAsyncHandlers(dpy, findXSyncFunctionPreAsyncHandlerFct);
     return ((int (*)(void*))kzt_XSyncFunction)(dpy);
 }
 
@@ -1457,14 +1445,14 @@ EXPORT void* my_XOpenDisplay(void* d)
 EXPORT void* my_XInternAtom(my_XDisplay_t* dpy, void* name, int32_t onlyIfExists);
 EXPORT void* my_XInternAtom(my_XDisplay_t* dpy, void* name, int32_t onlyIfExists)
 {
-    kzt_handleasync(dpy, findXInternAtomAsyncHandlerFct);
+    bridge_XInternalAsyncHandlers(dpy, findXInternAtomAsyncHandlerFct);
     return my->XInternAtom(dpy, name, onlyIfExists);
 }
 
 EXPORT int32_t my_XSync(my_XDisplay_t* dpy, uint32_t v2);
 EXPORT int32_t my_XSync(my_XDisplay_t* dpy, uint32_t v2)
 {
-    kzt_handleasync(dpy, findXSyncAsyncHandlerFct);
+    bridge_XInternalAsyncHandlers(dpy, findXSyncAsyncHandlerFct);
     int32_t ret = my->XSync(dpy, v2);
     latx_dpy_xcb_sync(dpy);
     return ret;
@@ -1473,28 +1461,29 @@ EXPORT int32_t my_XSync(my_XDisplay_t* dpy, uint32_t v2)
 EXPORT void my__XDeqAsyncHandler(my_XDisplay_t* dpy, void* data);
 EXPORT void my__XDeqAsyncHandler(my_XDisplay_t* dpy, void* data)
 {
-    kzt_handleasync(dpy, findXInternalAsyncHandlerFct);
+    bridge_XInternalAsyncHandlers(dpy, findXInternalAsyncHandlerFct);
     my->_XDeqAsyncHandler(dpy, data);
 }
 
 EXPORT int32_t my_XTranslateCoordinates(my_XDisplay_t* dpy, void* v2, void* v3, int32_t v4, int32_t v5, void* v6, void* v7, void* v8);
 EXPORT int32_t my_XTranslateCoordinates(my_XDisplay_t* dpy, void* v2, void* v3, int32_t v4, int32_t v5, void* v6, void* v7, void* v8)
 {
-    kzt_handleasync(dpy, findXTranslateCoordinatesAsyncHandlerFct);
+    bridge_XInternalAsyncHandlers(
+        dpy, findXTranslateCoordinatesAsyncHandlerFct);
     return my->XTranslateCoordinates(dpy, v2, v3, v4, v5, v6, v7, v8);
 }
 
 EXPORT int32_t my_XGrabKeyboard(my_XDisplay_t*, void*, int32_t, int32_t, int32_t, uintptr_t);
 EXPORT int32_t my_XGrabKeyboard(my_XDisplay_t* dpy, void* v2, int32_t v3, int32_t v4, int32_t v5, uintptr_t v6)
 {
-    kzt_handleasync(dpy, findXGrabKeyboardAsyncHandlerFct);
+    bridge_XInternalAsyncHandlers(dpy, findXGrabKeyboardAsyncHandlerFct);
     return my->XGrabKeyboard(dpy, v2, v3, v4, v5, v6);
 }
 
 EXPORT int32_t my_XQueryPointer(my_XDisplay_t*, void*, void*, void*, void*, void*, void*, void*, void*);
 EXPORT int32_t my_XQueryPointer(my_XDisplay_t* dpy, void* v2, void* v3, void* v4, void* v5, void* v6, void* v7, void* v8, void* v9)
 {
-    kzt_handleasync(dpy, findXQueryPointerAsyncHandlerFct);
+    bridge_XInternalAsyncHandlers(dpy, findXQueryPointerAsyncHandlerFct);
     return my->XQueryPointer(dpy, v2, v3, v4, v5, v6, v7, v8, v9);
 }
 int latx_dpy_xcb_sync(void *v1)
@@ -1519,21 +1508,13 @@ EXPORT int32_t my_XNextEvent(void* v1, void* v2)
 EXPORT void my_XPending(my_XDisplay_t* dpy);
 EXPORT void my_XPending(my_XDisplay_t* dpy)
 {
-    kzt_handleasync(dpy, findXPendingAsyncHandlerFct);
+    bridge_XInternalAsyncHandlers(dpy, findXPendingAsyncHandlerFct);
     my->XPending(dpy);
 }
 EXPORT int32_t my_XGetWindowProperty(my_XDisplay_t* dpy, void* v2, void* v3, intptr_t v4, intptr_t v5, int32_t v6, void* v7, void* v8, void* v9, void* v10, void* v11, void* v12);
 EXPORT int32_t my_XGetWindowProperty(my_XDisplay_t* dpy, void* v2, void* v3, intptr_t v4, intptr_t v5, int32_t v6, void* v7, void* v8, void* v9, void* v10, void* v11, void* v12)
 {
-    if (dpy->async_handlers) {
-        struct my_XInternalAsync *async, *next;
-        for(async = dpy->async_handlers; async; async = next) {
-            next = async->next;
-            if ((uintptr_t)async->handler < reserved_va) {
-                async->handler = findXGetWindowPropertyFct(async->handler);
-            }
-        }
-    }
+    bridge_XInternalAsyncHandlers(dpy, findXGetWindowPropertyFct);
     return my->XGetWindowProperty(dpy, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12);
 }
 
