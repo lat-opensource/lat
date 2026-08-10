@@ -50,6 +50,18 @@ test(
   suite: 'lat-pr-fast',
 )
 
+test(
+  'test-xcb-image-wrappers',
+  python,
+  args: [
+    files('check-xcb-image-wrappers.py'),
+    project_source_root / 'target/i386/latx/include/wrappedlibxcbimage_private.h',
+    project_source_root / 'target/i386/latx/include/wrapper.h',
+    project_source_root / 'target/i386/latx/context/wrapper.c',
+  ],
+  suite: 'lat-pr-fast',
+)
+
 test_rcu_lazy_thread = executable(
   'test-rcu-lazy-thread',
   files('test-rcu-lazy-thread.c'),
