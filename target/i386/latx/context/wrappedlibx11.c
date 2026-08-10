@@ -235,6 +235,10 @@ typedef struct my_XDisplay_s
         void* exit_handler_data;
 } my_XDisplay_t;
 
+static void bridge_XInternalAsyncHandlers(my_XDisplay_t *dpy,
+                                          void *(*fct)(void *));
+static void *bridge_XInternalAsyncHandler(void *handler);
+
 typedef void (*vFp_t)(void*);
 typedef uint32_t (*uFv_t)(void);
 typedef int32_t (*iFpl_t)(void*, intptr_t);
@@ -1096,23 +1100,33 @@ EXPORT void* my_XESetCloseDisplay(void* display, int32_t extension, void* handle
     return reverse_close_displayFct(my_lib, ret);
 }
 
-EXPORT int32_t my_XIfEvent(void* d,void* ev, EventHandler h, void* arg)
+EXPORT int32_t my_XIfEvent(void *display, void* ev, EventHandler h,
+                           void* arg)
 {
-    int32_t ret = my->XIfEvent(d, ev, findxifeventFct(h), arg);
+    my_XDisplay_t *dpy = display;
+
+    bridge_XInternalAsyncHandlers(dpy, bridge_XInternalAsyncHandler);
+    int32_t ret = my->XIfEvent(dpy, ev, findxifeventFct(h), arg);
     return ret;
 }
 
-EXPORT int32_t my_XCheckIfEvent(void* d,void* ev, EventHandler h, void* arg);
-EXPORT int32_t my_XCheckIfEvent(void* d,void* ev, EventHandler h, void* arg)
+EXPORT int32_t my_XCheckIfEvent(my_XDisplay_t *dpy, void* ev,
+                                EventHandler h, void* arg);
+EXPORT int32_t my_XCheckIfEvent(my_XDisplay_t *dpy, void* ev,
+                                EventHandler h, void* arg)
 {
-    int32_t ret = my->XCheckIfEvent(d, ev, findxifeventFct(h), arg);
+    bridge_XInternalAsyncHandlers(dpy, bridge_XInternalAsyncHandler);
+    int32_t ret = my->XCheckIfEvent(dpy, ev, findxifeventFct(h), arg);
     return ret;
 }
 
-EXPORT int32_t my_XPeekIfEvent(void* d,void* ev, EventHandler h, void* arg);
-EXPORT int32_t my_XPeekIfEvent(void* d,void* ev, EventHandler h, void* arg)
+EXPORT int32_t my_XPeekIfEvent(my_XDisplay_t *dpy, void* ev,
+                               EventHandler h, void* arg);
+EXPORT int32_t my_XPeekIfEvent(my_XDisplay_t *dpy, void* ev,
+                               EventHandler h, void* arg)
 {
-    int32_t ret = my->XPeekIfEvent(d, ev, findxifeventFct(h), arg);
+    bridge_XInternalAsyncHandlers(dpy, bridge_XInternalAsyncHandler);
+    int32_t ret = my->XPeekIfEvent(dpy, ev, findxifeventFct(h), arg);
     return ret;
 }
 
@@ -1332,11 +1346,37 @@ EXPORT void* my_XSetAfterFunction(void* display, void* f)
     return reverse_XSynchronizeProcFct(my_lib, my->XSetAfterFunction(display, findXSynchronizeProcFct(f)));
 }
 
+static latx_x11_async_bridge_state x11_async_bridge_state =
+    LATX_X11_ASYNC_BRIDGE_STATE_INITIALIZER;
+
 static void bridge_XInternalAsyncHandlers(my_XDisplay_t *dpy,
                                           void *(*fct)(void *))
 {
-    latx_x11_bridge_async_handler_list(dpy->async_handlers, reserved_va, fct);
+    latx_x11_async_bridge_result result =
+        latx_x11_bridge_async_handler_list(&x11_async_bridge_state,
+                                           dpy->async_handlers, reserved_va,
+                                           fct);
+
+    if (result != LATX_X11_ASYNC_BRIDGE_OK) {
+        printf_log(LOG_NONE,
+                   "Error, cannot safely bridge libX11 async handlers "
+                   "(status=%d)\n",
+                   result);
+        abort();
+    }
 }
+
+static void *bridge_XInternalAsyncHandler(void *handler)
+{
+    void *native_handler = findXInternalAsyncHandlerFct(handler);
+
+    if (!native_handler) {
+        return NULL;
+    }
+    AddAutomaticBridge(my_lib->priv.w.bridge, iFpppip, native_handler, 0);
+    return native_handler;
+}
+
 static void* kzt_XSyncFunction;
 static int kzt_XSyncFunctionPre(my_XDisplay_t* dpy)
 {
@@ -1449,6 +1489,120 @@ EXPORT void* my_XInternAtom(my_XDisplay_t* dpy, void* name, int32_t onlyIfExists
     return my->XInternAtom(dpy, name, onlyIfExists);
 }
 
+EXPORT void *my__XGetRequest(my_XDisplay_t *dpy, uint8_t type,
+                             uintptr_t len);
+EXPORT void *my__XGetRequest(my_XDisplay_t *dpy, uint8_t type,
+                             uintptr_t len)
+{
+    bridge_XInternalAsyncHandlers(dpy, bridge_XInternalAsyncHandler);
+    return my->_XGetRequest(dpy, type, len);
+}
+
+EXPORT int32_t my_XEventsQueued(my_XDisplay_t *dpy, int32_t mode);
+EXPORT int32_t my_XEventsQueued(my_XDisplay_t *dpy, int32_t mode)
+{
+    bridge_XInternalAsyncHandlers(dpy, bridge_XInternalAsyncHandler);
+    return my->XEventsQueued(dpy, mode);
+}
+
+EXPORT int32_t my_XFlush(my_XDisplay_t *dpy);
+EXPORT int32_t my_XFlush(my_XDisplay_t *dpy)
+{
+    bridge_XInternalAsyncHandlers(dpy, bridge_XInternalAsyncHandler);
+    return my->XFlush(dpy);
+}
+
+EXPORT void my__XFlush(my_XDisplay_t *dpy);
+EXPORT void my__XFlush(my_XDisplay_t *dpy)
+{
+    bridge_XInternalAsyncHandlers(dpy, bridge_XInternalAsyncHandler);
+    my->_XFlush(dpy);
+}
+
+EXPORT void my__XReadEvents(my_XDisplay_t *dpy);
+EXPORT void my__XReadEvents(my_XDisplay_t *dpy)
+{
+    bridge_XInternalAsyncHandlers(dpy, bridge_XInternalAsyncHandler);
+    my->_XReadEvents(dpy);
+}
+
+EXPORT int32_t my__XReply(my_XDisplay_t *dpy, void *reply, int32_t extra,
+                          int32_t discard);
+EXPORT int32_t my__XReply(my_XDisplay_t *dpy, void *reply, int32_t extra,
+                          int32_t discard)
+{
+    bridge_XInternalAsyncHandlers(dpy, bridge_XInternalAsyncHandler);
+    return my->_XReply(dpy, reply, extra, discard);
+}
+
+EXPORT int32_t my__XError(my_XDisplay_t *dpy, void *error);
+EXPORT int32_t my__XError(my_XDisplay_t *dpy, void *error)
+{
+    bridge_XInternalAsyncHandlers(dpy, bridge_XInternalAsyncHandler);
+    return my->_XError(dpy, error);
+}
+
+EXPORT int32_t my_XMaskEvent(my_XDisplay_t *dpy, intptr_t mask,
+                             void *event);
+EXPORT int32_t my_XMaskEvent(my_XDisplay_t *dpy, intptr_t mask,
+                             void *event)
+{
+    bridge_XInternalAsyncHandlers(dpy, bridge_XInternalAsyncHandler);
+    return my->XMaskEvent(dpy, mask, event);
+}
+
+EXPORT int32_t my_XPeekEvent(my_XDisplay_t *dpy, void *event);
+EXPORT int32_t my_XPeekEvent(my_XDisplay_t *dpy, void *event)
+{
+    bridge_XInternalAsyncHandlers(dpy, bridge_XInternalAsyncHandler);
+    return my->XPeekEvent(dpy, event);
+}
+
+EXPORT int32_t my_XWindowEvent(my_XDisplay_t *dpy, void *window,
+                               intptr_t mask, void *event);
+EXPORT int32_t my_XWindowEvent(my_XDisplay_t *dpy, void *window,
+                               intptr_t mask, void *event)
+{
+    bridge_XInternalAsyncHandlers(dpy, bridge_XInternalAsyncHandler);
+    return my->XWindowEvent(dpy, window, mask, event);
+}
+
+EXPORT int32_t my_XCheckMaskEvent(my_XDisplay_t *dpy, intptr_t mask,
+                                  void *event);
+EXPORT int32_t my_XCheckMaskEvent(my_XDisplay_t *dpy, intptr_t mask,
+                                  void *event)
+{
+    bridge_XInternalAsyncHandlers(dpy, bridge_XInternalAsyncHandler);
+    return my->XCheckMaskEvent(dpy, mask, event);
+}
+
+EXPORT int32_t my_XCheckTypedEvent(my_XDisplay_t *dpy, int32_t type,
+                                   void *event);
+EXPORT int32_t my_XCheckTypedEvent(my_XDisplay_t *dpy, int32_t type,
+                                   void *event)
+{
+    bridge_XInternalAsyncHandlers(dpy, bridge_XInternalAsyncHandler);
+    return my->XCheckTypedEvent(dpy, type, event);
+}
+
+EXPORT int32_t my_XCheckTypedWindowEvent(my_XDisplay_t *dpy, void *window,
+                                         int32_t type, void *event);
+EXPORT int32_t my_XCheckTypedWindowEvent(my_XDisplay_t *dpy, void *window,
+                                         int32_t type, void *event)
+{
+    bridge_XInternalAsyncHandlers(dpy, bridge_XInternalAsyncHandler);
+    return my->XCheckTypedWindowEvent(dpy, window, type, event);
+}
+
+EXPORT int32_t my_XCheckWindowEvent(my_XDisplay_t *dpy, void *window,
+                                    intptr_t mask, void *event);
+EXPORT int32_t my_XCheckWindowEvent(my_XDisplay_t *dpy, void *window,
+                                    intptr_t mask, void *event)
+{
+    bridge_XInternalAsyncHandlers(dpy, bridge_XInternalAsyncHandler);
+    return my->XCheckWindowEvent(dpy, window, mask, event);
+}
+
 EXPORT int32_t my_XSync(my_XDisplay_t* dpy, uint32_t v2);
 EXPORT int32_t my_XSync(my_XDisplay_t* dpy, uint32_t v2)
 {
@@ -1493,13 +1647,14 @@ int latx_dpy_xcb_sync(void *v1)
 }
 
 extern void* x86pthread_setcanceltype;
-EXPORT int32_t my_XNextEvent(void* v1, void* v2);
-EXPORT int32_t my_XNextEvent(void* v1, void* v2)
+EXPORT int32_t my_XNextEvent(my_XDisplay_t *dpy, void* v2);
+EXPORT int32_t my_XNextEvent(my_XDisplay_t *dpy, void* v2)
 {
     int oldtype;
     int32_t ret;
+    bridge_XInternalAsyncHandlers(dpy, bridge_XInternalAsyncHandler);
     uint64_t callbackret = RunFunctionWithState((uintptr_t)x86pthread_setcanceltype ,2, PTHREAD_CANCEL_ASYNCHRONOUS, &oldtype);
-    ret = my->XNextEvent(v1,v2);
+    ret = my->XNextEvent(dpy,v2);
     callbackret = RunFunctionWithState((uintptr_t)x86pthread_setcanceltype ,2, oldtype, NULL);
     (void)callbackret;
     return ret;

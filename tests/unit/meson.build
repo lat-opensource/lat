@@ -62,6 +62,18 @@ test(
   suite: 'lat-pr-fast',
 )
 
+test(
+  'test-x11-async-wrapper-routing',
+  python,
+  args: [
+    files('check-x11-async-wrapper.py'),
+    project_source_root / 'target/i386/latx/context/wrappedlibx11.c',
+    project_source_root / 'target/i386/latx/include/wrappedlibx11_private.h',
+    project_source_root / 'target/i386/latx/include/generated/wrappedlibx11types.h',
+  ],
+  suite: 'lat-pr-fast',
+)
+
 test_rcu_lazy_thread = executable(
   'test-rcu-lazy-thread',
   files('test-rcu-lazy-thread.c'),
@@ -80,7 +92,7 @@ if 'CONFIG_LATX' in config_host
     'test-x11-async-handler',
     files('test-x11-async-handler.c'),
     include_directories: include_directories('../..'),
-    dependencies: glib,
+    dependencies: dependency('threads'),
     build_by_default: false,
   )
 

@@ -9,6 +9,7 @@
 #endif
 
 typedef int32_t (*iFp_t)(void*);
+typedef int32_t (*iFpi_t)(void*, int32_t);
 typedef void* (*pFp_t)(void*);
 typedef void (*vFpp_t)(void*, void*);
 typedef void* (*pFiV_t)(int32_t, ...);
@@ -26,8 +27,14 @@ typedef void* (*pFppuiipuuii_t)(void*, void*, uint32_t, int32_t, int32_t, void*,
 typedef void* (*pFppiiuuuipii_t)(void*, void*, int32_t, int32_t, uint32_t, uint32_t, uint32_t, int32_t, void*, int32_t, int32_t);
 typedef void* (*pFppi_t)(void*, void*, int32_t);
 typedef int32_t (*iFpu_t)(void*, uint32_t);
+typedef void* (*pFpCL_t)(void*, uint8_t, uintptr_t);
 typedef int32_t (*iFpppiippp_t)(void*, void*, void*, int32_t, int32_t, void*, void*, void*);
 typedef int32_t (*iFpp_t)(void*, void*);
+typedef int32_t (*iFppii_t)(void*, void*, int32_t, int32_t);
+typedef int32_t (*iFplp_t)(void*, intptr_t, void*);
+typedef int32_t (*iFpip_t)(void*, int32_t, void*);
+typedef int32_t (*iFppip_t)(void*, void*, int32_t, void*);
+typedef int32_t (*iFpplp_t)(void*, void*, intptr_t, void*);
 typedef int32_t (*iFppiiiL_t)(void*, void*, int32_t, int32_t, int32_t, uintptr_t);
 typedef int32_t (*iFppppppppp_t)(void*, void*, void*, void*, void*, void*, void*, void*, void*);
 typedef int32_t (*iFpppllipppppp_t)(void*, void*, void*, intptr_t, intptr_t, int32_t, void*, void*, void*, void*, void*, void*);
@@ -65,6 +72,20 @@ typedef void* (*pFpppp_t)(void*, void*, void*, void*);
         GO(XPutImage, iFppppiiiiuu_t) \
         GO(XCreateImage, pFppuiipuuii_t) \
         GO(XInternAtom, pFppi_t) \
+        GO(_XGetRequest, pFpCL_t) \
+        GO(XEventsQueued, iFpi_t) \
+        GO(XFlush, iFp_t) \
+        GO(_XError, iFpp_t) \
+        GO(_XFlush, vFp_t) \
+        GO(_XReadEvents, vFp_t) \
+        GO(_XReply, iFppii_t) \
+        GO(XMaskEvent, iFplp_t) \
+        GO(XPeekEvent, iFpp_t) \
+        GO(XWindowEvent, iFpplp_t) \
+        GO(XCheckMaskEvent, iFplp_t) \
+        GO(XCheckTypedEvent, iFpip_t) \
+        GO(XCheckTypedWindowEvent, iFppip_t) \
+        GO(XCheckWindowEvent, iFpplp_t) \
         GO(XSync, iFpu_t) \
         GO(XTranslateCoordinates, iFpppiippp_t) \
         GO(XPending, iFp_t) \

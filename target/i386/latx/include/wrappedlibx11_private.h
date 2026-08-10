@@ -92,10 +92,10 @@ GO(XChangeProperty, iFppppiipi)
 //GO(XChangeSaveSet
 GO(XChangeWindowAttributes, iFppLp)
 GOM(XCheckIfEvent, iFpppp)
-GO(XCheckMaskEvent, iFplp)
-GO(XCheckTypedEvent, iFpip)
-GO(XCheckTypedWindowEvent, iFppip)
-GO(XCheckWindowEvent, iFpplp)
+GOM(XCheckMaskEvent, iFplp)
+GOM(XCheckTypedEvent, iFpip)
+GOM(XCheckTypedWindowEvent, iFppip)
+GOM(XCheckWindowEvent, iFpplp)
 //GO(XCirculateSubwindows
 //GO(XCirculateSubwindowsDown
 //GO(XCirculateSubwindowsUp
@@ -336,7 +336,7 @@ GO(XEmptyRegion, iFp)
 GO(XEnableAccessControl, vFp)
 GO(_XEnq, vFpp)
 GO(XEqualRegion, iFpp)
-// _XError
+GOM(_XError, iFpp)
 DATAB(_XErrorFunction, sizeof(void*))
 //GO(XESetBeforeFlush
 GOM(XESetCloseDisplay, pFEpip)
@@ -355,7 +355,7 @@ GOM(XESetEventToWire, pFEpip)
 GOM(XESetWireToEvent, pFEpip)
 //GO(XESetWireToEventCookie
 //GO(XEventMaskOfScreen
-GO(XEventsQueued, iFpi)
+GOM(XEventsQueued, iFpi)
 // _XEventsQueued
 // _Xevent_to_mask  // type r
 // _XEventToWire
@@ -375,8 +375,8 @@ GO(XFillRectangles, iFppppi)
 GO(XFilterEvent, iFpp)
 GO(XFindContext, iFpLip)
 //GO(XFindOnExtensionList
-GO(XFlush, iFp)
-GO(_XFlush, vFp)
+GOM(XFlush, iFp)
+GOM(_XFlush, vFp)
 GO(XFlushGC, vFpp)
 GO(_XFlushGCCache, vFpp)
 GO(XFontsOfFontSet, iFppp)
@@ -440,7 +440,7 @@ GO(XGetOMValues, pFpppppppppp)
 GO(dummy_XGetPixel, LFpii)     // for the wrapper
 GO(XGetPointerControl, iFpppp)
 GO(XGetPointerMapping, iFppi)
-GO(_XGetRequest, pFpCL)
+GOM(_XGetRequest, pFpCL)
 GO(XGetRGBColormaps, iFppppp)
 // _XGetScanlinePad
 GO(XGetScreenSaver, iFppppp)
@@ -805,7 +805,7 @@ GO(XLowerWindow, iFpp)
 GO(XMapRaised, iFpp)
 GO(XMapSubwindows, iFpp)
 GO(XMapWindow, iFpp)
-GO(XMaskEvent, iFplp)
+GOM(XMaskEvent, iFplp)
 GO(XMatchVisualInfo, iFpiiip)
 //GO(XMaxCmapsOfScreen
 GO(XMaxRequestSize, lFp)
@@ -844,7 +844,7 @@ GO(XOpenOM, pFpppp)
 // _XParseBaseFontNameList
 GO(XParseColor, iFpppp)
 GO(XParseGeometry, iFppppp)
-GO(XPeekEvent, iFpp)
+GOM(XPeekEvent, iFpp)
 GOM(XPeekIfEvent, iFpppp)
 GOM(XPending, iFp)
 //GO(Xpermalloc
@@ -881,7 +881,7 @@ GO(XRaiseWindow, iFpp)
 GO(_XRead, iFppl)
 //GO(XReadBitmapFile
 //GO(XReadBitmapFileData
-GO(_XReadEvents, vFp)
+GOM(_XReadEvents, vFp)
 GO(_XReadPad, vFppl)
 GO(XRebindKeysym, iFpppipi)
 GO(XRecolorCursor, iFpppp)
@@ -898,7 +898,7 @@ GO(XRemoveFromSaveSet, iFpL)
 GO(XRemoveHost, vFpp)
 GO(XRemoveHosts, vFppi)
 GO(XReparentWindow, iFpppii)
-GO(_XReply, iFppii)
+GOM(_XReply, iFppii)
 GO(XResetScreenSaver, iFp)
 GO(XResizeWindow, iFppuu)
 GO(XResourceManagerString, pFp)
@@ -1113,7 +1113,7 @@ GO(XwcTextPropertyToTextList, iFpppp)
 //GO(XWhitePixelOfScreen
 //GO(XWidthMMOfScreen
 GO(XWidthOfScreen, iFp)
-GO(XWindowEvent, iFpplp)
+GOM(XWindowEvent, iFpplp)
 GO(_XWireToEvent, iFppp)
 GO(XWithdrawWindow, iFppi)
 //GO(XWMGeometry
