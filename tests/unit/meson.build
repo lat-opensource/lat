@@ -119,3 +119,20 @@ test(
   test_kzt_public_loader_observer,
   suite: 'lat-pr-fast',
 )
+
+test_kzt_relocation_transaction = executable(
+  'test-kzt-relocation-transaction',
+  files(
+    'kzt/test_kzt_relocation_transaction.c',
+    '../../target/i386/latx/context/kzt_relocation_transaction.c',
+  ),
+  include_directories: include_directories(
+    '../../target/i386/latx/include',
+  ),
+)
+
+test(
+  'test-kzt-relocation-transaction',
+  test_kzt_relocation_transaction,
+  suite: 'lat-pr-fast',
+)

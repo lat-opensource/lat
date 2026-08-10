@@ -73,6 +73,7 @@ my_file = files(
   'globalsymbols.c',
   'callback.c',
   'kzt_public_loader_observer.c',
+  'kzt_relocation_transaction.c',
   'wrappertbbridge.c'
   )
 
