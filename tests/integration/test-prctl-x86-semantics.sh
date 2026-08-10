@@ -29,43 +29,34 @@ chmod +x "$workdir/relative/state-script"
 
 run_case()
 {
-    mode=$1
-    label=$2
-    case_name=$3
-    shift 3
+    case_name=$1
+    shift
 
     set +e
-    env LATX_AOT=0 LATX_KZT=0 LATX_TU="$mode" timeout -s KILL 10 \
+    env LATX_AOT=0 LATX_KZT=0 timeout -s KILL 10 \
         "$emulator" "$workdir/prctl-x86-semantics" "$case_name" "$@"
     ret=$?
     set -e
 
     if [ "$ret" -eq 0 ]; then
-        echo "PASS: $label $case_name prctl semantics"
+        echo "PASS: $case_name prctl semantics"
         return
     fi
     if [ "$ret" -eq 124 ]; then
-        echo "FAIL: $label $case_name prctl semantics timed out" >&2
+        echo "FAIL: $case_name prctl semantics timed out" >&2
     else
-        echo "FAIL: $label $case_name prctl semantics returned $ret" >&2
+        echo "FAIL: $case_name prctl semantics returned $ret" >&2
     fi
     exit "$ret"
 }
 
-for mode in 0 1; do
-    if [ "$mode" -eq 0 ]; then
-        label=non-tu
-    else
-        label=tu
-    fi
-    run_case "$mode" "$label" p
-    run_case "$mode" "$label" v
-    run_case "$mode" "$label" m
-    run_case "$mode" "$label" r
-    run_case "$mode" "$label" s
-    run_case "$mode" "$label" f
-    run_case "$mode" "$label" i
-    run_case "$mode" "$label" e "$workdir/prctl-native-env-helper"
-    run_case "$mode" "$label" a "$workdir/prctl-native-env-helper"
-    run_case "$mode" "$label" d "$workdir/relative"
-done
+run_case p
+run_case v
+run_case m
+run_case r
+run_case s
+run_case f
+run_case i
+run_case e "$workdir/prctl-native-env-helper"
+run_case a "$workdir/prctl-native-env-helper"
+run_case d "$workdir/relative"

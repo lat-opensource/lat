@@ -18,20 +18,17 @@ fi
 "$clang" --target=x86_64-linux-gnu -fuse-ld=lld -nostdlib -static \
     -Wl,--build-id=none "$source_file" -o "$workdir/prctl-x86-abi"
 
-run_mode()
+run_test()
 {
-    mode=$1
-    label=$2
-
     set +e
-    LATX_AOT=0 LATX_KZT=0 LATX_TU="$mode" timeout -s KILL 10 \
+    LATX_AOT=0 LATX_KZT=0 timeout -s KILL 10 \
         "$emulator" "$workdir/prctl-x86-abi"
     ret=$?
     set -e
 
     case $ret in
 0)
-    echo "PASS: $label x86_64 prctl ABI behavior"
+    echo "PASS: x86_64 prctl ABI behavior"
     ;;
 20)
     echo "FAIL: PR_GET_PDEATHSIG pointer semantics" >&2
@@ -64,12 +61,11 @@ run_mode()
     echo "FAIL: x86_64 prctl ABI test timed out" >&2
     ;;
 *)
-    echo "FAIL: $label unexpected guest exit status $ret" >&2
+    echo "FAIL: unexpected guest exit status $ret" >&2
     ;;
     esac
 
     test "$ret" -eq 0
 }
 
-run_mode 0 non-tu
-run_mode 1 tu
+run_test

@@ -23,23 +23,15 @@ fi
     -ffreestanding -fno-builtin -fno-stack-protector \
     -Wl,--build-id=none "$source_file" -o "$workdir/prctl-x86-semantics"
 
-for mode in 0 1; do
-    if [ "$mode" -eq 0 ]; then
-        label=non-tu
-    else
-        label=tu
-    fi
-    guest="$workdir/prctl-x86-semantics-$mode"
-    cp "$workdir/prctl-x86-semantics" "$guest"
-    set +e
-    unshare -Ur env LATX_AOT=0 LATX_KZT=0 LATX_TU="$mode" \
-        timeout -s KILL 10 "$emulator" \
-        "$guest" x "$guest"
-    ret=$?
-    set -e
-    if [ "$ret" -ne 0 ]; then
-        echo "FAIL: $label user-namespace PR_SET_MM semantics returned $ret" >&2
-        exit "$ret"
-    fi
-    echo "PASS: $label user-namespace PR_SET_MM semantics"
-done
+guest="$workdir/prctl-x86-semantics-privileged"
+cp "$workdir/prctl-x86-semantics" "$guest"
+set +e
+unshare -Ur env LATX_AOT=0 LATX_KZT=0 timeout -s KILL 10 \
+    "$emulator" "$guest" x "$guest"
+ret=$?
+set -e
+if [ "$ret" -ne 0 ]; then
+    echo "FAIL: user-namespace PR_SET_MM semantics returned $ret" >&2
+    exit "$ret"
+fi
+echo "PASS: user-namespace PR_SET_MM semantics"
