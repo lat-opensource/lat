@@ -14,6 +14,20 @@ if host_machine.cpu_family() == 'loongarch64' and \
       suite: 'latx-integration',
       timeout: 120,
     )
+
+    test(
+      'test-x11-async-bridge',
+      find_program('test-x11-async-bridge.sh'),
+      args: [
+        emulators['latx-x86_64'],
+        files('x11-async-bridge-guest.c'),
+        files('x11-async-bridge-probe.c'),
+        files('x11-async-bridge-dummy.c'),
+      ],
+      protocol: 'exitcode',
+      suite: 'latx-integration',
+      timeout: 120,
+    )
   endif
 
   test(
