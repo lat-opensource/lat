@@ -40,6 +40,16 @@ if 'CONFIG_LATX' in config_host
   )
 endif
 
+test(
+  'test-x11-synchronize-callback',
+  python,
+  args: [
+    files('check-x11-synchronize-callback.py'),
+    project_source_root / 'target/i386/latx/context/wrappedlibx11.c',
+  ],
+  suite: 'lat-pr-fast',
+)
+
 test_rcu_lazy_thread = executable(
   'test-rcu-lazy-thread',
   files('test-rcu-lazy-thread.c'),

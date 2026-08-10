@@ -663,9 +663,9 @@ static void* findXPendingAsyncHandlerFct(void* fct)
 // XSynchronizeProc
 #define GO(A)   \
 static uintptr_t my_XSynchronizeProc_fct_##A = 0;                       \
-static int my_XSynchronizeProc_##A(void)                                    \
+static int my_XSynchronizeProc_##A(void *dpy)                           \
 {                                                                       \
-    return (int)RunFunctionWithState(my_XSynchronizeProc_fct_##A, 0);\
+    return (int)RunFunctionWithState(my_XSynchronizeProc_fct_##A, 1, dpy);\
 }
 SUPER()
 #undef GO
@@ -736,7 +736,7 @@ static void* reverse_XSynchronizeProcFct(library_t* lib, void* fct)
     #define GO(A) if(my_XSynchronizeProc_##A == fct) return (void*)my_XSynchronizeProc_fct_##A;
     SUPER()
     #undef GO
-    return (void*)AddBridge(lib->priv.w.bridge, iFppp, fct, 0, NULL);
+    return (void *)AddBridge(lib->priv.w.bridge, iFp, fct, 0, NULL);
 }
 #if 0
 // XLockDisplay
