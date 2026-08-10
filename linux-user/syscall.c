@@ -3270,6 +3270,11 @@ set_timeout:
 static abi_long do_getsockopt(int sockfd, int level, int optname,
                               abi_ulong optval_addr, abi_ulong optlen)
 {
+    struct target_sctp_peeloff_arg {
+        uint32_t associd;
+        int32_t sd;
+    } *target_peeloff;
+    sctp_peeloff_arg_t peeloff;
     abi_long ret;
     int len, val;
     socklen_t lv;
@@ -3713,12 +3718,41 @@ get_timeout:
         break;
 #endif /* SOL_NETLINK */
     case IPPROTO_SCTP:
+        if (get_user_u32(len, optlen)) {
+            return -TARGET_EFAULT;
+        }
+
+        if (optname == SCTP_SOCKOPT_PEELOFF) {
+            if (len < sizeof(*target_peeloff)) {
+                return -TARGET_EINVAL;
+            }
+            target_peeloff = lock_user(VERIFY_WRITE, optval_addr,
+                                       sizeof(*target_peeloff), 1);
+            if (!target_peeloff) {
+                return -TARGET_EFAULT;
+            }
+            peeloff.associd = tswap32(target_peeloff->associd);
+            peeloff.sd = tswap32(target_peeloff->sd);
+            lv = sizeof(peeloff);
+            ret = get_errno(getsockopt(sockfd, level, optname, &peeloff, &lv));
+            if (ret < 0) {
+                unlock_user(target_peeloff, optval_addr, 0);
+                return ret;
+            }
+            target_peeloff->associd = tswap32(peeloff.associd);
+            target_peeloff->sd = tswap32(peeloff.sd);
+            unlock_user(target_peeloff, optval_addr,
+                        sizeof(*target_peeloff));
+            if (put_user_u32(lv, optlen)) {
+                close(peeloff.sd);
+                return -TARGET_EFAULT;
+            }
+            break;
+        }
+
         if (optname != SCTP_GET_LOCAL_ADDRS &&
             optname != SCTP_GET_PEER_ADDRS) {
             goto unimplemented;
-        }
-        if (get_user_u32(len, optlen)) {
-            return -TARGET_EFAULT;
         }
         if (len < sizeof(struct sctp_getaddrs)) {
             return -TARGET_EINVAL;
