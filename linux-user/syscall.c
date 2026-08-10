@@ -16511,7 +16511,7 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
             return ret;
         }
 #endif
-        ret = get_errno(target_mprotect(arg1, arg2, arg3));
+        ret = get_errno(target_mprotect_guest(arg1, arg2, arg3));
 #ifdef TARGET_I386
         mmap_unlock();
 #endif

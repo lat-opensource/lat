@@ -28,6 +28,9 @@
 #ifdef CONFIG_LATX
 #include "latx-config.h"
 #endif
+#if defined(CONFIG_LATX_KZT) && defined(TARGET_X86_64)
+#include "kzt_relro_preprotect.h"
+#endif
 #ifdef CONFIG_LATX_PERF
 #include "latx-perf.h"
 #endif
@@ -142,7 +145,8 @@ static int validate_prot_to_pageflags(int *host_prot, int prot)
 }
 
 /* NOTE: all the constants are the HOST ones, but addresses are target. */
-int target_mprotect(abi_ulong start, abi_ulong len, int target_prot)
+static int target_mprotect_internal(abi_ulong start, abi_ulong len,
+                                    int target_prot, bool guest_request)
 {
     abi_ulong end, host_start, host_end, addr;
     int prot1, ret, page_flags, host_prot;
@@ -170,6 +174,16 @@ int target_mprotect(abi_ulong start, abi_ulong len, int target_prot)
         mmap_unlock();
         return -TARGET_ENOMEM;
     }
+
+#if defined(CONFIG_LATX_KZT) && defined(TARGET_X86_64)
+    if (guest_request &&
+        page_check_range(start, len, PAGE_VALID | PAGE_WRITE)) {
+        kzt_try_bind_before_guest_relro(
+            (uintptr_t)start, (size_t)len, target_prot);
+    }
+#else
+    (void)guest_request;
+#endif
 
     host_start = start & qemu_host_page_mask;
     host_end = HOST_PAGE_ALIGN(end);
@@ -280,6 +294,16 @@ int target_mprotect(abi_ulong start, abi_ulong len, int target_prot)
 error:
     mmap_unlock();
     return ret;
+}
+
+int target_mprotect(abi_ulong start, abi_ulong len, int target_prot)
+{
+    return target_mprotect_internal(start, len, target_prot, false);
+}
+
+int target_mprotect_guest(abi_ulong start, abi_ulong len, int target_prot)
+{
+    return target_mprotect_internal(start, len, target_prot, true);
 }
 
 /* map an incomplete host page */

@@ -31,6 +31,194 @@
 #include "dictionnary.h"
 #include "symbols.h"
 #include "lsenv.h"
+#include "qemu.h"
+#include "kzt_relocation_transaction.h"
+
+static int kzt_relocation_slot_fits_page(uintptr_t slot_addr)
+{
+    uintptr_t slot_last;
+
+    if (!slot_addr || (slot_addr & (sizeof(uintptr_t) - 1)) ||
+        slot_addr > UINTPTR_MAX - (sizeof(uintptr_t) - 1)) {
+        return 0;
+    }
+    slot_last = slot_addr + sizeof(uintptr_t) - 1;
+    return (slot_addr & (uintptr_t)TARGET_PAGE_MASK) ==
+           (slot_last & (uintptr_t)TARGET_PAGE_MASK);
+}
+
+static int kzt_relocation_slot_is_writable(uintptr_t slot_addr)
+{
+    uintptr_t slot_last = slot_addr + sizeof(uintptr_t) - 1;
+    abi_ulong guest_addr;
+    abi_ulong guest_last;
+    int first_flags;
+    int last_flags;
+    int required = PAGE_VALID | PAGE_WRITE;
+
+    /*
+     * KZT may replace a loader relocation only while the guest mapping is
+     * naturally writable data.  In particular, never reopen RELRO and never
+     * write executable mappings without linux-user's SMC invalidation path.
+     */
+    if (!kzt_relocation_slot_fits_page(slot_addr) ||
+        !h2g_valid((void *)slot_addr) ||
+        !h2g_valid((void *)slot_last)) {
+        return 0;
+    }
+    guest_addr = h2g((void *)slot_addr);
+    guest_last = h2g((void *)slot_last);
+    first_flags = page_get_flags(guest_addr);
+    last_flags = page_get_flags(guest_last);
+    if (guest_last < guest_addr ||
+        guest_last - guest_addr != sizeof(uintptr_t) - 1 ||
+        (guest_addr & TARGET_PAGE_MASK) !=
+            (guest_last & TARGET_PAGE_MASK) ||
+        (first_flags & required) != required ||
+        (last_flags & required) != required ||
+        (first_flags & PAGE_EXEC) || (last_flags & PAGE_EXEC)) {
+        return 0;
+    }
+    return 1;
+}
+
+static int kzt_relocation_store(
+    kzt_relocation_transaction_t *transaction,
+    uintptr_t *slot,
+    uintptr_t value)
+{
+    if (transaction) {
+        return kzt_relocation_transaction_add(transaction, slot, value);
+    }
+    if (!kzt_relocation_slot_is_writable((uintptr_t)slot)) {
+        return -1;
+    }
+    *slot = value;
+    return 0;
+}
+
+static int kzt_atomic_relocation_slot_is_writable(
+    uintptr_t *slot,
+    void *opaque)
+{
+    (void)opaque;
+    return have_mmap_lock() &&
+           kzt_relocation_slot_is_writable((uintptr_t)slot) ? 0 : -1;
+}
+
+static int kzt_relocation_table_targets_are_writable(
+    elfheader_t *head,
+    uintptr_t table_addr,
+    size_t table_size,
+    int table_entry_size,
+    int *has_jump_slot)
+{
+    Elf64_Rela *rela;
+    size_t count;
+    size_t index;
+
+    if (!table_addr && !table_size) {
+        return 1;
+    }
+    if (!head || !table_addr || !table_size ||
+        table_entry_size != (int)sizeof(Elf64_Rela) ||
+        table_size % (size_t)table_entry_size ||
+        table_addr > UINTPTR_MAX - (uintptr_t)head->delta) {
+        return 0;
+    }
+    rela = (Elf64_Rela *)(table_addr + (uintptr_t)head->delta);
+    count = table_size / (size_t)table_entry_size;
+    for (index = 0; index < count; ++index) {
+        int type = ELF64_R_TYPE(rela[index].r_info);
+        uintptr_t slot_addr;
+
+        if (type != R_X86_64_GLOB_DAT &&
+            type != R_X86_64_JUMP_SLOT) {
+            continue;
+        }
+        if (rela[index].r_offset >
+            UINTPTR_MAX - (uintptr_t)head->delta) {
+            return 0;
+        }
+        slot_addr = (uintptr_t)rela[index].r_offset +
+                    (uintptr_t)head->delta;
+        if (!kzt_relocation_slot_is_writable(slot_addr)) {
+            return 0;
+        }
+        if (has_jump_slot && type == R_X86_64_JUMP_SLOT) {
+            *has_jump_slot = 1;
+        }
+    }
+    return 1;
+}
+
+int KZTRelocationTargetsAreWritable(elfheader_t *head)
+{
+    uintptr_t got_addr;
+    int has_jump_slot = 0;
+
+    if (!head ||
+        !kzt_relocation_table_targets_are_writable(
+            head, head->rela, head->relasz, head->relaent, NULL)) {
+        return 0;
+    }
+    if (head->pltrel != DT_RELA) {
+        return !head->pltrel || head->pltrel == DT_REL;
+    }
+    if (!kzt_relocation_table_targets_are_writable(
+            head, head->jmprel, head->pltsz, head->pltent,
+            &has_jump_slot)) {
+        return 0;
+    }
+    if (!has_jump_slot) {
+        return 1;
+    }
+
+    got_addr = head->pltgot ? head->pltgot : head->got;
+    if (!got_addr) {
+        return 1;
+    }
+    if (got_addr > UINTPTR_MAX - (uintptr_t)head->delta ||
+        got_addr + (uintptr_t)head->delta > UINTPTR_MAX - 16) {
+        return 0;
+    }
+    got_addr += (uintptr_t)head->delta;
+    return kzt_relocation_slot_is_writable(got_addr + 8) &&
+           kzt_relocation_slot_is_writable(got_addr + 16);
+}
+
+size_t KZTRelocationWriteCapacity(const elfheader_t *head)
+{
+    size_t capacity = 2;
+    size_t count;
+
+    if (!head) {
+        return 0;
+    }
+    if (head->rela || head->relasz) {
+        if (!head->rela || head->relaent != sizeof(Elf64_Rela) ||
+            head->relasz % head->relaent) {
+            return 0;
+        }
+        count = head->relasz / head->relaent;
+        if (count > SIZE_MAX - capacity) {
+            return 0;
+        }
+        capacity += count;
+    }
+    if (head->pltrel == DT_RELA && (head->jmprel || head->pltsz)) {
+        if (!head->jmprel || head->pltent != sizeof(Elf64_Rela) ||
+            head->pltsz % head->pltent) {
+            return 0;
+        }
+        count = head->pltsz / head->pltent;
+        if (count > SIZE_MAX - capacity) {
+            return 0;
+        }
+        capacity += count;
+    }
+    return capacity;
+}
 
 void* my__IO_2_1_stderr_ = NULL;
 void* my__IO_2_1_stdin_  = NULL;
@@ -643,7 +831,15 @@ static int FindR64COPYRel(elfheader_t* h, const char* name, uintptr_t *offs, uin
 }
 */
 
-int RelocateElfRELA(lib_t *maplib, lib_t *local_maplib, int bindnow, elfheader_t* head, int cnt, Elf64_Rela *rela, int* need_resolv)
+static int relocate_elf_rela(
+    lib_t *maplib,
+    lib_t *local_maplib,
+    int bindnow,
+    elfheader_t *head,
+    int cnt,
+    Elf64_Rela *rela,
+    int *need_resolv,
+    kzt_relocation_transaction_t *transaction)
 {
 //    int ret_ok = 0;
     for (int i=0; i<cnt; ++i) {
@@ -691,7 +887,13 @@ int RelocateElfRELA(lib_t *maplib, lib_t *local_maplib, int bindnow, elfheader_t
                    // }
                     if (offs) {
                         printf_log(LOG_INFO, "Apply %s R_X86_64_GLOB_DAT @%p (%p -> %p) on sym=%s (ver=%d/%s)\n", (bind==STB_LOCAL)?"Local":"Global", p, (void*)(p?(*p):0), (void*)offs, symname, version, vername?vername:"(none)");
-                        *p = offs/* + rela[i].r_addend*/;   // not addend it seems
+                        if (kzt_relocation_store(
+                                transaction, (uintptr_t *)p, offs) != 0) {
+                            printf_log(LOG_INFO,
+                                       "Cannot write R_X86_64_GLOB_DAT @%p\n",
+                                       p);
+                            return -1;
+                        }
                     }
                 break;
             case R_X86_64_JUMP_SLOT:
@@ -706,15 +908,30 @@ int RelocateElfRELA(lib_t *maplib, lib_t *local_maplib, int bindnow, elfheader_t
                     if (offs){
                         if(p) {
                             printf_log(LOG_INFO, "RelocateElfRELA : Apply %s R_X86_64_JUMP_SLOT @%p with sym=%s (%p -> %p)\n", (bind==STB_LOCAL)?"Local":"Global", p, symname, *(void**)p, (void*)(offs+rela[i].r_addend));
-                            *p =(uint64_t) (offs + rela[i].r_addend);
+                            if (kzt_relocation_store(
+                                    transaction, (uintptr_t *)p,
+                                    offs + rela[i].r_addend) != 0) {
+                                printf_log(LOG_INFO,
+                                           "Cannot write R_X86_64_JUMP_SLOT @%p\n",
+                                           p);
+                                return -1;
+                            }
                         } else {
-                            printf_log(LOG_INFO, "Warning, Symbol %s found, but Jump Slot Offset is NULL \n", symname);
+                            printf_log(LOG_INFO,
+                                       "Warning, Symbol %s found, but Jump Slot Offset is NULL\n",
+                                       symname);
                         }
                     }
                 } else {
                     printf_log(LOG_INFO, "Preparing (if needed) %s R_X86_64_JUMP_SLOT @%p (0x%lx->0x%0lx) with sym=%s to be apply later (addend=%ld)\n", 
                         (bind==STB_LOCAL)?"Local":"Global", p, *p, *p+head->delta, symname, rela[i].r_addend);
-                    *p += head->delta;
+                    if (kzt_relocation_store(transaction, (uintptr_t *)p,
+                                             tmp + head->delta) != 0) {
+                        printf_log(LOG_INFO,
+                                   "Cannot prepare R_X86_64_JUMP_SLOT @%p\n",
+                                   p);
+                        return -1;
+                    }
                     *need_resolv = 1;
                 }
                 break;
@@ -739,10 +956,22 @@ int RelocateElfRELA(lib_t *maplib, lib_t *local_maplib, int bindnow, elfheader_t
     return 0;
 }
 
-int RelocateElfPlt(lib_t *maplib, lib_t *local_maplib, int bindnow, elfheader_t* head)
+int RelocateElfRELA(lib_t *maplib, lib_t *local_maplib, int bindnow,
+                    elfheader_t *head, int cnt, Elf64_Rela *rela,
+                    int *need_resolv)
+{
+    return relocate_elf_rela(maplib, local_maplib, bindnow, head, cnt, rela,
+                             need_resolv, NULL);
+}
+
+static int relocate_elf_plt(
+    lib_t *maplib,
+    lib_t *local_maplib,
+    int bindnow,
+    elfheader_t *head,
+    kzt_relocation_transaction_t *transaction)
 {
     int need_resolver = 0;
-    head->had_RelocateElfPlt = 1;
     if(head->pltrel) {
         int cnt = head->pltsz / head->pltent;
         if(head->pltrel==DT_REL) {
@@ -754,34 +983,72 @@ int RelocateElfPlt(lib_t *maplib, lib_t *local_maplib, int bindnow, elfheader_t*
         } else if(head->pltrel==DT_RELA) {
             DumpRelATable(head, cnt, (Elf64_Rela *)(head->jmprel + head->delta), "PLT");
             printf_log(LOG_INFO, "Applying %d PLT Relocation(s) with Addend for %s\n", cnt, head->name);
-            if(RelocateElfRELA(maplib, local_maplib, bindnow, head, cnt, (Elf64_Rela *)(head->jmprel + head->delta), &need_resolver))
-                //return -1;
+            if (relocate_elf_rela(
+                    maplib, local_maplib, bindnow, head, cnt,
+                    (Elf64_Rela *)(head->jmprel + head->delta),
+                    &need_resolver, transaction)) {
                 printf_log(LOG_INFO, "RelocateElfRELA run ERROR!");
+                return -1;
+            }
         }
         if(need_resolver) {
             if(pltResolver==~0LL) {
                 pltResolver = AddBridge(my_context->system, vFE, PltResolver, 0, "PltResolver");
             }
             if(head->pltgot) {
+                uintptr_t *link_map_slot =
+                    (uintptr_t *)(head->pltgot + head->delta + 8);
+                uintptr_t *resolver_slot =
+                    (uintptr_t *)(head->pltgot + head->delta + 16);
+
                 if(dl_runtime_resolver ==~0LL){
-                    dl_runtime_resolver =  *(uintptr_t*)(head->pltgot+head->delta+16);
+                    dl_runtime_resolver = *resolver_slot;
                 }
-                *(uintptr_t*)(head->pltgot+head->delta+16) = pltResolver;
-                head->self_link_map = *(uintptr_t*)(head->pltgot+head->delta+8);
-                *(uintptr_t*)(head->pltgot+head->delta+8) = (uintptr_t)head;
+                head->self_link_map = *link_map_slot;
+                if (kzt_relocation_store(
+                        transaction, resolver_slot, pltResolver) != 0 ||
+                    kzt_relocation_store(
+                        transaction, link_map_slot, (uintptr_t)head) != 0) {
+                    printf_log(LOG_INFO,
+                               "Cannot inject PLT resolver in plt.got @%p\n",
+                               (void *)(head->pltgot + head->delta));
+                    return -1;
+                }
                 printf_log(LOG_INFO, "PLT Resolver injected in plt.got at %p\n", (void*)(head->pltgot+head->delta+16));
             } else if(head->got) {
+                uintptr_t *link_map_slot =
+                    (uintptr_t *)(head->got + head->delta + 8);
+                uintptr_t *resolver_slot =
+                    (uintptr_t *)(head->got + head->delta + 16);
+
                 if(dl_runtime_resolver ==~0LL){
-                    dl_runtime_resolver =  *(uintptr_t*)(head->got+head->delta+16);
+                    dl_runtime_resolver = *resolver_slot;
                 }
-                *(uintptr_t*)(head->got+head->delta+16) = pltResolver;
-                head->self_link_map = *(uintptr_t*)(head->got+head->delta+8);
-                *(uintptr_t*)(head->got+head->delta+8) = (uintptr_t)head;
+                head->self_link_map = *link_map_slot;
+                if (kzt_relocation_store(
+                        transaction, resolver_slot, pltResolver) != 0 ||
+                    kzt_relocation_store(
+                        transaction, link_map_slot, (uintptr_t)head) != 0) {
+                    printf_log(LOG_INFO,
+                               "Cannot inject PLT resolver in got @%p\n",
+                               (void *)(head->got + head->delta));
+                    return -1;
+                }
                 printf_log(LOG_INFO, "PLT Resolver injected in got at %p\n", (void*)(head->got+head->delta+16));
             }
         }
     }
    
+    return 0;
+}
+
+int RelocateElfPlt(lib_t *maplib, lib_t *local_maplib, int bindnow,
+                   elfheader_t *head)
+{
+    if (relocate_elf_plt(maplib, local_maplib, bindnow, head, NULL) != 0) {
+        return -1;
+    }
+    head->had_RelocateElfPlt = 1;
     return 0;
 }
 
@@ -815,7 +1082,12 @@ int GetElfHeadFromLinkmap (struct link_map *map, elfheader_t* h)
     return 0;
 }
 #endif
-int RelocateElf(lib_t *maplib, lib_t *local_maplib, int bindnow, elfheader_t* head)
+static int relocate_elf(
+    lib_t *maplib,
+    lib_t *local_maplib,
+    int bindnow,
+    elfheader_t *head,
+    kzt_relocation_transaction_t *transaction)
 {
     if(head->rel) {
 //        int cnt = head->relsz / head->relent;
@@ -828,10 +1100,52 @@ int RelocateElf(lib_t *maplib, lib_t *local_maplib, int bindnow, elfheader_t* he
         int cnt = head->relasz / head->relaent;
         DumpRelATable(head, cnt, (Elf64_Rela *)(head->rela + head->delta), "RelA");
         printf_dump(LOG_DEBUG, "Applying %d Relocation(s) with Addend for %s\n", cnt, head->name);
-        if(RelocateElfRELA(maplib, local_maplib, bindnow, head, cnt, (Elf64_Rela *)(head->rela + head->delta), NULL))
+        if (relocate_elf_rela(
+                maplib, local_maplib, bindnow, head, cnt,
+                (Elf64_Rela *)(head->rela + head->delta), NULL,
+                transaction)) {
             return -1;
+        }
+    }
+    return 0;
+}
+
+int RelocateElf(lib_t *maplib, lib_t *local_maplib, int bindnow,
+                elfheader_t *head)
+{
+    if (relocate_elf(maplib, local_maplib, bindnow, head, NULL) != 0) {
+        return -1;
     }
     head->had_RelocateElf = 1;
+    return 0;
+}
+
+int KZTRelocateElfAtomically(
+    lib_t *maplib,
+    lib_t *local_maplib,
+    int bindnow,
+    elfheader_t *head,
+    kzt_relocation_write_t *writes,
+    size_t write_capacity)
+{
+    kzt_relocation_transaction_t transaction;
+    size_t required_capacity = KZTRelocationWriteCapacity(head);
+
+    if (!required_capacity || write_capacity < required_capacity ||
+        !have_mmap_lock()) {
+        return -1;
+    }
+    kzt_relocation_transaction_init(
+        &transaction, writes, write_capacity,
+        kzt_atomic_relocation_slot_is_writable, NULL);
+    if (relocate_elf(maplib, local_maplib, bindnow, head, &transaction) != 0 ||
+        relocate_elf_plt(
+            maplib, local_maplib, bindnow, head, &transaction) != 0 ||
+        kzt_relocation_transaction_commit(&transaction) != 0) {
+        return -1;
+    }
+    head->had_RelocateElf = 1;
+    head->had_RelocateElfPlt = 1;
     return 0;
 }
 
@@ -971,7 +1285,6 @@ $PLATFORM – Expands to the processor type of the current machine (see the
 uname(1) man page description of the -i option). For more details of this token
 expansion, see “System Specific Shared Objects”
 */
-extern const char *interp_prefix;
 int LoadNeededLibs(elfheader_t* h, lib_t *maplib, needed_libs_t* neededlibs, library_t *deplib, int local, int bindnow, box64context_t *box64)
 {
     if (!h->latx_hasfix) return 1;

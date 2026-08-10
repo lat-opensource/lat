@@ -603,6 +603,7 @@ void sparc64_get_context(CPUSPARCState *env);
 
 /* mmap.c */
 int target_mprotect(abi_ulong start, abi_ulong len, int prot);
+int target_mprotect_guest(abi_ulong start, abi_ulong len, int prot);
 abi_long target_mmap(abi_ulong start, abi_ulong len, int prot,
                      int flags, int fd, uint64_t offset, int rlimit_as_account);
 int target_munmap(abi_ulong start, abi_ulong len, int rlimit_as_account);

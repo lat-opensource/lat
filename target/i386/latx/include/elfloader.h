@@ -2,6 +2,7 @@
 #define __ELF_LOADER_H_
 #include <stdio.h>
 #include "elf.h"
+#include "kzt_relocation_transaction.h"
 extern uintptr_t pltResolver;
 extern uintptr_t dl_runtime_resolver;
 extern uintptr_t link_map_obj;
@@ -30,6 +31,15 @@ int CalcLoadAddr(elfheader_t* head);
 int AllocLoadElfMemory(box64context_t* context, elfheader_t* head, int mainbin);
 int RelocateElf(lib_t *maplib, lib_t *local_maplib, int bindnow, elfheader_t* head);
 int RelocateElfPlt(lib_t *maplib, lib_t* local_maplib, int bindnow, elfheader_t* head);
+int KZTRelocationTargetsAreWritable(elfheader_t *head);
+size_t KZTRelocationWriteCapacity(const elfheader_t *head);
+int KZTRelocateElfAtomically(
+    lib_t *maplib,
+    lib_t *local_maplib,
+    int bindnow,
+    elfheader_t *head,
+    kzt_relocation_write_t *writes,
+    size_t write_capacity);
 void CalcStack(elfheader_t* h, uint64_t* stacksz, size_t* stackalign);
 void AddSymbols(lib_t *maplib, kh_mapsymbols_t* mapsymbols, kh_mapsymbols_t* weaksymbols, kh_mapsymbols_t* localsymbols, elfheader_t* h);
 int LoadNeededLibs(elfheader_t* h, lib_t *maplib, needed_libs_t* neededlibs, library_t *deplib, int local, int bindnow, box64context_t *box64);

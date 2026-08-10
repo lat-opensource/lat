@@ -11,7 +11,12 @@
 #include "myalign.h"
 #include "elfloader.h"
 #include "elfloader_private.h"
+#include "kzt_public_loader_observer.h"
+#include "kzt_relro_preprotect.h"
+#include "librarian_private.h"
+#include "library_private.h"
 #include <sys/epoll.h>
+#include <sys/mman.h>
 #include <sys/sem.h>
 #include <sys/syscall.h>
 
@@ -21,7 +26,9 @@
 int box64_x87_no80bits = 1;
 #define BIAS80 16383
 #define BIAS64 1023
-static TranslationBlock* kzt_add_fucn_by_addr(uint32* inst_old, CPUState *cpu, uintptr_t addr, int (*latx_ld_callback)(void *, void (*)(CPUX86State *)), void (*kzt_tb_callback)(CPUX86State *));
+static TranslationBlock *kzt_install_guest_pc_callback(
+    uint32_t *inst_old, CPUState *cpu, uintptr_t addr,
+    void (*callback)(CPUX86State *));
 
 #ifndef HUGE_VAL
 #define HUGE_VAL (1.0 / 0.0)
@@ -2117,11 +2124,9 @@ int kzt_init(char** argv, int argc,char** target_argv, int target_argc,
     return 0;
 }
 
-struct x86_ld_info {
-    int reg;
-    intptr_t addr;
-};
-static struct x86_ld_info * ld_info = NULL;
+static kzt_public_loader_observer_t kzt_public_loader_observer;
+static int kzt_main_relocated_before_relro;
+static uint32 kzt_public_r_brk_inst[2];
 extern void* x86free;
 extern void* x86realloc;
 extern void* x86pthread_setcanceltype;
@@ -2218,67 +2223,464 @@ static char* kzt_find_realsofilepath(char * filepath, char *filetmp)
         printf_log(LOG_DEBUG, "%s filename change to \"%s\"\n", __func__, filepath);
         return filetmp;
     }
-    //file must exist for kzt_tb_callback.
+    /* Keep the guest path when no matching prefixed file exists. */
     return filepath;
 }
 extern const char* libcName;
-static void kzt_tb_callback(CPUX86State *env)
+
+static int kzt_public_loader_read_guest(uintptr_t guest_addr,
+                                        void *dst,
+                                        size_t size,
+                                        void *opaque)
 {
-    struct link_map_x64 * my_lm = (struct link_map_x64 *)env->regs[R_EAX + ld_info->reg];
-    elfheader_t *h = NULL;
-    if ((!my_lm ||!my_lm->l_name ||!strlen(my_lm->l_name) || ! my_lm->l_addr)&& my_lm->l_addr != info1.load_addr) {
-        printf_log(LOG_DEBUG, "error %d debug %s link_map = %p{0x%lx, %s}\n", getpid(), __func__, my_lm, my_lm->l_addr, my_lm->l_name);
-        return;
+    void *src;
+
+    (void)opaque;
+    if (!guest_addr || !dst || !size) {
+        return -1;
     }
-    printf_log(LOG_DEBUG, "%d debug %s link_map = %p{0x%lx, %s}\n", getpid(), __func__, my_lm, my_lm->l_addr, my_lm->l_name);
-    char * rfilename = my_lm->l_name;
-    if (strstr(basename(rfilename), "ld-linux-x86-64.so.2")) {
-        AddDebugInfo(LIB_EMULATED, my_lm->l_name, my_lm->l_map_start, my_lm->l_map_end);
-        return;
+    src = lock_user(VERIFY_READ, (abi_ulong)guest_addr, (ssize_t)size, 1);
+    if (!src) {
+        return -1;
     }
+    memcpy(dst, src, size);
+    unlock_user(src, (abi_ulong)guest_addr, 0);
+    return 0;
+}
+
+static const kzt_public_loader_reader_t kzt_public_loader_reader = {
+    .read_memory = kzt_public_loader_read_guest,
+    .opaque = NULL,
+};
+
+static int kzt_find_main_dynamic_table(const elfheader_t *head,
+                                       uintptr_t *dynamic_addr,
+                                       size_t *dynamic_count)
+{
+    size_t index;
+
+    if (!head || !dynamic_addr || !dynamic_count) {
+        return -1;
+    }
+    for (index = 0; index < head->numPHEntries; ++index) {
+        const Elf64_Phdr *phdr = &head->PHEntries[index];
+        uintptr_t load_bias = (uintptr_t)head->delta;
+
+        if (phdr->p_type != PT_DYNAMIC) {
+            continue;
+        }
+        if (phdr->p_vaddr > UINTPTR_MAX - load_bias ||
+            phdr->p_memsz < sizeof(kzt_x86_64_dynamic_entry_t)) {
+            return -1;
+        }
+        *dynamic_addr = load_bias + (uintptr_t)phdr->p_vaddr;
+        *dynamic_count = phdr->p_memsz /
+                         sizeof(kzt_x86_64_dynamic_entry_t);
+        return *dynamic_count ? 0 : -1;
+    }
+    return -1;
+}
+
+static int kzt_main_relro_matches(const elfheader_t *head,
+                                  uintptr_t protect_start,
+                                  size_t protect_size)
+{
+    uintptr_t protect_end;
+    size_t index;
+
+    /*
+     * The main executable's link_map has an empty l_name and ET_EXEC may
+     * legitimately have l_addr == 0.  Match its already-parsed program
+     * headers instead of treating it like a named shared object.
+     */
+    if (!head || !protect_start || !protect_size ||
+        protect_size > UINTPTR_MAX - protect_start) {
+        return 0;
+    }
+    protect_end = protect_start + protect_size;
+    for (index = 0; index < head->numPHEntries; ++index) {
+        const Elf64_Phdr *phdr = &head->PHEntries[index];
+        uintptr_t relro_start;
+        uintptr_t relro_end;
+
+        if (phdr->p_type != PT_GNU_RELRO || !phdr->p_memsz ||
+            phdr->p_vaddr > UINTPTR_MAX - (uintptr_t)head->delta) {
+            continue;
+        }
+        relro_start = (uintptr_t)head->delta +
+                      (uintptr_t)phdr->p_vaddr;
+        if (phdr->p_memsz > UINTPTR_MAX - relro_start ||
+            relro_start + (uintptr_t)phdr->p_memsz >
+                UINTPTR_MAX - (TARGET_PAGE_SIZE - 1)) {
+            return 0;
+        }
+        relro_end = TARGET_PAGE_ALIGN(
+            relro_start + (uintptr_t)phdr->p_memsz);
+        relro_start &= TARGET_PAGE_MASK;
+        return (protect_start >= relro_start && protect_end <= relro_end) ||
+               (relro_start >= protect_start && relro_end <= protect_end);
+    }
+    return 0;
+}
+
+static void kzt_calculate_loaded_elf_range(
+    const elfheader_t *head,
+    uintptr_t load_bias,
+    uintptr_t *map_start,
+    uintptr_t *map_end)
+{
+    size_t index;
+
+    *map_start = UINTPTR_MAX;
+    *map_end = 0;
+    for (index = 0; index < head->numPHEntries; ++index) {
+        const Elf64_Phdr *phdr = &head->PHEntries[index];
+        uintptr_t start;
+        uintptr_t end;
+
+        if (phdr->p_type != PT_LOAD ||
+            phdr->p_vaddr > UINTPTR_MAX - load_bias) {
+            continue;
+        }
+        start = load_bias + (uintptr_t)phdr->p_vaddr;
+        if (phdr->p_memsz > UINTPTR_MAX - start) {
+            continue;
+        }
+        end = start + (uintptr_t)phdr->p_memsz;
+        if (start < *map_start) {
+            *map_start = start;
+        }
+        if (end > *map_end) {
+            *map_end = end;
+        }
+    }
+    if (*map_start == UINTPTR_MAX) {
+        *map_start = load_bias;
+        *map_end = load_bias;
+    }
+}
+
+typedef struct kzt_library_registration_snapshot {
+    int global_library_count;
+    int needed_library_count;
+} kzt_library_registration_snapshot_t;
+
+static void kzt_library_registration_snapshot(
+    kzt_library_registration_snapshot_t *snapshot)
+{
+    snapshot->global_library_count = my_context->maplib->libsz;
+    snapshot->needed_library_count = my_context->neededlibs.size;
+}
+
+static void kzt_library_registration_rollback(
+    const kzt_library_registration_snapshot_t *snapshot)
+{
+    while (my_context->maplib->libsz > snapshot->global_library_count) {
+        library_t *library =
+            my_context->maplib->libraries[my_context->maplib->libsz - 1];
+
+        MapLibRemoveLib(my_context->maplib, library);
+        removeLinkMapLib(library);
+        InactiveLibrary(library);
+    }
+    my_context->neededlibs.size = snapshot->needed_library_count;
+}
+
+static kzt_relocation_write_t *kzt_allocate_relocation_writes(
+    const elfheader_t *head,
+    size_t *write_capacity)
+{
+    size_t capacity = KZTRelocationWriteCapacity(head);
+
+    *write_capacity = 0;
+    if (!capacity ||
+        capacity > SIZE_MAX / sizeof(kzt_relocation_write_t)) {
+        return NULL;
+    }
+    *write_capacity = capacity;
+    return box_calloc(capacity, sizeof(kzt_relocation_write_t));
+}
+
+static int kzt_relocate_elf_with_fresh_transaction(elfheader_t *head)
+{
+    kzt_relocation_write_t *writes;
+    size_t write_capacity;
+    int result;
+
+    writes = kzt_allocate_relocation_writes(head, &write_capacity);
+    if (!writes) {
+        return -1;
+    }
+    result = KZTRelocateElfAtomically(
+        my_context->maplib, NULL, 0, head, writes, write_capacity);
+    box_free(writes);
+    return result;
+}
+
+typedef enum kzt_loaded_object_timing {
+    KZT_BEFORE_GUEST_PROTECTION,
+    KZT_AFTER_LOADER_CONSISTENT,
+} kzt_loaded_object_timing_t;
+
+static int kzt_try_bind_loaded_object(
+    const kzt_public_loader_object_t *object,
+    kzt_loaded_object_timing_t timing,
+    int *processed)
+{
+    char *guest_name;
+    char *name_copy;
+    char *rfilename;
+    char *rbasename;
     char filetmp[PATH_MAX] = {0};
+    library_t *lib;
+    elfheader_t *h;
+    kzt_relocation_write_t *writes;
+    kzt_library_registration_snapshot_t registration_snapshot;
+    uintptr_t map_start;
+    uintptr_t map_end;
+    size_t write_capacity;
+    FILE *f;
+
+    if (processed) {
+        *processed = 0;
+    }
+    if (!object || !object->link_map_addr || !object->name_addr) {
+        return 0;
+    }
+    guest_name = lock_user_string((abi_ulong)object->name_addr);
+    if (!guest_name) {
+        printf_log(LOG_INFO,
+                   "KZT public loader cannot read link_map name @%p\n",
+                   (void *)object->name_addr);
+        return 0;
+    }
+    name_copy = box_strdup(guest_name);
+    unlock_user(guest_name, (abi_ulong)object->name_addr, 0);
+    if (!name_copy || !name_copy[0]) {
+        box_free(name_copy);
+        return 0;
+    }
+
+    rfilename = name_copy;
+    rbasename = basename(rfilename);
+    if (strstr(rbasename, "ld-linux-x86-64.so.2") ||
+        strstr(rbasename, "linux-vdso.so")) {
+        box_free(name_copy);
+        return 0;
+    }
     if (rfilename[0] == '/') {
         rfilename = kzt_find_realsofilepath(rfilename, filetmp);
     }
-    char * rbasename = basename(rfilename);
-    library_t* lib = NewLibrary(rbasename, my_context);
-    if (lib) {
-        const char* libs[] = {rbasename};
-        AddNeededLib(my_context->maplib, &my_context->neededlibs, NULL, 0, 1, libs, 1, my_context);
-    }
-    if (!lib && (!strncmp(rbasename, "libSDL", 6)||!strncmp(rbasename, "libCgGL.so", strlen("libCgGL.so")))) {
-        printf_log(LOG_DEBUG, "%s libSDL need libGL.so.1\n", __func__);
-        const char* libs[] = {"libGL.so.1"};
-        AddNeededLib(my_context->maplib, &my_context->neededlibs, NULL, 0, 1, libs, 1, my_context);
-    }
-    FILE *f = fopen(rfilename, "rb");
-    if(!f) {
-        printf_log(LOG_INFO, "%s Error: Cannot open \"%s\"\n", __func__, rfilename);
-        return;
+
+    printf_log(LOG_DEBUG,
+               "%d debug %s link_map=%p{0x%lx, %s, l_ld=%p}\n",
+               getpid(), __func__, (void *)object->link_map_addr,
+               object->load_bias, name_copy,
+               (void *)object->dynamic_addr);
+
+    f = fopen(rfilename, "rb");
+    if (!f) {
+        printf_log(LOG_INFO, "%s Error: Cannot open \"%s\"\n",
+                   __func__, rfilename);
+        box_free(name_copy);
+        return 0;
     }
     h = LoadAndCheckElfHeader(f, rfilename, 0);
-    ElfHeadReFix(h, my_lm->l_addr);
     fclose(f);
+    if (!h) {
+        printf_log(LOG_INFO, "%s Error: Cannot parse \"%s\"\n",
+                   __func__, rfilename);
+        box_free(name_copy);
+        return 0;
+    }
+
+    kzt_calculate_loaded_elf_range(h, object->load_bias,
+                                   &map_start, &map_end);
+    ElfHeadReFix(h, object->load_bias);
+
+    if (!have_mmap_lock() || !KZTRelocationTargetsAreWritable(h)) {
+        printf_log(LOG_DEBUG,
+                   "KZT observed loaded object \"%s\" %s, but at least "
+                   "one relocation target is not writable; keeping guest "
+                   "execution\n",
+                   name_copy,
+                   timing == KZT_BEFORE_GUEST_PROTECTION ?
+                       "before guest protection" :
+                       "after the loader became consistent");
+        FreeElfHeader(&h);
+        box_free(name_copy);
+        return 0;
+    }
+    writes = kzt_allocate_relocation_writes(h, &write_capacity);
+    if (!writes) {
+        printf_log(LOG_INFO,
+                   "KZT cannot allocate a relocation transaction for "
+                   "\"%s\"; keeping guest execution\n",
+                   name_copy);
+        FreeElfHeader(&h);
+        box_free(name_copy);
+        return 0;
+    }
+
+    kzt_library_registration_snapshot(&registration_snapshot);
+
+    lib = GetLibInternal(rbasename);
+    if (!lib && FindLibIsWrapped(rbasename) &&
+        AddNeededLib_add(my_context->maplib, &my_context->neededlibs,
+                         NULL, 0, rbasename, my_context) != 0) {
+        printf_log(LOG_INFO,
+                   "KZT cannot register the wrapper for \"%s\"; keeping "
+                   "guest execution\n",
+                   name_copy);
+        kzt_library_registration_rollback(&registration_snapshot);
+        box_free(writes);
+        FreeElfHeader(&h);
+        box_free(name_copy);
+        return 0;
+    }
+    lib = GetLibInternal(rbasename);
+    if (!lib && (!strncmp(rbasename, "libSDL", 6) ||
+                 !strncmp(rbasename, "libCgGL.so", strlen("libCgGL.so")))) {
+        printf_log(LOG_DEBUG, "%s libSDL need libGL.so.1\n", __func__);
+        if (AddNeededLib_add(
+                my_context->maplib, &my_context->neededlibs, NULL, 0,
+                "libGL.so.1", my_context) != 0) {
+            kzt_library_registration_rollback(&registration_snapshot);
+            box_free(writes);
+            FreeElfHeader(&h);
+            box_free(name_copy);
+            return 0;
+        }
+    }
+
+    if (LoadNeededLibs(h, my_context->maplib, &my_context->neededlibs,
+                       NULL, 0, 0, my_context) != 0 ||
+        KZTRelocateElfAtomically(
+            my_context->maplib, NULL, 0, h, writes, write_capacity) != 0) {
+        printf_log(LOG_INFO,
+                   "KZT cannot commit loaded object \"%s\"; rolling back "
+                   "wrapper registration and keeping guest execution\n",
+                   name_copy);
+        kzt_library_registration_rollback(&registration_snapshot);
+        box_free(writes);
+        FreeElfHeader(&h);
+        box_free(name_copy);
+        return -1;
+    }
+    box_free(writes);
+
+    AddElfHeader(my_context, h);
     collectX86free(h);
-    if(!x86free &&!strcmp(rbasename, libcName)) {
-        struct malloc_map * m = SearchMallocMap(my_context, (char *)libcName);
+    if (!x86free && !strcmp(rbasename, libcName)) {
+        struct malloc_map *m = SearchMallocMap(my_context, (char *)libcName);
         lsassert(m);
         x86free = m->freep;
         x86realloc = m->reallocp;
     }
-    if(!x86pthread_setcanceltype &&!strcmp(rbasename, libcName)) {
+    if (!x86pthread_setcanceltype && !strcmp(rbasename, libcName)) {
         findx86pthread_setcanceltype(h);
     }
-    AddElfHeader(my_context, h);
-    LoadNeededLibs(h, my_context->maplib, &my_context->neededlibs, NULL, 0, 0, my_context);
-    RelocateElf(my_context->maplib, NULL, 0, h);
-    RelocateElfPlt(my_context->maplib, NULL, 0, h);
-    if (lib) {
-        AddDebugInfo(LIB_WRAPPED, my_lm->l_name, my_lm->l_map_start, my_lm->l_map_end);
-    } else {
-        AddDebugInfo(LIB_EMULATED, my_lm->l_name, my_lm->l_map_start, my_lm->l_map_end);
+    AddDebugInfo(lib ? LIB_WRAPPED : LIB_EMULATED,
+                 name_copy, map_start, map_end);
+    if (processed) {
+        *processed = 1;
     }
+    box_free(name_copy);
+    return 0;
 }
+
+static int kzt_try_bind_observed_object(
+    const kzt_public_loader_object_t *object,
+    void *opaque)
+{
+    kzt_public_loader_result_t result;
+    int has_relro = 0;
+    int processed = 0;
+
+    (void)opaque;
+    result = kzt_public_loader_object_has_relro(
+        object, &kzt_public_loader_reader, &has_relro);
+    if (result == KZT_PUBLIC_LOADER_OK && !has_relro &&
+        kzt_try_bind_loaded_object(
+            object, KZT_AFTER_LOADER_CONSISTENT, &processed) == 0 &&
+        processed) {
+        printf_log(LOG_DEBUG,
+                   "KZT processed no-RELRO link_map=%p after the "
+                   "loader reached a consistent state\n",
+                   (void *)object->link_map_addr);
+        return 0;
+    }
+    printf_log(LOG_DEBUG,
+               "KZT observed link_map=%p after the loader reached a "
+               "consistent state; keeping guest execution "
+               "(ELF inspection=%s, RELRO=%s)\n",
+               object ? (void *)object->link_map_addr : NULL,
+               kzt_public_loader_result_name(result),
+               result == KZT_PUBLIC_LOADER_OK ?
+                   (has_relro ? "present" : "absent") : "unknown");
+    return 0;
+}
+
+void kzt_try_bind_before_guest_relro(uintptr_t start, size_t length, int prot)
+{
+    static __thread int in_preprotect;
+    kzt_public_loader_object_t object;
+    kzt_public_loader_result_t result;
+    uintptr_t dynamic_addr;
+    size_t dynamic_count;
+    int processed = 0;
+
+    if (!option_kzt || in_preprotect || !my_context || !elf_header ||
+        !have_mmap_lock() ||
+        !(prot & PROT_READ) || (prot & PROT_WRITE) || !length ||
+        (start & (TARGET_PAGE_SIZE - 1)) ||
+        (length & (TARGET_PAGE_SIZE - 1)) ||
+        !(page_get_flags((abi_ulong)start) & PAGE_WRITE) ||
+        kzt_find_main_dynamic_table(
+            elf_header, &dynamic_addr, &dynamic_count) != 0) {
+        return;
+    }
+
+    in_preprotect = 1;
+    result = kzt_public_loader_find_relro_object(
+        dynamic_addr, dynamic_count, start, length, TARGET_PAGE_SIZE,
+        &kzt_public_loader_reader, &object);
+    if (!kzt_main_relocated_before_relro &&
+        kzt_main_relro_matches(elf_header, start, length)) {
+        if (KZTRelocationTargetsAreWritable(elf_header) &&
+            kzt_relocate_elf_with_fresh_transaction(elf_header) == 0) {
+            kzt_main_relocated_before_relro = 1;
+            if (result == KZT_PUBLIC_LOADER_OK &&
+                object.load_bias == (uintptr_t)elf_header->delta &&
+                object.dynamic_addr == dynamic_addr) {
+                kzt_public_loader_observer_remember(
+                    &kzt_public_loader_observer, object.link_map_addr);
+            }
+            printf_log(LOG_DEBUG,
+                       "KZT processed main executable before guest RELRO "
+                       "mprotect(%p, %zu)\n",
+                       (void *)start, length);
+        } else {
+            printf_log(LOG_INFO,
+                       "KZT cannot relocate main executable before RELRO; "
+                       "keeping guest path\n");
+        }
+    } else if (result == KZT_PUBLIC_LOADER_OK &&
+        !kzt_public_loader_observer_has_map(
+            &kzt_public_loader_observer, object.link_map_addr) &&
+        kzt_try_bind_loaded_object(
+            &object, KZT_BEFORE_GUEST_PROTECTION, &processed) == 0 &&
+        processed) {
+        kzt_public_loader_observer_remember(
+            &kzt_public_loader_observer, object.link_map_addr);
+        printf_log(LOG_DEBUG,
+                   "KZT processed link_map=%p before guest RELRO "
+                   "mprotect(%p, %zu)\n",
+                   (void *)object.link_map_addr, (void *)start, length);
+    }
+    in_preprotect = 0;
+}
+
 static TranslationBlock* test_tb;
 static void test_x86free(CPUX86State *env)
 {
@@ -2323,7 +2725,9 @@ static void test_x86free(CPUX86State *env)
 
                 mmap_unlock();
                 printf_log(LOG_DEBUG, "%s latx try find free=%p, realloc=%p from %s\n", __func__, x86free, x86realloc, ((elfheader_t*)m->h)->path);
-                test_tb = kzt_add_fucn_by_addr((uint32 *)&test_ld,  cpu, (uintptr_t)x86free, target_latx_ld_callback, test_x86free);
+                test_tb = kzt_install_guest_pc_callback(
+                    (uint32 *)&test_ld, cpu, (uintptr_t)x86free,
+                    test_x86free);
                 env->eip = eip;
                 cnt = 0;
                 return;
@@ -2345,8 +2749,15 @@ static void finiReFlesh(elfheader_t* exech)
 {
     CPUState *cpu;
     static uint32 test_ld [2] = {0};
-    lsassert(my_context->mallocmapsize);
     struct malloc_map * m;
+
+    if (!my_context || !my_context->mallocmapsize) {
+        printf_log(LOG_DEBUG,
+                   "%s skip malloc bridge setup for %s: "
+                   "no eligible guest malloc provider\n",
+                   __func__, exech ? ElfPath(exech) : "<unknown>");
+        return;
+    }
 
     if (my_context->mallocmapsize == 1) {
         m = my_context->mallocmaps[0];
@@ -2379,35 +2790,112 @@ static void finiReFlesh(elfheader_t* exech)
     }
     CPUArchState *env = cpu->env_ptr;
     target_ulong eip = env->eip;
-    test_tb = kzt_add_fucn_by_addr((uint32 *)&test_ld,  cpu, (uintptr_t)x86free, target_latx_ld_callback, test_x86free);
+    test_tb = kzt_install_guest_pc_callback(
+        (uint32 *)&test_ld, cpu, (uintptr_t)x86free, test_x86free);
     env->eip = eip;
     printf_log(LOG_DEBUG, "%s latx try find free=%p, realloc=%p from %s\n", __func__, x86free, x86realloc, ((elfheader_t*)m->h)->path);
 }
-static void kzt_exectb_callback(CPUX86State *env)
+
+static void kzt_dynamic_library_change_callback(CPUX86State *env)
 {
+    kzt_public_loader_result_t result;
+
+    (void)env;
+    mmap_lock();
+    result = kzt_public_loader_observer_refresh(
+        &kzt_public_loader_observer, &kzt_public_loader_reader,
+        kzt_try_bind_observed_object, NULL);
+    mmap_unlock();
+    if (result != KZT_PUBLIC_LOADER_OK &&
+        result != KZT_PUBLIC_LOADER_BUSY) {
+        printf_log(LOG_INFO,
+                   "KZT public loader refresh failed: %s\n",
+                   kzt_public_loader_result_name(result));
+    }
+}
+
+static void kzt_guest_main_entry_callback(CPUX86State *env)
+{
+    kzt_public_loader_result_t observer_result =
+        KZT_PUBLIC_LOADER_INVALID_INPUT;
+    uintptr_t dynamic_addr = 0;
+    size_t dynamic_count = 0;
+
+    mmap_lock();
+    if (kzt_find_main_dynamic_table(
+            elf_header, &dynamic_addr, &dynamic_count) == 0) {
+        observer_result = kzt_public_loader_observer_activate(
+            &kzt_public_loader_observer, dynamic_addr, dynamic_count,
+            &kzt_public_loader_reader, kzt_try_bind_observed_object, NULL);
+    }
+    if (!kzt_main_relocated_before_relro) {
+        if (KZTRelocationTargetsAreWritable(elf_header) &&
+            kzt_relocate_elf_with_fresh_transaction(elf_header) == 0) {
+            kzt_main_relocated_before_relro = 1;
+            printf_log(LOG_DEBUG,
+                       "KZT processed main executable at program entry "
+                       "because every relocation target remained "
+                       "writable\n");
+        } else {
+            printf_log(LOG_INFO,
+                       "KZT main executable missed relocation before "
+                       "guest protection and cannot be changed safely at "
+                       "program entry; keeping guest execution\n");
+        }
+    }
+    mmap_unlock();
+    if (observer_result == KZT_PUBLIC_LOADER_OK) {
+        CPUState *cpu = env_cpu(env);
+        target_ulong eip = env->eip;
+
+        kzt_install_guest_pc_callback(
+            kzt_public_r_brk_inst, cpu,
+            kzt_public_loader_observer.r_brk_addr,
+            kzt_dynamic_library_change_callback);
+        env->eip = eip;
+        printf_log(LOG_INFO,
+                   "KZT public loader observer active: "
+                   "r_debug=%p r_brk=%p objects=%zu\n",
+                   (void *)kzt_public_loader_observer.r_debug_addr,
+                   (void *)kzt_public_loader_observer.r_brk_addr,
+                   kzt_public_loader_observer.live_map_count);
+    } else {
+        printf_log(LOG_INFO,
+                   "KZT public loader observer unavailable: %s; "
+                   "keeping existing KZT bindings and leaving future "
+                   "dynamic libraries on guest execution\n",
+                   kzt_public_loader_result_name(observer_result));
+    }
+
     finiReFlesh(elf_header);
     x64free_fini = 1;
-    RelocateElf(my_context->maplib, NULL, 0, elf_header);
-    RelocateElfPlt(my_context->maplib, NULL, 0, elf_header);
     AddDebugInfo(LIB_EMULATED, elf_header->name, info1.start_code, info1.end_code);
 }
-static TranslationBlock* kzt_add_fucn_by_addr(uint32* inst_old, CPUState *cpu, uintptr_t addr, int (*latx_ld_callback)(void *, void (*)(CPUX86State *)), void (*kzt_tb_callback)(CPUX86State *))
+static TranslationBlock *kzt_install_guest_pc_callback(
+    uint32_t *inst_old, CPUState *cpu, uintptr_t addr,
+    void (*callback)(CPUX86State *))
 {
     uint32 jmpinst [2] = {0};
     uint32 * tmp, *pinsn;
     CPUArchState *env = cpu->env_ptr;
     int isOverWrite = 0;
     int pos = 0;
-    void * ld_callback_context = tcg_ctx->code_gen_ptr;
-    int backlen = latx_ld_callback(tcg_ctx->code_gen_ptr, kzt_tb_callback);
+    void *callback_context = tcg_ctx->code_gen_ptr;
+    int backlen = target_latx_ld_callback(
+        tcg_ctx->code_gen_ptr, callback);
     backlen *= 4;
     tcg_ctx->code_gen_ptr += backlen;
     env->eip = addr - env->segs[R_CS].base;
-    printf_log(LOG_DEBUG, "------------init_tb_callback_bridge--cpu=%p--pid=%d---latx_ld_callback %p to %p----\n", cpu, getpid(), ld_callback_context, tcg_ctx->code_gen_ptr);
+    printf_log(LOG_DEBUG,
+               "KZT install guest callback cpu=%p pid=%d bridge=%p to %p\n",
+               cpu, getpid(), callback_context, tcg_ctx->code_gen_ptr);
     TranslationBlock * tb = kzt_tb_find_exp(cpu, NULL, 0, cpu->tcg_cflags);
-    printf_log(LOG_DEBUG, "%s add pc = %lx jmp blok=%p tb=%p\n", __func__, addr, ld_callback_context, tb);
-    light_tb_target_set_jmp_target(0, (uintptr_t)tb->tc.ptr, (uintptr_t)&jmpinst, (uintptr_t)ld_callback_context);
-    tmp = (uint32 *)((uintptr_t)ld_callback_context + backlen - 4*4);
+    printf_log(LOG_DEBUG, "%s add pc = %lx jmp blok=%p tb=%p\n",
+               __func__, addr, callback_context, tb);
+    light_tb_target_set_jmp_target(0, (uintptr_t)tb->tc.ptr,
+                                   (uintptr_t)&jmpinst,
+                                   (uintptr_t)callback_context);
+    tmp = (uint32 *)((uintptr_t)callback_context + backlen - 4 * 4);
     pinsn =  (uint32 *)tb->tc.ptr;
     if (*pinsn == 0x50000800 && *(pinsn + 1) == 0x03400000) {//skip insts:--> b 8(0x8)  ;andi $r0,$r0,0x0
         pos = 2;
@@ -2419,7 +2907,9 @@ static TranslationBlock* kzt_add_fucn_by_addr(uint32* inst_old, CPUState *cpu, u
     if (((*pinsn) & 0xfc000000) == 0x50000000 ||// b
         (((*pinsn) & 0xfe000000) == 0x1e000000 &&/* pcaddu18i */
         (*(pinsn + 1) & 0xfc000000) == 0x4c000000)) {
-        printf_log(LOG_DEBUG, "------------kzt_add_fucn_by_addr tb has fixed return --cpu=%p--pid=%d------\n", cpu, getpid());
+        printf_log(LOG_DEBUG,
+                   "KZT guest callback has fixed return cpu=%p pid=%d\n",
+                   cpu, getpid());
         isOverWrite = 1;
         lsassert(jmpinst[0] && jmpinst[1]);
     }
@@ -2455,228 +2945,24 @@ static TranslationBlock* kzt_add_fucn_by_addr(uint32* inst_old, CPUState *cpu, u
     }
     return tb;
 }
-struct ins_part_s {
-    char search[5];
-    int search_len;
-    uint32_t offset;
-};
-#define MY_PARTY_OFFSET 0x32 - 1
-#define MY_PARTY_OFFSET_UBUNTU 0x36 - 1
-
-#define MY_PARTY_INS_MAX 8
-static struct x86_ld_info * find_ld_part(char * start, int len)
-{
-    struct x86_ld_info * ret = NULL;
-    char * old_start = start;
-    char searchpopret_part[] = {
-        0x5b,                   //pop    rbx
-        0x41, 0x5c,        //pop    r12
-        0x41, 0x5d,        //pop    r13
-        0x41, 0x5e,       //pop    r14
-        0x41, 0x5f,        //pop    r15
-        0x5d,                 //pop    rbp
-        0xc3                  //ret
-    };
-    char *ld_find = NULL;
-    static char* _dl_relocate_object_end;
-#define K_OR(offset_s)          {.search = {0x41, 0x80}, .search_len = 2, .offset = offset_s}
-#define K_CMP_48(offset_s)      {.search = {0x48, 0x83}, .search_len = 2, .offset = offset_s}
-#define K_CMP_49(offset_s)      {.search = {0x49, 0x83}, .search_len = 2, .offset = offset_s}
-#define K_JNE(offset_s)         {.search = {0x0f, 0x85}, .search_len = 2, .offset = offset_s}
-#define K_LEA(offset_s)         {.search = {0x48, 0x8d}, .search_len = 2, .offset = offset_s}
-#define K_MOV(offset_s)         {.search = {0x49, 0x8b}, .search_len = 2, .offset = offset_s}
-#define K_TEST(offset_s)        {.search = {0x48, 0x85}, .search_len = 2, .offset = offset_s}
-#define K_SKIP(offset_s)        {.search = {0, 0}, .search_len = 0, .offset = offset_s}
-
-#define K_ISNOT_SKIP(p)         (p.offset != 0)
-#define MAX_INS_PART_S          7
-
-	struct ld_part_s {
-	    struct ins_part_s ins [MAX_INS_PART_S];
-	    int part_offset;
-	};
-
-	struct ld_part_s all_part[] = {
-        {
-            .ins = {
-                K_OR(0),
-                K_CMP_48(8),
-                K_JNE(8),
-                K_CMP_49(6),
-                K_JNE(8),
-                K_LEA(6),
-                K_SKIP(0),
-            },
-            .part_offset = MY_PARTY_OFFSET//for debian
-        },
-        {
-            .ins = {
-                K_OR(0),
-                K_CMP_48(8),
-                K_JNE(8),
-                K_MOV(6),
-                K_TEST(7),
-                K_JNE(3),
-                K_LEA(6),
-            },
-            .part_offset = MY_PARTY_OFFSET_UBUNTU//for Ubuntu 21.04
-        },
-        {   // AOSC 25.05.16 GNU C Library (GNU libc) stable release version 2.40.
-            .ins = {
-                K_OR(0),          // 0x41 0x80 0x8e 0x54 0x03 0x00 0x00 0x08    (orb $0x8,0x354(%r14))
-                K_CMP_48(8),      // 0x48 0x83 0xbd 0x10 0xff 0xff 0xff 0x00    (cmpq   $0x0,-0xf0(%rbp))
-                K_JNE(8),         // 0x0f 0x85 0xe0 0x17 0x00 0x00              (jne)
-                K_CMP_49(6),      // 0x49 0x83 0xbe 0xa8 0x04 0x00 0x00 0x00    (cmpq   $0x0,0x4a8(%r14))
-                K_JNE(8),         // 0x0f 0x85 0xea 0x0b 0x00 0x00              (jne)
-                K_LEA(6),         // 0x48 0x8d 0x65 0xd8                        (lea    -0x28(%rbp),%rsp)
-                K_SKIP(0),
-            },
-            .part_offset = 0x33
-        },
-        {   // AOSC OS (Core 12.2.2), glibc 2.40 (EmuKit 20250909~pre20250911T080911Z)
-            .ins = {
-                K_OR(0),          // 0x41 0x80 0x8e 0x54 0x03 0x00 0x00 0x08    (orb $0x8,0x354(%r14))
-                K_TEST(8),        // 0x48 0x85 0xdb                             (test %rbx,%rbx)
-                K_JNE(3),         // 0x0f 0x85 0xe0 0x17 0x00 0x00              (jne)
-                K_CMP_49(6),      // 0x49 0x83 0xbe 0xa8 0x04 0x00 0x00 0x00    (cmpq   $0x0,0x4a8(%r14))
-                K_JNE(8),         // 0x0f 0x85 0x50 0x0b 0x00 0x00              (jne)
-                K_LEA(6),         // 0x48 0x8d 0x65 0xd8                        (lea    -0x28(%rbp),%rsp)
-                K_SKIP(0),
-            },
-            .part_offset = 0x2e
-        },
-        {   // debian sid GNU C Library (Debian GLIBC 2.41-7) stable release version 2.41.
-            .ins = {
-                K_OR(0),          // 0x41 0x80 0x8e 0x54 0x03 0x00 0x00 0x08    (orb $0x8,0x354(%r14))
-                K_TEST(8),        // 0x48 0x85 0xdb                             (test %rbx,%rbx)
-                K_JNE(3),         // 0x0f 0x85 0xbd 0x14 0x00 0x00              (jne)
-                K_LEA(6),         // 0x48 0x8d 0x64 0xd8                        (lea -0x28(%rbp),%rsp)
-            },
-            .part_offset = 0x20
-        },
-        {   // glibc 2.42 (Yongbao x86_64_runtime)
-            .ins = {
-                K_OR(0),          // 0x41 0x80 0x8e 0x54 0x03 0x00 0x00 0x08    (orb $0x8,0x354(%r14))
-                K_CMP_48(8),      // 0x48 0x83 0xbd 0x28 0xff 0xff 0xff 0x00    (cmpq   $0x0,-0xd8(%rbp))
-                K_JNE(8),         // 0x0f 0x85 0x2a 0x18 0x00 0x00              (jne)
-                K_LEA(6),         // 0x48 0x8d 0x65 0xd8                        (lea    -0x28(%rbp),%rsp)
-                K_SKIP(0),
-            },
-            .part_offset = 0x25
-        }
-    };
-    while((_dl_relocate_object_end = memmem(start, len - (start - old_start), searchpopret_part,
-    sizeof(searchpopret_part)))) {
-        start = _dl_relocate_object_end + 1;
-        for (int j = 0; j < sizeof(all_part) / sizeof(struct ld_part_s); j++) {
-            char *my_start = _dl_relocate_object_end - all_part[j].part_offset + sizeof(searchpopret_part);
-            int no_match = 0;
-            for (int i = 0; i < MAX_INS_PART_S; i++) {
-                my_start += all_part[j].ins[i].offset;
-                if (K_ISNOT_SKIP(all_part[j].ins[i]) &&
-                    memmem(my_start, MY_PARTY_INS_MAX, all_part[j].ins[i].search, all_part[j].ins[i].search_len) != my_start) {
-                    no_match = 1;
-                    break;
-                }
-            }
-            if (!no_match) {
-                ld_find = _dl_relocate_object_end - all_part[j].part_offset + sizeof(searchpopret_part);
-                goto suc;
-            }
-        }
-    }
-    fprintf(stderr, "Lat can't find ldinfo.\n");
-    return NULL;
-suc:
-    ret = malloc(sizeof(struct x86_ld_info));
-    ret->addr = (uintptr_t) ld_find;
-    ret->reg = (*(ld_find+ 2)) & 0xf;
-    printf_log(LOG_DEBUG, "debug find ld so 0x%lx reg = %d\n", ret->addr, ret->reg);
-    return ret;
-}
-static struct x86_ld_info *find_ld_bridge(void* info)
-{
-    struct image_info * execinfo = (struct image_info *)info;
-    struct x86_ld_info * ret = NULL;
-    struct stat st;
-    uint8_t *ld_start = (uint8_t *)execinfo->load_bias;
-    char *real_dl_file = ResolveFile(basename(execinfo->interpreter_path), &my_context->box64_ld_lib);
-    if (stat(real_dl_file, &st)) {
-        return NULL;
-    }
-    size_t file_len = st.st_size;
-
-    uint8_t* fix_addr = (uint8_t *)(ld_start+0xbc15);
-    if ((*(uint64_t *)fix_addr & 0xffffffffff00ffff) == 0x040000031c008041) {
-        ret = malloc(sizeof(struct x86_ld_info));
-        ret->addr = (uintptr_t) fix_addr;
-        ret->reg = (*(fix_addr+ 2)) & 0xf;
-        printf_log(LOG_DEBUG, "debug find ld so 0x%lx reg = %d\n", ret->addr, ret->reg);
-        return ret;
-    }
-    fix_addr = (uint8_t *)(ld_start+ 0xdcc2);
-    if ((*(uint64_t *)fix_addr & 0xffffffffff00ffff) == 0x040000031c008041) {//for Ubuntu 21.04 ld-2.31.so
-        ret = malloc(sizeof(struct x86_ld_info));
-        ret->addr = (uintptr_t) fix_addr;
-        ret->reg = (*(fix_addr+ 2)) & 0xf;
-        printf_log(LOG_DEBUG, "debug find ld so 0x%lx reg = %d\n", ret->addr, ret->reg);
-        return ret;
-    }
-    fix_addr = (uint8_t *)(ld_start+0xe6d8);
-    if ((*(uint64_t *)fix_addr & 0xffffffffff00ffff) == 0x0800000334008041) {
-        ret = malloc(sizeof(struct x86_ld_info));
-        ret->addr = (uintptr_t) fix_addr;
-        ret->reg = (*(fix_addr+ 2)) & 0xf;
-        printf_log(LOG_DEBUG, "debug find ld so 0x%lx reg = %d\n", ret->addr, ret->reg);
-        return ret;
-    }
-    fix_addr = (uint8_t *)(ld_start+ 0xe7cd);
-    if ((*(uint64_t *)fix_addr & 0xffffffffff00ffff) == 0x0800000354008041) {
-        ret = malloc(sizeof(struct x86_ld_info));
-        ret->addr = (uintptr_t) fix_addr;
-        ret->reg = (*(fix_addr+ 2)) & 0xf;
-        printf_log(LOG_DEBUG, "debug find ld so 0x%lx reg = %d\n", ret->addr, ret->reg);
-        return ret;
-    }
-    // AOSC 25.05.16 GNU C Library ( GLIBC 2.40)
-    fix_addr = (uint8_t *)(ld_start+ 0xdb72);
-    if ((*(uint64_t *)fix_addr & 0xffffffffff00ffff) == 0x0800000354008041) {
-        ret = malloc(sizeof(struct x86_ld_info));
-        ret->addr = (uintptr_t) fix_addr;
-        ret->reg = (*(fix_addr+ 2)) & 0xf;
-        printf_log(LOG_DEBUG, "debug find ld so 0x%lx reg = %d\n", ret->addr, ret->reg);
-        return ret;
-    }
-    // debian sid GNU C Library (Debian GLIBC 2.41-7) stable release version 2.41. addr 0x4008403ffe
-    fix_addr = (uint8_t *)(ld_start+ 0xdffe);
-    if ((*(uint64_t *)fix_addr & 0xffffffffff00ffff) == 0x0800000354008041) {
-        ret = malloc(sizeof(struct x86_ld_info));
-        ret->addr = (uintptr_t) fix_addr;
-        ret->reg = (*(fix_addr+ 2)) & 0xf;
-        printf_log(LOG_DEBUG, "debug find ld so 0x%lx reg = %d\n", ret->addr, ret->reg);
-        return ret;
-    }
-    return find_ld_part((char *)ld_start, file_len);
-    return NULL;
-}
-
-void init_tb_callback_bridge(CPUState *cpu, void* info)
+void init_tb_callback_bridge(CPUState *cpu, void *info)
 {
     struct image_info * execinfo = (struct image_info *)info;
     static uint32 jmpinst_exec [2] = {0};
-    static uint32 jmpinst_ld [2] = {0};
-    if (!ld_info) {
-        ld_info = find_ld_bridge(info);
-    }
-    if (!ld_info) {
-        lsassertm(0,"can't find ld callback tb.");
-        option_kzt = 0;
-        return;
-    }
     CPUArchState *env = cpu->env_ptr;
     target_ulong eip = env->eip;
-    kzt_add_fucn_by_addr((uint32 *)&jmpinst_exec, cpu, execinfo->exec_entry, target_latx_ld_callback, kzt_exectb_callback);
-    kzt_add_fucn_by_addr((uint32 *)&jmpinst_ld, cpu, ld_info->addr, target_latx_ld_callback, kzt_tb_callback);
+
+    kzt_public_loader_observer_reset(&kzt_public_loader_observer);
+    memset(kzt_public_r_brk_inst, 0, sizeof(kzt_public_r_brk_inst));
+    kzt_main_relocated_before_relro = 0;
+
+    /*
+     * The program-entry hook is version independent.  It installs the
+     * public r_debug/r_brk observer after guest ld.so finishes startup.
+     */
+    kzt_install_guest_pc_callback((uint32 *)&jmpinst_exec, cpu,
+                                  execinfo->exec_entry,
+                                  kzt_guest_main_entry_callback);
     env->eip = eip;
 }
 void kzt_bridge_init(void)
