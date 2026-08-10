@@ -12287,7 +12287,7 @@ static int open_self_stat(void *cpu_env, int fd, const char *oldpath)
         if (NULL == word) {
             /* Find a pointer to '\0' */
             word = strchr(orig, '\0');
-            if (NULL == word) {
+            if (word == NULL) {
                 goto fail;
             }
             /* \0 not needed */
@@ -13158,7 +13158,7 @@ static abi_long do_prctl_syscall_user_dispatch(CPUArchState *env,
 }
 
 #ifdef TARGET_X86_64
-struct target_prctl_mm_map {
+typedef struct TargetPrctlMmMap {
     uint64_t start_code;
     uint64_t end_code;
     uint64_t start_data;
@@ -13173,9 +13173,9 @@ struct target_prctl_mm_map {
     uint64_t auxv;
     uint32_t auxv_size;
     uint32_t exe_fd;
-};
+} TargetPrctlMmMap;
 
-struct guest_prctl_mm_map {
+typedef struct GuestPrctlMmMap {
     abi_ulong start_code;
     abi_ulong end_code;
     abi_ulong start_data;
@@ -13187,7 +13187,7 @@ struct guest_prctl_mm_map {
     abi_ulong arg_end;
     abi_ulong env_start;
     abi_ulong env_end;
-};
+} GuestPrctlMmMap;
 
 static abi_long do_prctl_get_auxv(CPUArchState *env, abi_ulong addr,
                                   abi_ulong len)
@@ -13253,9 +13253,9 @@ static abi_ulong guest_mmap_min_addr(void)
 }
 
 static void guest_prctl_mm_read(const struct image_info *info,
-                                struct guest_prctl_mm_map *map)
+                                GuestPrctlMmMap *map)
 {
-    *map = (struct guest_prctl_mm_map) {
+    *map = (GuestPrctlMmMap) {
         .start_code = info->prctl_mm_start_code,
         .end_code = info->prctl_mm_end_code,
         .start_data = info->prctl_mm_start_data,
@@ -13271,7 +13271,7 @@ static void guest_prctl_mm_read(const struct image_info *info,
 }
 
 static void guest_prctl_mm_write(struct image_info *info,
-                                 const struct guest_prctl_mm_map *map)
+                                 const GuestPrctlMmMap *map)
 {
     info->prctl_mm_start_code = info->start_code = map->start_code;
     info->prctl_mm_end_code = info->end_code = map->end_code;
@@ -13290,7 +13290,7 @@ static void guest_prctl_mm_write(struct image_info *info,
     brk_page = HOST_PAGE_ALIGN(target_brk);
 }
 
-static abi_long guest_prctl_mm_validate(const struct guest_prctl_mm_map *map)
+static abi_long guest_prctl_mm_validate(const GuestPrctlMmMap *map)
 {
     const abi_ulong value[] = {
         map->start_code, map->end_code,
@@ -13353,12 +13353,12 @@ static abi_long guest_prctl_set_auxv(struct image_info *info,
     return 0;
 }
 
-struct guest_prctl_exe_file {
+typedef struct GuestPrctlExeFile {
     int fd;
-};
+} GuestPrctlExeFile;
 
 static abi_long guest_prctl_prepare_exe_file(unsigned int fd,
-                                             struct guest_prctl_exe_file *file)
+                                             GuestPrctlExeFile *file)
 {
     struct stat st;
     struct statvfs fs;
@@ -13392,7 +13392,7 @@ static abi_long guest_prctl_prepare_exe_file(unsigned int fd,
 
 /* Called with the linux-user mmap lock held. */
 static void guest_prctl_commit_exe_file(struct image_info *info,
-                                        struct guest_prctl_exe_file *file)
+                                        GuestPrctlExeFile *file)
 {
     int old_fd = info->prctl_mm_exe_fd;
 
@@ -13406,7 +13406,7 @@ static void guest_prctl_commit_exe_file(struct image_info *info,
 static abi_long guest_prctl_set_exe_file(struct image_info *info,
                                          unsigned int fd)
 {
-    struct guest_prctl_exe_file file;
+    GuestPrctlExeFile file;
     abi_long ret = guest_prctl_prepare_exe_file(fd, &file);
 
     if (ret) {
@@ -13423,7 +13423,7 @@ static abi_long do_prctl_set_mm(CPUArchState *env, abi_ulong option,
                                 abi_ulong arg5)
 {
     struct image_info *info = ((TaskState *)env_cpu(env)->opaque)->info;
-    struct guest_prctl_mm_map map;
+    GuestPrctlMmMap map;
     abi_long ret;
 
     if (arg5 || (arg4 && option != PR_SET_MM_AUXV &&
@@ -13433,14 +13433,14 @@ static abi_long do_prctl_set_mm(CPUArchState *env, abi_ulong option,
     }
 
     if (option == PR_SET_MM_MAP_SIZE) {
-        return put_user_u32(sizeof(struct target_prctl_mm_map), addr) ?
+        return put_user_u32(sizeof(TargetPrctlMmMap), addr) ?
                -TARGET_EFAULT : 0;
     }
 
     if (option == PR_SET_MM_MAP) {
-        struct target_prctl_mm_map *target_map;
+        TargetPrctlMmMap *target_map;
         abi_ulong new_auxv[TARGET_X86_64_PRCTL_AUXV_WORDS] = { };
-        struct guest_prctl_exe_file new_exe = { .fd = -1 };
+        GuestPrctlExeFile new_exe = { .fd = -1 };
         abi_ulong auxv;
         uint32_t auxv_size, exe_fd;
         bool replace_exe = false;
@@ -13451,7 +13451,7 @@ static abi_long do_prctl_set_mm(CPUArchState *env, abi_ulong option,
         if (!lock_user_struct(VERIFY_READ, target_map, addr, 1)) {
             return -TARGET_EFAULT;
         }
-        map = (struct guest_prctl_mm_map) {
+        map = (GuestPrctlMmMap) {
             .start_code = tswap64(target_map->start_code),
             .end_code = tswap64(target_map->end_code),
             .start_data = tswap64(target_map->start_data),
@@ -14117,9 +14117,14 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
             char **exec_argp = NULL;
             char *hash_str = NULL;
             char *pidof_arg = NULL;
+            const char *pname;
+            const char *exec_pathname;
+            bool self_exe;
+            bool x86_file;
 #ifdef TARGET_X86_64
             char *prctl_mdwe_env = NULL;
             char *prctl_tsc_env = NULL;
+            bool restore_prctl;
 #endif
             int argc, envc;
             abi_ulong gp;
@@ -14190,13 +14195,13 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
                 goto execveat_efault;
             }
 
-            char *pname = strrchr(p, '/');
-            const char *exec_pathname = path(p);
-            bool self_exe = is_proc_myself((const char *)p, "exe");
+            pname = strrchr(p, '/');
+            exec_pathname = path(p);
+            self_exe = is_proc_myself((const char *)p, "exe");
 #ifdef TARGET_X86_64
-            bool x86_file = self_exe ? guest_self_exe_is_x86(env) :
-                            is_x86_file_at(arg1, exec_pathname, arg5);
-            bool restore_prctl = self_exe ?
+            x86_file = self_exe ? guest_self_exe_is_x86(env) :
+                       is_x86_file_at(arg1, exec_pathname, arg5);
+            restore_prctl = self_exe ?
                 guest_self_exe_restores_guest_state(env) :
                 exec_file_restores_guest_state_at(arg1, exec_pathname,
                                                   arg5, 0);
@@ -14206,8 +14211,8 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
                                                      &prctl_mdwe_env,
                                                      &prctl_tsc_env);
 #else
-            bool x86_file = self_exe ||
-                            is_x86_file_at(arg1, exec_pathname, arg5);
+            x86_file = self_exe ||
+                       is_x86_file_at(arg1, exec_pathname, arg5);
 
             exec_envp = envp;
 #endif
@@ -14341,9 +14346,13 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
             char **exec_argp = NULL;
             char *hash_str = NULL;
             char *pidof_arg = NULL;
+            const char *pname;
+            bool self_exe;
+            bool x86_file;
 #ifdef TARGET_X86_64
             char *prctl_mdwe_env = NULL;
             char *prctl_tsc_env = NULL;
+            bool restore_prctl;
 #endif
             int argc, envc;
             abi_ulong gp;
@@ -14402,12 +14411,12 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
                 goto execve_efault;
             }
 
-            char *pname = strrchr(p, '/');
-            bool self_exe = is_proc_myself((const char *)p, "exe");
+            pname = strrchr(p, '/');
+            self_exe = is_proc_myself((const char *)p, "exe");
 #ifdef TARGET_X86_64
-            bool x86_file = self_exe ? guest_self_exe_is_x86(env) :
-                            is_x86_file_at(AT_FDCWD, path(p), 0);
-            bool restore_prctl = self_exe ?
+            x86_file = self_exe ? guest_self_exe_is_x86(env) :
+                       is_x86_file_at(AT_FDCWD, path(p), 0);
+            restore_prctl = self_exe ?
                 guest_self_exe_restores_guest_state(env) :
                 exec_file_restores_guest_state_at(AT_FDCWD, path(p), 0, 0);
 
@@ -14416,8 +14425,8 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
                                                      &prctl_mdwe_env,
                                                      &prctl_tsc_env);
 #else
-            bool x86_file = self_exe ||
-                            is_x86_file_at(AT_FDCWD, path(p), 0);
+            x86_file = self_exe ||
+                       is_x86_file_at(AT_FDCWD, path(p), 0);
 
             exec_envp = envp;
 #endif
