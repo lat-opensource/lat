@@ -11560,17 +11560,23 @@ struct open_self_maps_data {
 # define test_stack(S, E, L)  (S == L)
 #endif
 
-static void open_self_maps_4(const struct open_self_maps_data *d,
-                             const MapInfo *mi, abi_ptr start,
-                             abi_ptr end, unsigned flags)
+static void open_self_maps_4_line(const struct open_self_maps_data *d,
+                                  const MapInfo *mi, abi_ptr start,
+                                  abi_ptr end, unsigned flags,
+                                  const char *vma_name)
 {
     const struct image_info *info = d->ts->info;
     const char *path = mi->path;
+    char named_path[96];
     uint64_t offset;
     int fd = d->fd;
     int count;
 
-    if (test_stack(start, end, info->stack_limit)) {
+    if (vma_name) {
+        snprintf(named_path, sizeof(named_path),
+                 mi->is_priv ? "[anon:%s]" : "[anon_shmem:%s]", vma_name);
+        path = named_path;
+    } else if (test_stack(start, end, info->stack_limit)) {
         path = "[stack]";
 #ifdef TARGET_X86_64
     } else if (start == info->prctl_mm_start_brk) {
@@ -11648,6 +11654,13 @@ static void open_self_maps_4(const struct open_self_maps_data *d,
                 (flags & PAGE_EXEC) ? " me" : "",
                 mi->is_priv ? "" : " ms");
     }
+}
+
+static void open_self_maps_4(const struct open_self_maps_data *d,
+                             const MapInfo *mi, abi_ptr start,
+                             abi_ptr end, unsigned flags)
+{
+    open_self_maps_4_line(d, mi, start, end, flags, NULL);
 }
 
 /*
