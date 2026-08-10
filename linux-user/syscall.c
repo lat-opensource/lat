@@ -283,8 +283,10 @@ out_marker:
 #ifndef PR_SET_MDWE
 #define PR_SET_MDWE 65
 #define PR_MDWE_REFUSE_EXEC_GAIN (1UL << 0)
-#define PR_MDWE_NO_INHERIT (1UL << 1)
 #define PR_GET_MDWE 66
+#endif
+#ifndef PR_MDWE_NO_INHERIT
+#define PR_MDWE_NO_INHERIT (1UL << 1)
 #endif
 #ifndef PR_GET_AUXV
 #define PR_GET_AUXV 0x41555856
@@ -5857,16 +5859,6 @@ static inline abi_ulong do_shmat(CPUArchState *cpu_env,
         return ret;
     }
 
-#ifdef TARGET_X86_64
-    ret = guest_mdwe_mmap(cpu, shm_info.shm_segsz,
-                          PROT_READ |
-                          (shmflg & SHM_RDONLY ? 0 : PROT_WRITE) |
-                          (shmflg & SHM_EXEC ? PROT_EXEC : 0));
-    if (ret) {
-        return ret;
-    }
-#endif
-
     shmlba = target_shmlba(cpu_env);
 
     if (shmaddr & (shmlba - 1)) {
@@ -5881,6 +5873,17 @@ static inline abi_ulong do_shmat(CPUArchState *cpu_env,
     }
 
     mmap_lock();
+
+#ifdef TARGET_X86_64
+    ret = guest_mdwe_mmap(cpu, shm_info.shm_segsz,
+                          PROT_READ |
+                          (shmflg & SHM_RDONLY ? 0 : PROT_WRITE) |
+                          (shmflg & SHM_EXEC ? PROT_EXEC : 0));
+    if (ret) {
+        mmap_unlock();
+        return ret;
+    }
+#endif
 
     /*
      * We're mapping shared memory, so ensure we generate code for parallel
@@ -13747,6 +13750,7 @@ static abi_long do_prctl_set_vma(abi_ulong operation, abi_ulong start,
     return ret;
 }
 
+/* Called with the linux-user mmap lock held. */
 static abi_long guest_mdwe_mmap(CPUState *cpu, abi_ulong len, int prot)
 {
     TaskState *ts = cpu->opaque;
@@ -13754,9 +13758,7 @@ static abi_long guest_mdwe_mmap(CPUState *cpu, abi_ulong len, int prot)
     int valid = PROT_READ | PROT_WRITE | PROT_EXEC | TARGET_PROT_SEM;
     int current_personality;
 
-    mmap_lock();
     mdwe = ts->info->prctl_mdwe;
-    mmap_unlock();
     if (!(mdwe & TARGET_PR_MDWE_REFUSE_EXEC_GAIN) ||
         !len || (prot & ~valid)) {
         return 0;
@@ -13770,6 +13772,7 @@ static abi_long guest_mdwe_mmap(CPUState *cpu, abi_ulong len, int prot)
            (PROT_WRITE | PROT_EXEC) ? -TARGET_EACCES : 0;
 }
 
+/* Called with the linux-user mmap lock held. */
 static abi_long guest_mdwe_mprotect(CPUState *cpu, abi_ulong start,
                                     abi_ulong len, int prot)
 {
@@ -13778,9 +13781,7 @@ static abi_long guest_mdwe_mprotect(CPUState *cpu, abi_ulong start,
     unsigned int mdwe;
     int valid = PROT_READ | PROT_WRITE | PROT_EXEC | TARGET_PROT_SEM;
 
-    mmap_lock();
     mdwe = ts->info->prctl_mdwe;
-    mmap_unlock();
     if (!(mdwe & TARGET_PR_MDWE_REFUSE_EXEC_GAIN) ||
         !(prot & PROT_EXEC) || (prot & ~valid) ||
         (start & ~TARGET_PAGE_MASK)) {
@@ -15957,8 +15958,10 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
         }
 
 #ifdef TARGET_X86_64
+        mmap_lock();
         ret = guest_mdwe_mmap(cpu, arg2, arg3);
         if (ret) {
+            mmap_unlock();
             return ret;
         }
 #endif
@@ -15967,6 +15970,9 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
                                     target_to_host_bitmask(arg4, mmap_flags_tbl),
                                     arg5,
                                     arg6, 1));
+#ifdef TARGET_X86_64
+        mmap_unlock();
+#endif
 #endif
         return ret;
 #endif
@@ -15997,12 +16003,18 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
             }
         }
 #ifdef TARGET_X86_64
+        mmap_lock();
         ret = guest_mdwe_mprotect(cpu, arg1, arg2, arg3);
         if (ret) {
+            mmap_unlock();
             return ret;
         }
 #endif
-        return get_errno(target_mprotect(arg1, arg2, arg3));
+        ret = get_errno(target_mprotect(arg1, arg2, arg3));
+#ifdef TARGET_X86_64
+        mmap_unlock();
+#endif
+        return ret;
 #ifdef TARGET_NR_mremap
     case TARGET_NR_mremap:
         arg1 = cpu_untagged_addr(cpu, arg1);
