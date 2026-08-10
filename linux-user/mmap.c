@@ -1393,6 +1393,7 @@ abi_long target_mremap(abi_ulong old_addr, abi_ulong old_size,
         abi_ulong addr;
         size_t copy_size = MIN(old_size, new_size);
         int source_host_prot = 0;
+        int move_errno = 0;
         void *temp = MAP_FAILED;
 
         if (!(flags & MREMAP_FIXED)) {
@@ -1420,30 +1421,43 @@ abi_long target_mremap(abi_ulong old_addr, abi_ulong old_size,
                 if (!(source_host_prot & PROT_READ) &&
                     mprotect(g2h_untagged(old_addr), source_host_size,
                              source_host_prot | PROT_READ) < 0) {
+                    move_errno = errno;
                     host_addr = MAP_FAILED;
                 } else {
                     memcpy(temp, g2h_untagged(old_addr), copy_size);
                     if (!(source_host_prot & PROT_READ) &&
                         mprotect(g2h_untagged(old_addr), source_host_size,
                                  source_host_prot) < 0) {
-                        abort();
-                    }
-                    new_addr = target_mmap(
-                        mmap_start, new_size, PROT_READ | PROT_WRITE,
-                        MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS,
-                        -1, 0, 0);
-                    if (new_addr == (abi_ulong)-1) {
+                        move_errno = errno;
                         host_addr = MAP_FAILED;
                     } else {
-                        memcpy(g2h_untagged(new_addr), temp, copy_size);
-                        if (target_mprotect(new_addr, new_size,
-                                            prot & PAGE_BITS) != 0) {
-                            abort();
+                        new_addr = target_mmap(
+                            mmap_start, new_size, PROT_READ | PROT_WRITE,
+                            MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS,
+                            -1, 0, 0);
+                        if (new_addr == (abi_ulong)-1) {
+                            move_errno = errno;
+                            host_addr = MAP_FAILED;
+                        } else {
+                            memcpy(g2h_untagged(new_addr), temp, copy_size);
+                            if (target_mprotect(new_addr, new_size,
+                                                prot & PAGE_BITS) != 0) {
+                                move_errno = errno;
+                                if (target_munmap(new_addr, new_size, 0)) {
+                                    qemu_log_mask(LOG_UNIMP,
+                                                  "mremap rollback failed\n");
+                                }
+                                host_addr = MAP_FAILED;
+                            } else {
+                                host_addr = g2h_untagged(new_addr);
+                            }
                         }
-                        host_addr = g2h_untagged(new_addr);
                     }
                 }
                 munmap(temp, target_host_size);
+                if (move_errno) {
+                    errno = move_errno;
+                }
                 if (host_addr != MAP_FAILED) {
                     manual_move = true;
                 }
@@ -1520,6 +1534,17 @@ abi_long target_mremap(abi_ulong old_addr, abi_ulong old_size,
         }
     }
 
+    if (host_addr != MAP_FAILED && manual_move &&
+        mmap_unmap_host_range(old_addr, old_size) != 0) {
+        int move_errno = errno;
+
+        if (target_munmap(new_addr, new_size, 0)) {
+            qemu_log_mask(LOG_UNIMP, "mremap rollback failed\n");
+        }
+        errno = move_errno;
+        host_addr = MAP_FAILED;
+    }
+
     if (host_addr == MAP_FAILED) {
         if (unreserved_extension) {
             mmap_reserve(old_addr + old_size, new_size - old_size);
@@ -1527,9 +1552,6 @@ abi_long target_mremap(abi_ulong old_addr, abi_ulong old_size,
         new_addr = -1;
     } else {
         new_addr = h2g(host_addr);
-        if (manual_move && mmap_unmap_host_range(old_addr, old_size) != 0) {
-            abort();
-        }
 #ifdef TARGET_X86_64
         guest_vma_name_remap(old_addr, source_size, new_addr, new_size,
                              keep_old);
