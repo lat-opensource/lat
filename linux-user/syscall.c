@@ -327,21 +327,20 @@ out_marker:
 #define PR_SPEC_FORCE_DISABLE (1UL << 3)
 #define PR_SPEC_DISABLE_NOEXEC (1UL << 4)
 #endif
-#ifndef PR_RISCV_V_SET_CONTROL
-#define PR_RISCV_V_SET_CONTROL 69
-#define PR_RISCV_V_GET_CONTROL 70
-#define PR_RISCV_SET_ICACHE_FLUSH_CTX 71
+#ifndef PR_TIMER_CREATE_RESTORE_IDS
+#define PR_TIMER_CREATE_RESTORE_IDS 77
+#define PR_TIMER_CREATE_RESTORE_IDS_OFF 0
+#define PR_TIMER_CREATE_RESTORE_IDS_ON 1
+#define PR_TIMER_CREATE_RESTORE_IDS_GET 2
 #endif
-#ifndef PR_PPC_GET_DEXCR
-#define PR_PPC_GET_DEXCR 72
-#define PR_PPC_SET_DEXCR 73
+#ifndef PR_FUTEX_HASH
+#define PR_FUTEX_HASH 78
+#define PR_FUTEX_HASH_SET_SLOTS 1
+#define PR_FUTEX_HASH_GET_SLOTS 2
 #endif
-#ifndef PR_GET_SHADOW_STACK_STATUS
-#define PR_GET_SHADOW_STACK_STATUS 74
-#define PR_SET_SHADOW_STACK_STATUS 75
-#define PR_LOCK_SHADOW_STACK_STATUS 76
+#ifndef PR_RSEQ_SLICE_EXTENSION
+#define PR_RSEQ_SLICE_EXTENSION 79
 #endif
-
 #ifdef CONFIG_LATX
 #define IMAGE_NT_SIGNATURE 0x00004550
 #define IMAGE_FILE_RELOCS_STRIPPED 0x0001
@@ -960,19 +959,79 @@ _syscall4(int, sys_prlimit64, pid_t, pid, int, resource,
 
 #if defined(TARGET_NR_timer_create)
 /* Maximum of 32 active POSIX timers allowed at any one time. */
-static timer_t g_posix_timers[32] = { 0, } ;
+#define TIMER_MAGIC 0x0caf0000
+static timer_t g_posix_timers[32];
+static target_timer_t g_posix_timer_ids[32];
+static bool g_posix_timer_used[32];
+static pthread_mutex_t posix_timer_lock = PTHREAD_MUTEX_INITIALIZER;
 
-static inline int next_free_host_timer(void)
+static int reserve_host_timer(target_timer_t requested, bool exact)
 {
-    int k ;
-    /* FIXME: Does finding the next free slot require a lock? */
+    int free_slot = -1;
+    int k;
+
+    pthread_mutex_lock(&posix_timer_lock);
     for (k = 0; k < ARRAY_SIZE(g_posix_timers); k++) {
-        if (g_posix_timers[k] == 0) {
-            g_posix_timers[k] = (timer_t) 1;
-            return k;
+        if (g_posix_timer_used[k]) {
+            if (exact && g_posix_timer_ids[k] == requested) {
+                pthread_mutex_unlock(&posix_timer_lock);
+                return -TARGET_EBUSY;
+            }
+        } else if (free_slot < 0) {
+            int j;
+
+            if (exact) {
+                free_slot = k;
+                continue;
+            }
+            requested = TIMER_MAGIC | k;
+            for (j = 0; j < ARRAY_SIZE(g_posix_timers); j++) {
+                if (g_posix_timer_used[j] &&
+                    g_posix_timer_ids[j] == requested) {
+                    break;
+                }
+            }
+            if (j == ARRAY_SIZE(g_posix_timers)) {
+                free_slot = k;
+            }
         }
     }
-    return -1;
+    if (free_slot < 0) {
+        pthread_mutex_unlock(&posix_timer_lock);
+        return -TARGET_EAGAIN;
+    }
+
+    g_posix_timer_used[free_slot] = true;
+    g_posix_timer_ids[free_slot] = requested;
+    pthread_mutex_unlock(&posix_timer_lock);
+    return free_slot;
+}
+
+static void release_host_timer(int slot)
+{
+    pthread_mutex_lock(&posix_timer_lock);
+    g_posix_timer_used[slot] = false;
+    g_posix_timer_ids[slot] = 0;
+    g_posix_timers[slot] = (timer_t)0;
+    pthread_mutex_unlock(&posix_timer_lock);
+}
+
+static void posix_timer_fork_start(void)
+{
+    pthread_mutex_lock(&posix_timer_lock);
+}
+
+static void posix_timer_fork_end(bool child)
+{
+    if (!child) {
+        pthread_mutex_unlock(&posix_timer_lock);
+        return;
+    }
+
+    pthread_mutex_init(&posix_timer_lock, NULL);
+    memset(g_posix_timer_used, 0, sizeof(g_posix_timer_used));
+    memset(g_posix_timer_ids, 0, sizeof(g_posix_timer_ids));
+    memset(g_posix_timers, 0, sizeof(g_posix_timers));
 }
 #endif
 
@@ -9781,6 +9840,9 @@ static int do_fork(CPUArchState *env, unsigned int flags, abi_ulong newsp,
         }
 
         fork_start();
+#if defined(TARGET_NR_timer_create)
+        posix_timer_fork_start();
+#endif
         if (userns_via_unshare) {
             rcu_child_was_deferred = rcu_defer_atfork_child();
         }
@@ -9819,6 +9881,9 @@ static int do_fork(CPUArchState *env, unsigned int flags, abi_ulong newsp,
             /* Child Process.  */
             cpu_clone_regs_child(env, newsp, flags);
             fork_end(1);
+#if defined(TARGET_NR_timer_create)
+            posix_timer_fork_end(true);
+#endif
             /* There is a race condition here.  The parent process could
                theoretically read the TID in the child process before the child
                tid is set.  This would require using either ptrace
@@ -9834,6 +9899,11 @@ static int do_fork(CPUArchState *env, unsigned int flags, abi_ulong newsp,
             ts->sys_dispatch_len = -1;
             ts->sys_dispatch_inclusive = false;
             ts->child_tidptr = 0;
+#ifdef TARGET_X86_64
+            ts->info->prctl_timer_restore_ids = false;
+            ts->info->prctl_futex_hash_slots = 0;
+            ts->info->prctl_futex_hash_custom = false;
+#endif
             if (flags & CLONE_NEWIPC) {
                 ts->ipc_namespace_isolated = true;
             }
@@ -9851,6 +9921,9 @@ static int do_fork(CPUArchState *env, unsigned int flags, abi_ulong newsp,
             }
             cpu_clone_regs_parent(env, flags);
             fork_end(0);
+#if defined(TARGET_NR_timer_create)
+            posix_timer_fork_end(false);
+#endif
 
             if (userns_via_unshare && ret > 0) {
                 do {
@@ -12878,25 +12951,24 @@ static int proc_self_fstat(int ofd, struct stat *st)
     return ret;
 }
 
-#define TIMER_MAGIC 0x0caf0000
-#define TIMER_MAGIC_MASK 0xffff0000
-
-/* Convert QEMU provided timer ID back to internal 16bit index format */
-static target_timer_t get_timer_id(abi_long arg)
+/* Return a fixed-table index while holding posix_timer_lock on success. */
+static target_timer_t lock_host_timer(abi_long arg)
 {
     target_timer_t timerid = arg;
+    int k;
 
-    if ((timerid & TIMER_MAGIC_MASK) != TIMER_MAGIC) {
+    if (timerid < 0) {
         return -TARGET_EINVAL;
     }
 
-    timerid &= 0xffff;
-
-    if (timerid >= ARRAY_SIZE(g_posix_timers)) {
-        return -TARGET_EINVAL;
+    pthread_mutex_lock(&posix_timer_lock);
+    for (k = 0; k < ARRAY_SIZE(g_posix_timers); k++) {
+        if (g_posix_timer_used[k] && g_posix_timer_ids[k] == timerid) {
+            return k;
+        }
     }
-
-    return timerid;
+    pthread_mutex_unlock(&posix_timer_lock);
+    return -TARGET_EINVAL;
 }
 
 static int target_to_host_cpu_mask(unsigned long *host_mask,
@@ -13670,6 +13742,69 @@ static abi_long do_prctl_mdwe(CPUArchState *env, bool set,
     info->prctl_mdwe = arg2;
     mmap_unlock();
     return 0;
+}
+
+static abi_long do_prctl_timer_create_restore_ids(CPUArchState *env,
+                                                   abi_ulong control,
+                                                   abi_ulong arg3,
+                                                   abi_ulong arg4,
+                                                   abi_ulong arg5)
+{
+    TaskState *ts = env_cpu(env)->opaque;
+
+    if (arg3 || arg4 || arg5) {
+        return -TARGET_EINVAL;
+    }
+    switch (control) {
+    case PR_TIMER_CREATE_RESTORE_IDS_OFF:
+        ts->info->prctl_timer_restore_ids = false;
+        return 0;
+    case PR_TIMER_CREATE_RESTORE_IDS_ON:
+        ts->info->prctl_timer_restore_ids = true;
+        return 0;
+    case PR_TIMER_CREATE_RESTORE_IDS_GET:
+        return ts->info->prctl_timer_restore_ids;
+    default:
+        return -TARGET_EINVAL;
+    }
+}
+
+static abi_long do_prctl_futex_hash(CPUArchState *env, abi_ulong operation,
+                                    abi_ulong arg3, abi_ulong arg4)
+{
+    TaskState *ts = env_cpu(env)->opaque;
+    unsigned int slots = arg3;
+    abi_long ret;
+
+    /*
+     * Private hash sizing is a performance control; host futex operations
+     * remain functionally equivalent on the global hash.  Keep the guest MM
+     * state here instead of retuning the translator's own host futexes.
+     */
+    switch (operation) {
+    case PR_FUTEX_HASH_SET_SLOTS:
+        if (arg4 || (slots && (slots == 1 || (slots & (slots - 1))))) {
+            return -TARGET_EINVAL;
+        }
+        mmap_lock();
+        if (ts->info->prctl_futex_hash_custom &&
+            !ts->info->prctl_futex_hash_slots) {
+            ret = -TARGET_EBUSY;
+        } else {
+            ts->info->prctl_futex_hash_slots = slots;
+            ts->info->prctl_futex_hash_custom = true;
+            ret = 0;
+        }
+        mmap_unlock();
+        return ret;
+    case PR_FUTEX_HASH_GET_SLOTS:
+        mmap_lock();
+        ret = ts->info->prctl_futex_hash_slots;
+        mmap_unlock();
+        return ret;
+    default:
+        return -TARGET_EINVAL;
+    }
 }
 
 static abi_long do_prctl_set_vma(abi_ulong operation, abi_ulong start,
@@ -17554,6 +17689,13 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
         case PR_SET_SPECULATION_CTRL:
             return do_prctl_speculation_ctrl(true, arg2, arg3,
                                              arg4, arg5);
+        case PR_TIMER_CREATE_RESTORE_IDS:
+            return do_prctl_timer_create_restore_ids(env, arg2, arg3,
+                                                     arg4, arg5);
+        case PR_FUTEX_HASH:
+            return do_prctl_futex_hash(env, arg2, arg3, arg4);
+        case PR_RSEQ_SLICE_EXTENSION:
+            return arg4 || arg5 ? -TARGET_EINVAL : -TARGET_EOPNOTSUPP;
 #endif
         case PR_GET_SECCOMP:
         case PR_SET_SECCOMP:
@@ -17631,29 +17773,6 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
 #endif
         case PR_MPX_ENABLE_MANAGEMENT:
         case PR_MPX_DISABLE_MANAGEMENT:
-#ifdef TARGET_X86_64
-        case PR_GET_UNALIGN:
-        case PR_SET_UNALIGN:
-        case PR_SET_FP_MODE:
-        case PR_GET_FP_MODE:
-        case PR_SVE_SET_VL:
-        case PR_SVE_GET_VL:
-        case PR_PAC_RESET_KEYS:
-        case PR_SET_TAGGED_ADDR_CTRL:
-        case PR_GET_TAGGED_ADDR_CTRL:
-        case PR_PAC_SET_ENABLED_KEYS:
-        case PR_PAC_GET_ENABLED_KEYS:
-        case PR_SME_SET_VL:
-        case PR_SME_GET_VL:
-        case PR_RISCV_V_SET_CONTROL:
-        case PR_RISCV_V_GET_CONTROL:
-        case PR_RISCV_SET_ICACHE_FLUSH_CTX:
-        case PR_PPC_GET_DEXCR:
-        case PR_PPC_SET_DEXCR:
-        case PR_GET_SHADOW_STACK_STATUS:
-        case PR_SET_SHADOW_STACK_STATUS:
-        case PR_LOCK_SHADOW_STACK_STATUS:
-#endif
             /* Do not let the guest alter host execution state. */
             return -TARGET_EINVAL;
         default:
@@ -19871,12 +19990,26 @@ defined(__loongarch__)
         /* args: clockid_t clockid, struct sigevent *sevp, timer_t *timerid */
 
         struct sigevent host_sevp = { {0}, }, *phost_sevp = NULL;
-
+        target_timer_t requested = 0;
+        bool exact = false;
         int clkid = arg1;
-        int timer_index = next_free_host_timer();
+        int timer_index;
+
+#ifdef TARGET_X86_64
+        mmap_lock();
+        exact = ((TaskState *)cpu->opaque)->info->prctl_timer_restore_ids;
+        mmap_unlock();
+#endif
+        if (exact && get_user(requested, arg3, target_timer_t)) {
+            return -TARGET_EFAULT;
+        }
+        if (exact && requested < 0) {
+            return -TARGET_EINVAL;
+        }
+        timer_index = reserve_host_timer(requested, exact);
 
         if (timer_index < 0) {
-            ret = -TARGET_EAGAIN;
+            ret = timer_index;
         } else {
             timer_t *phtimer = g_posix_timers  + timer_index;
 
@@ -19884,17 +20017,19 @@ defined(__loongarch__)
                 phost_sevp = &host_sevp;
                 ret = target_to_host_sigevent(phost_sevp, arg2);
                 if (ret != 0) {
+                    release_host_timer(timer_index);
                     return ret;
                 }
             }
 
             ret = get_errno(timer_create(clkid, phost_sevp, phtimer));
             if (ret) {
-                phtimer = NULL;
-            } else {
-                if (put_user(TIMER_MAGIC | timer_index, arg3, target_timer_t)) {
-                    return -TARGET_EFAULT;
-                }
+                release_host_timer(timer_index);
+            } else if (put_user(g_posix_timer_ids[timer_index], arg3,
+                                target_timer_t)) {
+                timer_delete(*phtimer);
+                release_host_timer(timer_index);
+                return -TARGET_EFAULT;
             }
         }
         return ret;
@@ -19906,24 +20041,28 @@ defined(__loongarch__)
     {
         /* args: timer_t timerid, int flags, const struct itimerspec *new_value,
          * struct itimerspec * old_value */
-        target_timer_t timerid = get_timer_id(arg1);
+        target_timer_t timerid = lock_host_timer(arg1);
 
         if (timerid < 0) {
             ret = timerid;
         } else if (arg3 == 0) {
             ret = -TARGET_EINVAL;
+            pthread_mutex_unlock(&posix_timer_lock);
         } else {
             timer_t htimer = g_posix_timers[timerid];
             struct itimerspec hspec_new = {{0},}, hspec_old = {{0},};
 
             if (target_to_host_itimerspec(&hspec_new, arg3)) {
+                pthread_mutex_unlock(&posix_timer_lock);
                 return -TARGET_EFAULT;
             }
             ret = get_errno(
                           timer_settime(htimer, arg2, &hspec_new, &hspec_old));
-            if (arg4 && host_to_target_itimerspec(arg4, &hspec_old)) {
-                return -TARGET_EFAULT;
+            if (!ret && arg4 &&
+                host_to_target_itimerspec(arg4, &hspec_old)) {
+                ret = -TARGET_EFAULT;
             }
+            pthread_mutex_unlock(&posix_timer_lock);
         }
         return ret;
     }
@@ -19932,24 +20071,28 @@ defined(__loongarch__)
 #ifdef TARGET_NR_timer_settime64
     case TARGET_NR_timer_settime64:
     {
-        target_timer_t timerid = get_timer_id(arg1);
+        target_timer_t timerid = lock_host_timer(arg1);
 
         if (timerid < 0) {
             ret = timerid;
         } else if (arg3 == 0) {
             ret = -TARGET_EINVAL;
+            pthread_mutex_unlock(&posix_timer_lock);
         } else {
             timer_t htimer = g_posix_timers[timerid];
             struct itimerspec hspec_new = {{0},}, hspec_old = {{0},};
 
             if (target_to_host_itimerspec64(&hspec_new, arg3)) {
+                pthread_mutex_unlock(&posix_timer_lock);
                 return -TARGET_EFAULT;
             }
             ret = get_errno(
                           timer_settime(htimer, arg2, &hspec_new, &hspec_old));
-            if (arg4 && host_to_target_itimerspec64(arg4, &hspec_old)) {
-                return -TARGET_EFAULT;
+            if (!ret && arg4 &&
+                host_to_target_itimerspec64(arg4, &hspec_old)) {
+                ret = -TARGET_EFAULT;
             }
+            pthread_mutex_unlock(&posix_timer_lock);
         }
         return ret;
     }
@@ -19959,20 +20102,22 @@ defined(__loongarch__)
     case TARGET_NR_timer_gettime:
     {
         /* args: timer_t timerid, struct itimerspec *curr_value */
-        target_timer_t timerid = get_timer_id(arg1);
+        target_timer_t timerid = lock_host_timer(arg1);
 
         if (timerid < 0) {
             ret = timerid;
         } else if (!arg2) {
             ret = -TARGET_EFAULT;
+            pthread_mutex_unlock(&posix_timer_lock);
         } else {
             timer_t htimer = g_posix_timers[timerid];
             struct itimerspec hspec;
             ret = get_errno(timer_gettime(htimer, &hspec));
 
-            if (host_to_target_itimerspec(arg2, &hspec)) {
+            if (!ret && host_to_target_itimerspec(arg2, &hspec)) {
                 ret = -TARGET_EFAULT;
             }
+            pthread_mutex_unlock(&posix_timer_lock);
         }
         return ret;
     }
@@ -19982,20 +20127,22 @@ defined(__loongarch__)
     case TARGET_NR_timer_gettime64:
     {
         /* args: timer_t timerid, struct itimerspec64 *curr_value */
-        target_timer_t timerid = get_timer_id(arg1);
+        target_timer_t timerid = lock_host_timer(arg1);
 
         if (timerid < 0) {
             ret = timerid;
         } else if (!arg2) {
             ret = -TARGET_EFAULT;
+            pthread_mutex_unlock(&posix_timer_lock);
         } else {
             timer_t htimer = g_posix_timers[timerid];
             struct itimerspec hspec;
             ret = get_errno(timer_gettime(htimer, &hspec));
 
-            if (host_to_target_itimerspec64(arg2, &hspec)) {
+            if (!ret && host_to_target_itimerspec64(arg2, &hspec)) {
                 ret = -TARGET_EFAULT;
             }
+            pthread_mutex_unlock(&posix_timer_lock);
         }
         return ret;
     }
@@ -20005,13 +20152,14 @@ defined(__loongarch__)
     case TARGET_NR_timer_getoverrun:
     {
         /* args: timer_t timerid */
-        target_timer_t timerid = get_timer_id(arg1);
+        target_timer_t timerid = lock_host_timer(arg1);
 
         if (timerid < 0) {
             ret = timerid;
         } else {
             timer_t htimer = g_posix_timers[timerid];
             ret = get_errno(timer_getoverrun(htimer));
+            pthread_mutex_unlock(&posix_timer_lock);
         }
         return ret;
     }
@@ -20021,14 +20169,19 @@ defined(__loongarch__)
     case TARGET_NR_timer_delete:
     {
         /* args: timer_t timerid */
-        target_timer_t timerid = get_timer_id(arg1);
+        target_timer_t timerid = lock_host_timer(arg1);
 
         if (timerid < 0) {
             ret = timerid;
         } else {
             timer_t htimer = g_posix_timers[timerid];
             ret = get_errno(timer_delete(htimer));
-            g_posix_timers[timerid] = 0;
+            if (!ret) {
+                g_posix_timer_used[timerid] = false;
+                g_posix_timer_ids[timerid] = 0;
+                g_posix_timers[timerid] = (timer_t)0;
+            }
+            pthread_mutex_unlock(&posix_timer_lock);
         }
         return ret;
     }

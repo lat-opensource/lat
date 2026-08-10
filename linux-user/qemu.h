@@ -75,6 +75,9 @@ struct image_info {
         abi_ulong       prctl_auxv[TARGET_X86_64_PRCTL_AUXV_WORDS];
         bool            prctl_auxv_initialized;
         unsigned int    prctl_mdwe;
+        unsigned int    prctl_futex_hash_slots;
+        bool            prctl_futex_hash_custom;
+        bool            prctl_timer_restore_ids;
         abi_ulong       prctl_mm_start_code;
         abi_ulong       prctl_mm_end_code;
         abi_ulong       prctl_mm_start_data;

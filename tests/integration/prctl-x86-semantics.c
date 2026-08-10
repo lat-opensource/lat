@@ -25,6 +25,8 @@ typedef long slong;
 #define __NR_personality      135
 #define __NR_prctl            157
 #define __NR_set_tid_address  218
+#define __NR_timer_create     222
+#define __NR_timer_delete     226
 #define __NR_exit_group       231
 #define __NR_openat           257
 #define __NR_readlinkat       267
@@ -35,10 +37,12 @@ typedef long slong;
 
 #define EACCES 13
 #define EBADF   9
+#define EBUSY  16
 #define EFAULT 14
 #define EINVAL 22
 #define ENOMEM 12
 #define ENAMETOOLONG 36
+#define EOPNOTSUPP 95
 #define EPERM   1
 
 #define PROT_READ  1
@@ -69,7 +73,6 @@ typedef long slong;
 #define PR_GET_PDEATHSIG             2
 #define PR_GET_DUMPABLE              3
 #define PR_SET_DUMPABLE              4
-#define PR_GET_UNALIGN               5
 #define PR_SET_KEEPCAPS              8
 #define PR_GET_KEEPCAPS              7
 #define PR_SET_TIMING               14
@@ -114,7 +117,7 @@ typedef long slong;
 #define PR_GET_NO_NEW_PRIVS         39
 #define PR_SET_THP_DISABLE          41
 #define PR_GET_THP_DISABLE          42
-#define PR_SET_FP_MODE              45
+#define PR_THP_DISABLE_EXCEPT_ADVISED 2
 #define PR_SCHED_CORE               62
 #define PR_SCHED_CORE_GET            0
 #define PR_SCHED_CORE_SCOPE_THREAD   0
@@ -124,6 +127,15 @@ typedef long slong;
 #define PR_MDWE_NO_INHERIT           2
 #define PR_SET_MEMORY_MERGE         67
 #define PR_GET_MEMORY_MERGE         68
+#define PR_TIMER_CREATE_RESTORE_IDS 77
+#define PR_TIMER_CREATE_RESTORE_IDS_OFF 0
+#define PR_TIMER_CREATE_RESTORE_IDS_ON  1
+#define PR_TIMER_CREATE_RESTORE_IDS_GET 2
+#define PR_FUTEX_HASH               78
+#define PR_FUTEX_HASH_SET_SLOTS      1
+#define PR_FUTEX_HASH_GET_SLOTS      2
+#define PR_RSEQ_SLICE_EXTENSION     79
+#define PR_RSEQ_SLICE_EXTENSION_GET  1
 #define PR_SET_VMA          0x53564d41
 #define PR_SET_VMA_ANON_NAME         0
 #define PR_GET_AUXV         0x41555856
@@ -357,6 +369,7 @@ static int test_process_controls(void)
     int old_keepcaps;
     int old_subreaper;
     int old_thp;
+    int timer_id;
     int old_merge;
     slong old_slack;
     ulong tid_address = 0;
@@ -438,7 +451,18 @@ static int test_process_controls(void)
     old_thp = do_prctl(PR_GET_THP_DISABLE, 0, 0, 0, 0);
     if (old_thp < 0 || do_prctl(PR_SET_THP_DISABLE, 1, 0, 0, 0) != 0 ||
         do_prctl(PR_GET_THP_DISABLE, 0, 0, 0, 0) != 1 ||
-        do_prctl(PR_SET_THP_DISABLE, old_thp, 0, 0, 0) != 0) {
+        do_prctl(PR_SET_THP_DISABLE, !!old_thp, old_thp & ~1, 0, 0) != 0) {
+        return 50;
+    }
+    ret = do_prctl(PR_SET_THP_DISABLE, 1,
+                   PR_THP_DISABLE_EXCEPT_ADVISED, 0, 0);
+    if (ret == 0) {
+        if (do_prctl(PR_GET_THP_DISABLE, 0, 0, 0, 0) != 3 ||
+            do_prctl(PR_SET_THP_DISABLE, !!old_thp, old_thp & ~1,
+                     0, 0) != 0) {
+            return 50;
+        }
+    } else if (ret != -EINVAL) {
         return 50;
     }
 
@@ -472,21 +496,79 @@ static int test_process_controls(void)
         return 53;
     }
 
-    if (do_prctl(PR_GET_UNALIGN, (slong)&value, 0, 0, 0) != -EINVAL ||
-        do_prctl(PR_SET_FP_MODE, 0, 0, 0, 0) != -EINVAL) {
-        return 54;
-    }
-
     if (do_prctl(PR_SET_NO_NEW_PRIVS, 1, 1, 0, 0) != -EINVAL ||
         do_prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0 ||
         do_prctl(PR_GET_NO_NEW_PRIVS, 0, 0, 0, 0) != 1) {
         return 55;
     }
+
+    timer_id = 123;
+    if (do_prctl(PR_TIMER_CREATE_RESTORE_IDS,
+                 PR_TIMER_CREATE_RESTORE_IDS_GET, 0, 0, 0) != 0 ||
+        do_prctl(PR_TIMER_CREATE_RESTORE_IDS,
+                 PR_TIMER_CREATE_RESTORE_IDS_ON, 0, 0, 0) != 0 ||
+        do_prctl(PR_TIMER_CREATE_RESTORE_IDS,
+                 PR_TIMER_CREATE_RESTORE_IDS_GET, 0, 0, 0) != 1 ||
+        syscall3(__NR_timer_create, 1, 0, (slong)&timer_id) != 0 ||
+        timer_id != 123) {
+        return 56;
+    }
+    timer_id = 123;
+    if (syscall3(__NR_timer_create, 1, 0, (slong)&timer_id) != -EBUSY ||
+        syscall1(__NR_timer_delete, 123) != 0) {
+        return 56;
+    }
+    timer_id = -1;
+    if (syscall3(__NR_timer_create, 1, 0, (slong)&timer_id) != -EINVAL ||
+        do_prctl(PR_TIMER_CREATE_RESTORE_IDS,
+                 PR_TIMER_CREATE_RESTORE_IDS_OFF, 0, 0, 0) != 0) {
+        return 56;
+    }
+    timer_id = -1;
+    if (syscall3(__NR_timer_create, 1, 0, (slong)&timer_id) != 0 ||
+        timer_id < 0 || syscall1(__NR_timer_delete, timer_id) != 0 ||
+        do_prctl(PR_TIMER_CREATE_RESTORE_IDS, 99, 0, 0, 0) != -EINVAL ||
+        do_prctl(PR_TIMER_CREATE_RESTORE_IDS,
+                 PR_TIMER_CREATE_RESTORE_IDS_GET, 1, 0, 0) != -EINVAL) {
+        return 56;
+    }
+
+    if (do_prctl(PR_FUTEX_HASH, PR_FUTEX_HASH_GET_SLOTS,
+                 123, 456, 789) != 0 ||
+        do_prctl(PR_FUTEX_HASH, PR_FUTEX_HASH_SET_SLOTS,
+                 1, 0, 0) != -EINVAL ||
+        do_prctl(PR_FUTEX_HASH, PR_FUTEX_HASH_SET_SLOTS,
+                 3, 0, 0) != -EINVAL ||
+        do_prctl(PR_FUTEX_HASH, PR_FUTEX_HASH_SET_SLOTS,
+                 16, 1, 0) != -EINVAL ||
+        do_prctl(PR_FUTEX_HASH, PR_FUTEX_HASH_SET_SLOTS,
+                 16, 0, 0) != 0 ||
+        do_prctl(PR_FUTEX_HASH, PR_FUTEX_HASH_GET_SLOTS,
+                 0, 0, 0) != 16 ||
+        do_prctl(PR_FUTEX_HASH, PR_FUTEX_HASH_SET_SLOTS,
+                 32, 0, 0) != 0 ||
+        do_prctl(PR_FUTEX_HASH, PR_FUTEX_HASH_GET_SLOTS,
+                 0, 0, 0) != 32 ||
+        do_prctl(PR_FUTEX_HASH, PR_FUTEX_HASH_SET_SLOTS,
+                 0, 0, 0) != 0 ||
+        do_prctl(PR_FUTEX_HASH, PR_FUTEX_HASH_SET_SLOTS,
+                 16, 0, 0) != -EBUSY) {
+        return 57;
+    }
+
+    value = 0x12345678;
+    if (do_prctl(PR_RSEQ_SLICE_EXTENSION,
+                 PR_RSEQ_SLICE_EXTENSION_GET, 0, 0, 0) != -EOPNOTSUPP ||
+        do_prctl(PR_RSEQ_SLICE_EXTENSION,
+                 PR_RSEQ_SLICE_EXTENSION_GET, 0, 1, 0) != -EINVAL) {
+        return 58;
+    }
+
     if (syscall3(__NR_readlink, (slong)exe_path, -1, 0) != -EINVAL ||
         syscall3(__NR_readlink, (slong)exe_path, -1, -1) != -EINVAL ||
         syscall4(__NR_readlinkat, AT_FDCWD, (slong)exe_path, -1, 0) !=
             -EINVAL) {
-        return 56;
+        return 59;
     }
     return 0;
 }
@@ -917,6 +999,10 @@ static int test_fork_state(int no_inherit)
 
     if (do_prctl(PR_SET_MDWE, mdwe, 0, 0, 0) != 0 ||
         do_prctl(PR_SET_TSC, PR_TSC_SIGSEGV, 0, 0, 0) != 0 ||
+        do_prctl(PR_TIMER_CREATE_RESTORE_IDS,
+                 PR_TIMER_CREATE_RESTORE_IDS_ON, 0, 0, 0) != 0 ||
+        do_prctl(PR_FUTEX_HASH, PR_FUTEX_HASH_SET_SLOTS,
+                 32, 0, 0) != 0 ||
         syscall1(__NR_set_tid_address, (slong)&clear_tid) <= 0) {
         return 110;
     }
@@ -930,6 +1016,10 @@ static int test_fork_state(int no_inherit)
         if (do_prctl(PR_GET_MDWE, 0, 0, 0, 0) != expected_child_mdwe ||
             do_prctl(PR_GET_TSC, (slong)&tsc_mode, 0, 0, 0) != 0 ||
             tsc_mode != PR_TSC_SIGSEGV ||
+            do_prctl(PR_TIMER_CREATE_RESTORE_IDS,
+                     PR_TIMER_CREATE_RESTORE_IDS_GET, 0, 0, 0) != 0 ||
+            do_prctl(PR_FUTEX_HASH, PR_FUTEX_HASH_GET_SLOTS,
+                     0, 0, 0) != 0 ||
             do_prctl(PR_GET_TID_ADDRESS, (slong)&tid_address, 0, 0, 0) ||
             tid_address != 0) {
             result = 112;
@@ -942,6 +1032,10 @@ static int test_fork_state(int no_inherit)
     if (do_prctl(PR_GET_MDWE, 0, 0, 0, 0) != mdwe ||
         do_prctl(PR_GET_TSC, (slong)&tsc_mode, 0, 0, 0) != 0 ||
         tsc_mode != PR_TSC_SIGSEGV ||
+        do_prctl(PR_TIMER_CREATE_RESTORE_IDS,
+                 PR_TIMER_CREATE_RESTORE_IDS_GET, 0, 0, 0) != 1 ||
+        do_prctl(PR_FUTEX_HASH, PR_FUTEX_HASH_GET_SLOTS,
+                 0, 0, 0) != 32 ||
         do_prctl(PR_GET_TID_ADDRESS, (slong)&tid_address, 0, 0, 0) ||
         tid_address != (ulong)&clear_tid) {
         return 114;
