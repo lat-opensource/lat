@@ -373,6 +373,8 @@ static void test_preprotected_object_is_not_replayed(void)
     kzt_public_loader_observer_reset(&observer);
     CHECK(kzt_public_loader_observer_remember(&observer, MAP1_ADDR) ==
           KZT_PUBLIC_LOADER_OK);
+    CHECK(kzt_public_loader_observer_mark_processed(&observer, MAP1_ADDR) ==
+          KZT_PUBLIC_LOADER_OK);
     CHECK(kzt_public_loader_observer_activate(
               &observer, DYNAMIC_ADDR, 16, &reader,
               record_visit, &log) == KZT_PUBLIC_LOADER_OK);
@@ -407,7 +409,7 @@ static void test_invalid_sources_fail_closed(void)
     CHECK(observer.active == 0);
 }
 
-static void test_relro_lookup_matches_one_object_during_add(void)
+static void test_relro_lookup_matches_one_object_before_protection(void)
 {
     fixture_t fixture;
     kzt_public_loader_object_t object = { 0 };
@@ -453,6 +455,12 @@ static void test_relro_lookup_matches_one_object_during_add(void)
     write_debug(&fixture, KZT_LOADER_DEBUG_CONSISTENT, MAP1_ADDR);
     CHECK(kzt_public_loader_find_relro_object(
               DYNAMIC_ADDR, 16, ELF2_BASE + 0x1000, 0x2000,
+              TEST_PAGE_SIZE, &reader, &object) == KZT_PUBLIC_LOADER_OK);
+    CHECK(object.link_map_addr == MAP2_ADDR);
+
+    write_debug(&fixture, KZT_LOADER_DEBUG_DELETE, MAP1_ADDR);
+    CHECK(kzt_public_loader_find_relro_object(
+              DYNAMIC_ADDR, 16, ELF2_BASE + 0x1000, 0x2000,
               TEST_PAGE_SIZE, &reader, &object) == KZT_PUBLIC_LOADER_BUSY);
 
     kzt_public_loader_observer_reset(&observer);
@@ -460,6 +468,56 @@ static void test_relro_lookup_matches_one_object_during_add(void)
     CHECK(kzt_public_loader_observer_remember(&observer, MAP2_ADDR) ==
           KZT_PUBLIC_LOADER_OK);
     CHECK(kzt_public_loader_observer_has_map(&observer, MAP2_ADDR));
+}
+
+static void test_observed_processed_and_reported_states_are_distinct(void)
+{
+    fixture_t fixture;
+    visit_log_t log = { 0 };
+    kzt_public_loader_observer_t observer;
+    const kzt_public_loader_reader_t reader = {
+        .read_memory = fixture_read,
+        .opaque = &fixture,
+    };
+
+    setup_two_maps(&fixture);
+    kzt_public_loader_observer_reset(&observer);
+    CHECK(kzt_public_loader_observer_activate(
+              &observer, DYNAMIC_ADDR, 16, &reader,
+              record_visit, &log) == KZT_PUBLIC_LOADER_OK);
+
+    CHECK(kzt_public_loader_observer_has_map(&observer, MAP2_ADDR));
+    CHECK(!kzt_public_loader_observer_is_processed(&observer, MAP2_ADDR));
+    CHECK(kzt_public_loader_observer_mark_processed(
+              &observer, MAP2_ADDR) == KZT_PUBLIC_LOADER_OK);
+    CHECK(kzt_public_loader_observer_is_processed(&observer, MAP2_ADDR));
+
+    CHECK(kzt_public_loader_observer_mark_fallback_reported(
+              &observer, MAP2_ADDR));
+    CHECK(kzt_public_loader_observer_fallback_was_reported(
+              &observer, MAP2_ADDR));
+    CHECK(!kzt_public_loader_observer_mark_fallback_reported(
+              &observer, MAP2_ADDR));
+
+    write_map(&fixture, MAP1_ADDR, UINT64_C(0x400000), NAME1_ADDR,
+              FIXTURE_BASE + 0x5000, 0, 0);
+    CHECK(kzt_public_loader_observer_refresh(
+              &observer, &reader, record_visit, &log) ==
+          KZT_PUBLIC_LOADER_OK);
+    CHECK(!kzt_public_loader_observer_has_map(&observer, MAP2_ADDR));
+    CHECK(!kzt_public_loader_observer_is_processed(&observer, MAP2_ADDR));
+    CHECK(!kzt_public_loader_observer_fallback_was_reported(
+              &observer, MAP2_ADDR));
+
+    write_map(&fixture, MAP1_ADDR, UINT64_C(0x400000), NAME1_ADDR,
+              FIXTURE_BASE + 0x5000, MAP2_ADDR, 0);
+    write_map(&fixture, MAP2_ADDR, UINT64_C(0xa00000), NAME3_ADDR,
+              FIXTURE_BASE + 0x5300, 0, MAP1_ADDR);
+    CHECK(kzt_public_loader_observer_refresh(
+              &observer, &reader, record_visit, &log) ==
+          KZT_PUBLIC_LOADER_OK);
+    CHECK(kzt_public_loader_observer_mark_fallback_reported(
+              &observer, MAP2_ADDR));
 }
 
 static void test_object_relro_classification_uses_guest_memory(void)
@@ -496,7 +554,8 @@ int main(void)
     test_cycle_does_not_replace_last_complete_snapshot();
     test_preprotected_object_is_not_replayed();
     test_invalid_sources_fail_closed();
-    test_relro_lookup_matches_one_object_during_add();
+    test_relro_lookup_matches_one_object_before_protection();
+    test_observed_processed_and_reported_states_are_distinct();
     test_object_relro_classification_uses_guest_memory();
     puts("kzt public loader observer tests: PASS");
     return 0;

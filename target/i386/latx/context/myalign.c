@@ -13,6 +13,7 @@
 #include "elfloader_private.h"
 #include "kzt_public_loader_observer.h"
 #include "kzt_relro_preprotect.h"
+#include "latx-options.h"
 #include "librarian_private.h"
 #include "library_private.h"
 #include <sys/epoll.h>
@@ -2126,6 +2127,8 @@ int kzt_init(char** argv, int argc,char** target_argv, int target_argc,
 
 static kzt_public_loader_observer_t kzt_public_loader_observer;
 static int kzt_main_relocated_before_relro;
+static int kzt_main_fallback_reported;
+static int kzt_observer_failure_reported;
 static uint32 kzt_public_r_brk_inst[2];
 extern void* x86free;
 extern void* x86realloc;
@@ -2252,6 +2255,77 @@ static const kzt_public_loader_reader_t kzt_public_loader_reader = {
     .read_memory = kzt_public_loader_read_guest,
     .opaque = NULL,
 };
+
+static void kzt_report_object_fallback_once(
+    const kzt_public_loader_object_t *object,
+    const char *name,
+    const char *reason)
+{
+    if (!option_kzt_log || !object || !object->link_map_addr ||
+        !kzt_public_loader_observer_mark_fallback_reported(
+            &kzt_public_loader_observer, object->link_map_addr)) {
+        return;
+    }
+    fprintf(stderr,
+            "KZT: direct wrapper binding attempt skipped for \"%s\" "
+            "(link_map=%p): %s; this object currently keeps x86 guest "
+            "translation\n",
+            name ? name : "<unknown>",
+            (void *)object->link_map_addr, reason);
+}
+
+static void kzt_report_object_recovery_if_needed(
+    const kzt_public_loader_object_t *object,
+    const char *name)
+{
+    if (!option_kzt_log || !object ||
+        !kzt_public_loader_observer_fallback_was_reported(
+            &kzt_public_loader_observer, object->link_map_addr)) {
+        return;
+    }
+    fprintf(stderr,
+            "KZT: direct wrapper binding recovered for \"%s\" "
+            "(link_map=%p): a later naturally writable retry completed\n",
+            name ? name : "<unknown>",
+            (void *)object->link_map_addr);
+}
+
+static void kzt_report_main_fallback_once(const char *reason)
+{
+    if (!option_kzt_log || kzt_main_fallback_reported) {
+        return;
+    }
+    kzt_main_fallback_reported = 1;
+    fprintf(stderr,
+            "KZT: direct wrapper binding attempt skipped for the main "
+            "executable: %s; it currently keeps x86 guest translation\n",
+            reason);
+}
+
+static void kzt_report_main_recovery_if_needed(void)
+{
+    if (!option_kzt_log || !kzt_main_fallback_reported) {
+        return;
+    }
+    fprintf(stderr,
+            "KZT: direct wrapper binding recovered for the main "
+            "executable at a later naturally writable retry\n");
+}
+
+static void kzt_report_observer_failure_once(
+    const char *operation,
+    kzt_public_loader_result_t result)
+{
+    if (!option_kzt_log || kzt_observer_failure_reported) {
+        return;
+    }
+    kzt_observer_failure_reported = 1;
+    fprintf(stderr,
+            "KZT: public loader %s failed (%s); bindings already "
+            "completed remain active, but affected dynamic objects keep "
+            "x86 guest translation\n",
+            operation, kzt_public_loader_result_name(result));
+}
 
 static int kzt_find_main_dynamic_table(const elfheader_t *head,
                                        uintptr_t *dynamic_addr,
@@ -2480,6 +2554,8 @@ static int kzt_try_bind_loaded_object(
 
     f = fopen(rfilename, "rb");
     if (!f) {
+        kzt_report_object_fallback_once(
+            object, name_copy, "the guest ELF file could not be opened");
         printf_log(LOG_INFO, "%s Error: Cannot open \"%s\"\n",
                    __func__, rfilename);
         box_free(name_copy);
@@ -2488,6 +2564,8 @@ static int kzt_try_bind_loaded_object(
     h = LoadAndCheckElfHeader(f, rfilename, 0);
     fclose(f);
     if (!h) {
+        kzt_report_object_fallback_once(
+            object, name_copy, "the guest ELF metadata could not be parsed");
         printf_log(LOG_INFO, "%s Error: Cannot parse \"%s\"\n",
                    __func__, rfilename);
         box_free(name_copy);
@@ -2499,6 +2577,10 @@ static int kzt_try_bind_loaded_object(
     ElfHeadReFix(h, object->load_bias);
 
     if (!have_mmap_lock() || !KZTRelocationTargetsAreWritable(h)) {
+        kzt_report_object_fallback_once(
+            object, name_copy,
+            "the memory-map lock was unavailable, or at least one "
+            "relocation target was already read-only or executable");
         printf_log(LOG_DEBUG,
                    "KZT observed loaded object \"%s\" %s, but at least "
                    "one relocation target is not writable; keeping guest "
@@ -2513,6 +2595,9 @@ static int kzt_try_bind_loaded_object(
     }
     writes = kzt_allocate_relocation_writes(h, &write_capacity);
     if (!writes) {
+        kzt_report_object_fallback_once(
+            object, name_copy,
+            "a complete relocation transaction could not be allocated");
         printf_log(LOG_INFO,
                    "KZT cannot allocate a relocation transaction for "
                    "\"%s\"; keeping guest execution\n",
@@ -2528,6 +2613,8 @@ static int kzt_try_bind_loaded_object(
     if (!lib && FindLibIsWrapped(rbasename) &&
         AddNeededLib_add(my_context->maplib, &my_context->neededlibs,
                          NULL, 0, rbasename, my_context) != 0) {
+        kzt_report_object_fallback_once(
+            object, name_copy, "the native wrapper could not be registered");
         printf_log(LOG_INFO,
                    "KZT cannot register the wrapper for \"%s\"; keeping "
                    "guest execution\n",
@@ -2545,6 +2632,9 @@ static int kzt_try_bind_loaded_object(
         if (AddNeededLib_add(
                 my_context->maplib, &my_context->neededlibs, NULL, 0,
                 "libGL.so.1", my_context) != 0) {
+            kzt_report_object_fallback_once(
+                object, name_copy,
+                "the required native libGL wrapper could not be registered");
             kzt_library_registration_rollback(&registration_snapshot);
             box_free(writes);
             FreeElfHeader(&h);
@@ -2557,6 +2647,9 @@ static int kzt_try_bind_loaded_object(
                        NULL, 0, 0, my_context) != 0 ||
         KZTRelocateElfAtomically(
             my_context->maplib, NULL, 0, h, writes, write_capacity) != 0) {
+        kzt_report_object_fallback_once(
+            object, name_copy,
+            "the all-or-nothing relocation transaction could not commit");
         printf_log(LOG_INFO,
                    "KZT cannot commit loaded object \"%s\"; rolling back "
                    "wrapper registration and keeping guest execution\n",
@@ -2569,6 +2662,7 @@ static int kzt_try_bind_loaded_object(
     }
     box_free(writes);
 
+    kzt_report_object_recovery_if_needed(object, name_copy);
     AddElfHeader(my_context, h);
     collectX86free(h);
     if (!x86free && !strcmp(rbasename, libcName)) {
@@ -2611,6 +2705,8 @@ static int kzt_try_bind_observed_object(
         kzt_try_bind_loaded_object(
             object, KZT_AFTER_LOADER_CONSISTENT, &processed) == 0 &&
         processed) {
+        kzt_public_loader_observer_mark_processed(
+            &kzt_public_loader_observer, object->link_map_addr);
         printf_log(LOG_DEBUG,
                    "KZT processed link_map=%p after the loader reached "
                    "a consistent state while its relocation targets "
@@ -2658,10 +2754,13 @@ void kzt_try_bind_before_guest_relro(uintptr_t start, size_t length, int prot)
         if (KZTRelocationTargetsAreWritable(elf_header) &&
             kzt_relocate_elf_with_fresh_transaction(elf_header) == 0) {
             kzt_main_relocated_before_relro = 1;
+            kzt_report_main_recovery_if_needed();
             if (result == KZT_PUBLIC_LOADER_OK &&
                 object.load_bias == (uintptr_t)elf_header->delta &&
                 object.dynamic_addr == dynamic_addr) {
                 kzt_public_loader_observer_remember(
+                    &kzt_public_loader_observer, object.link_map_addr);
+                kzt_public_loader_observer_mark_processed(
                     &kzt_public_loader_observer, object.link_map_addr);
             }
             printf_log(LOG_DEBUG,
@@ -2669,17 +2768,22 @@ void kzt_try_bind_before_guest_relro(uintptr_t start, size_t length, int prot)
                        "mprotect(%p, %zu)\n",
                        (void *)start, length);
         } else {
+            kzt_report_main_fallback_once(
+                "the relocation targets were not all writable before "
+                "guest RELRO protection");
             printf_log(LOG_INFO,
                        "KZT cannot relocate main executable before RELRO; "
                        "keeping guest path\n");
         }
     } else if (result == KZT_PUBLIC_LOADER_OK &&
-        !kzt_public_loader_observer_has_map(
+        !kzt_public_loader_observer_is_processed(
             &kzt_public_loader_observer, object.link_map_addr) &&
         kzt_try_bind_loaded_object(
             &object, KZT_BEFORE_GUEST_PROTECTION, &processed) == 0 &&
         processed) {
         kzt_public_loader_observer_remember(
+            &kzt_public_loader_observer, object.link_map_addr);
+        kzt_public_loader_observer_mark_processed(
             &kzt_public_loader_observer, object.link_map_addr);
         printf_log(LOG_DEBUG,
                    "KZT processed link_map=%p before guest RELRO "
@@ -2816,6 +2920,7 @@ static void kzt_dynamic_library_change_callback(CPUX86State *env)
     mmap_unlock();
     if (result != KZT_PUBLIC_LOADER_OK &&
         result != KZT_PUBLIC_LOADER_BUSY) {
+        kzt_report_observer_failure_once("refresh", result);
         printf_log(LOG_INFO,
                    "KZT public loader refresh failed: %s\n",
                    kzt_public_loader_result_name(result));
@@ -2840,11 +2945,15 @@ static void kzt_guest_main_entry_callback(CPUX86State *env)
         if (KZTRelocationTargetsAreWritable(elf_header) &&
             kzt_relocate_elf_with_fresh_transaction(elf_header) == 0) {
             kzt_main_relocated_before_relro = 1;
+            kzt_report_main_recovery_if_needed();
             printf_log(LOG_DEBUG,
                        "KZT processed main executable at program entry "
                        "because every relocation target remained "
                        "writable\n");
         } else {
+            kzt_report_main_fallback_once(
+                "the relocation targets were already protected at "
+                "program entry");
             printf_log(LOG_INFO,
                        "KZT main executable missed relocation before "
                        "guest protection and cannot be changed safely at "
@@ -2868,6 +2977,7 @@ static void kzt_guest_main_entry_callback(CPUX86State *env)
                    (void *)kzt_public_loader_observer.r_brk_addr,
                    kzt_public_loader_observer.live_map_count);
     } else {
+        kzt_report_observer_failure_once("activation", observer_result);
         printf_log(LOG_INFO,
                    "KZT public loader observer unavailable: %s; "
                    "keeping existing KZT bindings and leaving future "
@@ -2963,6 +3073,8 @@ void kzt_install_runtime_callbacks(CPUState *cpu, void *info)
     kzt_public_loader_observer_reset(&kzt_public_loader_observer);
     memset(kzt_public_r_brk_inst, 0, sizeof(kzt_public_r_brk_inst));
     kzt_main_relocated_before_relro = 0;
+    kzt_main_fallback_reported = 0;
+    kzt_observer_failure_reported = 0;
 
     /*
      * The program-entry hook is version independent.  It installs the

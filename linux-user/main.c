@@ -670,6 +670,11 @@ static void handle_arg_latx_kzt(const char *arg)
 {
     option_kzt = strtol(arg, NULL, 0);
 }
+
+static void handle_arg_latx_kzt_log(const char *arg)
+{
+    option_kzt_log = strtol(arg, NULL, 0) != 0;
+}
 #endif
 
 static void handle_arg_latx_fputag(const char *arg)
@@ -884,6 +889,8 @@ static const struct qemu_argument arg_table[] = {
 #if defined(CONFIG_LATX_KZT)
     {"latx-kzt",    "LATX_KZT",     true,  handle_arg_latx_kzt,
     "",           "enable kuzhitong"},
+    {"latx-kzt-log", "LATX_KZT_LOG", true, handle_arg_latx_kzt_log,
+    "0|1",        "log important KZT binding and fallback decisions"},
 #endif
     {"latx-fputag",    "LATX_FPUTAG",     true,  handle_arg_latx_fputag,
     "",           "enable fputag"},

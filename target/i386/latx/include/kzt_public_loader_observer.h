@@ -86,6 +86,10 @@ typedef struct kzt_public_loader_observer {
     uintptr_t r_brk_addr;
     uintptr_t live_maps[KZT_PUBLIC_LOADER_MAX_OBJECTS];
     size_t live_map_count;
+    uintptr_t processed_maps[KZT_PUBLIC_LOADER_MAX_OBJECTS];
+    size_t processed_map_count;
+    uintptr_t fallback_reported_maps[KZT_PUBLIC_LOADER_MAX_OBJECTS];
+    size_t fallback_reported_map_count;
     int active;
 } kzt_public_loader_observer_t;
 
@@ -93,14 +97,37 @@ void kzt_public_loader_observer_reset(
     kzt_public_loader_observer_t *observer);
 
 /*
- * Record an object already processed by the pre-protection path.  This
- * prevents the initial public snapshot from replaying it.
+ * Record an object already seen by the pre-protection path.  This prevents
+ * the initial public snapshot from replaying it; successful KZT processing
+ * must be recorded separately with mark_processed().
  */
 kzt_public_loader_result_t kzt_public_loader_observer_remember(
     kzt_public_loader_observer_t *observer,
     uintptr_t link_map_addr);
 
 int kzt_public_loader_observer_has_map(
+    const kzt_public_loader_observer_t *observer,
+    uintptr_t link_map_addr);
+
+/*
+ * Track successful KZT processing separately from the loader's live-object
+ * inventory.  Merely observing an object must not suppress a later safe
+ * pre-protection retry.
+ */
+kzt_public_loader_result_t kzt_public_loader_observer_mark_processed(
+    kzt_public_loader_observer_t *observer,
+    uintptr_t link_map_addr);
+
+int kzt_public_loader_observer_is_processed(
+    const kzt_public_loader_observer_t *observer,
+    uintptr_t link_map_addr);
+
+/* Return nonzero once for each live object generation. */
+int kzt_public_loader_observer_mark_fallback_reported(
+    kzt_public_loader_observer_t *observer,
+    uintptr_t link_map_addr);
+
+int kzt_public_loader_observer_fallback_was_reported(
     const kzt_public_loader_observer_t *observer,
     uintptr_t link_map_addr);
 
@@ -114,9 +141,10 @@ kzt_public_loader_result_t kzt_public_loader_object_has_relro(
     int *has_relro);
 
 /*
- * While r_debug reports RT_ADD, identify the one mapped ELF whose public
- * PT_GNU_RELRO range contains, or is fully contained by, an imminent guest
- * protection change.  Ambiguous multi-object matches are rejected.
+ * While r_debug reports RT_ADD or RT_CONSISTENT, identify the one mapped ELF
+ * whose public PT_GNU_RELRO range contains, or is fully contained by, an
+ * imminent guest protection change.  RT_DELETE and ambiguous multi-object
+ * matches are rejected.
  */
 kzt_public_loader_result_t kzt_public_loader_find_relro_object(
     uintptr_t dynamic_addr,

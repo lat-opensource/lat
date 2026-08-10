@@ -15,6 +15,7 @@
 
 #if defined(CONFIG_LATX_KZT)
 int option_kzt = 0;
+int option_kzt_log = 0;
 #endif
 
 #ifdef CONFIG_LATX_AVX_OPT

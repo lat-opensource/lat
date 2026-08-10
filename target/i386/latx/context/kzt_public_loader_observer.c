@@ -144,6 +144,39 @@ static int kzt_public_loader_contains(const uintptr_t *maps,
     return 0;
 }
 
+static int kzt_public_loader_objects_contain(
+    const kzt_public_loader_object_t *objects,
+    size_t object_count,
+    uintptr_t map_addr)
+{
+    size_t index;
+
+    for (index = 0; index < object_count; ++index) {
+        if (objects[index].link_map_addr == map_addr) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void kzt_public_loader_retain_live_state(
+    uintptr_t *maps,
+    size_t *map_count,
+    const kzt_public_loader_object_t *objects,
+    size_t object_count)
+{
+    size_t read_index;
+    size_t write_index = 0;
+
+    for (read_index = 0; read_index < *map_count; ++read_index) {
+        if (kzt_public_loader_objects_contain(
+                objects, object_count, maps[read_index])) {
+            maps[write_index++] = maps[read_index];
+        }
+    }
+    *map_count = write_index;
+}
+
 static int kzt_public_loader_relro_matches(
     const kzt_public_loader_reader_t *reader,
     uintptr_t load_bias,
@@ -336,6 +369,12 @@ static kzt_public_loader_result_t kzt_public_loader_capture(
         }
     }
 
+    kzt_public_loader_retain_live_state(
+        observer->processed_maps, &observer->processed_map_count,
+        objects, count);
+    kzt_public_loader_retain_live_state(
+        observer->fallback_reported_maps,
+        &observer->fallback_reported_map_count, objects, count);
     for (index = 0; index < count; ++index) {
         observer->live_maps[index] = objects[index].link_map_addr;
     }
@@ -383,6 +422,62 @@ int kzt_public_loader_observer_has_map(
                                       link_map_addr);
 }
 
+kzt_public_loader_result_t kzt_public_loader_observer_mark_processed(
+    kzt_public_loader_observer_t *observer,
+    uintptr_t link_map_addr)
+{
+    if (!observer || !link_map_addr) {
+        return KZT_PUBLIC_LOADER_INVALID_INPUT;
+    }
+    if (kzt_public_loader_contains(observer->processed_maps,
+                                   observer->processed_map_count,
+                                   link_map_addr)) {
+        return KZT_PUBLIC_LOADER_OK;
+    }
+    if (observer->processed_map_count == KZT_PUBLIC_LOADER_MAX_OBJECTS) {
+        return KZT_PUBLIC_LOADER_LIMIT;
+    }
+    observer->processed_maps[observer->processed_map_count++] = link_map_addr;
+    return KZT_PUBLIC_LOADER_OK;
+}
+
+int kzt_public_loader_observer_is_processed(
+    const kzt_public_loader_observer_t *observer,
+    uintptr_t link_map_addr)
+{
+    return observer && link_map_addr &&
+           kzt_public_loader_contains(observer->processed_maps,
+                                      observer->processed_map_count,
+                                      link_map_addr);
+}
+
+int kzt_public_loader_observer_mark_fallback_reported(
+    kzt_public_loader_observer_t *observer,
+    uintptr_t link_map_addr)
+{
+    if (!observer || !link_map_addr ||
+        kzt_public_loader_contains(observer->fallback_reported_maps,
+                                   observer->fallback_reported_map_count,
+                                   link_map_addr) ||
+        observer->fallback_reported_map_count ==
+            KZT_PUBLIC_LOADER_MAX_OBJECTS) {
+        return 0;
+    }
+    observer->fallback_reported_maps[
+        observer->fallback_reported_map_count++] = link_map_addr;
+    return 1;
+}
+
+int kzt_public_loader_observer_fallback_was_reported(
+    const kzt_public_loader_observer_t *observer,
+    uintptr_t link_map_addr)
+{
+    return observer && link_map_addr &&
+           kzt_public_loader_contains(observer->fallback_reported_maps,
+                                      observer->fallback_reported_map_count,
+                                      link_map_addr);
+}
+
 kzt_public_loader_result_t kzt_public_loader_find_relro_object(
     uintptr_t dynamic_addr,
     size_t max_dynamic_entries,
@@ -427,7 +522,8 @@ kzt_public_loader_result_t kzt_public_loader_find_relro_object(
         debug.state > KZT_LOADER_DEBUG_DELETE) {
         return KZT_PUBLIC_LOADER_INVALID_STATE;
     }
-    if (debug.state != KZT_LOADER_DEBUG_ADD) {
+    if (debug.state != KZT_LOADER_DEBUG_ADD &&
+        debug.state != KZT_LOADER_DEBUG_CONSISTENT) {
         return KZT_PUBLIC_LOADER_BUSY;
     }
     if (!debug.map) {

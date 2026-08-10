@@ -31,6 +31,10 @@ extern int option_flag_reduction;
 extern int option_tu_link;
 #endif
 
+#ifdef CONFIG_LATX_KZT
+extern int option_kzt_log;
+#endif
+
 #ifdef CONFIG_LATX_AVX_OPT
 extern int option_avx_cpuid;
 #endif /* CONFIG_LATX_AVX_OPT */
@@ -147,7 +151,8 @@ extern unsigned long long counter_mips_tr;
 
 #if defined(CONFIG_LATX) && defined(CONFIG_LATX_KZT)
 #define ENVSUP_KZT \
-    ENVFUN(LATX_KZT, handle_arg_latx_kzt)
+    ENVFUN(LATX_KZT, handle_arg_latx_kzt) \
+    ENVFUN(LATX_KZT_LOG, handle_arg_latx_kzt_log)
 #else
 #define ENVSUP_KZT
 #endif
