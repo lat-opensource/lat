@@ -1,5 +1,21 @@
 if host_machine.cpu_family() == 'loongarch64' and \
    'x86_64-linux-user' in target_dirs
+  if 'CONFIG_LATX_KZT' in config_host
+    test(
+      'test-x11-xcb-wrapper-abi',
+      find_program('test-x11-xcb-wrapper-abi.sh'),
+      args: [
+        emulators['latx-x86_64'],
+        files('x11-xcb-wrapper-abi-guest.c'),
+        files('x11-xcb-wrapper-abi-probe.c'),
+        files('x11-xcb-wrapper-abi-dummy.c'),
+      ],
+      protocol: 'exitcode',
+      suite: 'latx-integration',
+      timeout: 120,
+    )
+  endif
+
   test(
     'test-cef-userns-nested',
     find_program('test-cef-userns-nested.sh'),
