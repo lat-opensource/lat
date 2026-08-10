@@ -5926,7 +5926,8 @@ static inline abi_ulong do_shmat(CPUArchState *cpu_env,
     guest_vma_name_reset(raddr, shm_info.shm_segsz);
 #endif
     page_set_flags(raddr, raddr + shm_info.shm_segsz,
-                   PAGE_VALID | PAGE_RESET | PAGE_ANON | PAGE_READ |
+                   PAGE_VALID | PAGE_RESET | PAGE_ANON | PAGE_MEMSHARE |
+                   PAGE_READ |
                    (shmflg & SHM_RDONLY ? 0 : PAGE_WRITE) |
                    (shmflg & SHM_EXEC ? PAGE_EXEC : 0));
 

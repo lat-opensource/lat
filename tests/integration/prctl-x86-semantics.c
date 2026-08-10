@@ -752,6 +752,36 @@ static int test_vma_name(void)
     syscall2(__NR_munmap, shared_map, 16384);
     syscall2(__NR_munmap, remap_copy, 16384);
 
+    /* A partial-host-page fallback must not privatize a shared mapping. */
+    shared_map = do_mmap(0, 16384, PROT_READ | PROT_WRITE,
+                         MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+    remap_copy = syscall5(__NR_mremap, shared_map, 0, 16384,
+                          MREMAP_MAYMOVE, 0);
+    remap_target = do_mmap(0, 16384, PROT_READ | PROT_WRITE,
+                           MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (shared_map < 0 || remap_copy < 0 || remap_target < 0 ||
+        syscall2(__NR_munmap, remap_target, 16384) != 0) {
+        return 69;
+    }
+    *(ulong *)remap_copy = 0x1020304050607080UL;
+    remap_target = syscall5(__NR_mremap, shared_map, 8193, 8193,
+                            MREMAP_MAYMOVE | MREMAP_FIXED, remap_target);
+    if (remap_target >= 0) {
+        *(ulong *)remap_copy = 0x8070605040302010UL;
+        if (*(ulong *)remap_target != 0x8070605040302010UL) {
+            return 69;
+        }
+        *(ulong *)remap_target = 0x1234432112344321UL;
+        if (*(ulong *)remap_copy != 0x1234432112344321UL) {
+            return 69;
+        }
+        syscall2(__NR_munmap, remap_target, 12288);
+    } else if (remap_target != -EINVAL && remap_target != -EFAULT) {
+        return 69;
+    }
+    syscall2(__NR_munmap, shared_map, 16384);
+    syscall2(__NR_munmap, remap_copy, 16384);
+
     remap_source = do_mmap(0, 16384, PROT_READ | PROT_WRITE,
                            MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (remap_source < 0 ||

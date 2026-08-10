@@ -777,9 +777,8 @@ abi_long target_mmap(abi_ulong start, abi_ulong len, int target_prot,
      * be atomic with respect to an external process.
      */
     if (flags & MAP_SHARED) {
-        if (option_monitor_shared_mem) {
-            page_flags |= PAGE_MEMSHARE;
-        }
+        /* Preserve sharing semantics even when monitoring is disabled. */
+        page_flags |= PAGE_MEMSHARE;
         CPUState *cpu = thread_cpu;
         if (!(cpu->tcg_cflags & CF_PARALLEL)) {
             cpu->tcg_cflags |= CF_PARALLEL;
@@ -1349,6 +1348,12 @@ abi_long target_mremap(abi_ulong old_addr, abi_ulong old_size,
         }
     }
 
+    /*
+     * The partial-host-page fallback temporarily changes host protection
+     * and copies mappings.  Keep other guest threads out until both the host
+     * mapping and guest page metadata describe the completed operation.
+     */
+    start_exclusive();
     mmap_lock();
 
     prot = page_get_flags(old_addr);
@@ -1557,6 +1562,7 @@ abi_long target_mremap(abi_ulong old_addr, abi_ulong old_size,
     }
 
     mmap_unlock();
+    end_exclusive();
 
     if (host_addr != MAP_FAILED && option_prlimit && rlimit_as_account &&
         vir_rlimit_as != RLIM_INFINITY) {
