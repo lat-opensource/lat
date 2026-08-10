@@ -1172,62 +1172,69 @@ static void mmap_reserve(abi_ulong start, abi_ulong size)
     }
 }
 
+/* Called with the mmap lock held. */
+static int mmap_unmap_host_range(abi_ulong start, abi_ulong len)
+{
+    abi_ulong end = start + len;
+    abi_ulong real_start = start & qemu_host_page_mask;
+    abi_ulong real_end = HOST_PAGE_ALIGN(end);
+    abi_ulong addr;
+    int prot;
+
+    if (start > real_start) {
+        prot = 0;
+        for (addr = real_start; addr < start; addr += TARGET_PAGE_SIZE) {
+            prot |= page_get_flags(addr);
+        }
+        if (real_end == real_start + qemu_host_page_size) {
+            for (addr = end; addr < real_end; addr += TARGET_PAGE_SIZE) {
+                prot |= page_get_flags(addr);
+            }
+            end = real_end;
+        }
+        if (prot != 0) {
+            real_start += qemu_host_page_size;
+        }
+    }
+    if (end < real_end) {
+        prot = 0;
+        for (addr = end; addr < real_end; addr += TARGET_PAGE_SIZE) {
+            prot |= page_get_flags(addr);
+        }
+        if (prot != 0) {
+            real_end -= qemu_host_page_size;
+        }
+    }
+
+    if (real_start >= real_end) {
+        return 0;
+    }
+    if (reserved_va) {
+        mmap_reserve(real_start, real_end - real_start);
+        return 0;
+    }
+    if (is_shadow_page_shmm(real_start)) {
+        fprintf(stderr, "%s:%d, should not happen\n", __func__, __LINE__);
+    }
+    return munmap(g2h_untagged(real_start), real_end - real_start);
+}
+
 int target_munmap(abi_ulong start, abi_ulong len, int rlimit_as_account)
 {
-    abi_ulong end, real_start, real_end, addr;
-    int prot, ret;
+    int ret;
 
     trace_target_munmap(start, len);
 
-    if (start & ~TARGET_PAGE_MASK)
+    if (start & ~TARGET_PAGE_MASK) {
         return -TARGET_EINVAL;
+    }
     len = TARGET_PAGE_ALIGN(len);
     if (len == 0 || !guest_range_valid_untagged(start, len)) {
         return -TARGET_EINVAL;
     }
 
     mmap_lock();
-    end = start + len;
-    real_start = start & qemu_host_page_mask;
-    real_end = HOST_PAGE_ALIGN(end);
-
-
-    if (start > real_start) {
-        /* handle host page containing start */
-        prot = 0;
-        for(addr = real_start; addr < start; addr += TARGET_PAGE_SIZE) {
-            prot |= page_get_flags(addr);
-        }
-        if (real_end == real_start + qemu_host_page_size) {
-            for(addr = end; addr < real_end; addr += TARGET_PAGE_SIZE) {
-                prot |= page_get_flags(addr);
-            }
-            end = real_end;
-        }
-        if (prot != 0)
-            real_start += qemu_host_page_size;
-    }
-    if (end < real_end) {
-        prot = 0;
-        for(addr = end; addr < real_end; addr += TARGET_PAGE_SIZE) {
-            prot |= page_get_flags(addr);
-        }
-        if (prot != 0)
-            real_end -= qemu_host_page_size;
-    }
-
-    ret = 0;
-    /* unmap what we can */
-    if (real_start < real_end) {
-        if (reserved_va) {
-            mmap_reserve(real_start, real_end - real_start);
-        } else {
-            if (is_shadow_page_shmm(real_start)) {
-                fprintf(stderr, "%s:%d, should not happen\n", __func__, __LINE__);
-            }
-            ret = munmap(g2h_untagged(real_start), real_end - real_start);
-        }
-    }
+    ret = mmap_unmap_host_range(start, len);
 
     if (ret == 0) {
 #ifdef CONFIG_LATX_AOT
