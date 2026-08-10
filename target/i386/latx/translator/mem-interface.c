@@ -463,7 +463,7 @@ imm_cache_exit:
     case 0:
         ra_free_temp_auto(dest_op);
         dest_op = zero_ir2_opnd;
-        if (!has_seg) {
+        if (!has_seg && !arg_dest_op) {
             return dest_op;
         }
         break;
@@ -550,12 +550,8 @@ skip:
         }
         dest_op = seg_op;
     } else if (!bitmap) {
-        /* no base, no index, no seg, no offset */
-#ifndef CONFIG_LATX_TU
-        lsassert(ir1_opnd_simm(opnd1));
-#else
-        /* fprintf(stderr, "maybe have bug in convert_mem_helper()\n"); */
-#endif
+        /* Only a specific-register conversion, such as LEA, reaches here. */
+        lsassert(arg_dest_op);
     }
 
     addr_size = ir1_addr_size(pir1);
