@@ -17,10 +17,16 @@ the appropriate suite; the workflow selects the suite automatically.
 
 ## Register a test
 
-Put ordinary unit tests in `tests/unit/meson.build` and environment-dependent
-tests in `tests/integration/meson.build`. A test that must use target-specific
-build objects may be registered in the top-level `meson.build`, guarded by
-`get_option('tests').enabled()`.
+Put ordinary unit tests in `tests/unit/meson.build`. Register LATX integration
+tests in the closest matching domain below
+`tests/integration/registrations/`; adding a test to an existing domain must
+not modify `tests/integration/meson.build`. Add a root `subdir()` entry only
+when introducing a genuinely new test domain. Keep architecture and feature
+conditions in the domain registration file, and do not make tests depend on
+registration or execution order.
+
+A test that must use target-specific build objects may instead be registered
+in the top-level `meson.build`, guarded by `get_option('tests').enabled()`.
 
 For example:
 
