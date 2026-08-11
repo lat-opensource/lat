@@ -25,6 +25,29 @@ when introducing a genuinely new test domain. Keep architecture and feature
 conditions in the domain registration file, and do not make tests depend on
 registration or execution order.
 
+Each LATX integration registration file appends dictionaries containing
+`name`, `runner`, and `args` to `latx_integration_tests`. Specify `timeout`
+only when the test needs a value other than 30 seconds. Runner and source paths
+are relative to the registration file:
+
+```meson
+latx_integration_tests += [{
+  'name': 'test-example',
+  'runner': find_program('../../test-example.sh'),
+  'args': [
+    emulators['latx-x86_64'],
+    files('../../example.S'),
+  ],
+  'timeout': 120,
+}]
+```
+
+The central registrar supplies `protocol: 'exitcode'`,
+`suite: 'latx-integration'`, and the default timeout. Do not add
+`executable()`, `custom_target()`, `generator()`, or `run_command()` merely to
+register a script-driven integration test, because normal product builds must
+not build test-only fixtures.
+
 A test that must use target-specific build objects may instead be registered
 in the top-level `meson.build`, guarded by `get_option('tests').enabled()`.
 
