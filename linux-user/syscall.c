@@ -340,6 +340,14 @@ out_marker:
 #endif
 #ifndef PR_RSEQ_SLICE_EXTENSION
 #define PR_RSEQ_SLICE_EXTENSION 79
+#define PR_RSEQ_SLICE_EXTENSION_GET 1
+#define PR_RSEQ_SLICE_EXTENSION_SET 2
+#define PR_RSEQ_SLICE_EXT_ENABLE 0x01
+#endif
+#ifndef PR_GET_CFI
+#define PR_GET_CFI 80
+#define PR_SET_CFI 81
+#define PR_CFI_BRANCH_LANDING_PADS 0
 #endif
 #ifdef CONFIG_LATX
 #define IMAGE_NT_SIGNATURE 0x00004550
@@ -962,17 +970,23 @@ _syscall4(int, sys_prlimit64, pid_t, pid, int, resource,
 #define TIMER_MAGIC 0x0caf0000
 static timer_t g_posix_timers[32];
 static target_timer_t g_posix_timer_ids[32];
-static bool g_posix_timer_used[32];
+typedef enum PosixTimerSlotState {
+    POSIX_TIMER_FREE,
+    POSIX_TIMER_RESERVED,
+    POSIX_TIMER_ACTIVE,
+} PosixTimerSlotState;
+static PosixTimerSlotState g_posix_timer_state[32];
 static pthread_mutex_t posix_timer_lock = PTHREAD_MUTEX_INITIALIZER;
 
-static int reserve_host_timer(target_timer_t requested, bool exact)
+static int reserve_host_timer(target_timer_t requested, bool exact,
+                              target_timer_t *allocated)
 {
     int free_slot = -1;
     int k;
 
     pthread_mutex_lock(&posix_timer_lock);
     for (k = 0; k < ARRAY_SIZE(g_posix_timers); k++) {
-        if (g_posix_timer_used[k]) {
+        if (g_posix_timer_state[k] != POSIX_TIMER_FREE) {
             if (exact && g_posix_timer_ids[k] == requested) {
                 pthread_mutex_unlock(&posix_timer_lock);
                 return -TARGET_EBUSY;
@@ -986,7 +1000,7 @@ static int reserve_host_timer(target_timer_t requested, bool exact)
             }
             requested = TIMER_MAGIC | k;
             for (j = 0; j < ARRAY_SIZE(g_posix_timers); j++) {
-                if (g_posix_timer_used[j] &&
+                if (g_posix_timer_state[j] != POSIX_TIMER_FREE &&
                     g_posix_timer_ids[j] == requested) {
                     break;
                 }
@@ -1001,18 +1015,37 @@ static int reserve_host_timer(target_timer_t requested, bool exact)
         return -TARGET_EAGAIN;
     }
 
-    g_posix_timer_used[free_slot] = true;
+    g_posix_timer_state[free_slot] = POSIX_TIMER_RESERVED;
     g_posix_timer_ids[free_slot] = requested;
+    *allocated = requested;
     pthread_mutex_unlock(&posix_timer_lock);
     return free_slot;
 }
 
-static void release_host_timer(int slot)
+static bool publish_host_timer(int slot, target_timer_t timerid, timer_t timer)
+{
+    bool reserved;
+
+    pthread_mutex_lock(&posix_timer_lock);
+    reserved = g_posix_timer_state[slot] == POSIX_TIMER_RESERVED &&
+               g_posix_timer_ids[slot] == timerid;
+    if (reserved) {
+        g_posix_timers[slot] = timer;
+        g_posix_timer_state[slot] = POSIX_TIMER_ACTIVE;
+    }
+    pthread_mutex_unlock(&posix_timer_lock);
+    return reserved;
+}
+
+static void release_host_timer(int slot, target_timer_t timerid)
 {
     pthread_mutex_lock(&posix_timer_lock);
-    g_posix_timer_used[slot] = false;
-    g_posix_timer_ids[slot] = 0;
-    g_posix_timers[slot] = (timer_t)0;
+    if (g_posix_timer_state[slot] == POSIX_TIMER_RESERVED &&
+        g_posix_timer_ids[slot] == timerid) {
+        g_posix_timer_state[slot] = POSIX_TIMER_FREE;
+        g_posix_timer_ids[slot] = 0;
+        g_posix_timers[slot] = (timer_t)0;
+    }
     pthread_mutex_unlock(&posix_timer_lock);
 }
 
@@ -1029,7 +1062,7 @@ static void posix_timer_fork_end(bool child)
     }
 
     pthread_mutex_init(&posix_timer_lock, NULL);
-    memset(g_posix_timer_used, 0, sizeof(g_posix_timer_used));
+    memset(g_posix_timer_state, 0, sizeof(g_posix_timer_state));
     memset(g_posix_timer_ids, 0, sizeof(g_posix_timer_ids));
     memset(g_posix_timers, 0, sizeof(g_posix_timers));
 }
@@ -5896,7 +5929,7 @@ abi_ulong latx_is_shm(abi_ulong maddr)
     }
     return 0;
 }
-#ifdef TARGET_X86_64
+#ifdef TARGET_I386
 static abi_long guest_mdwe_mmap(CPUState *cpu, abi_ulong len, int prot);
 #endif
 static inline abi_ulong do_shmat(CPUArchState *cpu_env,
@@ -5933,7 +5966,7 @@ static inline abi_ulong do_shmat(CPUArchState *cpu_env,
 
     mmap_lock();
 
-#ifdef TARGET_X86_64
+#ifdef TARGET_I386
     ret = guest_mdwe_mmap(cpu, shm_info.shm_segsz,
                           PROT_READ |
                           (shmflg & SHM_RDONLY ? 0 : PROT_WRITE) |
@@ -5981,7 +6014,7 @@ static inline abi_ulong do_shmat(CPUArchState *cpu_env,
     }
     raddr=h2g((unsigned long)host_raddr);
 
-#ifdef TARGET_X86_64
+#ifdef TARGET_I386
     guest_vma_name_reset(raddr, shm_info.shm_segsz);
 #endif
     page_set_flags(raddr, raddr + shm_info.shm_segsz,
@@ -6017,7 +6050,7 @@ static inline abi_long do_shmdt(abi_ulong shmaddr)
     if (!is_error(rv)) {
         for (i = 0; i < N_SHM_REGIONS; ++i) {
             if (shm_regions[i].in_use && shm_regions[i].start == shmaddr) {
-#ifdef TARGET_X86_64
+#ifdef TARGET_I386
                 guest_vma_name_reset(shmaddr, shm_regions[i].size);
 #endif
                 page_set_flags(shmaddr, shmaddr + shm_regions[i].size, 0);
@@ -9894,12 +9927,18 @@ static int do_fork(CPUArchState *env, unsigned int flags, abi_ulong newsp,
                 put_user_u32(sys_gettid(), child_tidptr);
             ts = (TaskState *)cpu->opaque;
             /* Linux clears syscall user dispatch in every fork child. */
+#ifdef TARGET_I386
             ts->sys_dispatch = 0;
             ts->sys_dispatch_selector = 0;
             ts->sys_dispatch_len = -1;
             ts->sys_dispatch_inclusive = false;
+#endif
             ts->child_tidptr = 0;
-#ifdef TARGET_X86_64
+#ifdef TARGET_I386
+            if (!(flags & CLONE_VM) &&
+                (ts->info->prctl_mdwe & TARGET_PR_MDWE_NO_INHERIT)) {
+                ts->info->prctl_mdwe = 0;
+            }
             ts->info->prctl_timer_restore_ids = false;
             ts->info->prctl_futex_hash_slots = 0;
             ts->info->prctl_futex_hash_custom = false;
@@ -11341,7 +11380,7 @@ static void regs_to_seccomp_trace(const struct target_pt_regs *regs,
 }
 #endif
 
-#ifdef TARGET_X86_64
+#ifdef TARGET_I386
 static int write_guest_proc_range(int fd, abi_ulong start, abi_ulong end)
 {
     while (start < end) {
@@ -11367,7 +11406,7 @@ static int write_guest_proc_range(int fd, abi_ulong start, abi_ulong end)
 static int open_self_cmdline(void *cpu_env, int fd, const char *oldpath)
 {
     CPUState *cpu = env_cpu((CPUArchState *)cpu_env);
-#ifdef TARGET_X86_64
+#ifdef TARGET_I386
     struct image_info *info = ((TaskState *)cpu->opaque)->info;
     abi_ulong start, end, env_end;
     uint8_t last = 0;
@@ -11400,7 +11439,7 @@ static int open_self_cmdline(void *cpu_env, int fd, const char *oldpath)
     return 0;
 }
 
-#ifdef TARGET_X86_64
+#ifdef TARGET_I386
 static int open_self_environ(void *cpu_env, int fd, const char *oldpath)
 {
     TaskState *ts = env_cpu((CPUArchState *)cpu_env)->opaque;
@@ -11418,7 +11457,7 @@ static const char *guest_self_exe_open_path(CPUArchState *env, char *buffer,
                                             size_t size, int *owned_fd)
 {
     *owned_fd = -1;
-#ifdef TARGET_X86_64
+#ifdef TARGET_I386
     TaskState *ts = env_cpu(env)->opaque;
     bool overridden;
 
@@ -11442,7 +11481,7 @@ static const char *guest_self_exe_open_path(CPUArchState *env, char *buffer,
 static const char *guest_self_exe_link_path(CPUArchState *env,
                                             char *buffer, size_t size)
 {
-#ifdef TARGET_X86_64
+#ifdef TARGET_I386
     TaskState *ts = env_cpu(env)->opaque;
     char fd_path[64];
     bool overridden;
@@ -11479,7 +11518,7 @@ static bool guest_self_exe_exec_paths(CPUArchState *env, char *link_buffer,
                                       const char **open_path, int *owned_fd)
 {
     *owned_fd = -1;
-#ifdef TARGET_X86_64
+#ifdef TARGET_I386
     TaskState *ts = env_cpu(env)->opaque;
     bool overridden;
     ssize_t len;
@@ -11745,7 +11784,7 @@ struct open_self_maps_data {
     bool smaps;
 };
 
-#ifdef TARGET_X86_64
+#ifdef TARGET_I386
 typedef struct GuestVmaName {
     abi_ulong start;
     abi_ulong end;
@@ -11944,7 +11983,7 @@ static void open_self_maps_4_line(const struct open_self_maps_data *d,
         path = named_path;
     } else if (test_stack(start, end, info->stack_limit)) {
         path = "[stack]";
-#ifdef TARGET_X86_64
+#ifdef TARGET_I386
     } else if (start == info->prctl_mm_start_brk) {
         path = "[heap]";
 #else
@@ -12026,7 +12065,7 @@ static void open_self_maps_4(const struct open_self_maps_data *d,
                              const MapInfo *mi, abi_ptr start,
                              abi_ptr end, unsigned flags)
 {
-#ifdef TARGET_X86_64
+#ifdef TARGET_I386
     while (start < end) {
         abi_ulong next;
         const GuestVmaName *entry = guest_vma_name_find_locked(start, &next);
@@ -12146,7 +12185,7 @@ static int open_self_maps_1(CPUArchState *cpu_env, int fd, bool smaps)
     CPUState *cpu = env_cpu((CPUArchState *)cpu_env);
     TaskState *ts = cpu->opaque;
     IntervalTreeRoot *map_info = read_self_maps();
-#ifdef TARGET_X86_64
+#ifdef TARGET_I386
     struct open_self_maps_data data = {
         .ts = ts,
         .host_maps = map_info,
@@ -12167,7 +12206,7 @@ static int open_self_maps_1(CPUArchState *cpu_env, int fd, bool smaps)
             unsigned long max = e->itree.last + 1;
             int flags = page_get_flags(h2g(min));
             const char *path;
-#ifdef TARGET_X86_64
+#ifdef TARGET_I386
             abi_ulong next_name;
             const GuestVmaName *name;
 #endif
@@ -12179,7 +12218,7 @@ static int open_self_maps_1(CPUArchState *cpu_env, int fd, bool smaps)
                 continue;
             }
 
-#ifdef TARGET_X86_64
+#ifdef TARGET_I386
             name = guest_vma_name_find_locked(h2g(min), &next_name);
             if (name || next_name < h2g(max - 1) + 1) {
                 open_self_maps_4(&data, e, h2g(min), h2g(max - 1) + 1,
@@ -12247,7 +12286,7 @@ static int open_self_maps_1(CPUArchState *cpu_env, int fd, bool smaps)
 
 static int open_self_maps(void *cpu_env, int fd, const char *oldpath)
 {
-#ifdef TARGET_X86_64
+#ifdef TARGET_I386
     bool have_guest_vma_names;
 
     mmap_lock();
@@ -12263,7 +12302,7 @@ static int open_self_maps(void *cpu_env, int fd, const char *oldpath)
 
 static int open_self_smaps(void *cpu_env, int fd, const char *oldpath)
 {
-#ifdef TARGET_X86_64
+#ifdef TARGET_I386
     bool have_guest_vma_names;
 
     mmap_lock();
@@ -12309,7 +12348,7 @@ static int open_self_stat(void *cpu_env, int fd, const char *oldpath)
     char *word = NULL;
     size_t orig_len = 0;
     int word_len = 0;
-#ifdef TARGET_X86_64
+#ifdef TARGET_I386
     struct {
         abi_ulong start_code;
         abi_ulong end_code;
@@ -12357,7 +12396,7 @@ static int open_self_stat(void *cpu_env, int fd, const char *oldpath)
         word = strchr(orig, ' ');
 
         /* last word */
-        if (NULL == word) {
+        if (word == NULL) {
             /* Find a pointer to '\0' */
             word = strchr(orig, '\0');
             if (word == NULL) {
@@ -12380,7 +12419,7 @@ static int open_self_stat(void *cpu_env, int fd, const char *oldpath)
             /* Hide translator-only threads from the guest process view. */
             g_string_printf(buf, "%u ", latx_guest_thread_count());
 #endif
-#ifdef TARGET_X86_64
+#ifdef TARGET_I386
         } else if (i == 25) {
             g_string_printf(buf, TARGET_ABI_FMT_ld " ",
                             mm.start_code);
@@ -12447,20 +12486,24 @@ static int open_self_auxv(void *cpu_env, int fd, const char *oldpath)
 {
     CPUState *cpu = env_cpu((CPUArchState *)cpu_env);
     TaskState *ts = cpu->opaque;
-#ifdef TARGET_X86_64
-    abi_ulong auxv[TARGET_X86_64_PRCTL_AUXV_WORDS];
-    size_t words;
+#ifdef TARGET_I386
+    uint8_t auxv[TARGET_X86_PRCTL_AUXV_SIZE];
+    size_t offset;
     size_t len;
 
     mmap_lock();
     memcpy(auxv, ts->info->prctl_auxv, sizeof(auxv));
     mmap_unlock();
-    for (words = 0; words + 1 < ARRAY_SIZE(auxv); words += 2) {
-        if (auxv[words] == 0) {
+    for (offset = 0; offset + 2 * sizeof(abi_ulong) <= sizeof(auxv);
+         offset += 2 * sizeof(abi_ulong)) {
+        abi_ulong type;
+
+        memcpy(&type, auxv + offset, sizeof(type));
+        if (tswapal(type) == 0) {
             break;
         }
     }
-    len = MIN(words + 2, ARRAY_SIZE(auxv)) * sizeof(auxv[0]);
+    len = MIN(offset + 2 * sizeof(abi_ulong), sizeof(auxv));
     if (qemu_write_full(fd, auxv, len) != len) {
         return -1;
     }
@@ -12799,7 +12842,7 @@ static int do_openat(void *cpu_env, int dirfd, const char *pathname, int flags, 
         { "stat", open_self_stat, is_proc_myself },
         { "auxv", open_self_auxv, is_proc_myself },
         { "cmdline", open_self_cmdline, is_proc_myself },
-#ifdef TARGET_X86_64
+#ifdef TARGET_I386
         { "environ", open_self_environ, is_proc_myself },
 #endif
         { "cmdline", open_other_cmdline, is_proc_other},
@@ -12963,7 +13006,8 @@ static target_timer_t lock_host_timer(abi_long arg)
 
     pthread_mutex_lock(&posix_timer_lock);
     for (k = 0; k < ARRAY_SIZE(g_posix_timers); k++) {
-        if (g_posix_timer_used[k] && g_posix_timer_ids[k] == timerid) {
+        if (g_posix_timer_state[k] == POSIX_TIMER_ACTIVE &&
+            g_posix_timer_ids[k] == timerid) {
             return k;
         }
     }
@@ -13041,7 +13085,20 @@ static int host_to_target_cpu_mask(const unsigned long *host_mask,
 static bool is_x86_elf_fd(int fd)
 {
     Elf64_Ehdr ehdr;
-    ssize_t read_size = pread(fd, &ehdr, sizeof(ehdr), 0);
+    char fd_path[64];
+    int read_fd = fd;
+    ssize_t read_size;
+
+    read_size = pread(read_fd, &ehdr, sizeof(ehdr), 0);
+    if (read_size < 0 && errno == EBADF) {
+        snprintf(fd_path, sizeof(fd_path), "/proc/self/fd/%d", fd);
+        read_fd = open(fd_path, O_RDONLY | O_CLOEXEC);
+        if (read_fd < 0) {
+            return false;
+        }
+        read_size = pread(read_fd, &ehdr, sizeof(ehdr), 0);
+        close(read_fd);
+    }
 
     if (read_size != sizeof(ehdr)) {
         return false;
@@ -13058,13 +13115,15 @@ static bool is_x86_elf_fd(int fd)
 static int open_exec_inspection_file(int dirfd, const char *file_name,
                                      int flags)
 {
-    char fd_path[64];
+    int open_flags = O_RDONLY | O_CLOEXEC;
 
     if (!file_name[0] && (flags & AT_EMPTY_PATH)) {
-        snprintf(fd_path, sizeof(fd_path), "/proc/self/fd/%d", dirfd);
-        return open(fd_path, O_RDONLY | O_CLOEXEC);
+        return fcntl(dirfd, F_DUPFD_CLOEXEC, 0);
     }
-    return openat(dirfd, file_name, O_RDONLY | O_CLOEXEC);
+    if (flags & AT_SYMLINK_NOFOLLOW) {
+        open_flags |= O_NOFOLLOW;
+    }
+    return openat(dirfd, file_name, open_flags);
 }
 
 static bool is_x86_file_at(int dirfd, const char *file_name, int flags)
@@ -13081,117 +13140,284 @@ static bool is_x86_file_at(int dirfd, const char *file_name, int flags)
     return ret;
 }
 
-#ifdef TARGET_X86_64
-static bool is_self_file_at(int dirfd, const char *file_name, int flags)
+#ifdef TARGET_I386
+static bool is_self_exec_fd(int fd)
 {
     struct stat target_st, self_st;
-    int fd;
-    bool owned = false;
-    bool ret;
 
-    if (!file_name[0] && (flags & AT_EMPTY_PATH)) {
-        fd = dirfd;
-    } else {
-        fd = openat(dirfd, file_name, O_PATH | O_CLOEXEC);
-        if (fd < 0) {
-            return false;
+    return fstat(fd, &target_st) == 0 &&
+           stat("/proc/self/exe", &self_st) == 0 &&
+           target_st.st_dev == self_st.st_dev &&
+           target_st.st_ino == self_st.st_ino;
+}
+
+typedef enum GuestScriptParseResult {
+    GUEST_SCRIPT_NONE,
+    GUEST_SCRIPT_VALID,
+    GUEST_SCRIPT_INVALID,
+} GuestScriptParseResult;
+
+#define GUEST_EXEC_MAX_SCRIPTS 5
+
+typedef struct GuestExecScript {
+    int fd;
+    char *fd_path;
+    char *interpreter;
+    char *argument;
+} GuestExecScript;
+
+typedef struct GuestExecResolution {
+    int terminal_fd;
+    bool initial_is_x86;
+    bool restore_prctl;
+    unsigned int script_count;
+    GuestExecScript scripts[GUEST_EXEC_MAX_SCRIPTS];
+} GuestExecResolution;
+
+static ssize_t guest_exec_pread(int fd, void *buffer, size_t size)
+{
+    char fd_path[64];
+    int read_fd;
+    ssize_t ret;
+
+    ret = pread(fd, buffer, size, 0);
+    if (ret >= 0 || errno != EBADF) {
+        return ret;
+    }
+    snprintf(fd_path, sizeof(fd_path), "/proc/self/fd/%d", fd);
+    read_fd = open(fd_path, O_RDONLY | O_CLOEXEC);
+    if (read_fd < 0) {
+        return -1;
+    }
+    ret = pread(read_fd, buffer, size, 0);
+    close(read_fd);
+    return ret;
+}
+
+static const char *guest_script_nonspace(const char *first, const char *last)
+{
+    while (first <= last) {
+        if (*first != ' ' && *first != '\t') {
+            return first;
         }
-        owned = true;
+        first++;
     }
-    ret = fstat(fd, &target_st) == 0 &&
-          stat("/proc/self/exe", &self_st) == 0 &&
-          target_st.st_dev == self_st.st_dev &&
-          target_st.st_ino == self_st.st_ino;
-    if (owned) {
-        close(fd);
-    }
-    return ret;
+    return NULL;
 }
 
-static bool exec_file_restores_guest_state_at(int dirfd,
-                                               const char *file_name,
-                                               int flags, unsigned int depth)
+static const char *guest_script_terminator(const char *first,
+                                           const char *last)
 {
-    char header[256];
-    char interpreter[PATH_MAX];
-    ssize_t len;
-    size_t start, end;
+    while (first <= last) {
+        if (*first == ' ' || *first == '\t' || *first == '\0') {
+            return first;
+        }
+        first++;
+    }
+    return NULL;
+}
+
+static GuestScriptParseResult guest_exec_parse_script(int fd,
+                                                       char **interpreter,
+                                                       char **argument)
+{
+    char header[256] = { 0 };
+    const char *buffer_end = header + sizeof(header) - 1;
+    const char *name, *separator, *arg, *end;
+    ssize_t len = guest_exec_pread(fd, header, sizeof(header));
+
+    *interpreter = NULL;
+    *argument = NULL;
+    if (len < 2 || header[0] != '#' || header[1] != '!') {
+        return GUEST_SCRIPT_NONE;
+    }
+    end = memchr(header, '\n', sizeof(header));
+    if (!end) {
+        end = guest_script_nonspace(header + 2, buffer_end);
+        if (!end || !guest_script_terminator(end, buffer_end)) {
+            return GUEST_SCRIPT_INVALID;
+        }
+        end = buffer_end;
+    }
+    while (end > header + 2 && (end[-1] == ' ' || end[-1] == '\t')) {
+        end--;
+    }
+    name = guest_script_nonspace(header + 2, end);
+    if (!name || name == end || *name == '\0') {
+        return GUEST_SCRIPT_INVALID;
+    }
+    separator = guest_script_terminator(name, end);
+    if (!separator) {
+        separator = end;
+    }
+    *interpreter = g_strndup(name, separator - name);
+    if (separator < end && *separator != '\0') {
+        arg = guest_script_nonspace(separator, end);
+        if (arg && arg < end && *arg != '\0') {
+            *argument = g_strndup(arg, end - arg);
+        }
+    }
+    return GUEST_SCRIPT_VALID;
+}
+
+static int guest_self_exe_dup_fd(CPUArchState *env)
+{
+    char path_buffer[64];
+    const char *exe_pathname;
+    int owned_fd;
+
+    exe_pathname = guest_self_exe_open_path(env, path_buffer,
+                                            sizeof(path_buffer), &owned_fd);
+    if (!exe_pathname) {
+        return -1;
+    }
+    if (owned_fd >= 0) {
+        return owned_fd;
+    }
+    return open(exe_pathname, O_RDONLY | O_CLOEXEC);
+}
+
+static void guest_exec_resolution_cleanup(GuestExecResolution *resolution)
+{
+    unsigned int i;
+
+    if (resolution->terminal_fd >= 0) {
+        close(resolution->terminal_fd);
+    }
+    for (i = 0; i < resolution->script_count; i++) {
+        close(resolution->scripts[i].fd);
+        g_free(resolution->scripts[i].fd_path);
+        g_free(resolution->scripts[i].interpreter);
+        g_free(resolution->scripts[i].argument);
+    }
+    memset(resolution, 0, sizeof(*resolution));
+    resolution->terminal_fd = -1;
+}
+
+static int guest_exec_resolve(CPUArchState *env, int dirfd,
+                              const char *file_name, int flags,
+                              bool self_exe, GuestExecResolution *resolution)
+{
+    int fd_flags;
     int fd;
 
-    if (depth > 4 || is_self_file_at(dirfd, file_name, flags)) {
-        return depth <= 4;
+    memset(resolution, 0, sizeof(*resolution));
+    resolution->terminal_fd = -1;
+    if (flags & ~(AT_EMPTY_PATH | AT_SYMLINK_NOFOLLOW)) {
+        errno = EINVAL;
+        return -1;
     }
-    fd = open_exec_inspection_file(dirfd, file_name, flags);
+    fd = self_exe ? guest_self_exe_dup_fd(env) :
+         open_exec_inspection_file(dirfd, file_name, flags);
     if (fd < 0) {
-        return false;
+        return -1;
     }
-    if (is_x86_elf_fd(fd)) {
-        close(fd);
-        return true;
-    }
-    len = pread(fd, header, sizeof(header), 0);
-    close(fd);
-    if (len < 2 || header[0] != '#' || header[1] != '!') {
-        return false;
-    }
+    resolution->initial_is_x86 = is_x86_elf_fd(fd);
+    while (true) {
+        GuestExecScript *script;
+        GuestScriptParseResult parsed;
+        char *interpreter;
+        char *argument;
+        int interpreter_fd;
 
-    start = 2;
-    while (start < len && (header[start] == ' ' || header[start] == '\t')) {
-        start++;
+        parsed = guest_exec_parse_script(fd, &interpreter, &argument);
+        if (parsed != GUEST_SCRIPT_VALID) {
+            resolution->terminal_fd = fd;
+            resolution->restore_prctl = is_x86_elf_fd(fd) ||
+                                         is_self_exec_fd(fd);
+            return 0;
+        }
+        if (resolution->script_count == GUEST_EXEC_MAX_SCRIPTS) {
+            g_free(interpreter);
+            g_free(argument);
+            close(fd);
+            errno = ELOOP;
+            guest_exec_resolution_cleanup(resolution);
+            return -1;
+        }
+        interpreter_fd = open(interpreter, O_RDONLY | O_CLOEXEC);
+        if (interpreter_fd < 0) {
+            int saved_errno = errno;
+
+            g_free(interpreter);
+            g_free(argument);
+            close(fd);
+            guest_exec_resolution_cleanup(resolution);
+            errno = saved_errno;
+            return -1;
+        }
+        /*
+         * Linux requires the script fd to survive execveat(AT_EMPTY_PATH):
+         * closing it during exec makes /proc/self/fd/N unavailable to the
+         * interpreter and yields ENOENT.  Keep one carrier fd per script
+         * layer.  GUEST_EXEC_MAX_SCRIPTS bounds one resolution; as with
+         * native execveat(), the interpreter owns the inherited fd lifetime.
+         */
+        fd_flags = fcntl(fd, F_GETFD);
+        if (fd_flags < 0 || fcntl(fd, F_SETFD, fd_flags & ~FD_CLOEXEC) < 0) {
+            int saved_errno = errno;
+
+            g_free(interpreter);
+            g_free(argument);
+            close(interpreter_fd);
+            close(fd);
+            guest_exec_resolution_cleanup(resolution);
+            errno = saved_errno;
+            return -1;
+        }
+        script = &resolution->scripts[resolution->script_count++];
+        script->fd = fd;
+        script->fd_path = g_strdup_printf("/proc/self/fd/%d", fd);
+        script->interpreter = interpreter;
+        script->argument = argument;
+        fd = interpreter_fd;
     }
-    end = start;
-    while (end < len && header[end] != ' ' && header[end] != '\t' &&
-           header[end] != '\n' && header[end] != '\r') {
-        end++;
-    }
-    if (end == start || end - start >= sizeof(interpreter)) {
-        return false;
-    }
-    memcpy(interpreter, header + start, end - start);
-    interpreter[end - start] = 0;
-    return exec_file_restores_guest_state_at(AT_FDCWD, interpreter, 0,
-                                              depth + 1);
 }
 
-static bool guest_self_exe_restores_guest_state(CPUArchState *env)
+static char **guest_exec_script_argv(const GuestExecResolution *resolution,
+                                     char **argp)
 {
-    char path_buffer[64];
-    const char *exe_pathname;
-    bool ret;
-    int owned_fd;
+    char **current = argp;
+    size_t current_count = g_strv_length(current);
+    unsigned int i;
 
-    exe_pathname = guest_self_exe_open_path(env, path_buffer,
-                                            sizeof(path_buffer), &owned_fd);
-    if (!exe_pathname) {
-        return false;
+    for (i = 0; i < resolution->script_count; i++) {
+        const GuestExecScript *script = &resolution->scripts[i];
+        size_t tail_count = current_count ? current_count - 1 : 0;
+        size_t prefix_count = script->argument ? 3 : 2;
+        char **next = g_new0(char *, prefix_count + tail_count + 1);
+        size_t pos = 0;
+
+        next[pos++] = script->interpreter;
+        if (script->argument) {
+            next[pos++] = script->argument;
+        }
+        next[pos++] = script->fd_path;
+        if (tail_count) {
+            memcpy(next + pos, current + 1, tail_count * sizeof(*next));
+        }
+        if (current != argp) {
+            g_free(current);
+        }
+        current = next;
+        current_count = prefix_count + tail_count;
     }
-    ret = exec_file_restores_guest_state_at(AT_FDCWD, exe_pathname, 0, 0);
-    if (owned_fd >= 0) {
-        close(owned_fd);
-    }
-    return ret;
+    return current;
 }
 
-static bool guest_self_exe_is_x86(CPUArchState *env)
+static bool guest_prctl_exec_state_active(CPUArchState *env)
 {
-    char path_buffer[64];
-    const char *exe_pathname;
-    bool ret;
-    int owned_fd;
+    TaskState *ts = env_cpu(env)->opaque;
+    unsigned int mdwe;
 
-    exe_pathname = guest_self_exe_open_path(env, path_buffer,
-                                            sizeof(path_buffer), &owned_fd);
-    if (!exe_pathname) {
-        return false;
-    }
-    ret = is_x86_file_at(AT_FDCWD, exe_pathname, 0);
-    if (owned_fd >= 0) {
-        close(owned_fd);
-    }
-    return ret;
+    mmap_lock();
+    mdwe = ts->info->prctl_mdwe;
+    mmap_unlock();
+    return mdwe || (((CPUX86State *)env)->cr[4] & CR4_TSD_MASK);
 }
-#endif
+#endif /* TARGET_I386 */
 
+#ifdef TARGET_I386
 static abi_long do_prctl_syscall_user_dispatch(CPUArchState *env,
                                                abi_ulong mode,
                                                abi_ulong offset,
@@ -13228,8 +13454,9 @@ static abi_long do_prctl_syscall_user_dispatch(CPUArchState *env,
         return -TARGET_EINVAL;
     }
 }
+#endif
 
-#ifdef TARGET_X86_64
+#ifdef TARGET_I386
 typedef struct TargetPrctlMmMap {
     uint64_t start_code;
     uint64_t end_code;
@@ -13289,6 +13516,12 @@ static abi_long do_prctl_get_auxv(CPUArchState *env, abi_ulong addr,
     }
     mmap_unlock();
     return sizeof(info->prctl_auxv);
+}
+
+static void guest_prctl_auxv_terminate(uint8_t *auxv)
+{
+    memset(auxv + TARGET_X86_PRCTL_AUXV_SIZE - 2 * sizeof(uint64_t), 0,
+           2 * sizeof(uint64_t));
 }
 
 static bool guest_has_capability(unsigned int capability)
@@ -13405,7 +13638,7 @@ static abi_long guest_prctl_set_auxv(struct image_info *info,
                                      abi_ulong addr, abi_ulong len,
                                      bool replace_all)
 {
-    abi_ulong auxv[TARGET_X86_64_PRCTL_AUXV_WORDS] = { };
+    uint8_t auxv[TARGET_X86_PRCTL_AUXV_SIZE] = { };
 
     if (len > sizeof(auxv)) {
         return -TARGET_EINVAL;
@@ -13413,8 +13646,7 @@ static abi_long guest_prctl_set_auxv(struct image_info *info,
     if (len && copy_from_user(auxv, addr, len)) {
         return -TARGET_EFAULT;
     }
-    auxv[ARRAY_SIZE(auxv) - 2] = 0;
-    auxv[ARRAY_SIZE(auxv) - 1] = 0;
+    guest_prctl_auxv_terminate(auxv);
     mmap_lock();
     if (replace_all) {
         memcpy(info->prctl_auxv, auxv, sizeof(auxv));
@@ -13511,8 +13743,9 @@ static abi_long do_prctl_set_mm(CPUArchState *env, abi_ulong option,
 
     if (option == PR_SET_MM_MAP) {
         TargetPrctlMmMap *target_map;
-        abi_ulong new_auxv[TARGET_X86_64_PRCTL_AUXV_WORDS] = { };
+        uint8_t new_auxv[TARGET_X86_PRCTL_AUXV_SIZE] = { };
         GuestPrctlExeFile new_exe = { .fd = -1 };
+        uint64_t auxv64;
         abi_ulong auxv;
         uint32_t auxv_size, exe_fd;
         bool replace_exe = false;
@@ -13523,23 +13756,47 @@ static abi_long do_prctl_set_mm(CPUArchState *env, abi_ulong option,
         if (!lock_user_struct(VERIFY_READ, target_map, addr, 1)) {
             return -TARGET_EFAULT;
         }
-        map = (GuestPrctlMmMap) {
-            .start_code = tswap64(target_map->start_code),
-            .end_code = tswap64(target_map->end_code),
-            .start_data = tswap64(target_map->start_data),
-            .end_data = tswap64(target_map->end_data),
-            .start_brk = tswap64(target_map->start_brk),
-            .brk = tswap64(target_map->brk),
-            .start_stack = tswap64(target_map->start_stack),
-            .arg_start = tswap64(target_map->arg_start),
-            .arg_end = tswap64(target_map->arg_end),
-            .env_start = tswap64(target_map->env_start),
-            .env_end = tswap64(target_map->env_end),
-        };
-        auxv = tswap64(target_map->auxv);
+        {
+            const uint64_t values[] = {
+                tswap64(target_map->start_code),
+                tswap64(target_map->end_code),
+                tswap64(target_map->start_data),
+                tswap64(target_map->end_data),
+                tswap64(target_map->start_brk),
+                tswap64(target_map->brk),
+                tswap64(target_map->start_stack),
+                tswap64(target_map->arg_start),
+                tswap64(target_map->arg_end),
+                tswap64(target_map->env_start),
+                tswap64(target_map->env_end),
+            };
+            abi_ulong *fields[] = {
+                &map.start_code, &map.end_code,
+                &map.start_data, &map.end_data,
+                &map.start_brk, &map.brk,
+                &map.start_stack,
+                &map.arg_start, &map.arg_end,
+                &map.env_start, &map.env_end,
+            };
+            size_t i;
+
+            for (i = 0; i < ARRAY_SIZE(values); i++) {
+                if (values[i] > GUEST_ADDR_MAX) {
+                    unlock_user_struct(target_map, addr, 0);
+                    return -TARGET_EINVAL;
+                }
+                *fields[i] = values[i];
+            }
+        }
+        auxv64 = tswap64(target_map->auxv);
         auxv_size = tswap32(target_map->auxv_size);
         exe_fd = tswap32(target_map->exe_fd);
         unlock_user_struct(target_map, addr, 0);
+
+        if (auxv_size && auxv64 > GUEST_ADDR_MAX) {
+            return -TARGET_EINVAL;
+        }
+        auxv = auxv64;
 
         ret = guest_prctl_mm_validate(&map);
         if (ret) {
@@ -13552,8 +13809,7 @@ static abi_long do_prctl_set_mm(CPUArchState *env, abi_ulong option,
             if (copy_from_user(new_auxv, auxv, auxv_size)) {
                 return -TARGET_EFAULT;
             }
-            new_auxv[ARRAY_SIZE(new_auxv) - 2] = 0;
-            new_auxv[ARRAY_SIZE(new_auxv) - 1] = 0;
+            guest_prctl_auxv_terminate(new_auxv);
         }
         if (exe_fd != UINT32_MAX) {
             unsigned int checkpoint_cap =
@@ -13751,22 +14007,30 @@ static abi_long do_prctl_timer_create_restore_ids(CPUArchState *env,
                                                    abi_ulong arg5)
 {
     TaskState *ts = env_cpu(env)->opaque;
+    abi_long ret;
 
     if (arg3 || arg4 || arg5) {
         return -TARGET_EINVAL;
     }
+    mmap_lock();
     switch (control) {
     case PR_TIMER_CREATE_RESTORE_IDS_OFF:
         ts->info->prctl_timer_restore_ids = false;
-        return 0;
+        ret = 0;
+        break;
     case PR_TIMER_CREATE_RESTORE_IDS_ON:
         ts->info->prctl_timer_restore_ids = true;
-        return 0;
+        ret = 0;
+        break;
     case PR_TIMER_CREATE_RESTORE_IDS_GET:
-        return ts->info->prctl_timer_restore_ids;
+        ret = ts->info->prctl_timer_restore_ids;
+        break;
     default:
-        return -TARGET_EINVAL;
+        ret = -TARGET_EINVAL;
+        break;
     }
+    mmap_unlock();
+    return ret;
 }
 
 static abi_long do_prctl_futex_hash(CPUArchState *env, abi_ulong operation,
@@ -13951,7 +14215,7 @@ static char *guest_prctl_exec_env(CPUArchState *env, const char *name)
         mdwe = ts->info->prctl_mdwe;
         mmap_unlock();
         if (mdwe == TARGET_PR_MDWE_REFUSE_EXEC_GAIN) {
-            return g_strdup_printf("%s=1", LATX_GUEST_MDWE_ENV);
+            return g_strdup_printf("%s=%u", LATX_GUEST_MDWE_ENV, mdwe);
         }
     } else if (strcmp(name, LATX_GUEST_TSC_ENV) == 0) {
         CPUX86State *x86_env = (CPUX86State *)env;
@@ -14256,9 +14520,11 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
             const char *exec_pathname;
             bool self_exe;
             bool x86_file;
-#ifdef TARGET_X86_64
+#ifdef TARGET_I386
+            GuestExecResolution exec_resolution = { .terminal_fd = -1 };
             char *prctl_mdwe_env = NULL;
             char *prctl_tsc_env = NULL;
+            bool pinned_exec;
             bool restore_prctl;
 #endif
             int argc, envc;
@@ -14333,13 +14599,21 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
             pname = strrchr(p, '/');
             exec_pathname = path(p);
             self_exe = is_proc_myself((const char *)p, "exe");
-#ifdef TARGET_X86_64
-            x86_file = self_exe ? guest_self_exe_is_x86(env) :
-                       is_x86_file_at(arg1, exec_pathname, arg5);
-            restore_prctl = self_exe ?
-                guest_self_exe_restores_guest_state(env) :
-                exec_file_restores_guest_state_at(arg1, exec_pathname,
-                                                  arg5, 0);
+#ifdef TARGET_I386
+            pinned_exec = guest_prctl_exec_state_active(env);
+            if (pinned_exec) {
+                if (guest_exec_resolve(env, arg1, exec_pathname, arg5,
+                                       self_exe, &exec_resolution) < 0) {
+                    ret = get_errno(-1);
+                    goto execveat_end;
+                }
+                x86_file = exec_resolution.initial_is_x86;
+                restore_prctl = exec_resolution.restore_prctl;
+            } else {
+                x86_file = self_exe ||
+                           is_x86_file_at(arg1, exec_pathname, arg5);
+                restore_prctl = false;
+            }
 
             exec_envp = prepare_guest_prctl_exec_env(env, envp, envc,
                                                      restore_prctl,
@@ -14412,7 +14686,19 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
              * before the execve completes and makes it the other
              * program's problem.
              */
-            if (self_exe) {
+            if (pinned_exec) {
+                char **before_script_argp = exec_argp;
+
+                exec_argp = guest_exec_script_argv(&exec_resolution,
+                                                    exec_argp);
+                if (before_script_argp != argp &&
+                    before_script_argp != exec_argp) {
+                    g_free(before_script_argp);
+                }
+                ret = get_errno(safe_execveat(exec_resolution.terminal_fd,
+                                              "", exec_argp, exec_envp,
+                                              AT_EMPTY_PATH));
+            } else if (self_exe) {
                 char exe_path_buffer[64];
                 const char *exe_pathname;
                 int exe_fd;
@@ -14464,7 +14750,8 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
             g_free(pidof_arg);
             g_free(hash_str);
             g_free(argp);
-#ifdef TARGET_X86_64
+#ifdef TARGET_I386
+            guest_exec_resolution_cleanup(&exec_resolution);
             g_free(prctl_mdwe_env);
             g_free(prctl_tsc_env);
 #endif
@@ -14484,9 +14771,11 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
             const char *pname;
             bool self_exe;
             bool x86_file;
-#ifdef TARGET_X86_64
+#ifdef TARGET_I386
+            GuestExecResolution exec_resolution = { .terminal_fd = -1 };
             char *prctl_mdwe_env = NULL;
             char *prctl_tsc_env = NULL;
+            bool pinned_exec;
             bool restore_prctl;
 #endif
             int argc, envc;
@@ -14548,12 +14837,21 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
 
             pname = strrchr(p, '/');
             self_exe = is_proc_myself((const char *)p, "exe");
-#ifdef TARGET_X86_64
-            x86_file = self_exe ? guest_self_exe_is_x86(env) :
-                       is_x86_file_at(AT_FDCWD, path(p), 0);
-            restore_prctl = self_exe ?
-                guest_self_exe_restores_guest_state(env) :
-                exec_file_restores_guest_state_at(AT_FDCWD, path(p), 0, 0);
+#ifdef TARGET_I386
+            pinned_exec = guest_prctl_exec_state_active(env);
+            if (pinned_exec) {
+                if (guest_exec_resolve(env, AT_FDCWD, path(p), 0,
+                                       self_exe, &exec_resolution) < 0) {
+                    ret = get_errno(-1);
+                    goto execve_end;
+                }
+                x86_file = exec_resolution.initial_is_x86;
+                restore_prctl = exec_resolution.restore_prctl;
+            } else {
+                x86_file = self_exe ||
+                           is_x86_file_at(AT_FDCWD, path(p), 0);
+                restore_prctl = false;
+            }
 
             exec_envp = prepare_guest_prctl_exec_env(env, envp, envc,
                                                      restore_prctl,
@@ -14622,10 +14920,19 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
                 const char *exe_pathname;
                 int exe_fd;
 
-                if (!guest_self_exe_exec_paths(
-                        cpu_env, real, sizeof(real), &temp,
-                        exe_path_buffer, sizeof(exe_path_buffer),
-                        &exe_pathname, &exe_fd)) {
+                if (pinned_exec) {
+                    temp = guest_self_exe_link_path(cpu_env, real,
+                                                    sizeof(real));
+                    if (!temp) {
+                        ret = get_errno(-1);
+                        goto execve_end;
+                    }
+                    exe_pathname = NULL;
+                    exe_fd = -1;
+                } else if (!guest_self_exe_exec_paths(
+                               cpu_env, real, sizeof(real), &temp,
+                               exe_path_buffer, sizeof(exe_path_buffer),
+                               &exe_pathname, &exe_fd)) {
                     ret = get_errno(-1);
                     if (exe_fd >= 0) {
                         close(exe_fd);
@@ -14641,11 +14948,37 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
                     }
                     *exec_argp = (char *)temp;
                 }
-                ret = get_errno(safe_execve(exe_pathname, exec_argp,
-                                            exec_envp));
+                if (pinned_exec) {
+                    char **before_script_argp = exec_argp;
+
+                    exec_argp = guest_exec_script_argv(&exec_resolution,
+                                                        exec_argp);
+                    if (before_script_argp != argp &&
+                        before_script_argp != exec_argp) {
+                        g_free(before_script_argp);
+                    }
+                    ret = get_errno(safe_execveat(
+                                        exec_resolution.terminal_fd, "",
+                                        exec_argp, exec_envp, AT_EMPTY_PATH));
+                } else {
+                    ret = get_errno(safe_execve(exe_pathname, exec_argp,
+                                                exec_envp));
+                }
                 if (exe_fd >= 0) {
                     close(exe_fd);
                 }
+            } else if (pinned_exec) {
+                char **before_script_argp = exec_argp;
+
+                exec_argp = guest_exec_script_argv(&exec_resolution,
+                                                    exec_argp);
+                if (before_script_argp != argp &&
+                    before_script_argp != exec_argp) {
+                    g_free(before_script_argp);
+                }
+                ret = get_errno(safe_execveat(exec_resolution.terminal_fd,
+                                              "", exec_argp, exec_envp,
+                                              AT_EMPTY_PATH));
             } else {
 
                 /* Although execve() is not an interruptible syscall it is
@@ -14689,7 +15022,8 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
             g_free(pidof_arg);
             g_free(hash_str);
             g_free(argp);
-#ifdef TARGET_X86_64
+#ifdef TARGET_I386
+            guest_exec_resolution_cleanup(&exec_resolution);
             g_free(prctl_mdwe_env);
             g_free(prctl_tsc_env);
 #endif
@@ -16086,9 +16420,20 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
             v5 = tswapal(v[4]);
             v6 = tswapal(v[5]);
             unlock_user(v, arg1, 0);
+#ifdef TARGET_I386
+            mmap_lock();
+            ret = guest_mdwe_mmap(cpu, v2, v3);
+            if (ret) {
+                mmap_unlock();
+                return ret;
+            }
+#endif
             ret = get_errno(target_mmap(v1, v2, v3,
                                         target_to_host_bitmask(v4, mmap_flags_tbl),
                                         v5, v6, 1));
+#ifdef TARGET_I386
+            mmap_unlock();
+#endif
         }
 #else
 
@@ -16102,7 +16447,7 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
             }
         }
 
-#ifdef TARGET_X86_64
+#ifdef TARGET_I386
         mmap_lock();
         ret = guest_mdwe_mmap(cpu, arg2, arg3);
         if (ret) {
@@ -16115,7 +16460,7 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
                                     target_to_host_bitmask(arg4, mmap_flags_tbl),
                                     arg5,
                                     arg6, 1));
-#ifdef TARGET_X86_64
+#ifdef TARGET_I386
         mmap_unlock();
 #endif
 #endif
@@ -16126,9 +16471,20 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
 #ifndef MMAP_SHIFT
 #define MMAP_SHIFT 12
 #endif
+#ifdef TARGET_I386
+        mmap_lock();
+        ret = guest_mdwe_mmap(cpu, arg2, arg3);
+        if (ret) {
+            mmap_unlock();
+            return ret;
+        }
+#endif
         ret = target_mmap(arg1, arg2, arg3,
                           target_to_host_bitmask(arg4, mmap_flags_tbl),
                           arg5, (uint64_t)arg6 << MMAP_SHIFT, 1);
+#ifdef TARGET_I386
+        mmap_unlock();
+#endif
         return get_errno(ret);
 #endif
     case TARGET_NR_munmap:
@@ -16147,7 +16503,7 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
                 arg1 = ts->info->stack_limit;
             }
         }
-#ifdef TARGET_X86_64
+#ifdef TARGET_I386
         mmap_lock();
         ret = guest_mdwe_mprotect(cpu, arg1, arg2, arg3);
         if (ret) {
@@ -16156,7 +16512,7 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
         }
 #endif
         ret = get_errno(target_mprotect(arg1, arg2, arg3));
-#ifdef TARGET_X86_64
+#ifdef TARGET_I386
         mmap_unlock();
 #endif
         return ret;
@@ -17662,10 +18018,10 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
                 return ret;
             }
 #endif /* AARCH64 */
+#ifdef TARGET_I386
         case PR_SET_SYSCALL_USER_DISPATCH:
             return do_prctl_syscall_user_dispatch(env, arg2, arg3,
                                                   arg4, arg5);
-#ifdef TARGET_X86_64
         case PR_GET_TSC:
             return do_prctl_get_tsc(env, arg2);
         case PR_SET_TSC:
@@ -17695,7 +18051,16 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
         case PR_FUTEX_HASH:
             return do_prctl_futex_hash(env, arg2, arg3, arg4);
         case PR_RSEQ_SLICE_EXTENSION:
+            /* linux-user has no rseq-v2 slice ABI to enable. */
             return arg4 || arg5 ? -TARGET_EINVAL : -TARGET_EOPNOTSUPP;
+        case PR_SET_MEMORY_MERGE:
+        case PR_GET_MEMORY_MERGE:
+            /* KSM state belongs to the guest mm, not the translator mm. */
+            return -TARGET_EINVAL;
+        case PR_GET_CFI:
+        case PR_SET_CFI:
+            /* Native x86 has no branch-landing-pad prctl implementation. */
+            return -TARGET_EINVAL;
 #endif
         case PR_GET_SECCOMP:
         case PR_SET_SECCOMP:
@@ -17725,12 +18090,14 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
         case PR_SET_PTRACER:
         case PR_GET_THP_DISABLE:
         case PR_SET_THP_DISABLE:
-#ifndef TARGET_X86_64
+#ifndef TARGET_I386
         case PR_GET_SPECULATION_CTRL:
         case PR_SET_SPECULATION_CTRL:
 #endif
+#ifndef TARGET_I386
         case PR_SET_MEMORY_MERGE:
         case PR_GET_MEMORY_MERGE:
+#endif
             /* These options have only scalar arguments. */
             return get_errno(prctl(arg1, arg2, arg3, arg4, arg5));
         case PR_SCHED_CORE:
@@ -17766,7 +18133,7 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
         case PR_SET_ENDIAN:
         case PR_GET_FPEMU:
         case PR_SET_FPEMU:
-#ifndef TARGET_X86_64
+#ifndef TARGET_I386
         case PR_SET_MM:
         case PR_GET_TSC:
         case PR_SET_TSC:
@@ -17776,10 +18143,18 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
             /* Do not let the guest alter host execution state. */
             return -TARGET_EINVAL;
         default:
+#ifdef TARGET_I386
             qemu_log_mask(LOG_UNIMP,
                           "Unsupported prctl: " TARGET_ABI_FMT_ld "\n",
                           arg1);
             return -TARGET_EINVAL;
+#else
+            /* Preserve the generic linux-user behavior for other guests. */
+            return get_errno(prctl(arg1, g2h_untagged(arg2),
+                                   g2h_untagged(arg3),
+                                   g2h_untagged(arg4),
+                                   g2h_untagged(arg5)));
+#endif
         }
         break;
 #ifdef TARGET_NR_arch_prctl
@@ -19990,12 +20365,14 @@ defined(__loongarch__)
         /* args: clockid_t clockid, struct sigevent *sevp, timer_t *timerid */
 
         struct sigevent host_sevp = { {0}, }, *phost_sevp = NULL;
+        target_timer_t allocated;
         target_timer_t requested = 0;
+        timer_t host_timer;
         bool exact = false;
         int clkid = arg1;
         int timer_index;
 
-#ifdef TARGET_X86_64
+#ifdef TARGET_I386
         mmap_lock();
         exact = ((TaskState *)cpu->opaque)->info->prctl_timer_restore_ids;
         mmap_unlock();
@@ -20006,30 +20383,29 @@ defined(__loongarch__)
         if (exact && requested < 0) {
             return -TARGET_EINVAL;
         }
-        timer_index = reserve_host_timer(requested, exact);
+        if (arg2) {
+            phost_sevp = &host_sevp;
+            ret = target_to_host_sigevent(phost_sevp, arg2);
+            if (ret != 0) {
+                return ret;
+            }
+        }
+        timer_index = reserve_host_timer(requested, exact, &allocated);
 
         if (timer_index < 0) {
             ret = timer_index;
         } else {
-            timer_t *phtimer = g_posix_timers  + timer_index;
-
-            if (arg2) {
-                phost_sevp = &host_sevp;
-                ret = target_to_host_sigevent(phost_sevp, arg2);
-                if (ret != 0) {
-                    release_host_timer(timer_index);
-                    return ret;
-                }
-            }
-
-            ret = get_errno(timer_create(clkid, phost_sevp, phtimer));
+            ret = get_errno(timer_create(clkid, phost_sevp, &host_timer));
             if (ret) {
-                release_host_timer(timer_index);
-            } else if (put_user(g_posix_timer_ids[timer_index], arg3,
-                                target_timer_t)) {
-                timer_delete(*phtimer);
-                release_host_timer(timer_index);
+                release_host_timer(timer_index, allocated);
+            } else if (put_user(allocated, arg3, target_timer_t)) {
+                timer_delete(host_timer);
+                release_host_timer(timer_index, allocated);
                 return -TARGET_EFAULT;
+            } else if (!publish_host_timer(timer_index, allocated,
+                                           host_timer)) {
+                timer_delete(host_timer);
+                return -TARGET_EINVAL;
             }
         }
         return ret;
@@ -20177,7 +20553,7 @@ defined(__loongarch__)
             timer_t htimer = g_posix_timers[timerid];
             ret = get_errno(timer_delete(htimer));
             if (!ret) {
-                g_posix_timer_used[timerid] = false;
+                g_posix_timer_state[timerid] = POSIX_TIMER_FREE;
                 g_posix_timer_ids[timerid] = 0;
                 g_posix_timers[timerid] = (timer_t)0;
             }
@@ -20497,6 +20873,7 @@ defined(__loongarch__)
     return ret;
 }
 
+#ifdef TARGET_I386
 static bool syscall_user_dispatch(CPUArchState *env, int num, uint32_t arch)
 {
     CPUState *cpu = env_cpu(env);
@@ -20545,6 +20922,7 @@ static bool syscall_user_dispatch(CPUArchState *env, int num, uint32_t arch)
     queue_signal(env, TARGET_SIGSYS, QEMU_SI_SYS, &info);
     return true;
 }
+#endif
 
 abi_long do_syscall_with_seccomp(void *cpu_env, int num, int seccomp_num,
                                 uint32_t seccomp_arch, abi_long arg1,
@@ -20589,10 +20967,12 @@ abi_long do_syscall_with_seccomp(void *cpu_env, int num, int seccomp_num,
     loader_tunnel = num == TUNNEL_VIRTUAL_SYSCALL_ID &&
                     is_tunnel_loader_notification(env, arg1);
 #endif
+#ifdef TARGET_I386
     if (!loader_tunnel &&
         syscall_user_dispatch(env, seccomp_num, seccomp_arch)) {
         return -TARGET_QEMU_ESIGRETURN;
     }
+#endif
 
     record_syscall_start(cpu, num, arg1,
                          arg2, arg3, arg4, arg5, arg6, arg7, arg8);

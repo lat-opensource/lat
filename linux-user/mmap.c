@@ -112,7 +112,7 @@ static int validate_prot_to_pageflags(int *host_prot, int prot)
      *
      * Pages that are executable by the guest will never be executed
      * by the host, but the host will need to be able to read them.
-     */
+    */
     *host_prot = (prot & (PROT_READ | PROT_WRITE))
                | (prot & PROT_EXEC ? PROT_READ : 0);
 
@@ -438,7 +438,7 @@ static abi_ulong mmap_find_vma_reserved(abi_ulong start, abi_ulong size,
             }
         }
     }
-    */
+     */
     target_ulong ret;
     target_ulong max = reserved_va - 1;
 
@@ -777,9 +777,10 @@ abi_long target_mmap(abi_ulong start, abi_ulong len, int target_prot,
      * be atomic with respect to an external process.
      */
     if (flags & MAP_SHARED) {
+        CPUState *cpu = thread_cpu;
+
         /* Preserve sharing semantics even when monitoring is disabled. */
         page_flags |= PAGE_MEMSHARE;
-        CPUState *cpu = thread_cpu;
         if (!(cpu->tcg_cflags & CF_PARALLEL)) {
             cpu->tcg_cflags |= CF_PARALLEL;
             tb_flush(cpu);
@@ -1086,7 +1087,7 @@ abi_long target_mmap(abi_ulong start, abi_ulong len, int target_prot,
     }
 
  the_end:
-#ifdef TARGET_X86_64
+#ifdef TARGET_I386
     guest_vma_name_reset(start, len);
 #endif
     trace_target_mmap_complete(start);
@@ -1249,7 +1250,7 @@ int target_munmap(abi_ulong start, abi_ulong len, int rlimit_as_account)
         }
 #endif
         page_set_flags(start, start + len, 0);
-#ifdef TARGET_X86_64
+#ifdef TARGET_I386
         guest_vma_name_reset(start, len);
 #endif
     }
@@ -1276,6 +1277,10 @@ abi_long target_mremap(abi_ulong old_addr, abi_ulong old_size,
     bool keep_old;
     bool manual_move = false;
     bool can_manual_move = true;
+#if defined(CONFIG_LATX) && defined(TARGET_I386)
+    abi_ulong addr;
+    bool shared_mapping = false;
+#endif
     bool unreserved_extension = false;
     int prot;
     void *host_addr;
@@ -1320,6 +1325,10 @@ abi_long target_mremap(abi_ulong old_addr, abi_ulong old_size,
         errno = EINVAL;
         return -1;
     }
+    if ((flags & MREMAP_FIXED) && (new_addr & ~TARGET_PAGE_MASK)) {
+        errno = EINVAL;
+        return -1;
+    }
 
     keep_old = !old_size || (flags & MREMAP_DONTUNMAP);
     source_size = old_size ? old_size : new_size;
@@ -1357,6 +1366,45 @@ abi_long target_mremap(abi_ulong old_addr, abi_ulong old_size,
     mmap_lock();
 
     prot = page_get_flags(old_addr);
+#if defined(CONFIG_LATX) && defined(TARGET_I386)
+    for (addr = old_addr; addr < old_addr + source_size;
+         addr += TARGET_PAGE_SIZE) {
+        int page_prot = page_get_flags(addr);
+
+        if (page_get_target_data(addr)) {
+            errno = EFAULT;
+            host_addr = MAP_FAILED;
+            goto mremap_done;
+        }
+        if (page_prot & PAGE_MEMSHARE) {
+            shared_mapping = true;
+        }
+    }
+    if (shared_mapping) {
+        for (addr = old_addr; addr < old_addr + source_size;
+             addr += TARGET_PAGE_SIZE) {
+            int page_prot = page_get_flags(addr);
+
+            if ((page_prot & (PAGE_VALID | PAGE_MEMSHARE)) !=
+                    (PAGE_VALID | PAGE_MEMSHARE) ||
+                ((page_prot ^ prot) &
+                 (PAGE_BITS | PAGE_WRITE_ORG | PAGE_ANON))) {
+                errno = EFAULT;
+                host_addr = MAP_FAILED;
+                goto mremap_done;
+            }
+        }
+        if ((old_addr & ~qemu_host_page_mask) ||
+            (source_size & ~qemu_host_page_mask) ||
+            (new_size & ~qemu_host_page_mask) ||
+            ((flags & MREMAP_FIXED) &&
+             (new_addr & ~qemu_host_page_mask))) {
+            errno = EFAULT;
+            host_addr = MAP_FAILED;
+            goto mremap_done;
+        }
+    }
+#endif
     if ((prot & (PAGE_VALID | PAGE_ANON)) != (PAGE_VALID | PAGE_ANON) ||
         (prot & PAGE_MEMSHARE)) {
         can_manual_move = false;
@@ -1534,6 +1582,9 @@ abi_long target_mremap(abi_ulong old_addr, abi_ulong old_size,
         }
     }
 
+#if defined(CONFIG_LATX) && defined(TARGET_I386)
+mremap_done:
+#endif
     if (host_addr != MAP_FAILED && manual_move &&
         mmap_unmap_host_range(old_addr, old_size) != 0) {
         int move_errno = errno;
@@ -1552,7 +1603,7 @@ abi_long target_mremap(abi_ulong old_addr, abi_ulong old_size,
         new_addr = -1;
     } else {
         new_addr = h2g(host_addr);
-#ifdef TARGET_X86_64
+#ifdef TARGET_I386
         guest_vma_name_remap(old_addr, source_size, new_addr, new_size,
                              keep_old);
 #endif

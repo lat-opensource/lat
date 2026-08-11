@@ -303,8 +303,10 @@ void init_task_state(TaskState *ts)
         .ss_size = 0,
         .ss_flags = TARGET_SS_DISABLE,
     };
+#ifdef TARGET_I386
     ts->sys_dispatch_len = -1;
     ts->sys_dispatch_inclusive = false;
+#endif
 }
 
 CPUArchState *cpu_copy(CPUArchState *env)
@@ -1273,7 +1275,8 @@ int main(int argc, char **argv, char **envp)
     int log_mask;
     unsigned long max_reserved_va;
     bool preserve_argv0;
-#ifdef TARGET_X86_64
+#ifdef TARGET_I386
+    int initial_guest_exe_fd = -1;
     unsigned int inherited_guest_mdwe = 0;
     bool inherited_guest_tsc_disabled = false;
 #endif
@@ -1305,9 +1308,20 @@ int main(int argc, char **argv, char **envp)
         (void) envlist_setenv(envlist, *wrk);
     }
 
-#ifdef TARGET_X86_64
-    if (g_strcmp0(getenv(LATX_GUEST_MDWE_ENV), "1") == 0) {
-        inherited_guest_mdwe = TARGET_PR_MDWE_REFUSE_EXEC_GAIN;
+#ifdef TARGET_I386
+    {
+        const char *value = getenv(LATX_GUEST_MDWE_ENV);
+        char *end = NULL;
+        unsigned long parsed = value ? g_ascii_strtoull(value, &end, 10) : 0;
+        unsigned int valid = TARGET_PR_MDWE_REFUSE_EXEC_GAIN |
+                             TARGET_PR_MDWE_NO_INHERIT;
+
+        if (value && end != value && *end == '\0' &&
+            (parsed & ~valid) == 0 &&
+            (!(parsed & TARGET_PR_MDWE_NO_INHERIT) ||
+             (parsed & TARGET_PR_MDWE_REFUSE_EXEC_GAIN))) {
+            inherited_guest_mdwe = parsed;
+        }
     }
     inherited_guest_tsc_disabled =
         g_strcmp0(getenv(LATX_GUEST_TSC_ENV), "1") == 0;
@@ -1457,7 +1471,7 @@ int main(int argc, char **argv, char **envp)
     env = cpu->env_ptr;
     cpu_reset(cpu);
 
-#ifdef TARGET_X86_64
+#ifdef TARGET_I386
     if (inherited_guest_tsc_disabled) {
         env->cr[4] |= CR4_TSD_MASK;
     }
@@ -1645,7 +1659,7 @@ int main(int argc, char **argv, char **envp)
     /* build Task State */
     ts->info = info;
     ts->bprm = &bprm;
-#ifdef TARGET_X86_64
+#ifdef TARGET_I386
     info->prctl_mdwe = inherited_guest_mdwe;
 #endif
     cpu->opaque = ts;
@@ -1654,13 +1668,21 @@ int main(int argc, char **argv, char **envp)
     aot_set_process_profile(target_argc, target_argv);
     aot_init();
 #endif
+#ifdef TARGET_I386
+    initial_guest_exe_fd = fcntl(execfd, F_DUPFD_CLOEXEC, 0);
+    if (initial_guest_exe_fd < 0) {
+        error_report("Unable to preserve guest executable: %s",
+                     strerror(errno));
+        _exit(EXIT_FAILURE);
+    }
+#endif
     ret = loader_exec(execfd, exec_path, target_argv, target_environ, regs,
         info, &bprm);
     if (ret != 0) {
         printf("Error while loading %s: %s\n", exec_path, strerror(-ret));
         _exit(EXIT_FAILURE);
     }
-#ifdef TARGET_X86_64
+#ifdef TARGET_I386
     {
         size_t auxv_size = MIN((size_t)info->auxv_len,
                                sizeof(info->prctl_auxv));
@@ -1683,7 +1705,7 @@ int main(int argc, char **argv, char **envp)
         info->prctl_mm_arg_end = info->env_strings;
         info->prctl_mm_env_start = info->env_strings;
         info->prctl_mm_env_end = info->file_string;
-        info->prctl_mm_exe_fd = -1;
+        info->prctl_mm_exe_fd = initial_guest_exe_fd;
     }
 #endif
 #ifdef CONFIG_LATX_FAST_JMPCACHE

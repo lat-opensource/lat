@@ -69,10 +69,12 @@ struct image_info {
         /* For target-specific processing of NT_GNU_PROPERTY_TYPE_0. */
         uint32_t        note_flags;
 
-#ifdef TARGET_X86_64
-        /* Current Linux x86_64 has 54 native words in mm->saved_auxv. */
-#define TARGET_X86_64_PRCTL_AUXV_WORDS 54
-        abi_ulong       prctl_auxv[TARGET_X86_64_PRCTL_AUXV_WORDS];
+#ifdef TARGET_I386
+        /* Native x86_64 kernels reserve 54 words in mm->saved_auxv. */
+#define TARGET_X86_PRCTL_AUXV_WORDS 54
+#define TARGET_X86_PRCTL_AUXV_SIZE \
+        (TARGET_X86_PRCTL_AUXV_WORDS * sizeof(uint64_t))
+        uint8_t         prctl_auxv[TARGET_X86_PRCTL_AUXV_SIZE];
         bool            prctl_auxv_initialized;
         unsigned int    prctl_mdwe;
         unsigned int    prctl_futex_hash_slots;
@@ -98,7 +100,7 @@ struct image_info {
 #endif
 };
 
-#ifdef TARGET_X86_64
+#ifdef TARGET_I386
 #define LATX_GUEST_MDWE_ENV "_LATX_GUEST_MDWE"
 #define LATX_GUEST_TSC_ENV  "_LATX_GUEST_TSC"
 #define TARGET_PR_MDWE_REFUSE_EXEC_GAIN 1U
@@ -227,11 +229,13 @@ typedef struct TaskState {
 
     /* This thread's sigaltstack, if it has one */
     struct target_sigaltstack sigaltstack_used;
+#ifdef TARGET_I386
     /* This thread's syscall user dispatch state; ~0 means disabled. */
     abi_ulong sys_dispatch;
     abi_ulong sys_dispatch_selector;
     abi_ulong sys_dispatch_len;
     bool sys_dispatch_inclusive;
+#endif
     void* ptrace_poke_page;
 } __attribute__((aligned(16))) TaskState;
 

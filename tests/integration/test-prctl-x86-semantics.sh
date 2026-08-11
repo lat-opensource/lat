@@ -18,7 +18,7 @@ else
 fi
 
 "$clang" --target=x86_64-linux-gnu -fuse-ld=lld -nostdlib -static -no-pie \
-    -ffreestanding -fno-builtin -fno-stack-protector \
+    -O2 -ffreestanding -fno-builtin -fno-stack-protector \
     -Wl,--build-id=none "$source_file" -o "$workdir/prctl-x86-semantics"
 "${CC:-cc}" -O2 -Wall -Wextra "$native_helper_source" \
     -o "$workdir/prctl-native-env-helper"
@@ -51,7 +51,11 @@ run_case()
 }
 
 run_case p
-run_case v
+if [ "$(getconf PAGESIZE)" -gt 4096 ]; then
+    run_case v h
+else
+    run_case v
+fi
 run_case m
 run_case r
 run_case s

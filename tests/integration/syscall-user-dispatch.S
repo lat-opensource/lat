@@ -4,6 +4,7 @@
 .equ __NR_exit, 60
 .equ __NR_wait4, 61
 .equ __NR_prctl, 157
+.equ __NR_tunnel_virtual, 600
 
 .equ SIGSYS, 31
 .equ EFAULT, 14
@@ -193,6 +194,25 @@ blocked_syscall_after:
     cmpb $1, signal_seen(%rip)
     jne bad_siginfo
 
+    /* An ordinary syscall 600 is not an authenticated loader notification. */
+    movb $4, test_stage(%rip)
+    movb $0, signal_seen(%rip)
+    movb $SYSCALL_DISPATCH_FILTER_BLOCK, selector(%rip)
+blocked_tunnel_syscall:
+    mov $__NR_tunnel_virtual, %eax
+    xor %edi, %edi
+    xor %esi, %esi
+    xor %edx, %edx
+    xor %r10d, %r10d
+    xor %r8d, %r8d
+    xor %r9d, %r9d
+    syscall
+blocked_tunnel_syscall_after:
+    cmp $__NR_tunnel_virtual, %rax
+    jne bad_return
+    cmpb $1, signal_seen(%rip)
+    jne bad_siginfo
+
     /* Turning dispatch off makes the selector irrelevant. */
     mov $__NR_prctl, %eax
     mov $PR_SET_SYSCALL_USER_DISPATCH, %edi
@@ -282,6 +302,8 @@ dispatch_allowed:
     je fork_dispatch_inherited
     cmpb $3, test_stage(%rip)
     je inclusive_dispatch
+    cmpb $4, test_stage(%rip)
+    je tunnel_dispatch
     cmp $SIGSYS, %edi
     jne bad_siginfo
     cmpl $0, 4(%rsi)
@@ -292,6 +314,22 @@ dispatch_allowed:
     cmpq %rax, 16(%rsi)
     jne bad_siginfo
     cmpl $__NR_getpid, 24(%rsi)
+    jne bad_siginfo
+    cmpl $AUDIT_ARCH_X86_64, 28(%rsi)
+    jne bad_siginfo
+    movb $1, signal_seen(%rip)
+    movb $SYSCALL_DISPATCH_FILTER_ALLOW, selector(%rip)
+    ret
+
+tunnel_dispatch:
+    cmp $SIGSYS, %edi
+    jne bad_siginfo
+    cmpl $SYS_USER_DISPATCH, 8(%rsi)
+    jne bad_siginfo
+    lea blocked_tunnel_syscall_after(%rip), %rax
+    cmpq %rax, 16(%rsi)
+    jne bad_siginfo
+    cmpl $__NR_tunnel_virtual, 24(%rsi)
     jne bad_siginfo
     cmpl $AUDIT_ARCH_X86_64, 28(%rsi)
     jne bad_siginfo
