@@ -33,7 +33,7 @@
 //GO(xcb_render_change_picture_value_list_unpack, 
 //GO(xcb_render_color_end, 
 //GO(xcb_render_color_next, 
-GO(xcb_render_composite, pFbpCpppwwwwwwWW)
+GO(xcb_render_composite, uFbCuuuwwwwwwWW)
 //GO(xcb_render_composite_checked, 
 //GO(xcb_render_composite_glyphs_16, 
 //GO(xcb_render_composite_glyphs_16_checked, 
@@ -81,10 +81,10 @@ GO(xcb_render_create_cursor_checked, uFbuuWW)
 //GO(xcb_render_create_linear_gradient_stops, 
 //GO(xcb_render_create_linear_gradient_stops_end, 
 //GO(xcb_render_create_linear_gradient_stops_length, 
-GO(xcb_render_create_picture, uFbuuiup)
+GO(xcb_render_create_picture, uFbuuuup)
 //GO(xcb_render_create_picture_aux, 
 //GO(xcb_render_create_picture_aux_checked, 
-GO(xcb_render_create_picture_checked, uFbuuiup)
+GO(xcb_render_create_picture_checked, uFbuuuup)
 //GO(xcb_render_create_picture_sizeof, 
 //GO(xcb_render_create_picture_value_list, 
 //GO(xcb_render_create_picture_value_list_serialize, 
@@ -120,7 +120,7 @@ GO(xcb_render_create_picture_checked, uFbuuiup)
 //GO(xcb_render_free_glyphs_glyphs_length, 
 //GO(xcb_render_free_glyphs_sizeof, 
 GO(xcb_render_free_picture, uFbu)
-GO(xcb_render_free_picture_checked, fFbu)
+GO(xcb_render_free_picture_checked, uFbu)
 //GO(xcb_render_glyph_end, 
 //GO(xcb_render_glyphinfo_end, 
 //GO(xcb_render_glyphinfo_next, 
@@ -162,7 +162,7 @@ DATA(xcb_render_id, 2*sizeof(void*))
 //GO(xcb_render_query_filters_reply, 
 //GO(xcb_render_query_filters_sizeof, 
 //GO(xcb_render_query_filters_unchecked, 
-GO(xcb_render_query_pict_formats, uFbu)
+GO(xcb_render_query_pict_formats, uFb)
 //GO(xcb_render_query_pict_formats_formats, 
 //GO(xcb_render_query_pict_formats_formats_iterator, 
 //GO(xcb_render_query_pict_formats_formats_length, 

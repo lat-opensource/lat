@@ -1474,10 +1474,9 @@ void vFpC(uintptr_t fcn);
 void HFpp(uintptr_t fcn);
 void uFbuU(uintptr_t fcn);
 void pFbppU(uintptr_t fcn);
-void pFbpCpppwwwwwwWW(uintptr_t fcn);
+void uFbCuuuwwwwwwWW(uintptr_t fcn);
 void uFbuuWW(uintptr_t fcn);
-void uFbuuiup(uintptr_t fcn);
-void fFbu(uintptr_t fcn);
+void uFbuuuup(uintptr_t fcn);
 void pFbuuUUU(uintptr_t fcn);
 void pFbuuuuuwwuuuuUUUup(uintptr_t fcn);
 //endxcbV2
