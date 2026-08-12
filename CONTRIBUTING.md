@@ -1,5 +1,51 @@
 # Contributing to LAT / 参与 LAT 贡献
 
+## Fork and pull request workflow / Fork 与 Pull Request 工作流
+
+LAT uses a fork-first contribution workflow. Create ordinary feature, fix,
+documentation, and experiment branches in your personal fork, even if you have
+write access to `lat-opensource/lat`. Keep the upstream repository for its
+maintained branches and for exceptional work, such as release, stable, or
+emergency branches, that has been explicitly approved or coordinated by the
+maintainers.
+
+A typical setup is shown below. Replace `YOUR_ACCOUNT` and `TOPIC_BRANCH` with
+your GitHub account and a descriptive branch name.
+
+```console
+git clone https://github.com/YOUR_ACCOUNT/lat.git
+cd lat
+git remote add upstream https://github.com/lat-opensource/lat.git
+git fetch upstream
+git switch -c TOPIC_BRANCH upstream/master
+git push -u origin TOPIC_BRANCH
+```
+
+Then open a pull request from `YOUR_ACCOUNT:TOPIC_BRANCH` to
+`lat-opensource/lat:master`. Start each unrelated change on a new branch based
+on the current upstream target branch; do not reuse an already merged branch.
+
+LAT 默认采用 fork-first 贡献流程。即使你拥有 `lat-opensource/lat` 的写入
+权限，普通功能、修复、文档和实验分支也应创建在个人 fork 中。上游仓库仅
+保留项目维护分支，以及经过维护者明确批准或协调的特殊工作，例如发布、
+稳定版或紧急修复分支。
+
+典型设置方式如下。请将 `YOUR_ACCOUNT` 和 `TOPIC_BRANCH` 分别替换为你的
+GitHub 账号和具有描述性的分支名称：
+
+```console
+git clone https://github.com/YOUR_ACCOUNT/lat.git
+cd lat
+git remote add upstream https://github.com/lat-opensource/lat.git
+git fetch upstream
+git switch -c TOPIC_BRANCH upstream/master
+git push -u origin TOPIC_BRANCH
+```
+
+随后从 `YOUR_ACCOUNT:TOPIC_BRANCH` 向 `lat-opensource/lat:master` 创建
+Pull Request。每项无关变更都应从上游最新目标分支新建独立分支；不要重复
+使用已经合并的分支。
+
 ## DCO / Commit sign-off
 
 Every commit must include a Developer Certificate of Origin (DCO) sign-off. By
@@ -31,23 +77,24 @@ To add a sign-off to the latest commit:
 
 ```console
 git commit --amend --signoff
-git push --force-with-lease
+git push --force-with-lease origin HEAD
 ```
 
 The push is needed only if the original commit was already pushed. To add
-sign-offs to multiple commits on a branch:
+sign-offs to multiple commits on a branch, replace `TARGET_BRANCH` with the
+pull request's target branch:
 
 ```console
-git fetch origin
-git rebase --signoff origin/master
-git push --force-with-lease
+git fetch upstream
+git rebase --signoff upstream/TARGET_BRANCH
+git push --force-with-lease origin HEAD
 ```
 
 The command adds your sign-off to every rebased commit. Use it only when you
 authored or otherwise have the right to certify every commit being rebased, and
-do not remove existing sign-offs. Rebasing rewrites commit history, so
-coordinate with anyone else using the branch before rebasing or force-pushing
-it.
+do not remove existing sign-offs. Replace `origin` with the name of your fork
+remote if it differs. Rebasing rewrites commit history, so coordinate with
+anyone else using the branch before rebasing or force-pushing it.
 
 每个提交都必须包含开发者原创声明（Developer Certificate of Origin，DCO）
 签署。签署表示你确认 [DCO 1.1](https://developercertificate.org/) 中的声明，
@@ -75,22 +122,23 @@ Signed-off-by: 姓名 <email@example.com>
 
 ```console
 git commit --amend --signoff
-git push --force-with-lease
+git push --force-with-lease origin HEAD
 ```
 
 只有原提交已经推送到远端时才需要再次推送。如果分支上的多个提交都
-需要补充签署，可以执行：
+需要补充签署，请将 `TARGET_BRANCH` 替换为 Pull Request 的目标分支后执行：
 
 ```console
-git fetch origin
-git rebase --signoff origin/master
-git push --force-with-lease
+git fetch upstream
+git rebase --signoff upstream/TARGET_BRANCH
+git push --force-with-lease origin HEAD
 ```
 
 该命令会为所有被 rebase 的提交添加你的签署。只有当每个提交都是你
 创作的，或者你有权对其作出认证时，才能使用该命令；同时不要删除已有
-签署。rebase 会改写提交历史，因此在 rebase 或强制推送前，请先与同样
-使用该分支的其他贡献者协调。
+签署。如果你的个人 fork 远端不叫 `origin`，请替换为实际名称。rebase 会
+改写提交历史，因此在 rebase 或强制推送前，请先与同样使用该分支的其他
+贡献者协调。
 
 ## Before opening a pull request / 提交 Pull Request 前
 
