@@ -74,6 +74,7 @@ int mydebug = 1;
 #include "librarian.h"
 #include "wrapper.h"
 #if defined(CONFIG_LATX_KZT)
+#include "kzt-groups.h"
 #include "wrappertbbridge.h"
 box64context_t* my_context = NULL;
 elfheader_t* elf_header = NULL;
@@ -668,12 +669,36 @@ static void handle_arg_latx_avx_cpuid(const char *arg)
 #if defined(CONFIG_LATX_KZT)
 static void handle_arg_latx_kzt(const char *arg)
 {
-    option_kzt = strtol(arg, NULL, 0);
+    int value;
+
+    g_clear_pointer(&option_kzt_error, g_free);
+    if (qemu_strtoi(arg, NULL, 0, &value) || value < 0 || value > 2) {
+        option_kzt = 0;
+        option_kzt_error = g_strdup_printf(
+            "LATX_KZT must be exactly 0, 1, or 2 (got '%s')", arg);
+        return;
+    }
+    option_kzt = value;
+}
+
+static void handle_arg_latx_kzt_libs(const char *arg)
+{
+    g_free(option_kzt_libs);
+    option_kzt_libs = g_strdup(arg);
 }
 
 static void handle_arg_latx_kzt_log(const char *arg)
 {
-    option_kzt_log = strtol(arg, NULL, 0) != 0;
+    int value;
+
+    g_clear_pointer(&option_kzt_log_error, g_free);
+    if (qemu_strtoi(arg, NULL, 0, &value) || value < 0 || value > 1) {
+        option_kzt_log = 1;
+        option_kzt_log_error = g_strdup_printf(
+            "LATX_KZT_LOG must be exactly 0 or 1 (got '%s')", arg);
+        return;
+    }
+    option_kzt_log = value;
 }
 #endif
 
@@ -889,6 +914,8 @@ static const struct qemu_argument arg_table[] = {
 #if defined(CONFIG_LATX_KZT)
     {"latx-kzt",    "LATX_KZT",     true,  handle_arg_latx_kzt,
     "",           "enable kuzhitong"},
+    {"latx-kzt-libs", "LATX_KZT_LIBS", true, handle_arg_latx_kzt_libs,
+    "group,...",  "select KZT library groups"},
     {"latx-kzt-log", "LATX_KZT_LOG", true, handle_arg_latx_kzt_log,
     "0|1",        "log important KZT binding and fallback decisions"},
 #endif
@@ -1395,6 +1422,13 @@ int main(int argc, char **argv, char **envp)
 
     /* set environment variables */
     options_set(target_argv);
+
+    if (!latx_options_finalize()) {
+#if defined(CONFIG_LATX_KZT)
+        error_report("invalid KZT configuration: %s; KZT disabled",
+                     kzt_groups_last_error());
+#endif
+    }
 
     if (runtime_info_requested) {
         print_runtime_info();

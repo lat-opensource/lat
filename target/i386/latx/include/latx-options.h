@@ -33,6 +33,9 @@ extern int option_tu_link;
 
 #ifdef CONFIG_LATX_KZT
 extern int option_kzt_log;
+extern char *option_kzt_libs;
+extern char *option_kzt_error;
+extern char *option_kzt_log_error;
 #endif
 
 #ifdef CONFIG_LATX_AVX_OPT
@@ -152,6 +155,7 @@ extern unsigned long long counter_mips_tr;
 #if defined(CONFIG_LATX) && defined(CONFIG_LATX_KZT)
 #define ENVSUP_KZT \
     ENVFUN(LATX_KZT, handle_arg_latx_kzt) \
+    ENVFUN(LATX_KZT_LIBS, handle_arg_latx_kzt_libs) \
     ENVFUN(LATX_KZT_LOG, handle_arg_latx_kzt_log)
 #else
 #define ENVSUP_KZT
@@ -230,6 +234,7 @@ extern unsigned long long counter_mips_tr;
     ENVSUP_PLUGIN
 
 void options_init(void);
+bool latx_options_finalize(void);
 void options_parse_opt(const char *opt);
 void options_parse_imm_reg(const char *bits);
 void options_parse_dump(const char *bits);

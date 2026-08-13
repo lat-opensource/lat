@@ -12,10 +12,16 @@
 #include "latx-runtime.h"
 #include "latx-string-utils.h"
 #include "translate.h"
+#if defined(CONFIG_LATX_KZT)
+#include "kzt-groups.h"
+#endif
 
 #if defined(CONFIG_LATX_KZT)
 int option_kzt = 0;
 int option_kzt_log = 0;
+char *option_kzt_libs;
+char *option_kzt_error;
+char *option_kzt_log_error;
 #endif
 
 #ifdef CONFIG_LATX_AVX_OPT
@@ -210,6 +216,14 @@ void conf_init(char **argv)
 void options_init(void)
 {
     latx_runtime_reset();
+#if defined(CONFIG_LATX_KZT)
+    option_kzt = 0;
+    option_kzt_log = 0;
+    g_clear_pointer(&option_kzt_libs, g_free);
+    g_clear_pointer(&option_kzt_error, g_free);
+    g_clear_pointer(&option_kzt_log_error, g_free);
+    kzt_groups_reset();
+#endif
     option_debug_lative = 0;
     option_save_xmm = 0xff;
     option_dump_host = 0;
@@ -269,6 +283,33 @@ void options_init(void)
         option_fast_atomic = 1;
     else
         option_fast_atomic = 0;
+}
+
+bool latx_options_finalize(void)
+{
+#if defined(CONFIG_LATX_KZT)
+    if (option_kzt_log_error) {
+        kzt_groups_reject_configuration(option_kzt_log_error, true);
+        option_kzt = 0;
+        return false;
+    }
+    if (option_kzt_error) {
+        kzt_groups_reject_configuration(option_kzt_error,
+                                        option_kzt_log != 0);
+        option_kzt = 0;
+        return false;
+    }
+    if (option_kzt == 0) {
+        kzt_groups_reset();
+        return true;
+    }
+    if (!kzt_groups_configure(option_kzt_libs,
+                              option_kzt_log != 0 && option_kzt != 0)) {
+        option_kzt = 0;
+        return false;
+    }
+#endif
+    return true;
 }
 
 #define OPTIONS_IMM_REG 0

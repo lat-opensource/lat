@@ -32,6 +32,7 @@
 #include "symbols.h"
 #include "lsenv.h"
 #include "qemu.h"
+#include "kzt-groups.h"
 #include "kzt_relocation_transaction.h"
 
 static int kzt_relocation_slot_fits_page(uintptr_t slot_addr)
@@ -692,6 +693,9 @@ int CheckEnableKZT(elfheader_t* h, char** target_argv, int target_argc)
     /* check KZT libs in paths */
     int nb = sizeof(wrappedlibs_name) / sizeof(char*);
     for (int i=0; i<nb; ++i) {
+        if (!kzt_library_is_enabled(wrappedlibs_name[i])) {
+            continue;
+        }
         char *p = box_strdup(wrappedlibs_name[i]);
         char *p2 = strchr(p, '.');
         if (++p2) {

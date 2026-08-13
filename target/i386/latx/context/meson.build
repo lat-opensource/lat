@@ -59,6 +59,7 @@ my_file = files(
   'dictionnary.c',
   'symbols.c',
   'library.c',
+  'kzt-groups.c',
   'pathcoll.c',
   'fileutils.c',
   'elfparser.c',

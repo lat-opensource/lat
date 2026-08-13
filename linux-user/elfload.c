@@ -3484,23 +3484,14 @@ int load_elf_binary(struct linux_binprm *bprm, struct image_info *info)
     }
 #if defined(CONFIG_LATX_KZT)
     if (!elf_interpreter) {
-        if(option_kzt && getenv("LATX_KZT")) {
-            char * arg_kzt = getenv("LATX_KZT");
-            option_kzt = strtol(arg_kzt, NULL, 0);
-
-            /* option_kzt == 1 is normal kzt,
-               disable kzt for static or direct exec ld.so
-               option_kzt == 2 is forced kzt, used for test */
-            if (option_kzt == 1) {
-                if (latx_wine) {
-                    wine_option_kzt = option_kzt;
-                }
-                option_kzt = 0;
-            }
-        } else {
-            if (latx_wine) {
-                wine_option_kzt = option_kzt;
-            }
+        /* Wine maps its real main image later, so defer either KZT mode
+         * until that image is available.  For other static/direct-ld.so
+         * guests, normal mode is disabled while forced mode remains a test
+         * override.  option_kzt already reflects config and CLI precedence. */
+        if (latx_wine && option_kzt) {
+            wine_option_kzt = option_kzt;
+            option_kzt = 0;
+        } else if (option_kzt == 1) {
             option_kzt = 0;
         }
     }

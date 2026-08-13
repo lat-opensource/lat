@@ -29,6 +29,7 @@
 #include "librarian.h"
 #include "librarian_private.h"
 #include "pathcoll.h"
+#include "kzt-groups.h"
 
 #define GO(P, N, G) int wrapped##N##_init(library_t* lib, box64context_t *box64); \
                  void wrapped##N##_fini(library_t* lib); \
@@ -201,7 +202,11 @@ int FindLibIsWrapped(char * name)
     int nb = sizeof(wrappedlibs) / sizeof(wrappedlib_t);
     for (int i=0; i<nb; ++i) {
         if(strcmp(name, wrappedlibs[i].name)==0) {
-            return 1;
+            int enabled = kzt_library_is_enabled(name);
+            if (!enabled) {
+                kzt_groups_log_library(name, false);
+            }
+            return enabled;
         }
     }
     return 0;
@@ -210,6 +215,10 @@ static void initNativeLib(library_t *lib, box64context_t* context) {
     int nb = sizeof(wrappedlibs) / sizeof(wrappedlib_t);
     for (int i=0; i<nb; ++i) {
         if(strcmp(lib->name, wrappedlibs[i].name)==0) {
+            if (!kzt_library_is_enabled(lib->name)) {
+                kzt_groups_log_library(lib->name, false);
+                return;
+            }
             if(wrappedlibs[i].init(lib, context)) {
                 // error!
                 const char* error_str = dlerror();
@@ -244,6 +253,7 @@ static void initNativeLib(library_t *lib, box64context_t* context) {
             lm->l_addr = real_lm.l_addr;
             lm->l_name = real_lm.l_name;
             lm->l_ld = real_lm.l_ld;
+            kzt_groups_log_library(lib->name, true);
             break;
         }
     }

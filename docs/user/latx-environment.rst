@@ -117,11 +117,15 @@ Meson 安装目标会把模板安装到 configure 指定的 ``sysconfdir``。默
      - ``0``
      - 控制 64 位构建中的库直通。``1`` 表示按兼容性检查启用，``2`` 是供测试
        使用的强制模式。32 位构建不提供该选项。
+   * - ``LATX_KZT_LIBS``
+     - ``stable``
+     - 可选的 KZT 库族选择。``-x11`` 从稳定集合关闭 X11，``x11`` 表示只启用
+       X11 及其依赖，``+name`` 用于在稳定集合上增加已知的实验库族。
    * - ``LATX_KZT_LOG``
      - ``0``
      - 控制 KZT 关键降级日志。设为 ``1`` 时，release 构建也会在某个装载对象
-       无法安全完成直通绑定时向标准错误输出原因；默认不输出，也不会改变
-       KZT 的启用状态或安全降级行为。仅 64 位 KZT 构建提供该选项。
+       无法安全完成直通绑定时向标准错误输出原因，并记录最终库族集合和每个库
+       是否启用 KZT wrapper 的决策；默认不输出，也不会改变安全降级行为。
    * - ``LATX_SOFTFPU``
      - ``0``
      - 浮点结果异常时可尝试 ``1``；``2`` 是另一种软浮点模式。非零值会自动
@@ -142,6 +146,76 @@ Meson 安装目标会把模板安装到 configure 指定的 ``sysconfdir``。默
      - ABI 路径
      - 覆盖动态链接 guest 的运行时根目录，等价于 ``-L <path>``。先用
        ``-runtime-info`` 确认当前选择，避免掩盖运行时安装问题。
+
+
+KZT 库族控制
+============
+
+``LATX_KZT`` 仍然是 KZT（库直通）总开关。这里的库族选择控制 guest 动态库
+是否可以使用对应的 KZT wrapper，并不表示该库的所有函数都无条件调用 host
+实现。为了保持 guest 可见状态，loader 协调、回调等自定义 wrapper 仍可能有意
+回到 guest 翻译执行。
+
+普通用户只需设置
+``LATX_KZT=1``，此时启用当前版本的稳定库族。只有兼容性排查、二分和实验性
+wrapper 测试需要设置 ``LATX_KZT_LIBS``。总开关为 ``0`` 时忽略库族选择。
+
+库族名称、稳定状态和依赖关系由当前 LATX 构建定义，不在文档中维护一份容易
+过期的静态清单。下面的 ``x11``、``gl`` 等名称只用于说明选择语法。
+
+``LATX_KZT_LIBS`` 只有两种写法，不能混用：
+
+* 不带符号的名称表示“只启用这些库族”，例如 ``x11`` 或 ``x11,gl``；
+* 全部带 ``+`` 或 ``-`` 时，以稳定集合为起点增加或关闭库族，例如
+  ``-x11`` 或 ``+x11,-vulkan``。
+
+未设置、空值和 ``stable`` 都表示稳定集合。``stable`` 必须单独使用。库族名
+大小写不敏感，逗号两侧允许空白。这里不提供 ``all``：未来新增实验库族时，
+旧配置不应在升级后自动启用尚未验证的 wrapper。
+
+依赖由 LATX 自动处理。例如 ``LATX_KZT_LIBS=gl`` 实际启用
+``core,x11,gl``；``LATX_KZT_LIBS=-x11`` 会保留 ``core``，并同时关闭依赖
+X11 的 ``gl``、``vulkan`` 和 ``vaapi``。这样不会把 host 库创建的对象交给已经
+回退 guest 翻译的依赖库。
+
+以 ``libdl`` 为例，guest ``dlopen`` 会先进入 LAT 的自定义 wrapper。目标库有
+安全 KZT wrapper 时，LAT 才装载对应的 host 库；目标库没有 wrapper 时，LAT
+会重新进入 guest ``dlopen``，由 ``cpu_loop`` 翻译执行 guest loader。因而
+``core`` 是 KZT 的基础 wrapper 和 loader 协调库族，不是“完整原生 libdl”开关。
+
+未知库族、空项、混合两种写法，或者同时写 ``+x11`` 和 ``-x11`` 都属于配置
+错误。LATX 会报告原因、关闭本次运行的全部 KZT，并继续完整翻译 guest 库，
+不会忽略错误后继续走非预期的 native 路径。``LATX_KZT`` 只接受 ``0``、``1``、
+``2``，``LATX_KZT_LOG`` 只接受 ``0``、``1``；其他值同样按配置错误处理。
+
+常见用法：
+
+.. code-block:: bash
+
+    # 关闭全部 KZT
+    LATX_KZT=0 latx-x86_64 /path/to/program
+
+    # 启用当前稳定库族
+    LATX_KZT=1 latx-x86_64 /path/to/program
+
+    # 从稳定集合临时关闭 X11 及其依赖者
+    LATX_KZT=1 LATX_KZT_LIBS=-x11 \
+        latx-x86_64 /path/to/program
+
+    # 只启用 X11 及其必要依赖，便于调试和二分
+    LATX_KZT=1 LATX_KZT_LIBS=x11 LATX_KZT_LOG=1 \
+        latx-x86_64 /path/to/program
+
+所有选项都可以写入应用 section。例如只对 ``gtkperf`` 关闭 X11：
+
+.. code-block:: ini
+
+    [gtkperf]
+    LATX_KZT = 1
+    LATX_KZT_LIBS = -x11
+
+高优先级配置会完整替换低优先级的 ``LATX_KZT_LIBS`` 字符串，不会跨配置来源
+拼接集合，因此环境变量覆盖应用配置后的结果仍可直接复现。
 
 
 指定 guest 运行时
