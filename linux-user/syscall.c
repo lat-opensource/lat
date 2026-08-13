@@ -12830,6 +12830,60 @@ static int has_x_permission(struct stat *st) {
     }
 }
 
+#if defined(CONFIG_LATX) && defined(TARGET_I386)
+static bool latx_i386_dynamic_linker(CPUArchState *env)
+{
+    return info->interpreter_path
+        && env->eip >= info->interpreter_start_code
+        && env->eip < info->interpreter_end_code;
+}
+
+static bool latx_i386_shared_library(const char *pathname)
+{
+    const char *basename = strrchr(pathname, '/');
+    const char *so;
+
+    if (!basename || !g_str_has_prefix(++basename, "lib")) {
+        return false;
+    }
+
+    so = strstr(basename, ".so");
+    return so && (so[3] == '\0' || so[3] == '.');
+}
+
+static char *latx_i386_interpreter_library(CPUArchState *env,
+                                            const char *pathname, int flags)
+{
+    char *interpreter_path;
+    char *interpreter_dir;
+    char *candidate;
+    const char *basename;
+
+    if (!latx_i386_dynamic_linker(env) || !pathname || pathname[0] != '/'
+        || (flags & O_ACCMODE) != O_RDONLY || (flags & O_CREAT)
+        || !latx_i386_shared_library(pathname)) {
+        return NULL;
+    }
+
+    interpreter_path = realpath(path(info->interpreter_path), NULL);
+    if (!interpreter_path) {
+        return NULL;
+    }
+
+    interpreter_dir = g_path_get_dirname(interpreter_path);
+    free(interpreter_path);
+    basename = strrchr(pathname, '/') + 1;
+    candidate = g_build_filename(interpreter_dir, basename, NULL);
+    g_free(interpreter_dir);
+
+    if (access(candidate, F_OK) == 0) {
+        return candidate;
+    }
+    g_free(candidate);
+    return NULL;
+}
+#endif
+
 static int do_openat(void *cpu_env, int dirfd, const char *pathname, int flags, mode_t mode)
 {
     struct fake_open {
@@ -12928,17 +12982,39 @@ static int do_openat(void *cpu_env, int dirfd, const char *pathname, int flags, 
         return fd;
     }
     const char *realpath = path(pathname);
+    char *runtime_path = NULL;
     struct stat st;
+    int ret;
+#if defined(CONFIG_LATX) && defined(TARGET_I386)
+    int saved_errno;
+#endif
 
     if (fstatat(dirfd, realpath, &st, 0) == 0) {
         if (S_ISDIR(st.st_mode)) {
             if (!has_x_permission(&st)) {
                 errno = EACCES;
-                return -1;
+                ret = -1;
+                goto out;
             }
         }
     }
-    return safe_openat(dirfd, path(pathname), flags, mode);
+    ret = safe_openat(dirfd, realpath, flags, mode);
+
+#if defined(CONFIG_LATX) && defined(TARGET_I386)
+    if (ret < 0 && errno == ENOENT && realpath == pathname) {
+        saved_errno = errno;
+        runtime_path = latx_i386_interpreter_library(cpu_env, pathname, flags);
+        if (runtime_path) {
+            ret = safe_openat(dirfd, runtime_path, flags, mode);
+        } else {
+            errno = saved_errno;
+        }
+    }
+#endif
+
+out:
+    g_free(runtime_path);
+    return ret;
 }
 
 #define MAX_PATH_SIZE 1024
@@ -19357,9 +19433,9 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
             n = lock_user_string(arg2);
             if (p && n) {
                 if (num == TARGET_NR_setxattr) {
-                    ret = get_errno(setxattr(p, n, v, arg4, arg5));
+                ret = get_errno(setxattr(p, n, v, arg4, arg5));
                 } else {
-                    ret = get_errno(lsetxattr(p, n, v, arg4, arg5));
+                ret = get_errno(lsetxattr(p, n, v, arg4, arg5));
                 }
             } else {
                 ret = -TARGET_EFAULT;
@@ -19402,9 +19478,9 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
             n = lock_user_string(arg2);
             if (p && n) {
                 if (num == TARGET_NR_getxattr) {
-                    ret = get_errno(getxattr(p, n, v, arg4));
+                ret = get_errno(getxattr(p, n, v, arg4));
                 } else {
-                    ret = get_errno(lgetxattr(p, n, v, arg4));
+                ret = get_errno(lgetxattr(p, n, v, arg4));
                 }
             } else {
                 ret = -TARGET_EFAULT;
@@ -19441,9 +19517,9 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
             n = lock_user_string(arg2);
             if (p && n) {
                 if (num == TARGET_NR_removexattr) {
-                    ret = get_errno(removexattr(p, n));
+                ret = get_errno(removexattr(p, n));
                 } else {
-                    ret = get_errno(lremovexattr(p, n));
+                ret = get_errno(lremovexattr(p, n));
                 }
             } else {
                 ret = -TARGET_EFAULT;

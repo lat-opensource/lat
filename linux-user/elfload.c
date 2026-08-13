@@ -3480,6 +3480,8 @@ int load_elf_binary(struct linux_binprm *bprm, struct image_info *info)
         info->load_bias = interp_info.load_bias;
         info->entry = interp_info.entry;
         info->interpreter_path = elf_interpreter;
+        info->interpreter_start_code = interp_info.start_code;
+        info->interpreter_end_code = interp_info.end_code;
         //g_free(elf_interpreter);
     }
 #if defined(CONFIG_LATX_KZT)
