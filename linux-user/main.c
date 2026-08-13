@@ -184,9 +184,7 @@ static int last_log_mask;
 
 unsigned long reserved_va;
 
-#if defined(CONFIG_LATX_DEBUG) || defined(CONFIG_DEBUG_TCG)
 static void usage(int exitcode);
-#endif
 
 const char *interp_prefix = CONFIG_QEMU_INTERP_PREFIX;
 const char *qemu_uname_release;
@@ -423,11 +421,6 @@ static void handle_arg_latx_disassemble_trace_cmp(const char *arg)
 
 #endif
 
-static void handle_arg_help(const char *arg)
-{
-    usage(EXIT_SUCCESS);
-}
-
 static void handle_arg_imm_skip_pc(const char *arg) {
   imm_skip_pc = strtol(arg, NULL, 16);
 }
@@ -604,6 +597,12 @@ static void handle_arg_plugin(const char *arg)
 }
 #endif
 #endif
+
+static void handle_arg_help(const char *arg)
+{
+    (void)arg;
+    usage(EXIT_SUCCESS);
+}
 
 #ifdef CONFIG_LATX
 static void handle_arg_version(const char *arg)
@@ -992,10 +991,6 @@ static const struct qemu_argument arg_table[] = {
         true, handle_arg_latx_disassemble_trace_cmp,
         "", "LATX Compare different disassemble."},
 #endif
-    {"h",          "",                 false, handle_arg_help,
-     "",           "print this help"},
-    {"help",       "",                 false, handle_arg_help,
-     "",           ""},
     {"g",          "LAT_GDB",         true,  handle_arg_gdb,
      "port",       "wait gdb connection to 'port'"},
     {"s",          "LAT_STACK_SIZE",  true,  handle_arg_stack_size,
@@ -1040,6 +1035,10 @@ static const struct qemu_argument arg_table[] = {
      "",           "[file=]<file>[,arg=<string>]"},
 #endif
 #endif
+    {"h",          NULL,               false, handle_arg_help,
+     "",           "print this help"},
+    {"help",       NULL,               false, handle_arg_help,
+     "",           "print this help"},
     {"L",          "LAT_LD_PREFIX",   true,  handle_arg_ld_prefix,
      "path",       "set the elf interpreter prefix to 'path'"},
     {"runtime-info", NULL,             false, handle_arg_runtime_info,
@@ -1049,7 +1048,6 @@ static const struct qemu_argument arg_table[] = {
     {NULL, NULL, false, NULL, NULL, NULL}
 };
 
-#if defined(CONFIG_LATX_DEBUG) || defined(CONFIG_DEBUG_TCG)
 static void usage(int exitcode)
 {
     const struct qemu_argument *arginfo;
@@ -1073,8 +1071,10 @@ static void usage(int exitcode)
         if (arginfo->has_arg) {
             arglen += strlen(arginfo->example) + 1;
         }
-        if (strlen(arginfo->env) > maxenvlen) {
-            maxenvlen = strlen(arginfo->env);
+        const char *env = arginfo->env ? arginfo->env : "";
+
+        if (strlen(env) > maxenvlen) {
+            maxenvlen = strlen(env);
         }
         if (arglen > maxarglen) {
             maxarglen = arglen;
@@ -1085,13 +1085,15 @@ static void usage(int exitcode)
             maxenvlen, "Env-variable");
 
     for (arginfo = arg_table; arginfo->handle_opt != NULL; arginfo++) {
+        const char *env = arginfo->env ? arginfo->env : "";
+
         if (arginfo->has_arg) {
             printf("-%s %-*s %-*s %s\n", arginfo->argv,
                    (int)(maxarglen - strlen(arginfo->argv) - 1),
-                   arginfo->example, maxenvlen, arginfo->env, arginfo->help);
+                   arginfo->example, maxenvlen, env, arginfo->help);
         } else {
             printf("-%-*s %-*s %s\n", maxarglen, arginfo->argv,
-                    maxenvlen, arginfo->env,
+                    maxenvlen, env,
                     arginfo->help);
         }
     }
@@ -1116,11 +1118,11 @@ static void usage(int exitcode)
            "    LAT_SET_ENV=var1=val2,var2=val2 LAT_UNSET_ENV=LD_PRELOAD,LD_DEBUG\n"
            "Note that if you provide several changes to a single variable\n"
            "the last change will stay in effect.\n"
+           "Both -option and --option spellings are accepted.\n"
            "\n");
 
     exit(exitcode);
 }
-#endif
 
 struct ParseOption {
     const char *opt_name;
