@@ -7,6 +7,7 @@ linux_user_ss.add(files(
   'linuxload.c',
   'main.c',
   'mmap.c',
+  'pressure-vessel.c',
   'safe-syscall.S',
   'signal.c',
   'strace.c',
