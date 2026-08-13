@@ -39,6 +39,21 @@ static inline abi_long target_to_host_drm_amdgpu_gem_metadata
     return 0;
 }
 
+static inline abi_long target_to_host_drm_amdgpu_gem_va_old
+                        (struct drm_amdgpu_gem_va *host_ver,
+         struct target_drm_amdgpu_gem_va_old *target_ver)
+{
+    memset(host_ver, 0, sizeof(*host_ver));
+    __get_user(host_ver->handle, &target_ver->handle);
+    __get_user(host_ver->_pad, &target_ver->_pad);
+    __get_user(host_ver->operation, &target_ver->operation);
+    __get_user(host_ver->flags, &target_ver->flags);
+    __get_user(host_ver->va_address, &target_ver->va_address);
+    __get_user(host_ver->offset_in_bo, &target_ver->offset_in_bo);
+    __get_user(host_ver->map_size, &target_ver->map_size);
+    return 0;
+}
+
 static inline void host_to_target_drm_amdgpu_gem_metadata
                         (struct target_drm_amdgpu_gem_metadata *target_ver,
          struct drm_amdgpu_gem_metadata *host_ver)
@@ -90,6 +105,8 @@ static abi_long do_ioctl_amdgpu_drm(const IOCTLEntry *ie,
     struct drm_amdgpu_gem_metadata *drm_amdgpu_gem_metadata;
     struct target_drm_amdgpu_fence_to_handle_in *target_drm_amdgpu_fence_to_handle_in;
     union drm_amdgpu_fence_to_handle *drm_amdgpu_fence_to_handle;
+    struct target_drm_amdgpu_gem_va_old *target_drm_amdgpu_gem_va_old;
+    struct drm_amdgpu_gem_va *drm_amdgpu_gem_va;
     switch (ie->host_cmd) {
     case DRM_IOCTL_AMDGPU_INFO:
         if (!lock_user_struct(VERIFY_READ, target_drm_amdgpu_info, arg, 0)) {
@@ -125,6 +142,20 @@ static abi_long do_ioctl_amdgpu_drm(const IOCTLEntry *ie,
         }
         unlock_user_struct(target_drm_amdgpu_gem_metadata, arg, 0);
         return ret;
+    case DRM_IOCTL_AMDGPU_GEM_VA:
+        if (!lock_user_struct(VERIFY_READ,
+                              target_drm_amdgpu_gem_va_old, arg, 0)) {
+            return -TARGET_EFAULT;
+        }
+        drm_amdgpu_gem_va = (struct drm_amdgpu_gem_va *)buf_temp;
+        ret = target_to_host_drm_amdgpu_gem_va_old(
+                    drm_amdgpu_gem_va, target_drm_amdgpu_gem_va_old);
+        if (!is_error(ret)) {
+            ret = get_errno(safe_ioctl(fd, ie->host_cmd,
+                                       drm_amdgpu_gem_va));
+        }
+        unlock_user_struct(target_drm_amdgpu_gem_va_old, arg, 0);
+        return ret;
     case DRM_IOCTL_AMDGPU_FENCE_TO_HANDLE:
         if (!lock_user_struct(VERIFY_READ,
                     target_drm_amdgpu_fence_to_handle_in, arg, 0)) {
@@ -147,4 +178,3 @@ static abi_long do_ioctl_amdgpu_drm(const IOCTLEntry *ie,
     }
     return -TARGET_ENOSYS;
 }
-

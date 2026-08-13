@@ -41,6 +41,14 @@ STRUCT(drm_amdgpu_gem_wait_idle_in,
     TYPE_INT,
     TYPE_INT,
     TYPE_ULONGLONG)
+STRUCT(drm_amdgpu_gem_va_old,
+    TYPE_INT,
+    TYPE_INT,
+    TYPE_INT,
+    TYPE_INT,
+    TYPE_ULONGLONG,
+    TYPE_ULONGLONG,
+    TYPE_ULONGLONG)
 #ifdef CONFIG_AMDGPU_GEN_VA_OLD
 STRUCT(drm_amdgpu_gem_va,
     TYPE_INT,
