@@ -376,6 +376,8 @@ int get_osversion(void);
 void init_qemu_uname_release(void);
 void fork_start(void);
 void fork_end(int child);
+void fd_trans_fork_start(void);
+void fd_trans_fork_end(int child);
 
 /**
  * probe_guest_base:

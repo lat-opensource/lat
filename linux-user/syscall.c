@@ -2501,9 +2501,11 @@ static inline abi_long target_to_host_sockaddr(int fd, struct sockaddr *addr,
     const socklen_t unix_maxlen = sizeof (struct sockaddr_un);
     sa_family_t sa_family;
     struct target_sockaddr *target_saddr;
+    TargetFdAddrFunc trans;
 
-    if (fd_trans_target_to_host_addr(fd)) {
-        return fd_trans_target_to_host_addr(fd)(addr, target_addr, len);
+    trans = fd_trans_target_to_host_addr(fd);
+    if (trans) {
+        return trans(addr, target_addr, len);
     }
 
     target_saddr = lock_user(VERIFY_READ, target_addr, len, 1);
@@ -4629,6 +4631,7 @@ static abi_long do_sendrecvmsg_locked(int fd, struct target_msghdr *msgp,
     abi_ulong count;
     struct iovec *vec;
     abi_ulong target_vec;
+    TargetFdDataFunc trans;
 
     if (msgp->msg_name) {
         msg.msg_namelen = tswap32(msgp->msg_namelen);
@@ -4673,13 +4676,13 @@ static abi_long do_sendrecvmsg_locked(int fd, struct target_msghdr *msgp,
     msg.msg_iov = vec;
 
     if (send) {
-        if (fd_trans_target_to_host_data(fd)) {
+        trans = fd_trans_target_to_host_data(fd);
+        if (trans) {
             void *host_msg;
 
             host_msg = g_malloc(msg.msg_iov->iov_len);
             memcpy(host_msg, msg.msg_iov->iov_base, msg.msg_iov->iov_len);
-            ret = fd_trans_target_to_host_data(fd)(host_msg,
-                                                   msg.msg_iov->iov_len);
+            ret = trans(host_msg, msg.msg_iov->iov_len);
             if (ret >= 0) {
                 msg.msg_iov->iov_base = host_msg;
                 ret = get_errno(safe_sendmsg(fd, &msg, flags));
@@ -4714,9 +4717,10 @@ static abi_long do_sendrecvmsg_locked(int fd, struct target_msghdr *msgp,
 
         if (!is_error(ret)) {
             len = ret;
-            if (fd_trans_host_to_target_data(fd)) {
-                ret = fd_trans_host_to_target_data(fd)(msg.msg_iov->iov_base,
-                                               MIN(msg.msg_iov->iov_len, len));
+            trans = fd_trans_host_to_target_data(fd);
+            if (trans) {
+                ret = trans(msg.msg_iov->iov_base,
+                            MIN(msg.msg_iov->iov_len, len));
             }
             if (!is_error(ret)) {
                 ret = host_to_target_cmsg(msgp, &msg);
@@ -4961,6 +4965,7 @@ static abi_long do_sendto(int fd, abi_ulong msg, size_t len, int flags,
     void *host_msg;
     void *copy_msg = NULL;
     abi_long ret;
+    TargetFdDataFunc trans;
 
     if ((int)addrlen < 0) {
         return -TARGET_EINVAL;
@@ -4969,11 +4974,12 @@ static abi_long do_sendto(int fd, abi_ulong msg, size_t len, int flags,
     host_msg = lock_user(VERIFY_READ, msg, len, 1);
     if (!host_msg)
         return -TARGET_EFAULT;
-    if (fd_trans_target_to_host_data(fd)) {
+    trans = fd_trans_target_to_host_data(fd);
+    if (trans) {
         copy_msg = host_msg;
         host_msg = g_malloc(len);
         memcpy(host_msg, copy_msg, len);
-        ret = fd_trans_target_to_host_data(fd)(host_msg, len);
+        ret = trans(host_msg, len);
         if (ret < 0) {
             goto fail;
         }
@@ -5006,6 +5012,7 @@ static abi_long do_recvfrom(int fd, abi_ulong msg, size_t len, int flags,
     void *addr;
     void *host_msg;
     abi_long ret;
+    TargetFdDataFunc trans;
 
     if (!msg) {
         host_msg = NULL;
@@ -5034,11 +5041,11 @@ static abi_long do_recvfrom(int fd, abi_ulong msg, size_t len, int flags,
         ret = get_errno(safe_recvfrom(fd, host_msg, len, flags, NULL, 0));
     }
     if (!is_error(ret)) {
-        if (fd_trans_host_to_target_data(fd)) {
-            abi_long trans;
-            trans = fd_trans_host_to_target_data(fd)(host_msg, MIN(ret, len));
-            if (is_error(trans)) {
-                ret = trans;
+        trans = fd_trans_host_to_target_data(fd);
+        if (trans) {
+            abi_long trans_ret = trans(host_msg, MIN(ret, len));
+            if (is_error(trans_ret)) {
+                ret = trans_ret;
                 goto fail;
             }
         }
@@ -14400,6 +14407,7 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
     struct statfs stfs;
 #endif
     void *p;
+    TargetFdDataFunc fd_data_trans;
 
     switch(num) {
     case TARGET_NR_ioperm:
@@ -14455,9 +14463,9 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
             if (!(p = lock_user(VERIFY_WRITE, arg2, arg3, 0)))
                 return -TARGET_EFAULT;
             ret = get_errno(safe_read(arg1, p, arg3));
-            if (ret >= 0 &&
-                fd_trans_host_to_target_data(arg1)) {
-                ret = fd_trans_host_to_target_data(arg1)(p, ret);
+            fd_data_trans = fd_trans_host_to_target_data(arg1);
+            if (ret >= 0 && fd_data_trans) {
+                ret = fd_data_trans(p, ret);
             }
             unlock_user(p, arg2, ret);
         }
@@ -14468,10 +14476,11 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
         }
         if (!(p = lock_user(VERIFY_READ, arg2, arg3, 1)))
             return -TARGET_EFAULT;
-        if (fd_trans_target_to_host_data(arg1)) {
+        fd_data_trans = fd_trans_target_to_host_data(arg1);
+        if (fd_data_trans) {
             void *copy = g_malloc(arg3);
             memcpy(copy, p, arg3);
-            ret = fd_trans_target_to_host_data(arg1)(copy, arg3);
+            ret = fd_data_trans(copy, arg3);
             if (ret >= 0) {
                 ret = get_errno(safe_write(arg1, copy, ret));
             }
