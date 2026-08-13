@@ -183,6 +183,8 @@ typedef struct TaskState {
     abi_ulong child_tidptr;
     /* A detached helper must not outlive an isolated IPC namespace. */
     bool ipc_namespace_isolated;
+    abi_ulong robust_list_head;
+    abi_ulong robust_list_len;
     /* Immutable seccomp filter chain inherited by guest threads. */
     struct GuestSeccompFilter *seccomp_filter;
     /* A seccomp errno result must not be treated as an internal restart. */

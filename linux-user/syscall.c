@@ -11024,6 +11024,36 @@ static int do_safe_futex(int *uaddr, int op, int val,
     return -TARGET_ENOSYS;
 }
 
+static inline int do_safe_futex_wait(CPUState *cpu, target_ulong uaddr,
+                                     int op, int val,
+                                     const struct timespec *timeout,
+                                     int val3, int base_op)
+{
+    int ret = do_safe_futex(g2h(cpu, uaddr), op, val, timeout, NULL, val3);
+#if defined(__loongarch__)
+    unsigned int retry_count = 0;
+#endif
+
+#if defined(__loongarch__)
+    /*
+     * A valid private wait can transiently fault on the LoongArch host.
+     * Keep the workaround bounded and leave all other futex results alone.
+     */
+    while (ret == -TARGET_EFAULT
+           && retry_count < 8
+           && (base_op == FUTEX_WAIT || base_op == FUTEX_WAIT_BITSET)
+           && (op & FUTEX_PRIVATE_FLAG)
+           && page_check_range(uaddr, sizeof(uint32_t), PAGE_VALID)) {
+        retry_count++;
+        ret = do_safe_futex(g2h(cpu, uaddr), op, val, timeout, NULL, val3);
+    }
+#else
+    (void)base_op;
+#endif
+
+    return ret;
+}
+
 /* ??? Using host futex calls even when target atomic operations
    are not really atomic probably breaks things.  However implementing
    futexes locally would make futexes shared between multiple processes
@@ -11052,9 +11082,9 @@ static int do_futex(CPUState *cpu, target_ulong uaddr, int op, int val,
         } else {
             pts = NULL;
         }
-        return do_safe_futex(g2h(cpu, uaddr),
-                             op, tswap32(val), pts, NULL, val3);
-#ifdef TARGET_X86_64
+        return do_safe_futex_wait(cpu, uaddr, op, tswap32(val), pts, val3,
+                                  base_op);
+#if defined(TARGET_X86_64) || defined(TARGET_I386)
     case FUTEX_LOCK_PI:
         if (timeout) {
             pts = &ts;
@@ -11069,7 +11099,7 @@ static int do_futex(CPUState *cpu, target_ulong uaddr, int op, int val,
     case FUTEX_WAKE:
         return do_safe_futex(g2h(cpu, uaddr),
                              op, val, NULL, NULL, val3);
-#ifdef TARGET_X86_64
+#if defined(TARGET_X86_64) || defined(TARGET_I386)
     case FUTEX_TRYLOCK_PI:
     case FUTEX_UNLOCK_PI:
         return do_safe_futex(g2h(cpu, uaddr),
@@ -11122,9 +11152,9 @@ static int do_futex_time64(CPUState *cpu, target_ulong uaddr, int op,
         } else {
             pts = NULL;
         }
-        return do_safe_futex(g2h(cpu, uaddr), op,
-                             tswap32(val), pts, NULL, val3);
-#ifdef TARGET_X86_64
+        return do_safe_futex_wait(cpu, uaddr, op, tswap32(val), pts, val3,
+                                  base_op);
+#if defined(TARGET_X86_64) || defined(TARGET_I386)
     case FUTEX_LOCK_PI:
         if (timeout) {
             pts = &ts;
@@ -11138,7 +11168,7 @@ static int do_futex_time64(CPUState *cpu, target_ulong uaddr, int op,
     case FUTEX_WAKE_BITSET:
     case FUTEX_WAKE:
         return do_safe_futex(g2h(cpu, uaddr), op, val, NULL, NULL, 0);
-#ifdef TARGET_X86_64
+#if defined(TARGET_X86_64) || defined(TARGET_I386)
     case FUTEX_TRYLOCK_PI:
     case FUTEX_UNLOCK_PI:
         return do_safe_futex(g2h(cpu, uaddr),
@@ -19726,22 +19756,54 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
 
 #ifdef TARGET_NR_set_robust_list
     case TARGET_NR_set_robust_list:
-         return get_errno(syscall(__NR_set_robust_list, arg1, arg2));
+        {
+            TaskState *ts = cpu->opaque;
+
+            if (arg2 != 3 * sizeof(abi_ulong)) {
+                return -TARGET_EINVAL;
+            }
+
+            /* The target list layout cannot be registered with host Linux. */
+            ts->robust_list_head = arg1;
+            ts->robust_list_len = arg2;
+            return 0;
+        }
     case TARGET_NR_get_robust_list:
-        /* The ABI for supporting robust futexes has userspace pass
-         * the kernel a pointer to a linked list which is updated by
-         * userspace after the syscall; the list is walked by the kernel
-         * when the thread exits. Since the linked list in QEMU guest
-         * memory isn't a valid linked list for the host and we have
-         * no way to reliably intercept the thread-death event, we can't
-         * support these. Silently return ENOSYS so that guest userspace
-         * falls back to a non-robust futex implementation (which should
-         * be OK except in the corner case of the guest crashing while
-         * holding a mutex that is shared with another process via
-         * shared memory).
-         */
-        return get_errno(syscall(__NR_get_robust_list, arg1, g2h_untagged(arg2),
-                        g2h_untagged(arg3)));
+        {
+            TaskState *current_ts = cpu->opaque;
+            abi_ulong head = 0;
+            abi_ulong len = 0;
+            bool found = false;
+
+            if (arg1 == 0 || arg1 == current_ts->ts_tid) {
+                head = current_ts->robust_list_head;
+                len = current_ts->robust_list_len;
+                found = true;
+            } else {
+                CPUState *cpu_iter;
+
+                cpu_list_lock();
+                CPU_FOREACH(cpu_iter) {
+                    TaskState *ts = cpu_iter->opaque;
+
+                    if (ts && ts->ts_tid == arg1) {
+                        head = ts->robust_list_head;
+                        len = ts->robust_list_len;
+                        found = true;
+                        break;
+                    }
+                }
+                cpu_list_unlock();
+            }
+
+            if (!found) {
+                return -TARGET_ESRCH;
+            }
+            if (put_user_ual(head, arg2) || put_user_ual(len, arg3)) {
+                return -TARGET_EFAULT;
+            }
+            return 0;
+        }
 #endif
 
 #if defined(TARGET_NR_utimensat)
