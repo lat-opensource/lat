@@ -2210,7 +2210,7 @@ static int findx86pthread_setcanceltype(elfheader_t* h)
         sym = h->DynSym+i;
         if (h->DynSym[i].st_shndx != SHN_UNDEF && sym->st_value) {
             const char * symname = h->DynStr+sym->st_name;
-            if (!strcmp(symname, "malloc")) {
+            if (!strcmp(symname, "pthread_setcanceltype")) {
                 x86pthread_setcanceltype = (void*)sym->st_value+h->delta;
                 printf_log(LOG_DEBUG, "latx x86pthread_setcanceltype=%p type=0x%x from %s\n", x86pthread_setcanceltype, ELF64_ST_TYPE(sym->st_info), h->path);
                 return 0;
