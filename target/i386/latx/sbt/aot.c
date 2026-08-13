@@ -914,7 +914,7 @@ static int get_tb_num(char *lib_name, char *aot_file_name, CPUState *cpu)
         fclose(pf);
         return 0;
     }
-    if (!strstr(aot_version, AOT_VERSION)) {
+    if (memcmp(aot_version, AOT_VERSION, strlen(AOT_VERSION))) {
         qemu_log_mask(LAT_LOG_AOT, "aot file is not complete %s\n", lib_name);
         remove(aot_file_path);
         return 0;
@@ -1321,7 +1321,7 @@ lib_info *aot_load(char *lib_name, char *aot_file_name,
             || fread(aot_version, strlen(AOT_VERSION), 1, pf) != 1) {
         goto exit_aot_load;
     }
-    if (!strstr(aot_version, AOT_VERSION)) {
+    if (memcmp(aot_version, AOT_VERSION, strlen(AOT_VERSION))) {
         qemu_log_mask(LAT_LOG_AOT, "aot file is not complete %s\n", lib_name);
         remove_curr_aot_file(fd);
         goto exit_aot_load;

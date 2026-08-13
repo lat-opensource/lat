@@ -9,6 +9,8 @@
 
 #include "qemu-def.h"
 
+#define AOT_CACHE_KEY_VERSION "v3"
+
 typedef struct seg_info {
     char *file_name;
     target_ulong file_offset;
