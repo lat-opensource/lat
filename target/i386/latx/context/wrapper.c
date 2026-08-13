@@ -79,8 +79,8 @@ extern void* my__IO_2_1_stderr_;
 #define R_R8 cpu->regs[R_R8]
 #define R_R9 cpu->regs[R_R9]
 #define R_RSP cpu->regs[R_ESP]
-#define R_XMMD(r) (*(double*)&cpu->xmm_regs->ZMM_D(r))
-#define R_XMMS(r) (*(float*)&cpu->xmm_regs->ZMM_S(r))
+#define R_XMMD(r) (*(double *)&cpu->xmm_regs[(r)].ZMM_Q(0))
+#define R_XMMS(r) (*(float *)&cpu->xmm_regs[(r)].ZMM_L(0))
 #define ST0val (cpu->fpregs[cpu->fpstt].d)
 #else
 #define __CPU CPUX86State *cpu = (CPUX86State *)lsenv->cpu_state;
