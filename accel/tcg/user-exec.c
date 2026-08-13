@@ -1349,6 +1349,11 @@ int cpu_signal_handler(int host_signum, void *pinfo,
         }
     }
     if (info->si_signo == SIGBUS) {
+        /* Keep a target-queued SIGBUS on the target signal path. */
+        if (info->si_code == SI_KERNEL && info->si_addr != NULL) {
+            mmap_unlock();
+            return 0;
+        }
         int ret = lock_interpret(info, uc);
         if (!ret) {
             mmap_unlock();
