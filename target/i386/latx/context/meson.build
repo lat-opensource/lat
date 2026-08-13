@@ -25,6 +25,7 @@ my_file = files(
   'wrappedlibxcbutil.c',
   'wrappedlibxcbxinerama.c',
   'wrappedlibxcbxinput.c',
+  'wrappedcairo-preflight.c',
   'wrappedlibx11xcb.c',
   'wrappedxkbcommon.c',
   'wrappedxkbcommonx11.c',

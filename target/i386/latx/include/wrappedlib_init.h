@@ -116,6 +116,9 @@ int FUNC(_init)(library_t* lib, box64context_t* box64)
 {
     (void)box64;
 
+#ifdef PRE_INIT_GUEST
+    PRE_INIT_GUEST
+#endif
     // Init first
     free(lib->path); lib->path=NULL;
 #ifdef PRE_INIT

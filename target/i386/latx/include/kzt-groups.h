@@ -50,5 +50,7 @@ bool kzt_group_is_enabled(KztLibraryGroup group);
 bool kzt_library_is_enabled(const char *soname);
 const char *kzt_groups_last_error(void);
 void kzt_groups_log_library(const char *soname, bool enabled);
+void kzt_groups_log_wrapper_rejection(const char *soname,
+                                      const char *reason);
 
 #endif /* LATX_KZT_GROUPS_H */

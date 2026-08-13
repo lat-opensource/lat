@@ -423,3 +423,13 @@ void kzt_groups_log_library(const char *soname, bool enabled)
         return;
     }
 }
+
+void kzt_groups_log_wrapper_rejection(const char *soname,
+                                      const char *reason)
+{
+    if (!group_log_enabled) {
+        return;
+    }
+    fprintf(stderr, "KZT: native wrapper rejected for %s: %s\n",
+            soname, reason);
+}
