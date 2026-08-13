@@ -246,29 +246,76 @@ void do_translate_tbbridge(ADDR func_pc, ADDR wrapper, TranslationBlock *tb)
 }
 #endif
 
+#if defined(CONFIG_LATX_KZT)
+/*
+ * KZT ends a TB at INT3.  A host BREAK cannot then use the following host
+ * instruction to restore the guest RIP, so raise the target interrupt with
+ * the return RIP recorded explicitly.
+ */
+static bool translate_kzt_int3_signal(IR1_INST *pir1)
+{
+#ifdef TARGET_X86_64
+    IR2_OPND codemode_value_opnd = ra_alloc_itemp();
+    IR2_OPND not_64 = ra_alloc_label();
+
+    la_ld_d(codemode_value_opnd, env_ir2_opnd,
+            offsetof(CPUX86State, sys.codemode));
+    la_beq(codemode_value_opnd, zero_ir2_opnd, not_64);
+    ra_free_temp(codemode_value_opnd);
+    tr_save_x64_8_registers_to_env(0xff, option_save_xmm);
+    la_label(not_64);
+#endif
+    tr_save_fcsr_to_env();
+    tr_save_registers_to_env(0xff, 0xff, 0xff, options_to_save());
+
+    IR2_OPND intno = ra_alloc_itemp();
+    li_guest_addr(intno, EXCP03_INT3);
+    la_st_w(intno, env_ir2_opnd, lsenv_offset_exception_index(lsenv));
+    ra_free_temp(intno);
+
+    IR2_OPND next_pc = ra_alloc_itemp();
+    target_ulong call_offset __attribute__((unused)) =
+        aot_get_call_offset(ir1_addr_next(pir1));
+    aot_load_guest_addr(next_pc, ir1_addr_next(pir1),
+                        LOAD_CALL_TARGET, call_offset);
+    la_store_addrx(next_pc, env_ir2_opnd,
+                   lsenv_offset_exception_next_eip(lsenv));
+    ra_free_temp(next_pc);
+
+    IR2_OPND helper_addr_opnd = ra_alloc_dbt_arg2();
+    aot_load_host_addr(helper_addr_opnd, (ADDR)helper_raise_int,
+                       LOAD_HELPER_RAISE_INT, 0);
+    la_jirl(ra_ir2_opnd, helper_addr_opnd, 0);
+    tr_load_registers_from_env(0x1, 0, 0, options_to_save());
+    return true;
+}
+#endif
+
 bool translate_int_3(IR1_INST *pir1)
 {
 #if defined(CONFIG_LATX_KZT)
-    if (CODEIS64) {
+    if (option_kzt && CODEIS64) {
         struct cpu_state_info state_info;
         CPUState *cpu = env_cpu(lsenv->cpu_state);
         /* fill in cpu_state_info */
         state_info.cflags = cpu->tcg_cflags;
         cpu_get_tb_cpu_state(cpu->env_ptr, &state_info.current_pc,
                              &state_info.cs_base, &state_info.flags);
-        if(option_kzt && Peek8(state_info.current_pc + 1, 0) == 'S' && Peek8(state_info.current_pc + 1, 1) == 'C')
-        {
+        if (Peek8(state_info.current_pc + 1, 0) == 'S' &&
+            Peek8(state_info.current_pc + 1, 1) == 'C') {
             TranslationBlock *tb = NULL;
             mmap_lock();
             onebridge_t *bridge= (onebridge_t*)state_info.current_pc;
             do_translate_brick_tb(bridge, &state_info, cpu, state_info.current_pc, tb);
             mmap_unlock();
-        } else {
-            la_break(0x5);
+            return true;
         }
-    } else {
-        la_break(0x5);
     }
+
+    if (option_kzt) {
+        return translate_kzt_int3_signal(pir1);
+    }
+    la_break(0x5);
     return true;
 #else
     la_break(0x5);
