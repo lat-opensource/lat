@@ -49,7 +49,6 @@ my_file = files(
   'wrappedlibglx.c',
   'wrappedlibxxf86vm.c',
   'wrappedlibxau.c',
-  'wrappedlibxi.c',
   'wrappedlibxdmcp.c',
   'wrappedxshmfence.c',
   'wrappedlibxfixes.c',

@@ -100,6 +100,10 @@ typedef int32_t (*iFpppppp_t)(void*, void*, void*, void*, void*, void*);
 typedef void* (*pFpLiiil_t)(void*, uintptr_t, int32_t, int32_t, int32_t, intptr_t);
 typedef int32_t (*iFpippppp_t)(void*, int32_t, void*, void*, void*, void*, void*);
 typedef int32_t (*iFppipppp_t)(void*, void*, int32_t, void*, void*, void*, void*);
+typedef void* (*pFv_t)(void);
+typedef int32_t (*iFpip_t)(void*, int32_t, void*);
+typedef void* (*pFppi_t)(void*, void*, int32_t);
+typedef int32_t (*iFpppi_t)(void*, void*, void*, int32_t);
 #ifndef CONFIG_LOONGARCH_NEW_WORLD
 #define SUPER() ADDED_FUNCTIONS() \
 	GO(_Jv_RegisterClasses, vFv_t) \
@@ -358,15 +362,6 @@ typedef int32_t (*iFppipppp_t)(void*, void*, int32_t, void*, void*, void*, void*
 	GO(__libc_start_main, iFpippppp_t) \
 	GO(clone, iFppipppp_t)
 #else
-typedef int64_t (*iFp_t)(void*);
-typedef void* (*pFv_t)(void);
-typedef int64_t (*iFpp_t)(void*, void*);
-typedef void* (*pFpi_t)(void*, int64_t);
-typedef void* (*pFpp_t)(void*, void*);
-typedef int64_t (*iFpip_t)(void*, int64_t, void*);
-typedef void* (*pFppi_t)(void*, void*, int64_t);
-typedef void* (*pFppp_t)(void*, void*, void*);
-typedef int64_t (*iFpppi_t)(void*, void*, void*, int64_t);
 #define SUPER() ADDED_FUNCTIONS() \
 	GO(_Jv_RegisterClasses, vFv_t) \
 	GO(__cxa_pure_virtual, vFv_t) \

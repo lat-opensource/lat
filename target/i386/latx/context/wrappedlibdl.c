@@ -8,7 +8,9 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
+#include <stdarg.h>
 #include <dlfcn.h>
 #include "elf.h"
 #include <link.h>
@@ -34,7 +36,6 @@ dlprivate_t *NewDLPrivate(void) {
     return dl;
 }
 void FreeDLPrivate(dlprivate_t **lib) {
-    box_free((*lib)->last_error);
     box_free(*lib);
 }
 
@@ -51,7 +52,96 @@ int my_dlinfo(void* handle, int request, void* info) EXPORT;
 #define LIBNAME libdl
 const char* libdlName = "libdl.so.2";
 
-#define CLEARERR    if(dl->last_error) box_free(dl->last_error); dl->last_error = NULL;
+static __thread char dl_error_buffer[512];
+static __thread int dl_error_pending;
+
+static void clear_dl_error(dlprivate_t *dl)
+{
+    if (dl && dl->x86dlerror)
+        (void)RunFunctionWithState((uintptr_t)dl->x86dlerror, 0);
+    dl_error_pending = 0;
+}
+
+static void set_dl_error(dlprivate_t *dl, const char *message)
+{
+    (void)dl;
+    snprintf(dl_error_buffer, sizeof(dl_error_buffer), "%s", message);
+    dl_error_pending = 1;
+}
+
+static void set_dl_errorf(dlprivate_t *dl, const char *format, ...)
+{
+    char message[512];
+    va_list args;
+
+    va_start(args, format);
+    vsnprintf(message, sizeof(message), format, args);
+    va_end(args);
+    set_dl_error(dl, message);
+}
+
+#define CLEARERR clear_dl_error(dl);
+
+static int replace_path_token(char **path, const char *token,
+                              const char *replacement)
+{
+    const size_t token_len = strlen(token);
+    const size_t replacement_len = strlen(replacement);
+    size_t search_from = 0;
+    char *match;
+
+    while ((match = strstr(*path + search_from, token))) {
+        const size_t prefix_len = (size_t)(match - *path);
+        const size_t suffix_len = strlen(match + token_len);
+        size_t expanded_len;
+        char *expanded;
+
+        if (suffix_len == SIZE_MAX ||
+            prefix_len > SIZE_MAX - replacement_len ||
+            prefix_len + replacement_len > SIZE_MAX - suffix_len - 1)
+            return -1;
+        expanded_len = prefix_len + replacement_len + suffix_len + 1;
+        expanded = box_malloc(expanded_len);
+        if (!expanded)
+            return -1;
+        memcpy(expanded, *path, prefix_len);
+        memcpy(expanded + prefix_len, replacement, replacement_len);
+        memcpy(expanded + prefix_len + replacement_len,
+               match + token_len, suffix_len + 1);
+        box_free(*path);
+        *path = expanded;
+        search_from = prefix_len + replacement_len;
+    }
+    return 0;
+}
+
+static char *expand_dlopen_path(const char *filename)
+{
+    char *path = box_strdup(filename);
+    char *origin;
+    char *slash;
+
+    if (!path)
+        return NULL;
+    origin = box_strdup(my_context->fullpath ? my_context->fullpath : "");
+    if (!origin) {
+        box_free(path);
+        return NULL;
+    }
+    slash = strrchr(origin, '/');
+
+    if (slash)
+        *slash = '\0';
+    else
+        origin[0] = '\0';
+    if (replace_path_token(&path, "${ORIGIN}", origin) ||
+        replace_path_token(&path, "${PLATFORM}", "x86_64")) {
+        box_free(path);
+        path = NULL;
+    }
+    box_free(origin);
+    return path;
+}
 //#define R_RSP cpu->regs[R_ESP]
 static void Push64(CPUX86State *cpu, uint64_t v)
 {
@@ -64,21 +154,26 @@ int init_x86dlfun(void)
 {
     elfheader_t* h = loadElfFromFile("libdl.so.2");
     lsassert(h);
-    const char* syms[] = {"dlopen", "dlsym", "dlclose", "dladdr", "dladdr1", "dlinfo"};
-    void *rsyms[6] = {0};
+    const char* syms[] = {
+        "dlopen", "dlsym", "dlclose", "dladdr",
+        "dladdr1", "dlinfo", "dlvsym", "dlerror",
+    };
+    void *rsyms[8] = {0};
     int rrsyms = 0;
-    ResetSpecialCaseElf(h, syms, 6, rsyms, &rrsyms);
-    if (rrsyms != 6) {
+    ResetSpecialCaseElf(h, syms, 8, rsyms, &rrsyms);
+    if (rrsyms != 8) {
         h = loadElfFromFile("libc.so.6");
-        ResetSpecialCaseElf(h, syms, 6, rsyms, &rrsyms);
+        ResetSpecialCaseElf(h, syms, 8, rsyms, &rrsyms);
     }
-    lsassert(rrsyms == 6);
+    lsassert(rrsyms == 8);
     my_context->dlprivate->x86dlopen = rsyms[0];
     my_context->dlprivate->x86dlsym = rsyms[1];
     my_context->dlprivate->x86dlclose = rsyms[2];
     my_context->dlprivate->x86dladdr = rsyms[3];
     my_context->dlprivate->x86dladdr1 = rsyms[4];
     my_context->dlprivate->x86dlinfo = rsyms[5];
+    my_context->dlprivate->x86dlvsym = rsyms[6];
+    my_context->dlprivate->x86dlerror = rsyms[7];
     return 0;
 }
 static int callx86dlopen(void *filename, int flag, elfheader_t * h, int is_local) {
@@ -124,39 +219,31 @@ void* my_dlopen(void *filename, int flag){
         lsassert(dl->x86dlopen);
     }
     if(filename) {
-        char* rfilename = (char*)alloca(MAX_PATH);
-        strcpy(rfilename, (char*)filename);
+        char* rfilename = expand_dlopen_path((char*)filename);
+        if (!rfilename) {
+            set_dl_error(dl, "Cannot expand dlopen path");
+            return NULL;
+        }
         printf_dlsym(LOG_DEBUG, "Call to dlopen(\"%s\"/%p, %X)\n", rfilename, filename, flag);
-        while(strstr(rfilename, "${ORIGIN}")) {
-            char* origin = box_strdup(my_context->fullpath);
-            char* p = strrchr(origin, '/');
-            if(p) *p = '\0';    // remove file name to have only full path, without last '/'
-            char* tmp = (char*)box_calloc(1, strlen(rfilename)-strlen("${ORIGIN}")+strlen(origin)+1);
-            p = strstr(rfilename, "${ORIGIN}");
-            memcpy(tmp, rfilename, p-rfilename);
-            strcat(tmp, origin);
-            strcat(tmp, p+strlen("${ORIGIN}"));
-            strcpy(rfilename, tmp);
-            box_free(tmp);
-            box_free(origin);
-        }
-        while(strstr(rfilename, "${PLATFORM}")) {
-            char* platform = box_strdup("x86_64");
-            char* p = strrchr(platform, '/');
-            if(p) *p = '\0';    // remove file name to have only full path, without last '/'
-            char* tmp = (char*)box_calloc(1, strlen(rfilename)-strlen("${PLATFORM}")+strlen(platform)+1);
-            p = strstr(rfilename, "${PLATFORM}");
-            memcpy(tmp, rfilename, p-rfilename);
-            strcat(tmp, platform);
-            strcat(tmp, p+strlen("${PLATFORM}"));
-            strcpy(rfilename, tmp);
-            box_free(tmp);
-            box_free(platform);
-        }
         if (rfilename[0] == '/' && !FileExist(rfilename, IS_FILE)) {
-            char filetmp[PATH_MAX] = {0};
-            snprintf(filetmp , PATH_MAX, "%s%s", interp_prefix, rfilename);
-            strcpy(rfilename, filetmp);
+            const size_t interp_len = strlen(interp_prefix);
+            const size_t filename_len = strlen(rfilename);
+            if (filename_len == SIZE_MAX ||
+                interp_len > SIZE_MAX - filename_len - 1) {
+                box_free(rfilename);
+                set_dl_error(dl, "Cannot prefix dlopen path");
+                return NULL;
+            }
+            char *prefixed = box_malloc(interp_len + filename_len + 1);
+            if (!prefixed) {
+                box_free(rfilename);
+                set_dl_error(dl, "Cannot prefix dlopen path");
+                return NULL;
+            }
+            strcpy(prefixed, interp_prefix);
+            strcat(prefixed, rfilename);
+            box_free(rfilename);
+            rfilename = prefixed;
             printf_dlsym(LOG_DEBUG, "dlopen filename change to \"%s\"\n", rfilename);
         }
         // check if alread dlopenned...
@@ -179,11 +266,17 @@ void* my_dlopen(void *filename, int flag){
                 if(!(flag&0x4))
                     dl->count[i] = dl->count[i]+1;
                 printf_dlsym(LOG_DEBUG, "dlopen: Recycling %s/%p count=%ld (dlopened=%ld, elf_index=%d)\n", rfilename, (void*)(i+1), dl->count[i], dl->dlopened[i], GetElfIndex(dl->libs[i]));
+                box_free(rfilename);
                 return (void*)(i+1);
             }
         }
         if(strstr(rfilename, "libGL.so")){
-            strcpy(rfilename, "libGL.so.1");
+            box_free(rfilename);
+            rfilename = box_strdup("libGL.so.1");
+            if (!rfilename) {
+                set_dl_error(dl, "Cannot rewrite dlopen path");
+                return NULL;
+            }
         }
         dlopened = (GetLibInternal(rfilename)==NULL);
         // Then open the lib
@@ -202,24 +295,27 @@ void* my_dlopen(void *filename, int flag){
             printf_dlsym(LOG_DEBUG, "warning call call x86dlopen filename %s %x ret=0x%lx\n",  (char *)filename, flag, ret);
             //lsassert(0);
             if (ret) {
+                box_free(rfilename);
                 return (void *)ret;
             }
-            if(!dl->last_error)
-                dl->last_error = box_malloc(129);
-            snprintf(dl->last_error, 129, "filename \"%s\" flag=%x\n", (char *)filename, flag);
-            printf_dlsym(LOG_NEVER, "%p return %p\n", dl->last_error, (void*)NULL);
+            set_dl_errorf(dl, "filename \"%s\" flag=%x\n",
+                          (char *)filename, flag);
+            box_free(rfilename);
             return NULL;
 #endif
         }
         if(AddNeededLib(NULL, NULL, NULL, is_local, bindnow, libs, 1, my_context)) {
             printf_dlsym(strchr(rfilename,'/')?LOG_DEBUG:LOG_INFO, "Warning: Cannot dlopen(\"%s\"/%p, %X)\n", rfilename, filename, flag);
-            if(!dl->last_error)
-                dl->last_error = box_malloc(129);
-            snprintf(dl->last_error, 129, "Cannot dlopen(\"%s\"/%p, %X)\n", rfilename, filename, flag);
+            set_dl_errorf(dl, "Cannot dlopen(\"%s\"/%p, %X)\n",
+                          rfilename, filename, flag);
+            box_free(rfilename);
             return NULL;
         }
         lib = GetLibInternal(rfilename);
-        if (!lib) return NULL;
+        if (!lib) {
+            box_free(rfilename);
+            return NULL;
+        }
         lib->x86dlopenflag = flag;
         if (lib && lib->type == LIB_EMULATED) {
             // if dlopened = 0 ---> lib added but not loaded
@@ -232,6 +328,7 @@ void* my_dlopen(void *filename, int flag){
             }
         }
         //TODO:RunDeferedElfInit;
+        box_free(rfilename);
     } else {
         // check if already dlopenned...
         for (size_t i=0; i<dl->lib_sz; ++i) {
@@ -269,10 +366,18 @@ void* my_dlopen(void *filename, int flag){
 
 void* my_dlmopen(void* lmid, void *filename, int flag)
 {
-    if(lmid) {
-        printf_dlsym(LOG_INFO, "Warning, dlmopen(%p, %p(\"%s\"), 0x%x) called with lmid not LMID_ID_BASE (unsupported)\n", lmid, filename, filename?(char*)filename:"self", flag);
+    dlprivate_t *dl = my_context->dlprivate;
+
+    if ((Lmid_t)lmid != LM_ID_BASE) {
+        char error[160];
+        snprintf(error, sizeof(error),
+                 "dlmopen namespace %p is unsupported", lmid);
+        set_dl_error(dl, error);
+        printf_dlsym(LOG_INFO,
+                     "Warning, dlmopen(%p, %p(\"%s\"), 0x%x) rejected: unsupported namespace\n",
+                     lmid, filename, filename ? (char*)filename : "self", flag);
+        return NULL;
     }
-    // lmid is ignored for now...
     return my_dlopen(filename, flag);
 }
 
@@ -311,6 +416,23 @@ static int my_dlsym_lib(library_t* lib, const char* rsymbol, uintptr_t *start, u
     return ret;
 }
 
+static int find_dl_library_index(dlprivate_t *dl, void *handle, size_t *index)
+{
+    const size_t raw_handle = (size_t)handle;
+
+    if (raw_handle > 0 && raw_handle <= dl->lib_sz) {
+        *index = raw_handle - 1;
+        return 1;
+    }
+    for (size_t i = 0; i < dl->lib_sz; ++i) {
+        if (dl->libs[i] && dl->libs[i]->x86linkmap == handle) {
+            *index = i;
+            return 1;
+        }
+    }
+    return 0;
+}
+
 void* my_dlsym(void *handle, void *symbol){
     dlprivate_t *dl = my_context->dlprivate;
     uintptr_t start = 0, end = 0;
@@ -321,6 +443,17 @@ void* my_dlsym(void *handle, void *symbol){
         lsassert(dl->x86dlsym);
     }
     printf_dlsym(LOG_DEBUG, "Call to dlsym(%p, \"%s\")%s\n", handle, rsymbol, dlsym_error?"":"\n");
+    if (handle && handle != (void*)~0LL) {
+        size_t known_index;
+        if (!find_dl_library_index(dl, handle, &known_index)) {
+            uint64_t ret = RunFunctionWithState(
+                (uintptr_t)dl->x86dlsym, 2, handle, symbol);
+            if (!ret)
+                set_dl_errorf(dl, "Symbol \"%s\" not found in %p\n",
+                              rsymbol, handle);
+            return (void*)ret;
+        }
+    }
    //lsassert(!strstr(rsymbol, "XcursorGetDefaultSize"));
     if(handle==NULL) {
         // special case, look globably
@@ -348,10 +481,8 @@ void* my_dlsym(void *handle, void *symbol){
             }
             printf_dlsym(LOG_NEVER, "debug my %d\n", __LINE__);
         }
-        if(!dl->last_error)
-            dl->last_error = box_malloc(129);
-        snprintf(dl->last_error, 129, "Symbol \"%s\" not found in %p)\n", rsymbol, handle);
-        printf_dlsym(LOG_NEVER, "%p return %p\n", dl->last_error, (void*)NULL);
+        set_dl_errorf(dl, "Symbol \"%s\" not found in %p)\n", rsymbol,
+                      handle);
         return NULL;
 #endif
     }
@@ -413,30 +544,27 @@ void* my_dlsym(void *handle, void *symbol){
                 }
         }
 #endif
-        __MY_CPU;
 #if FORWORDBACK
+        __MY_CPU;
         lsassert(dl->x86dlsym);
         Push64(cpu, (uint64_t)dl->x86dlsym);
         printf_dlsym(LOG_DEBUG, "warning call x86dlsym filename is %s 0x%lx %s\n", strlen(lmfile)?lmfile:"NULL", cpu->regs[R_EDI], (char*)symbol);
         return NULL;
 #else
-        uint64_t ret = RunFunctionWithState((uintptr_t)my_context->dlprivate->x86dlsym, 2, cpu->regs[R_EDI], symbol);
-        printf_dlsym(LOG_DEBUG, "warning call call x86dlsym filename is %s handle 0x%lx ret=0x%lx\n", strlen(lmfile)?lmfile:"NULL", cpu->regs[R_EDI], ret);
+        uint64_t ret = RunFunctionWithState(
+            (uintptr_t)my_context->dlprivate->x86dlsym, 2, handle,
+            symbol);
+        printf_dlsym(LOG_DEBUG, "warning call call x86dlsym filename is %s handle %p ret=0x%lx\n", strlen(lmfile)?lmfile:"NULL", handle, ret);
         if (ret) {
             return (void *)ret;
         }
-        if(!dl->last_error)
-            dl->last_error = box_malloc(129);
-        snprintf(dl->last_error, 129, "Symbol \"%s\" not found in %p)\n", rsymbol, handle);
-        printf_dlsym(LOG_NEVER, "%p return %p\n", dl->last_error, (void*)NULL);
+        set_dl_errorf(dl, "Symbol \"%s\" not found in %p)\n", rsymbol,
+                      handle);
         return NULL;
 #endif
     }
     if(dl->count[nlib]==0) {
-        if(!dl->last_error)
-            dl->last_error = box_malloc(129);
-        snprintf(dl->last_error, 129, "Bad handle %p (already closed))\n", handle);
-        printf_dlsym(LOG_NEVER, "%p return %p\n", dl->last_error, (void*)NULL);
+        set_dl_errorf(dl, "Bad handle %p (already closed))\n", handle);
         return NULL;
     }
     if(dl->libs[nlib]) {
@@ -453,9 +581,11 @@ void* my_dlsym(void *handle, void *symbol){
                 }
                 lsassert(ret);
                 dl->libs[nlib]->x86linkmap = (void *)ret;
-                ret = RunFunctionWithState((uintptr_t)my_context->dlprivate->x86dlsym, 2, dl->libs[nlib]->x86linkmap , cpu->regs[R_ESI]);
+                ret = RunFunctionWithState(
+                    (uintptr_t)my_context->dlprivate->x86dlsym, 2,
+                    dl->libs[nlib]->x86linkmap, symbol);
                 printf_dlsym(LOG_DEBUG, "call x86dlsym filename %s is wrapped but not find symbol, dlsym(%p, %s) ret=0x%lx\n",
-                dl->libs[nlib]->name, dl->libs[nlib]->x86linkmap, (char *)cpu->regs[R_ESI], ret);
+                dl->libs[nlib]->name, dl->libs[nlib]->x86linkmap, (char *)symbol, ret);
                 return (void *)ret;
             }
             #endif
@@ -468,15 +598,15 @@ void* my_dlsym(void *handle, void *symbol){
             printf_dlsym(LOG_DEBUG, "warning call x86dlsym filename is %s %lx\n", dl->libs[nlib]->x86linkmap->l_name, cpu->regs[R_EDI]);
             return NULL;
 #else
-            uint64_t ret = RunFunctionWithState((uintptr_t)my_context->dlprivate->x86dlsym, 2, cpu->regs[R_EDI], cpu->regs[R_ESI]);
-            printf_dlsym(LOG_DEBUG, "call x86dlsym filename is %s %s ret=0x%lx\n", dl->libs[nlib]->x86linkmap->l_name, (char *)cpu->regs[R_ESI], ret);
+            uint64_t ret = RunFunctionWithState(
+                (uintptr_t)my_context->dlprivate->x86dlsym, 2,
+                dl->libs[nlib]->x86linkmap, symbol);
+            printf_dlsym(LOG_DEBUG, "call x86dlsym filename is %s %s ret=0x%lx\n", dl->libs[nlib]->x86linkmap->l_name, (char *)symbol, ret);
             if (ret) {
                 return (void *)ret;
             }
-            if(!dl->last_error)
-                dl->last_error = box_malloc(129);
-            snprintf(dl->last_error, 129, "Symbol \"%s\" not found in %p)\n", rsymbol, handle);
-            printf_dlsym(LOG_NEVER, "%p return %p\n", dl->last_error, (void*)NULL);
+            set_dl_errorf(dl, "Symbol \"%s\" not found in %p)\n", rsymbol,
+                          handle);
             return NULL;
 #endif
         }
@@ -489,11 +619,9 @@ void* my_dlsym(void *handle, void *symbol){
             return (void*)start;
         }
 #endif
-        if(!dl->last_error)
-            dl->last_error = box_malloc(129);
-        snprintf(dl->last_error, 129, "Symbol \"%s\" not found in %p)\n", rsymbol, handle);
+        set_dl_errorf(dl, "Symbol \"%s\" not found in %p)\n", rsymbol,
+                      handle);
         printf_dlsym(LOG_NEVER, "%p\n", NULL);
-        lsassertm(0,"%s",dl->last_error);
         return NULL;
     }
     printf_dlsym(LOG_NEVER, "%p\n", (void*)start);
@@ -527,18 +655,11 @@ int my_dlclose(void *handle)
             Push64(cpu, (uint64_t)dl->x86dlclose);
             return 0;
         }
-        if(!dl->last_error)
-            dl->last_error = box_malloc(129);
-        snprintf(dl->last_error, 129, "Bad handle %p, ret = %d)\n", handle, ret);
-        printf_dlsym(LOG_DEBUG, "dlclose: %s\n", dl->last_error);
-        lsassertm(0,"%s",dl->last_error);
+        set_dl_errorf(dl, "Bad handle %p, ret = %d)\n", handle, ret);
         return -1;
     }
     if(dl->count[nlib]==0) {
-        if(!dl->last_error)
-            dl->last_error = box_malloc(129);
-        snprintf(dl->last_error, 129, "Bad handle %p (already closed))\n", handle);
-        printf_dlsym(LOG_DEBUG, "dlclose: %s\n", dl->last_error);
+        set_dl_errorf(dl, "Bad handle %p (already closed))\n", handle);
         return -1;
     }
     dl->count[nlib] = dl->count[nlib]-1;
@@ -563,7 +684,19 @@ int my_dlclose(void *handle)
 char* my_dlerror(void)
 {
     dlprivate_t *dl = my_context->dlprivate;
-    return dl->last_error;
+
+    if (!dl->x86dlerror)
+        init_x86dlfun();
+    if (dl_error_pending) {
+        if (dl->x86dlerror)
+            (void)RunFunctionWithState((uintptr_t)dl->x86dlerror, 0);
+        dl_error_pending = 0;
+        return dl_error_buffer;
+    }
+    if (!dl->x86dlerror)
+        return NULL;
+    return (char*)(uintptr_t)RunFunctionWithState(
+        (uintptr_t)dl->x86dlerror, 0);
 }
 
 int my_dladdr1(void *addr, void *i, void** extra_info, int flags)
@@ -625,7 +758,50 @@ int my_dladdr(void *addr, void *i)
 void* my_dlvsym(void *handle, void *symbol, const char *vername)
 {
     printf_dlsym(LOG_DEBUG, "Call to dlvsym(%p, \"%s\", %s)", handle, (char *)symbol, vername?vername:"(nil)");
-    return my_dlsym(handle, symbol);
+    dlprivate_t *dl = my_context->dlprivate;
+    size_t nlib;
+    void *guest_handle = handle;
+
+    clear_dl_error(dl);
+    if (!dl->x86dlvsym)
+        init_x86dlfun();
+    if (!dl->x86dlvsym) {
+        set_dl_error(dl, "dlvsym is unavailable in the guest loader");
+        return NULL;
+    }
+    if (handle == (void*)~0LL) {
+        __MY_CPU;
+        Push64(cpu, (uint64_t)dl->x86dlvsym);
+        return NULL;
+    }
+    if (!handle)
+        return (void*)(uintptr_t)RunFunctionWithState(
+            (uintptr_t)dl->x86dlvsym, 3, guest_handle, symbol, vername);
+    if (find_dl_library_index(dl, handle, &nlib)) {
+        if (!dl->count[nlib]) {
+            set_dl_errorf(dl, "Bad handle %p (already closed)\n", handle);
+            return NULL;
+        }
+        if (!dl->libs[nlib]) {
+            return (void*)(uintptr_t)RunFunctionWithState(
+                (uintptr_t)dl->x86dlvsym, 3, NULL, symbol, vername);
+        }
+        guest_handle = dl->libs[nlib]->x86linkmap;
+        if (!guest_handle) {
+            guest_handle = (void*)(uintptr_t)RunFunctionWithState(
+                (uintptr_t)dl->x86dlopen, 2, dl->libs[nlib]->name,
+                dl->libs[nlib]->x86dlopenflag);
+            dl->libs[nlib]->x86linkmap = guest_handle;
+            if (!guest_handle) {
+                set_dl_errorf(dl, "Missing guest link_map for handle %p\n",
+                              handle);
+                return NULL;
+            }
+        }
+    }
+    uintptr_t ret = RunFunctionWithState(
+        (uintptr_t)dl->x86dlvsym, 3, guest_handle, symbol, vername);
+    return (void*)ret;
 }
 
 int my_dlinfo(void* handle, int request, void* info)
@@ -637,10 +813,45 @@ int my_dlinfo(void* handle, int request, void* info)
         init_x86dlfun();
         lsassert(dl->x86dlinfo);
     }
-    __MY_CPU;
-    uint64_t ret = RunFunctionWithState((uintptr_t)my_context->dlprivate->x86dlinfo, 3, cpu->regs[R_EDI], cpu->regs[R_ESI], cpu->regs[R_EDX]);
+    size_t nlib;
+    void *guest_handle = handle;
+    if (find_dl_library_index(dl, handle, &nlib)) {
+        if (!dl->count[nlib]) {
+            set_dl_errorf(dl, "Bad handle %p (already closed)\n", handle);
+            return -1;
+        }
+        if (!dl->libs[nlib]) {
+            guest_handle = NULL;
+        } else {
+            guest_handle = dl->libs[nlib]->x86linkmap;
+            if (!guest_handle) {
+                guest_handle = (void*)(uintptr_t)RunFunctionWithState(
+                    (uintptr_t)dl->x86dlopen, 2, dl->libs[nlib]->name,
+                    dl->libs[nlib]->x86dlopenflag);
+                dl->libs[nlib]->x86linkmap = guest_handle;
+                if (!guest_handle) {
+                    set_dl_errorf(dl,
+                                  "Cannot open guest library for handle %p\n",
+                                  handle);
+                    return -1;
+                }
+            }
+            if (request == RTLD_DI_LINKMAP) {
+                if (!info) {
+                    set_dl_errorf(dl,
+                                  "Invalid dlinfo result for handle %p\n",
+                                  handle);
+                    return -1;
+                }
+                *(struct link_map**)info = guest_handle;
+                return 0;
+            }
+        }
+    }
+    uint64_t ret = RunFunctionWithState(
+        (uintptr_t)my_context->dlprivate->x86dlinfo, 3,
+        guest_handle, request, info);
     return ret;
 }
 
 #include "wrappedlib_init.h"
-

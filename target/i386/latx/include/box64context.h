@@ -47,13 +47,14 @@ typedef struct dlprivate_s {
     struct link_map  *dlx86handle;
     size_t      lib_sz;
     size_t      lib_cap;
-    char*       last_error;
     void *     x86dlopen;
     void *     x86dlclose;
     void *     x86dlsym;
     void *     x86dladdr1;
     void *     x86dladdr;
     void *     x86dlinfo;
+    void *     x86dlvsym;
+    void *     x86dlerror;
 } dlprivate_t;
 struct latx_kzt_debug {
     char *name;

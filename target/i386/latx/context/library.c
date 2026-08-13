@@ -240,19 +240,20 @@ static void initNativeLib(library_t *lib, box64context_t* context) {
                 return;
             }
 
+            struct link_map *real_lm = NULL;
+            if(dlinfo(lib->priv.w.lib, RTLD_DI_LINKMAP, &real_lm) || !real_lm) {
+                printf_log(LOG_INFO, "Failed to dlinfo lib %s\n", lib->name);
+                break;
+            }
             linkmap_t *lm = addLinkMapLib(lib);
             if(!lm) {
                 // Crashed already
                 printf_log(LOG_INFO, "Failure to add lib %s linkmap\n", lib->name);
                 break;
             }
-            struct link_map real_lm;
-            if(dlinfo(lib->priv.w.lib, RTLD_DI_LINKMAP, &real_lm)) {
-                printf_log(LOG_INFO, "Failed to dlinfo lib %s\n", lib->name);
-            }
-            lm->l_addr = real_lm.l_addr;
-            lm->l_name = real_lm.l_name;
-            lm->l_ld = real_lm.l_ld;
+            lm->l_addr = real_lm->l_addr;
+            lm->l_name = real_lm->l_name;
+            lm->l_ld = real_lm->l_ld;
             kzt_groups_log_library(lib->name, true);
             break;
         }

@@ -44,11 +44,11 @@ extern void* my__IO_2_1_stderr_;
     if (kzt_call_log) { \
         Dl_info dl_info; \
         int ret = dladdr((const void *)fcn, &dl_info); \
-        if (ret != -1) { \
+        if (ret != 0) { \
             printf_kzt_call(LOG_INFO, "pid %d %llx call %s(%p,%p,%p,%p,%p,%p,%p,%p,%p,%p,%p,%p) = 0x%lx from %s\n",  \
                 getpid(), \
                 (unsigned long long)pthread_self(), \
-                dl_info.dli_sname, \
+                dl_info.dli_sname ? dl_info.dli_sname : "<unknown>", \
                 (void *)R_RDI, \
                 (void *)R_RSI, \
                 (void*)R_RDX, \
@@ -62,7 +62,7 @@ extern void* my__IO_2_1_stderr_;
                 *(void**)(R_RSP + 40), \
                 *(void**)(R_RSP + 48), \
                 R_RAX, \
-                dl_info.dli_fname); \
+                dl_info.dli_fname ? dl_info.dli_fname : "<unknown>"); \
         } else { \
             fprintf(stderr, "call dladdr err 0x%lx ret =%d \n", fcn, ret); \
         } \
