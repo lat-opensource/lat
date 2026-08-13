@@ -15334,7 +15334,7 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
         if (!(p = lock_user_string(arg2))) {
             return -TARGET_EFAULT;
         }
-        ret = get_errno(faccessat(arg1, p, arg3, 0));
+        ret = get_errno(faccessat(arg1, path(p), arg3, 0));
         unlock_user(p, arg2, 0);
         return ret;
 #endif
@@ -18554,7 +18554,8 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
                 struct target_statx host_stx;
                 int mask = arg4;
 
-                ret = get_errno(sys_statx(dirfd, p, flags, mask, &host_stx));
+                ret = get_errno(sys_statx(dirfd, path(p), flags, mask,
+                                          &host_stx));
                 if (!is_error(ret)) {
 #ifdef CONFIG_LATX
                     if (latx_statx_is_proc_self_task(&host_stx)) {
@@ -19395,9 +19396,9 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
         p = lock_user_string(arg1);
         if (p) {
             if (num == TARGET_NR_listxattr) {
-                ret = get_errno(listxattr(p, b, arg3));
+                ret = get_errno(listxattr(path(p), b, arg3));
             } else {
-                ret = get_errno(llistxattr(p, b, arg3));
+                ret = get_errno(llistxattr(path(p), b, arg3));
             }
         } else {
             ret = -TARGET_EFAULT;
@@ -19433,9 +19434,9 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
             n = lock_user_string(arg2);
             if (p && n) {
                 if (num == TARGET_NR_setxattr) {
-                ret = get_errno(setxattr(p, n, v, arg4, arg5));
+                ret = get_errno(setxattr(path(p), n, v, arg4, arg5));
                 } else {
-                ret = get_errno(lsetxattr(p, n, v, arg4, arg5));
+                ret = get_errno(lsetxattr(path(p), n, v, arg4, arg5));
                 }
             } else {
                 ret = -TARGET_EFAULT;
@@ -19478,9 +19479,9 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
             n = lock_user_string(arg2);
             if (p && n) {
                 if (num == TARGET_NR_getxattr) {
-                ret = get_errno(getxattr(p, n, v, arg4));
+                ret = get_errno(getxattr(path(p), n, v, arg4));
                 } else {
-                ret = get_errno(lgetxattr(p, n, v, arg4));
+                ret = get_errno(lgetxattr(path(p), n, v, arg4));
                 }
             } else {
                 ret = -TARGET_EFAULT;
@@ -19517,9 +19518,9 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
             n = lock_user_string(arg2);
             if (p && n) {
                 if (num == TARGET_NR_removexattr) {
-                ret = get_errno(removexattr(p, n));
+                ret = get_errno(removexattr(path(p), n));
                 } else {
-                ret = get_errno(lremovexattr(p, n));
+                ret = get_errno(lremovexattr(path(p), n));
                 }
             } else {
                 ret = -TARGET_EFAULT;
