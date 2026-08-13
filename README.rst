@@ -211,7 +211,8 @@ x86 指令集覆盖：
 
 运行行为说明：
 
-- 库直通（ ``LATX_KZT`` ）仅在 64 位构建中提供，默认按兼容性检查启用；
+- KZT wrapper（ ``LATX_KZT`` ）仅在 64 位构建中提供。可以运行
+  ``latx-x86_64 --kzt-libs`` 查询当前版本提供的库族、稳定状态和依赖关系；
   32 位构建没有该选项。
 - 多线程 guest 程序沿用 QEMU 用户态多线程模型，原子指令根据宿主内核能力
   选择优化路径。
@@ -226,6 +227,22 @@ x86 指令集覆盖：
 
 LATX 支持系统配置文件、用户配置文件、环境变量和命令行参数。优先级、常用配置
 及示例见 `LATX 配置信息 <docs/user/latx-environment.rst>`_。
+
+KZT 库族控制的常用方式：
+
+.. code-block:: bash
+
+    # 查询当前版本提供的库族
+    latx-x86_64 --kzt-libs
+
+    # 启用当前稳定库族
+    LATX_KZT=1 latx-x86_64 /path/to/program
+
+    # 从稳定集合关闭一个库族及其依赖者
+    LATX_KZT=1 LATX_KZT_LIBS=-x11 latx-x86_64 /path/to/program
+
+    # 只启用一个库族及其必要依赖
+    LATX_KZT=1 LATX_KZT_LIBS=x11 latx-x86_64 /path/to/program
 
 
 AVX 指令支持

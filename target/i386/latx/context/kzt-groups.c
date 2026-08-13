@@ -296,6 +296,34 @@ const char *kzt_group_name(KztLibraryGroup group)
     return "none";
 }
 
+void kzt_groups_print_available(void)
+{
+    puts("Available KZT library groups:");
+    for (size_t i = 0; i < ARRAY_SIZE(kzt_group_definitions); i++) {
+        const KztGroupDefinition *definition = &kzt_group_definitions[i];
+        uint32_t dependencies =
+            kzt_add_dependencies(definition->group) & ~definition->group;
+        bool first = true;
+
+        printf("  %-8s status=%s requires=", definition->name,
+               definition->stable ? "stable" : "experimental");
+        for (size_t j = 0; j < ARRAY_SIZE(kzt_group_definitions); j++) {
+            if (!(dependencies & kzt_group_definitions[j].group)) {
+                continue;
+            }
+            printf("%s%s", first ? "" : ",",
+                   kzt_group_definitions[j].name);
+            first = false;
+        }
+        puts(first ? "none" : "");
+    }
+    puts("Selection syntax:");
+    puts("  LATX_KZT_LIBS=stable       use the current stable set");
+    puts("  LATX_KZT_LIBS=name,...      use only the named groups and "
+         "dependencies");
+    puts("  LATX_KZT_LIBS=+name,-name   modify the current stable set");
+}
+
 void kzt_groups_reset(void)
 {
     enabled_groups = KZT_GROUP_STABLE;

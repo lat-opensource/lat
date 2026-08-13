@@ -41,6 +41,7 @@ enum {
 
 KztLibraryGroup kzt_group_for_library(const char *soname);
 const char *kzt_group_name(KztLibraryGroup group);
+void kzt_groups_print_available(void);
 void kzt_groups_reset(void);
 bool kzt_groups_configure(const char *spec, bool log_enabled);
 void kzt_groups_reject_configuration(const char *reason, bool log_enabled);

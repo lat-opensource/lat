@@ -232,9 +232,10 @@ x86 instruction set coverage:
 
 Runtime behavior notes:
 
-- Library pass-through (``LATX_KZT``) is available only in 64-bit builds and
-  is enabled subject to compatibility checks by default. 32-bit builds do
-  not provide this option.
+- KZT wrappers (``LATX_KZT``) are available only in 64-bit builds. Run
+  ``latx-x86_64 --kzt-libs`` to list the library groups, stability status, and
+  dependencies provided by the installed version. 32-bit builds do not
+  provide this option.
 - Multi-threaded guests use the QEMU user-mode threading model; atomic
   instructions select an optimized path according to host kernel
   capabilities.
@@ -253,6 +254,22 @@ LATX supports system and user configuration files, environment variables, and
 command-line options. The `LATX configuration reference
 <docs/user/latx-environment.rst>`_ describes precedence and common settings.
 This reference is currently available in Chinese.
+
+Common KZT library-group controls:
+
+.. code-block:: bash
+
+    # List the groups provided by this version
+    latx-x86_64 --kzt-libs
+
+    # Enable the current stable set
+    LATX_KZT=1 latx-x86_64 /path/to/program
+
+    # Remove one group and its dependents from the stable set
+    LATX_KZT=1 LATX_KZT_LIBS=-x11 latx-x86_64 /path/to/program
+
+    # Select one group and its required dependencies
+    LATX_KZT=1 LATX_KZT_LIBS=x11 latx-x86_64 /path/to/program
 
 
 AVX Instruction Support

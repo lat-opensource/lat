@@ -699,6 +699,13 @@ static void handle_arg_latx_kzt_log(const char *arg)
     }
     option_kzt_log = value;
 }
+
+static void handle_arg_kzt_libs_info(const char *arg)
+{
+    (void)arg;
+    kzt_groups_print_available();
+    exit(EXIT_SUCCESS);
+}
 #endif
 
 static void handle_arg_latx_fputag(const char *arg)
@@ -917,6 +924,8 @@ static const struct qemu_argument arg_table[] = {
     "group,...",  "select KZT library groups"},
     {"latx-kzt-log", "LATX_KZT_LOG", true, handle_arg_latx_kzt_log,
     "0|1",        "log important KZT binding and fallback decisions"},
+    {"kzt-libs", NULL, false, handle_arg_kzt_libs_info,
+    "",           "list available KZT library groups and exit"},
 #endif
     {"latx-fputag",    "LATX_FPUTAG",     true,  handle_arg_latx_fputag,
     "",           "enable fputag"},
@@ -1257,12 +1266,13 @@ static int parse_args(int argc, char **argv)
                 } else {
                     if (!strcmp(r, "version") || !strcmp(r, "h")
                         || !strcmp(r, "help")
-                        || !strcmp(r, "runtime-info")) {
+                        || !strcmp(r, "runtime-info")
+                        || !strcmp(r, "kzt-libs")) {
                         /*
-                         * runtime-info must take effect here so it can be used
-                         * without a guest.  options_set() intentionally
-                         * replays its idempotent handler with the other
-                         * command-line options.
+                         * Query options must take effect here so they can be
+                         * used without a guest. options_set() intentionally
+                         * replays the idempotent runtime-info handler with the
+                         * other command-line options.
                          */
                         arginfo->handle_opt(NULL);
                     }
