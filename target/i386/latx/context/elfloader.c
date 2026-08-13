@@ -402,8 +402,8 @@ void FreeElfHeader(elfheader_t** head)
     *head = NULL;
 }
 #include "fileutils.h"
-#define GO(P, N) P,
-#define GOALIAS(P, N) P,
+#define GO(P, N, G) P,
+#define GOALIAS(P, N, G) P,
 const char * wrappedlibs_name[] = {
 #include "library_list.h"
 };

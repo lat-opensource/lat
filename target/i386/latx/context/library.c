@@ -30,17 +30,17 @@
 #include "librarian_private.h"
 #include "pathcoll.h"
 
-#define GO(P, N) int wrapped##N##_init(library_t* lib, box64context_t *box64); \
+#define GO(P, N, G) int wrapped##N##_init(library_t* lib, box64context_t *box64); \
                  void wrapped##N##_fini(library_t* lib); \
                  int wrapped##N##_get(library_t* lib, const char* name, khint_t pre_k, uintptr_t *offs, uintptr_t *sz, int version, const char* vername, int local); \
                  int wrapped##N##_getnoweak(library_t* lib, const char* name, khint_t pre_k, uintptr_t *offs, uintptr_t *sz, int version, const char* vername, int local);
-#define GOALIAS(P, N)
+#define GOALIAS(P, N, G)
 #include "library_list.h"
 #undef GO
 #undef GOALIAS
 
-#define GO(P, N) {P, wrapped##N##_init, wrapped##N##_fini, wrapped##N##_get, wrapped##N##_getnoweak},
-#define GOALIAS(P, N) {P, wrapped##N##_init, wrapped##N##_fini, wrapped##N##_get, wrapped##N##_getnoweak},
+#define GO(P, N, G) {P, wrapped##N##_init, wrapped##N##_fini, wrapped##N##_get, wrapped##N##_getnoweak},
+#define GOALIAS(P, N, G) {P, wrapped##N##_init, wrapped##N##_fini, wrapped##N##_get, wrapped##N##_getnoweak},
 wrappedlib_t wrappedlibs[] = {
 #include "library_list.h"
 };
