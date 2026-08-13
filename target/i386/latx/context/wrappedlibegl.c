@@ -7,6 +7,7 @@
  */
 
 #include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <dlfcn.h>
@@ -28,6 +29,38 @@ const char* libeglName = "libEGL.so.1";
 #include "generated/wrappedlibegltypes.h"
 #include "wrappercallback.h"
 
+static char* make_proc_name(const char* prefix, const char* name, const char* suffix)
+{
+    const size_t prefix_len = strlen(prefix);
+    const size_t name_len = strlen(name);
+    const size_t suffix_len = strlen(suffix);
+    if(name_len > SIZE_MAX - prefix_len - suffix_len - 1)
+        return NULL;
+    char* result = (char*)malloc(prefix_len + name_len + suffix_len + 1);
+    if(!result)
+        return NULL;
+    memcpy(result, prefix, prefix_len);
+    memcpy(result + prefix_len, name, name_len);
+    memcpy(result + prefix_len + name_len, suffix, suffix_len + 1);
+    return result;
+}
+
+static khint_t find_egl_wrapper(kh_symbolmap_t* wrappers, const char* rname)
+{
+    khint_t k = kh_get(symbolmap, wrappers, rname);
+    static const char* const suffixes[] = {"ARB", "EXT"};
+    for(size_t i = 0; k == kh_end(wrappers) && i < sizeof(suffixes) / sizeof(suffixes[0]); ++i) {
+        if(strstr(rname, suffixes[i]) != NULL)
+            continue;
+        char* alternate = make_proc_name("", rname, suffixes[i]);
+        if(!alternate)
+            return kh_end(wrappers);
+        k = kh_get(symbolmap, wrappers, alternate);
+        free(alternate);
+    }
+    return k;
+}
+
 EXPORT void* my_eglGetProcAddress(void* name);
 
 EXPORT void* my_eglGetProcAddress(void* name)
@@ -41,15 +74,18 @@ EXPORT void* my_eglGetProcAddress(void* name)
     // get proc adress using actual glXGetProcAddress
     k = kh_get(symbolmap, my_context->glmymap, rname);
     int is_my = (k==kh_end(my_context->glmymap))?0:1;
-    void* symbol;
+    void* native_symbol = my->eglGetProcAddress((void*)rname);
+    void* symbol = native_symbol;
     if(is_my) {
         // try again, by using custom "my_" now...
-        char tmp[200];
-        strcpy(tmp, "my_");
-        strcat(tmp, rname);
-        symbol = dlsym(my_context->box64lib, tmp);
-    } else
-        symbol = my->eglGetProcAddress((void*)rname);
+        if(!native_symbol)
+            symbol = NULL;
+        else {
+            char* alternate = make_proc_name("my_", rname, "");
+            symbol = alternate ? dlsym(my_context->box64lib, alternate) : NULL;
+            free(alternate);
+        }
+    }
     if(!symbol) {
         if(relocation_log<LOG_DEBUG) printf_log(LOG_NONE, "%p\n", NULL);
         return NULL;    // easy
@@ -61,21 +97,7 @@ EXPORT void* my_eglGetProcAddress(void* name)
         return (void*)ret; // already bridged
     }
     // get wrapper
-    k = kh_get(symbolmap, my_context->glwrappers, rname);
-    if(k==kh_end(my_context->glwrappers) && strstr(rname, "ARB")==NULL) {
-        // try again, adding ARB at the end if not present
-        char tmp[200];
-        strcpy(tmp, rname);
-        strcat(tmp, "ARB");
-        k = kh_get(symbolmap, my_context->glwrappers, tmp);
-    }
-    if(k==kh_end(my_context->glwrappers) && strstr(rname, "EXT")==NULL) {
-        // try again, adding EXT at the end if not present
-        char tmp[200];
-        strcpy(tmp, rname);
-        strcat(tmp, "EXT");
-        k = kh_get(symbolmap, my_context->glwrappers, tmp);
-    }
+    k = find_egl_wrapper(my_context->glwrappers, rname);
     if(k==kh_end(my_context->glwrappers)) {
         return NULL;
     }

@@ -91,6 +91,14 @@ EXPORT void* my_xcb_connect(void* dispname, void* screen)
 	return add_xcb_connection(my->xcb_connect(dispname, screen));
 }
 
+EXPORT void* my_xcb_connect_to_display_with_auth_info(void* dispname,
+                                                       void* auth,
+                                                       void* screen)
+{
+    return add_xcb_connection(
+        my->xcb_connect_to_display_with_auth_info(dispname, auth, screen));
+}
+
 EXPORT void my_xcb_disconnect(void* conn)
 {
 	my->xcb_disconnect(align_xcb_connection(conn));

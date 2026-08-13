@@ -14,7 +14,7 @@ typedef void* (*pFp_t)(void*);
 typedef void (*vFpp_t)(void*, void*);
 typedef void (*vFipp_t)(int32_t, void*, void*);
 typedef void* (*pFpppip_t)(void*, void*, void*, int32_t, void*);
-typedef int32_t (*iFppp_t)(void*, void*, void*);
+typedef int32_t (*iFpLp_t)(void*, uintptr_t, void*);
 typedef void (*vFppp_t)(void*, void*, void*);
 
 #define SUPER() ADDED_FUNCTIONS() \
@@ -29,7 +29,7 @@ typedef void (*vFppp_t)(void*, void*, void*);
         GO(eglDebugMessageControlKHR, iFpp_t) \
         GO(glProgramCallbackMESA, vFipp_t) \
         GO(glXCreateContextAttribsARB, pFpppip_t) \
-        GO(glXMakeCurrent,iFppp_t) \
+	GO(glXMakeCurrent,iFpLp_t) \
         GO(eglSetBlobCacheFuncsANDROID, vFppp_t)
 
 #endif // __wrappedlibglTYPES_H_

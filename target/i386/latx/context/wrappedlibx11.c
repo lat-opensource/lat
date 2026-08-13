@@ -871,7 +871,7 @@ void* my_XGetSubImage(void* disp, void* drawable
                     , uint32_t w, uint32_t h, uintptr_t plane, int32_t fmt
                     , void* image, int32_t dst_x, int32_t dst_y);
 
-void my_XDestroyImage(void* image);
+int32_t my_XDestroyImage(void* image);
 
 #ifdef PANDORA
 void* my_XLoadQueryFont(void* d, void* name);
@@ -1255,7 +1255,7 @@ EXPORT void* my_XGetSubImage(void* disp, void* drawable
     return img;
 }
 
-EXPORT void my_XDestroyImage(void* image)
+EXPORT int32_t my_XDestroyImage(void* image)
 {
 
     UnbridgeImageFunc((XImage*)image);
@@ -1269,7 +1269,7 @@ EXPORT void my_XDestroyImage(void* image)
         RunFunctionWithState((uintptr_t)x86free ,1, img->data);
         img->data = la_data;
     }
-    my->XDestroyImage(image);
+    return my->XDestroyImage(image);
 }
 
 typedef struct xintasync_s {
@@ -1660,11 +1660,11 @@ EXPORT int32_t my_XNextEvent(my_XDisplay_t *dpy, void* v2)
     return ret;
 }
 
-EXPORT void my_XPending(my_XDisplay_t* dpy);
-EXPORT void my_XPending(my_XDisplay_t* dpy)
+EXPORT int32_t my_XPending(my_XDisplay_t* dpy);
+EXPORT int32_t my_XPending(my_XDisplay_t* dpy)
 {
     bridge_XInternalAsyncHandlers(dpy, findXPendingAsyncHandlerFct);
-    my->XPending(dpy);
+    return my->XPending(dpy);
 }
 EXPORT int32_t my_XGetWindowProperty(my_XDisplay_t* dpy, void* v2, void* v3, intptr_t v4, intptr_t v5, int32_t v6, void* v7, void* v8, void* v9, void* v10, void* v11, void* v12);
 EXPORT int32_t my_XGetWindowProperty(my_XDisplay_t* dpy, void* v2, void* v3, intptr_t v4, intptr_t v5, int32_t v6, void* v7, void* v8, void* v9, void* v10, void* v11, void* v12)

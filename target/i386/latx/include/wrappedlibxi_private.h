@@ -15,7 +15,7 @@ GO(XDeleteDeviceProperty, vFppp)
 //GO(XDeviceBell,
 //GO(XFreeDeviceControl,
 GO(XFreeDeviceList, iFp)
-GO(XFreeDeviceMotionEvents, iFv)
+GO(XFreeDeviceMotionEvents, vFp)
 GO(XFreeDeviceState, vFp)
 //GO(XFreeFeedbackList,
 GO(XGetDeviceButtonMapping, iFpppi)
@@ -44,7 +44,7 @@ GO(XIFreeDeviceInfo, vFp)
 GO(XIGetClientPointer, iFppp)
 //GO(XIGetFocus,
 GO(XIGetProperty, iFpipllipppppp)
-GO(XIGetSelectedEvents, iFpppi)
+GO(XIGetSelectedEvents, pFpLp)
 GO(XIGrabButton, iFpiippiiipip)
 GOM(XIGrabDevice, iFpipLpiiip)
 //GO(XIGrabEnter,

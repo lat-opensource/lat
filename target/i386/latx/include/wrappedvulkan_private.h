@@ -139,8 +139,8 @@ GO(vkEnumeratePhysicalDevices, iFppp)
 GO(vkFlushMappedMemoryRanges, iFpup)    // should wrap the array of VkMappedMemoryRange
 GO(vkFreeCommandBuffers, vFpUup)
 GO(vkFreeDescriptorSets, iFpUup)
-GOM(vkFreeMemory, iFEpUp)
-GO(vkGetBufferMemoryRequirements, iFpUp)
+GOM(vkFreeMemory, vFEpUp)
+GO(vkGetBufferMemoryRequirements, vFpUp)
 GO(vkGetDeviceMemoryCommitment, vFpUp)
 GOM(vkGetDeviceProcAddr, pFEpp)
 GO(vkGetDeviceQueue, vFpuup)
@@ -187,7 +187,7 @@ GOM(vkDestroyDescriptorUpdateTemplate, vFEpUp)
 GOM(vkDestroySamplerYcbcrConversion, vFEpUp)
 GO(vkEnumerateInstanceVersion, iFp)
 GO(vkEnumeratePhysicalDeviceGroups, iFppp)  //VkPhysicalDeviceGroupProperties seems OK
-GO(vkGetBufferMemoryRequirements2, iFppp)
+GO(vkGetBufferMemoryRequirements2, vFppp)
 GO(vkGetImageMemoryRequirements2, vFppp)
 GO(vkGetImageSparseMemoryRequirements2, vFpppp)
 GO(vkGetDescriptorSetLayoutSupport, vFppp)
@@ -265,7 +265,7 @@ GO(vkCmdSetViewportWithCount, vFpup)
 // VK_EXT_debug_report
 GOM(vkCreateDebugReportCallbackEXT, iFEpppp)
 GO(vkDebugReportMessageEXT, vFpiiULipp)
-GOM(vkDestroyDebugReportCallbackEXT, iFEppp)
+GOM(vkDestroyDebugReportCallbackEXT, vFEppp)
 
 //VK_EXT_debug_utils
 GO(vkCmdBeginDebugUtilsLabelEXT, vFpp)  //TODO: Check alignement of this extension
@@ -286,7 +286,7 @@ GO(vkGetPhysicalDeviceExternalBufferPropertiesKHR, vFppp)
 // VK_KHR_get_physical_device_properties2
 GO(vkGetPhysicalDeviceFeatures2KHR, vFpp)
 GO(vkGetPhysicalDeviceFormatProperties2KHR, vFpip)
-GO(vkGetPhysicalDeviceImageFormatProperties2KHR, vFppp)
+GO(vkGetPhysicalDeviceImageFormatProperties2KHR, iFppp)
 GO(vkGetPhysicalDeviceMemoryProperties2KHR, vFpp)
 GO(vkGetPhysicalDeviceProperties2KHR, vFpp)
 GO(vkGetPhysicalDeviceQueueFamilyProperties2KHR, vFppp)
@@ -370,7 +370,7 @@ GO(vkGetPhysicalDeviceWaylandPresentationSupportKHR, iFpup)
 GO(vkEnumeratePhysicalDeviceGroupsKHR, iFppp)
 
 // VK_KHR_get_memory_requirements2
-GO(vkGetBufferMemoryRequirements2KHR, iFppp)
+GO(vkGetBufferMemoryRequirements2KHR, vFppp)
 GO(vkGetImageMemoryRequirements2KHR, vFppp)
 GO(vkGetImageSparseMemoryRequirements2KHR, vFpppp)
 
@@ -827,14 +827,14 @@ GO(vkGetDescriptorSetLayoutHostMappingInfoVALVE, vFppp)
 GO(vkCmdBindDescriptorBufferEmbeddedSamplersEXT, vFppUu)
 GO(vkCmdBindDescriptorBuffersEXT, vFpup)
 GO(vkCmdSetDescriptorBufferOffsetsEXT, vFppUuupp)
-GO(vkGetAccelerationStructureOpaqueCaptureDescriptorDataEXT, vFppp)
-GO(vkGetBufferOpaqueCaptureDescriptorDataEXT, vFppp)
+GO(vkGetAccelerationStructureOpaqueCaptureDescriptorDataEXT, iFppp)
+GO(vkGetBufferOpaqueCaptureDescriptorDataEXT, iFppp)
 GO(vkGetDescriptorEXT, vFppLp)
 GO(vkGetDescriptorSetLayoutBindingOffsetEXT, vFpUup)
 GO(vkGetDescriptorSetLayoutSizeEXT, vFpUp)
-GO(vkGetImageOpaqueCaptureDescriptorDataEXT, vFppp)
-GO(vkGetImageViewOpaqueCaptureDescriptorDataEXT, vFppp)
-GO(vkGetSamplerOpaqueCaptureDescriptorDataEXT, vFppp)
+GO(vkGetImageOpaqueCaptureDescriptorDataEXT, iFppp)
+GO(vkGetImageViewOpaqueCaptureDescriptorDataEXT, iFppp)
+GO(vkGetSamplerOpaqueCaptureDescriptorDataEXT, iFppp)
 
 // VK_KHR_cooperative_matrix
 GO(vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR, iFppp)
@@ -855,7 +855,7 @@ GO(vkCmdDrawMeshTasksIndirectCountEXT, vFpUUUUuu)
 GO(vkCmdDrawMeshTasksIndirectEXT, vFpUUuu)
 
 // VK_EXT_opacity_micromap
-GO(vkBuildMicromapsEXT, iFpiup)
+GO(vkBuildMicromapsEXT, iFppup)
 GO(vkCmdBuildMicromapsEXT, vFpup)
 GO(vkCmdCopyMemoryToMicromapEXT, vFpp)
 GO(vkCmdCopyMicromapEXT, vFpp)
@@ -921,7 +921,7 @@ GO(vkGetDynamicRenderingTilePropertiesQCOM, iFppp)
 GO(vkGetFramebufferTilePropertiesQCOM, iFpUpp)
 
 // VK_NV_external_memory_capabilities
-GO(vkGetPhysicalDeviceExternalImageFormatPropertiesNV, iFpuuuuup)
+GO(vkGetPhysicalDeviceExternalImageFormatPropertiesNV, iFpuuuuuup)
 
 // VK_EXT_pipeline_properties
 GO(vkGetPipelinePropertiesEXT, iFppp)
@@ -958,10 +958,10 @@ GO(vkSetLatencyMarkerNV, vFpUp)
 GO(vkSetLatencySleepModeNV, iFpUp)
 
 // VK_AMDX_shader_enqueue
-GO(vkCmdDispatchGraphAMDX, vFpUp)
-GO(vkCmdDispatchGraphIndirectAMDX, vFpUp)
+GO(vkCmdDispatchGraphAMDX, vFpUUp)
+GO(vkCmdDispatchGraphIndirectAMDX, vFpUUp)
 GO(vkCmdDispatchGraphIndirectCountAMDX, vFpUU)
-GO(vkCmdInitializeGraphScratchMemoryAMDX, vFpU)
+GO(vkCmdInitializeGraphScratchMemoryAMDX, vFpUU)
 GOM(vkCreateExecutionGraphPipelinesAMDX, iFEpUuppp)
 GO(vkGetExecutionGraphPipelineNodeIndexAMDX, iFpUpp)
 GO(vkGetExecutionGraphPipelineScratchSizeAMDX, iFpUp)

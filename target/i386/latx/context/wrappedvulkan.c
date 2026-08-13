@@ -7,6 +7,7 @@
  */
 
 #include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <dlfcn.h>
@@ -54,15 +55,32 @@ static void updateInstance(vulkan_my_t* my)
 void fillVulkanProcWrapper(box64context_t*);
 void freeVulkanProcWrapper(box64context_t*);
 
-static symbol1_t* getWrappedSymbol(const char* rname, int warning)
+static char* make_proc_name(const char* prefix, const char* name, const char* suffix)
+{
+    const size_t prefix_len = strlen(prefix);
+    const size_t name_len = strlen(name);
+    const size_t suffix_len = strlen(suffix);
+    if(name_len > SIZE_MAX - prefix_len - suffix_len - 1)
+        return NULL;
+    char* result = (char*)malloc(prefix_len + name_len + suffix_len + 1);
+    if(!result)
+        return NULL;
+    memcpy(result, prefix, prefix_len);
+    memcpy(result + prefix_len, name, name_len);
+    memcpy(result + prefix_len + name_len, suffix, suffix_len + 1);
+    return result;
+}
+
+static symbol1_t* getWrappedSymbol(const char* rname, int warning, const char** constname)
 {
     khint_t k = kh_get(symbol1map, my_context->vkwrappers, rname);
     if(k==kh_end(my_context->vkwrappers) && strstr(rname, "KHR")==NULL) {
         // try again, adding KHR at the end if not present
-        char tmp[200];
-        strcpy(tmp, rname);
-        strcat(tmp, "KHR");
-        k = kh_get(symbol1map, my_context->vkwrappers, tmp);
+        char* alternate = make_proc_name("", rname, "KHR");
+        if(alternate) {
+            k = kh_get(symbol1map, my_context->vkwrappers, alternate);
+            free(alternate);
+        }
     }
     if(k==kh_end(my_context->vkwrappers)) {
         if(warning) {
@@ -71,16 +89,19 @@ static symbol1_t* getWrappedSymbol(const char* rname, int warning)
         }
         return NULL;
     }
+    if(constname)
+        *constname = kh_key(my_context->vkwrappers, k);
     return &kh_value(my_context->vkwrappers, k);
 }
 
 static void* resolveSymbol(void* symbol, const char* rname)
 {
     // get wrapper
-    symbol1_t *s = getWrappedSymbol(rname, 1);
+    const char* constname = NULL;
+    symbol1_t *s = getWrappedSymbol(rname, 1, &constname);
+    if(!s)
+        return NULL;
     if(!s->resolved) {
-        khint_t k = kh_get(symbol1map, my_context->vkwrappers, rname);
-        const char* constname = kh_key(my_context->vkwrappers, k);
         s->addr = AddCheckBridge(my_context->system, s->w, symbol, 0, constname);
         s->resolved = 1;
     }
@@ -97,7 +118,7 @@ EXPORT void* my_vkGetDeviceProcAddr(void* device, void* name)
     printf_dlsym(LOG_DEBUG, "Calling my_vkGetDeviceProcAddr(%p, \"%s\") => ", device, rname);
     if(!my_context->vkwrappers)
         fillVulkanProcWrapper(my_context);
-    symbol1_t* s = getWrappedSymbol(rname, 0);
+    symbol1_t* s = getWrappedSymbol(rname, 0, NULL);
     if(s && s->resolved) {
         void* ret = (void*)s->addr;
         printf_dlsym(LOG_DEBUG, "%p (cached)\n", ret);
@@ -108,10 +129,9 @@ EXPORT void* my_vkGetDeviceProcAddr(void* device, void* name)
     void* symbol = my->vkGetDeviceProcAddr(device, name);
     if(symbol && is_my) {   // only wrap if symbol exist
         // try again, by using custom "my_" now...
-        char tmp[200];
-        strcpy(tmp, "my_");
-        strcat(tmp, rname);
-        symbol = dlsym(my_context->box64lib, tmp);
+        char* alternate = make_proc_name("my_", rname, "");
+        symbol = alternate ? dlsym(my_context->box64lib, alternate) : NULL;
+        free(alternate);
         // need to update symbol link maybe
         #define GO(A, W) if(!strcmp(rname, #A)) my->A = (W)my->vkGetDeviceProcAddr(device, name);
         SUPER()
@@ -136,7 +156,7 @@ EXPORT void* my_vkGetInstanceProcAddr(void* instance, void* name)
         my->currentInstance = instance;
         updateInstance(my);
     }
-    symbol1_t* s = getWrappedSymbol(rname, 0);
+    symbol1_t* s = getWrappedSymbol(rname, 0, NULL);
     if(s && s->resolved) {
         void* ret = (void*)s->addr;
         printf_dlsym(LOG_DEBUG, "%p (cached)\n", ret);
@@ -153,14 +173,17 @@ EXPORT void* my_vkGetInstanceProcAddr(void* instance, void* name)
     }
     if(is_my) {
         // try again, by using custom "my_" now...
-        char tmp[200];
-        strcpy(tmp, "my_");
-        strcat(tmp, rname);
-        symbol = dlsym(my_context->box64lib, tmp);
+        char* alternate = make_proc_name("my_", rname, "");
+        symbol = alternate ? dlsym(my_context->box64lib, alternate) : NULL;
+        free(alternate);
         // need to update symbol link maybe
         #define GO(A, W) if(!strcmp(rname, #A)) my->A = (W)my_context->vkprocaddress(instance, rname);;
         SUPER()
         #undef GO
+    }
+    if(!symbol) {
+        printf_dlsym(LOG_DEBUG, "%p\n", NULL);
+        return NULL;
     }
     return resolveSymbol(symbol, rname);
 }
@@ -173,7 +196,7 @@ void* my_GetVkProcAddr(void* name, void*(*getaddr)(const char*))
     printf_dlsym(LOG_DEBUG, "Calling my_GetVkProcAddr(\"%s\", %p) => ", rname, getaddr);
     if(!my_context->vkwrappers)
         fillVulkanProcWrapper(my_context);
-    symbol1_t* s = getWrappedSymbol(rname, 0);
+    symbol1_t* s = getWrappedSymbol(rname, 0, NULL);
     if(s && s->resolved) {
         void* ret = (void*)s->addr;
         printf_dlsym(LOG_DEBUG, "%p (cached)\n", ret);
@@ -190,14 +213,17 @@ void* my_GetVkProcAddr(void* name, void*(*getaddr)(const char*))
     }
     if(is_my) {
         // try again, by using custom "my_" now...
-        char tmp[200];
-        strcpy(tmp, "my_");
-        strcat(tmp, rname);
-        symbol = dlsym(my_context->box64lib, tmp);
+        char* alternate = make_proc_name("my_", rname, "");
+        symbol = alternate ? dlsym(my_context->box64lib, alternate) : NULL;
+        free(alternate);
         // need to update symbol link maybe
         #define GO(A, W) if(!strcmp(rname, #A)) my->A = (W)getaddr(rname);
         SUPER()
         #undef GO
+    }
+    if(!symbol) {
+        printf_dlsym(LOG_DEBUG, "%p\n", NULL);
+        return NULL;
     }
     return resolveSymbol(symbol, rname);
 }
@@ -585,6 +611,7 @@ CREATE(vkCreateQueryPool)
 CREATE(vkCreateRenderPass)
 CREATE(vkCreateSampler)
 CREATE(vkCreateSamplerYcbcrConversion)
+CREATE(vkCreateSamplerYcbcrConversionKHR)
 CREATE(vkCreateSemaphore)
 CREATE(vkCreateShaderModule)
 
@@ -801,10 +828,10 @@ EXPORT int my_vkCreateDebugReportCallbackEXT(void* instance,
     return my->vkCreateDebugReportCallbackEXT(instance, &dbg, find_VkAllocationCallbacks(&my_alloc, alloc), callback);
 }
 
-EXPORT int my_vkDestroyDebugReportCallbackEXT(void* instance, void* callback, void* alloc)
+EXPORT void my_vkDestroyDebugReportCallbackEXT(void* instance, void* callback, void* alloc)
 {
     my_VkAllocationCallbacks_t my_alloc;
-    return my->vkDestroyDebugReportCallbackEXT(instance, callback, find_VkAllocationCallbacks(&my_alloc, alloc));
+    my->vkDestroyDebugReportCallbackEXT(instance, callback, find_VkAllocationCallbacks(&my_alloc, alloc));
 }
 #define VK_ICD_WSI_PLATFORM_WAYLAND 1
 #define VK_ICD_WSI_PLATFORM_XCB 3

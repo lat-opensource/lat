@@ -48,9 +48,9 @@ GO(7)
 // Event
 #define GO(A)   \
 static uintptr_t my_Event_fct_##A = 0;   \
-static void my_Event_##A(void* w, void* data, void* event)     \
-{                                       \
-    RunFunctionWithState(my_Event_fct_##A, 3, w, data, event);\
+static void my_Event_##A(void* w, void* data, void* event, void* cont) \
+{                                                                    \
+    RunFunctionWithState(my_Event_fct_##A, 4, w, data, event, cont); \
 }
 SUPER()
 #undef GO
@@ -114,10 +114,17 @@ static void* findInputCallbackFct(void* fct)
 #undef SUPER
 
 
-EXPORT void my_XtAddEventHandler(void* w, uint32_t mask, int32_t maskable, void* cb, void* data)
+EXPORT void my_XtAddEventHandler(void* w, uintptr_t mask, int32_t maskable, void* cb, void* data)
 {
     void* fct = findEventFct(cb);
     my->XtAddEventHandler(w, mask, maskable, fct, data);
+}
+
+EXPORT void my_XtRemoveEventHandler(void* w, uintptr_t mask,
+                                    int32_t maskable, void* cb, void* data)
+{
+    void* fct = findEventFct(cb);
+    my->XtRemoveEventHandler(w, mask, maskable, fct, data);
 }
 
 EXPORT long my_XtAppAddWorkProc(void* context, void* proc, void* data)

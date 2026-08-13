@@ -76,10 +76,10 @@ typedef int32_t (*iFpuUp_t)(void*, uint32_t, uint64_t, void*);
 	GO(vkDestroyVideoSessionKHR, vFpUp_t) \
 	GO(vkDestroyVideoSessionParametersKHR, vFpUp_t) \
 	GO(vkDestroyDebugUtilsMessengerEXT, vFppp_t) \
-	GO(vkFreeMemory, iFpUp_t) \
+	GO(vkFreeMemory, vFpUp_t) \
 	GO(vkCreateDeferredOperationKHR, iFppp_t) \
 	GO(vkCreateInstance, iFppp_t) \
-	GO(vkDestroyDebugReportCallbackEXT, iFppp_t) \
+	GO(vkDestroyDebugReportCallbackEXT, vFppp_t) \
 	GO(vkGetPhysicalDeviceDisplayPropertiesKHR, iFppp_t) \
 	GO(vkGetDisplayPlaneCapabilitiesKHR, iFpUup_t) \
 	GO(vkAllocateMemory, iFpppp_t) \

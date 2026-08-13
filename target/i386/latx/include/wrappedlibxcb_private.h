@@ -120,7 +120,7 @@ GO(xcb_configure_window, pFbuWp)
 //GO(xcb_configure_window_value_list_unpack, 
 GOM(xcb_connect, pFEpp)
 GO(xcb_connection_has_error, iFb)
-GO(xcb_connect_to_display_with_auth_info, pFbpp)
+GOM(xcb_connect_to_display_with_auth_info, pFEppp)
 //GO(xcb_connect_to_fd, 
 GO(xcb_convert_selection, pFbuuuuu)
 //GO(xcb_convert_selection_checked, 
@@ -223,7 +223,7 @@ GO(xcb_get_file_descriptor, iFb)
 //GO(xcb_get_font_path, 
 //GO(xcb_get_font_path_path_iterator, 
 //GO(xcb_get_font_path_path_length, 
-GO(xcb_get_font_path_reply, pFbpup)
+GO(xcb_get_font_path_reply, pFbup)
 //GO(xcb_get_font_path_sizeof, 
 //GO(xcb_get_font_path_unchecked, 
 GO(xcb_get_geometry, pFbu)
@@ -339,13 +339,13 @@ GO(xcb_intern_atom_unchecked, uFbCWp)
 //GO(xcb_list_extensions, 
 //GO(xcb_list_extensions_names_iterator, 
 //GO(xcb_list_extensions_names_length, 
-GO(xcb_list_extensions_reply, pFbpup)
+GO(xcb_list_extensions_reply, pFbup)
 //GO(xcb_list_extensions_sizeof, 
 //GO(xcb_list_extensions_unchecked, 
 //GO(xcb_list_fonts, 
 //GO(xcb_list_fonts_names_iterator, 
 //GO(xcb_list_fonts_names_length, 
-GO(xcb_list_fonts_reply, pFbpup)
+GO(xcb_list_fonts_reply, pFbup)
 //GO(xcb_list_fonts_sizeof, 
 //GO(xcb_list_fonts_unchecked, 
 //GO(xcb_list_fonts_with_info, 
@@ -361,7 +361,7 @@ GO(xcb_list_fonts_reply, pFbpup)
 //GO(xcb_list_hosts, 
 //GO(xcb_list_hosts_hosts_iterator, 
 //GO(xcb_list_hosts_hosts_length, 
-GO(xcb_list_hosts_reply, pFbpup)
+GO(xcb_list_hosts_reply, pFbup)
 //GO(xcb_list_hosts_sizeof, 
 //GO(xcb_list_hosts_unchecked, 
 //GO(xcb_list_installed_colormaps, 
@@ -375,11 +375,11 @@ GO(xcb_list_hosts_reply, pFbpup)
 //GO(xcb_list_properties_atoms, 
 //GO(xcb_list_properties_atoms_end, 
 //GO(xcb_list_properties_atoms_length, 
-GO(xcb_list_properties_reply, pFbpup)
+GO(xcb_list_properties_reply, pFbup)
 //GO(xcb_list_properties_sizeof, 
 //GO(xcb_list_properties_unchecked, 
 //GO(xcb_lookup_color, 
-GO(xcb_lookup_color_reply, pFbpup)
+GO(xcb_lookup_color_reply, pFbup)
 //GO(xcb_lookup_color_sizeof, 
 //GO(xcb_lookup_color_unchecked, 
 GO(xcb_map_subwindows, uFbu)
@@ -468,17 +468,17 @@ GO(xcb_put_image_checked, pFbCuuWWwwCCup)
 //GO(xcb_put_image_data_length, 
 //GO(xcb_put_image_sizeof, 
 //GO(xcb_query_best_size, 
-GO(xcb_query_best_size_reply, pFbpup)
+GO(xcb_query_best_size_reply, pFbup)
 //GO(xcb_query_best_size_unchecked, 
 //GO(xcb_query_colors, 
 //GO(xcb_query_colors_colors, 
 //GO(xcb_query_colors_colors_iterator, 
 //GO(xcb_query_colors_colors_length, 
-GO(xcb_query_colors_reply, pFbpup)
+GO(xcb_query_colors_reply, pFbup)
 //GO(xcb_query_colors_sizeof, 
 //GO(xcb_query_colors_unchecked, 
 //GO(xcb_query_extension, 
-GO(xcb_query_extension_reply, pFbpup)
+GO(xcb_query_extension_reply, pFbup)
 //GO(xcb_query_extension_sizeof, 
 //GO(xcb_query_extension_unchecked, 
 //GO(xcb_query_font, 
@@ -488,7 +488,7 @@ GO(xcb_query_extension_reply, pFbpup)
 //GO(xcb_query_font_properties, 
 //GO(xcb_query_font_properties_iterator, 
 //GO(xcb_query_font_properties_length, 
-GO(xcb_query_font_reply, pFbpup)
+GO(xcb_query_font_reply, pFbup)
 //GO(xcb_query_font_sizeof, 
 //GO(xcb_query_font_unchecked, 
 GO(xcb_query_keymap, pFbp)

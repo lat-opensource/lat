@@ -7,6 +7,7 @@
  */
 
 #include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <dlfcn.h>
@@ -27,50 +28,71 @@ const char* libglxName = "libGLX.so.0";
 #include "generated/wrappedlibglxtypes.h"
 #include "wrappercallback.h"
 
-EXPORT void my_glXDestroyContext(void* dpy, void* v2);
-EXPORT void my_glXDestroyContext(void* dpy, void* v2)
+EXPORT void myx_glXDestroyContext(void* dpy, void* v2);
+EXPORT void myx_glXDestroyContext(void* dpy, void* v2)
 {
     my->glXDestroyContext(dpy,v2);
     latx_dpy_xcb_sync(dpy);
 }
-EXPORT void my_glXDestroyPbuffer(void* dpy, void* v2);
-EXPORT void my_glXDestroyPbuffer(void* dpy, void* v2)
+EXPORT void myx_glXDestroyPbuffer(void* dpy, unsigned long v2);
+EXPORT void myx_glXDestroyPbuffer(void* dpy, unsigned long v2)
 {
-    my->glXDestroyPbuffer(dpy,v2);
+    my->glXDestroyPbuffer(dpy, v2);
     latx_dpy_xcb_sync(dpy);
 }
-EXPORT void* my_glXCreatePbuffer(void* dpy, void* v2, void* v3);
-EXPORT void* my_glXCreatePbuffer(void* dpy, void* v2, void* v3)
+EXPORT unsigned long myx_glXCreatePbuffer(void* dpy, void* v2, void* v3);
+EXPORT unsigned long myx_glXCreatePbuffer(void* dpy, void* v2, void* v3)
 {
-    void* ret = my->glXCreatePbuffer(dpy,v2, v3);
-    latx_dpy_xcb_sync(dpy);
-    return ret;
-}
-EXPORT int32_t my_glXMakeContextCurrent(void* dpy, void* v2, void* v3, void* v4);
-EXPORT int32_t my_glXMakeContextCurrent(void* dpy, void* v2, void* v3, void* v4)
-{
-    int32_t ret = my->glXMakeContextCurrent(dpy,v2, v3, v4);
+    unsigned long ret = my->glXCreatePbuffer(dpy,v2, v3);
     latx_dpy_xcb_sync(dpy);
     return ret;
 }
-EXPORT void* my_glXCreateNewContext(void*, void*, int32_t, void*, int32_t);
-EXPORT void* my_glXCreateNewContext(void* v1, void* v2, int32_t v3, void* v4, int32_t v5)
+EXPORT int32_t myx_glXMakeContextCurrent(void* dpy, unsigned long v2, unsigned long v3, void* v4);
+EXPORT int32_t myx_glXMakeContextCurrent(void* dpy, unsigned long v2, unsigned long v3, void* v4)
+{
+    int32_t ret = my->glXMakeContextCurrent(dpy, v2, v3, v4);
+    latx_dpy_xcb_sync(dpy);
+    return ret;
+}
+EXPORT void* myx_glXCreateNewContext(void*, void*, int32_t, void*, int32_t);
+EXPORT void* myx_glXCreateNewContext(void* v1, void* v2, int32_t v3, void* v4, int32_t v5)
 {
     void* ret = my->glXCreateNewContext(v1,v2, v3, v4, v5);
     latx_dpy_xcb_sync(v1);
     return ret;
 }
 
+EXPORT int32_t myx_glXMakeCurrent(void* dpy, unsigned long drawable, void* context);
+EXPORT int32_t myx_glXMakeCurrent(void* dpy, unsigned long drawable, void* context)
+{
+    if(!my->glXMakeCurrent)
+        return 0;
+    int32_t ret = my->glXMakeCurrent(dpy, drawable, context);
+    latx_dpy_xcb_sync(dpy);
+    return ret;
+}
+
+// libGL.so.1 shares these synchronization wrappers under the regular my_ prefix.
+EXPORT void my_glXDestroyContext(void* dpy, void* context) __attribute__((alias("myx_glXDestroyContext")));
+EXPORT void my_glXDestroyPbuffer(void* dpy, unsigned long pbuffer) __attribute__((alias("myx_glXDestroyPbuffer")));
+EXPORT unsigned long my_glXCreatePbuffer(void* dpy, void* config, void* attributes) __attribute__((alias("myx_glXCreatePbuffer")));
+EXPORT int32_t my_glXMakeContextCurrent(void* dpy, unsigned long draw, unsigned long read, void* context) __attribute__((alias("myx_glXMakeContextCurrent")));
+
+static void freeGLXProcWrapper(void);
+
 #define CUSTOM_INIT \
-     getMy(lib);
+     getMy(lib); \
+     SETALT(myx_); \
+     if (!box64->glxprocaddress) \
+         box64->glxprocaddress = (procaddess_t)my->glXGetProcAddress;
 
 
 #define CUSTOM_FINI \
+    freeGLXProcWrapper(); \
     freeMy();
 
 #include "wrappedlib_init.h"
 
-#if 0
 #define SUPER() \
 GO(0)   \
 GO(1)   \
@@ -79,14 +101,6 @@ GO(3)   \
 
 
 #undef SUPER
-
-#define CUSTOM_INIT     \
-    getMy(lib);         \
-    SETALT(myx_);       \
-
-#define CUSTOM_FINI     \
-    freeMy();
-
 
 typedef void* (*glprocaddress_t)(const char* name);
 
@@ -101,7 +115,7 @@ KHASH_MAP_INIT_INT64(gl_wrappers, gl_wrappers_t*)
 static kh_gl_wrappers_t *gl_wrappers = NULL;
 
 
-gl_wrappers_t* getGLProcWrapper(glprocaddress_t procaddress)
+static gl_wrappers_t* getGLXProcWrapper(glprocaddress_t procaddress)
 {
     int cnt, ret;
     khint_t k;
@@ -136,7 +150,7 @@ gl_wrappers_t* getGLProcWrapper(glprocaddress_t procaddress)
     }
     return wrappers;
 }
-void freeGLProcWrapper()
+static void freeGLXProcWrapper(void)
 {
     if(!gl_wrappers)
         return;
@@ -148,21 +162,23 @@ void freeGLProcWrapper()
             kh_destroy(symbolmap, wrappers->glmymap);
         wrappers->glwrappers = NULL;
         wrappers->glmymap = NULL;
+        free(wrappers);
     );
     kh_destroy(gl_wrappers, gl_wrappers);
     gl_wrappers = NULL;
 }
 
-void* getGLProcAddress(glprocaddress_t procaddr, const char* rname)
+static void* getGLXProcAddress(glprocaddress_t procaddr, const char* rname)
 {
     khint_t k;
     printf_dlsym(LOG_DEBUG, "Calling getGLProcAddress[%p](\"%s\") => ", procaddr, rname);
-    gl_wrappers_t* wrappers = getGLProcWrapper(procaddr);
+    gl_wrappers_t* wrappers = getGLXProcWrapper(procaddr);
     // check if glxprocaddress is filled, and search for lib and fill it if needed
     // get proc adress using actual glXGetProcAddress
     k = kh_get(symbolmap, wrappers->glmymap, rname);
     int is_my = (k==kh_end(wrappers->glmymap))?0:1;
-    void* symbol;
+    void* native_symbol = procaddr ? procaddr(rname) : NULL;
+    void* symbol = native_symbol;
     if(is_my) {
         // try again, by using custom "my_" now...
         #define GO(A, B) else if(!strcmp(rname, #B)) symbol = find_##B##_Fct(procaddr(rname));
@@ -172,15 +188,22 @@ void* getGLProcAddress(glprocaddress_t procaddr, const char* rname)
             if(strcmp(rname, "glXGetProcAddress") && strcmp(rname, "glXGetProcAddressARB")) {
                 printf_log(LOG_NONE, "Warning, %s defined as GOM, but find_%s_Fct not defined\n", rname, rname);
             }
-            char tmp[200];
-            strcpy(tmp, "my_");
-            strcat(tmp, rname);
+            if(!native_symbol)
+                return NULL;
+            size_t length = strlen(rname);
+            if(length > SIZE_MAX - 5)
+                return NULL;
+            char* tmp = (char*)malloc(length + 5);
+            if(!tmp)
+                return NULL;
+            memcpy(tmp, "myx_", 4);
+            memcpy(tmp + 4, rname, length + 1);
             symbol = dlsym(my_context->box64lib, tmp);
+            free(tmp);
         //}
         #undef GO
         #undef SUPER
-    } else
-        symbol = procaddr(rname);
+    }
     if(!symbol) {
         printf_dlsym(LOG_DEBUG, "%p\n", NULL);
         return NULL;    // easy
@@ -195,17 +218,29 @@ void* getGLProcAddress(glprocaddress_t procaddr, const char* rname)
     k = kh_get(symbolmap, wrappers->glwrappers, rname);
     if(k==kh_end(wrappers->glwrappers) && strstr(rname, "ARB")==NULL) {
         // try again, adding ARB at the end if not present
-        char tmp[200];
-        strcpy(tmp, rname);
-        strcat(tmp, "ARB");
-        k = kh_get(symbolmap, wrappers->glwrappers, tmp);
+        size_t length = strlen(rname);
+        if(length > SIZE_MAX - 4)
+            return NULL;
+        char* tmp = (char*)malloc(length + 4);
+        if(tmp) {
+            memcpy(tmp, rname, length);
+            memcpy(tmp + length, "ARB", 4);
+            k = kh_get(symbolmap, wrappers->glwrappers, tmp);
+            free(tmp);
+        }
     }
     if(k==kh_end(wrappers->glwrappers) && strstr(rname, "EXT")==NULL) {
         // try again, adding EXT at the end if not present
-        char tmp[200];
-        strcpy(tmp, rname);
-        strcat(tmp, "EXT");
-        k = kh_get(symbolmap, wrappers->glwrappers, tmp);
+        size_t length = strlen(rname);
+        if(length > SIZE_MAX - 4)
+            return NULL;
+        char* tmp = (char*)malloc(length + 4);
+        if(tmp) {
+            memcpy(tmp, rname, length);
+            memcpy(tmp + length, "EXT", 4);
+            k = kh_get(symbolmap, wrappers->glwrappers, tmp);
+            free(tmp);
+        }
     }
     if(k==kh_end(wrappers->glwrappers)) {
         printf_dlsym(LOG_DEBUG, "%p\n", NULL);
@@ -219,19 +254,16 @@ void* getGLProcAddress(glprocaddress_t procaddr, const char* rname)
     return (void*)ret;
 }
 
+EXPORT void* myx_glXGetProcAddress(void* name);
 EXPORT void* myx_glXGetProcAddress(void* name)
 {
-    khint_t k;
     const char* rname = (const char*)name;
-    return getGLProcAddress((glprocaddress_t)my->glXGetProcAddress, rname);
+    return getGLXProcAddress((glprocaddress_t)my->glXGetProcAddress, rname);
 }
 
+EXPORT void* myx_glXGetProcAddressARB(void* name);
 EXPORT void* myx_glXGetProcAddressARB(void* name)
 {
-    khint_t k;
     const char* rname = (const char*)name;
-    return getGLProcAddress((glprocaddress_t)my->glXGetProcAddressARB, rname);
+    return getGLXProcAddress((glprocaddress_t)my->glXGetProcAddressARB, rname);
 }
-
-
-#endif

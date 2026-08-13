@@ -9,7 +9,7 @@
 //GO(XtAddCallbacks,
 //GO(XtAddConverter,
 //GO(_XtAddDefaultConverters,
-GOM(XtAddEventHandler, vFEpuipp)
+GOM(XtAddEventHandler, vFEpLipp)
 //GO(_XtAddEventSeqToStateTree,
 //GO(XtAddExposureToRegion,
 //GO(XtAddGrab,
@@ -233,7 +233,7 @@ GO(XtGrabButton, vFpipiuiipp)
 //GO(_XtGrabInitialize,
 GO(XtGrabKey, vFpppiii)
 GO(XtGrabKeyboard, iFpiiiu)
-GO(XtGrabPointer, iFpiuiipp)
+GO(XtGrabPointer, iFpiuiiLLL)
 //GO(_XtHandleFocus,
 //GO(XtHasCallbacks,
 //GO(_XtHeapAlloc,
@@ -342,7 +342,7 @@ GO(XtRegisterDrawable, vFppp)
 //GO(XtRemoveCallback,
 //GO(_XtRemoveCallback,
 //GO(XtRemoveCallbacks,
-GO(XtRemoveEventHandler, vFpup)     // need to wrap to free event handler?
+GOM(XtRemoveEventHandler, vFEpLipp)
 //GO(XtRemoveEventTypeHandler,
 //GO(XtRemoveGrab,
 GO(XtRemoveInput, vFl)

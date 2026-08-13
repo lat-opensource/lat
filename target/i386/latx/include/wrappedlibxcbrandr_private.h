@@ -105,7 +105,7 @@ GO(xcb_randr_get_output_info_modes, pFp)
 //GO(xcb_randr_get_output_info_modes_end, 
 GO(xcb_randr_get_output_info_modes_length, iFp)
 GO(xcb_randr_get_output_info_name, pFp)
-GO(xcb_randr_get_output_info_name_end, pFp)
+GO(xcb_randr_get_output_info_name_end, HFp)
 GO(xcb_randr_get_output_info_name_length, iFp)
 GO(xcb_randr_get_output_info_reply, pFbup)
 //GO(xcb_randr_get_output_info_sizeof, 
@@ -115,7 +115,7 @@ GO(xcb_randr_get_output_primary_reply, pFbup)
 GO(xcb_randr_get_output_primary_unchecked, pFbpu)
 GO(xcb_randr_get_output_property, pFbppppuuCC)
 GO(xcb_randr_get_output_property_data, pFp)
-GO(xcb_randr_get_output_property_data_end, pFpp)
+GO(xcb_randr_get_output_property_data_end, HFp)
 GO(xcb_randr_get_output_property_data_length, iFp)
 GO(xcb_randr_get_output_property_reply, pFbup)
 //GO(xcb_randr_get_output_property_sizeof, 
@@ -219,10 +219,10 @@ DATA(xcb_randr_id, 8)
 //GO(xcb_randr_mode_info_end, 
 GO(xcb_randr_mode_info_next, vFp)
 //GO(xcb_randr_mode_next, 
-GO(xcb_randr_monitor_info_end, pFpp)
+GO(xcb_randr_monitor_info_end, HFH)
 GO(xcb_randr_monitor_info_next, vFp)
 GO(xcb_randr_monitor_info_outputs, pFp)
-GO(xcb_randr_monitor_info_outputs_end, pFpp)
+GO(xcb_randr_monitor_info_outputs_end, HFp)
 GO(xcb_randr_monitor_info_outputs_length, iFp)
 GO(xcb_randr_monitor_info_sizeof, iFp)
 //GO(xcb_randr_notify_data_end, 

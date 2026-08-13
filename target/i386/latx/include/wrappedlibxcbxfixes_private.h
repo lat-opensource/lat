@@ -94,7 +94,7 @@ GO(xcb_xfixes_select_selection_input_checked, uFbuuu)
 GO(xcb_xfixes_set_cursor_name, pFbpWp)
 GO(xcb_xfixes_set_cursor_name_checked, pFbpWp)
 GO(xcb_xfixes_set_cursor_name_name, pFp)
-GO(xcb_xfixes_set_cursor_name_name_end, pFp)
+GO(xcb_xfixes_set_cursor_name_name_end, HFp)
 GO(xcb_xfixes_set_cursor_name_name_length, iFp)
 GO(xcb_xfixes_set_cursor_name_sizeof, iFp)
 //GO(xcb_xfixes_set_gc_clip_region, 

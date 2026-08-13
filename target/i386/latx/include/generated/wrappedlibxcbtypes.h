@@ -16,7 +16,7 @@ typedef void* (*pFpup_t)(void*, uint32_t, void*);
 typedef void* (*pFpp_t)(void*, void*);
 typedef void* (*pFpUp_t)(void*, uint64_t, void*);
 typedef void (*vFp_t)(void*);
-typedef void* (*pFpp_t)(void*, void*);
+typedef void* (*pFppp_t)(void*, void*, void*);
 typedef int32_t (*iFb_t)(void*);
 
 #define SUPER() ADDED_FUNCTIONS() \
@@ -25,6 +25,7 @@ typedef int32_t (*iFb_t)(void*);
         GO(xcb_wait_for_reply64, pFpUp_t) \
         GO(xcb_disconnect, vFp_t) \
 	GO(xcb_connect, pFpp_t) \
+	GO(xcb_connect_to_display_with_auth_info, pFppp_t) \
         GO(xcb_wait_for_special_event, pFpp_t) \
         GO(xcb_flush, iFb_t)
 
