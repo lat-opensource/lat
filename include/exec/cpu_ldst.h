@@ -59,6 +59,7 @@
 
 #if defined(CONFIG_LATX_KZT)
 #include "kzt-runtime.h"
+#include "kzt-address-policy.h"
 #endif
 #if defined(CONFIG_USER_ONLY)
 /* sparc32plus has 64bit long but 32bit space address
@@ -93,22 +94,41 @@ static inline void *g2h(CPUState *cs, abi_ptr x)
 static inline bool guest_addr_valid_untagged(abi_ulong x)
 {
 #if defined(CONFIG_LATX_KZT)
-    if (latx_kzt_runtime_enabled()) {
-        return true;
-    } else
-#endif
+    return kzt_guest_addr_is_valid(x, GUEST_ADDR_MAX);
+#else
     return x <= GUEST_ADDR_MAX;
+#endif
 }
 
 static inline bool guest_range_valid_untagged(abi_ulong start, abi_ulong len)
 {
 #if defined(CONFIG_LATX_KZT)
-    if (latx_kzt_runtime_enabled()) {
-        return true;
-    } else
-#endif
+    return kzt_guest_range_is_valid(start, len, GUEST_ADDR_MAX);
+#else
     return len - 1 <= GUEST_ADDR_MAX && start <= GUEST_ADDR_MAX - len + 1;
+#endif
 }
+
+#if defined(CONFIG_LATX_KZT)
+/*
+ * KZT wrappers may expose host-owned objects to translated code.  Keep that
+ * compatibility permission separate from the guest virtual-address policy:
+ * callers which create, remove, or protect guest mappings must continue to
+ * use guest_addr_valid_untagged() and guest_range_valid_untagged().
+ */
+static inline bool kzt_data_addr_valid_untagged(abi_ulong addr)
+{
+    return kzt_data_addr_is_valid(latx_kzt_runtime_enabled(), addr,
+                                  GUEST_ADDR_MAX);
+}
+
+static inline bool kzt_data_range_valid_untagged(abi_ulong start,
+                                                  abi_ulong len)
+{
+    return kzt_data_range_is_valid(latx_kzt_runtime_enabled(), start, len,
+                                   GUEST_ADDR_MAX);
+}
+#endif
 
 #define h2g_valid(x) \
     (HOST_LONG_BITS <= TARGET_VIRT_ADDR_SPACE_BITS || \

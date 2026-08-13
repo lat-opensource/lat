@@ -638,11 +638,28 @@ extern unsigned long vir_rlimit_as_acc;
 
 static inline bool access_ok_untagged(int type, abi_ulong addr, abi_ulong size)
 {
+#if defined(CONFIG_LATX_KZT)
+    bool guest_range = size == 0
+        ? guest_addr_valid_untagged(addr)
+        : guest_range_valid_untagged(addr, size);
+
+    if (size == 0
+        ? !kzt_data_addr_valid_untagged(addr)
+        : !kzt_data_range_valid_untagged(addr, size)) {
+        return false;
+    }
+
+    /* Native wrapper objects do not have entries in the guest page map. */
+    if (!guest_range) {
+        return true;
+    }
+#else
     if (size == 0
         ? !guest_addr_valid_untagged(addr)
         : !guest_range_valid_untagged(addr, size)) {
         return false;
     }
+#endif
     return page_check_range((target_ulong)addr, size, type);
 }
 

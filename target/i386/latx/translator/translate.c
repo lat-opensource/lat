@@ -2305,7 +2305,9 @@ void do_translate_tbbridge(ADDR func_pc, ADDR wrapper, TranslationBlock *tb);
 static int kzt_tr_bridge(struct TranslationBlock *tb)
 {
     struct kzt_tbbridge* bridge = kzt_tbbridge_lookup(tb->pc);
-    lsassert(bridge);
+    if (!bridge) {
+        return 0;
+    }
     do_translate_tbbridge(bridge->func, (ADDR)bridge->wrapper, tb);
     return 1;
 }
@@ -2350,7 +2352,8 @@ int tr_translate_tb(struct TranslationBlock *tb)
     /* generate ir2 from ir1 */
 #if defined(CONFIG_LATX_KZT)
     int translation_done = 0;
-    if (unlikely(!tb->icount && tb->pc > reserved_va)) {
+    if (unlikely(latx_kzt_runtime_enabled() &&
+                 kzt_tbbridge_contains(tb->pc))) {
         translation_done = kzt_tr_bridge(tb);
     } else {
         translation_done = tr_ir2_generate(tb);

@@ -37,13 +37,21 @@ void* kzt_tbbridge_init(void)
 }
 struct kzt_tbbridge* kzt_tbbridge_lookup(target_ulong pc)
 {
-    lsassert(tree&&pc);
+    if (!pc) {
+        return NULL;
+    }
     struct kzt_tbbridge key = {.pc = pc};
     g_mutex_lock(&tree_lock);
-    struct kzt_tbbridge *bridge =
-        (struct kzt_tbbridge *)g_tree_lookup(tree, &key);
+    struct kzt_tbbridge *bridge = tree
+        ? (struct kzt_tbbridge *)g_tree_lookup(tree, &key)
+        : NULL;
     g_mutex_unlock(&tree_lock);
     return bridge;
+}
+
+bool kzt_tbbridge_contains(target_ulong pc)
+{
+    return kzt_tbbridge_lookup(pc) != NULL;
 }
 
 int kzt_tbbridge_insert(target_ulong pc, ADDR func, void * wrapper)

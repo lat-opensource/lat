@@ -42,8 +42,7 @@
 #include "tcg/tcg.h"
 #include "library.h"
 #include "fileutils.h"
-#include "bridge_private.h"
-void *getAlternate(void *addr);
+#include "bridge.h"
 extern struct elfheader_s * elf_header;
 #endif
 #if defined(TARGET_I386) && !defined(CONFIG_USER_ONLY)
@@ -195,8 +194,10 @@ cpu_tb_exec(CPUState *cpu, TranslationBlock *itb, int *tb_exit)
     if (qemu_loglevel_mask(CPU_LOG_EXEC)) {
 #ifdef CONFIG_LATX_KZT
         Dl_info dl_info;
-        if (latx_kzt_runtime_enabled() && itb->pc > reserved_va &&
-            dladdr ((const void *)((onebridge_t *)itb->pc)->f, &dl_info)) {
+        uintptr_t function;
+        if (latx_kzt_runtime_enabled() &&
+            kzt_registered_onebridge_snapshot(itb->pc, NULL, &function) &&
+            dladdr((const void *)function, &dl_info)) {
             qemu_log_mask_and_addr(CPU_LOG_EXEC, itb->pc,
                    "pid(%d) - tid(%" PRIuPTR ") Trace cpu%d: %p [ "
                    TARGET_FMT_lx "/%#x] KZT:%s\n",

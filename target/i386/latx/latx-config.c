@@ -18,6 +18,9 @@
 #include "translate.h"
 #include "latx-config.h"
 #include "syscall-tunnel.h"
+#if defined(CONFIG_LATX_KZT)
+#include "wrappertbbridge.h"
+#endif
 
 #ifdef CONFIG_LATX_TU
 #include "tu.h"
@@ -97,9 +100,16 @@ int target_latx_host(CPUArchState *env, struct TranslationBlock *tb,
     if (option_anonym && (tb->flags & HF_TF_MASK)) {
         max_insns = 1;
     }
-    tr_disasm(tb, max_insns);
+    bool is_tbbridge = false;
+#if defined(CONFIG_LATX_KZT)
+    is_tbbridge = latx_kzt_runtime_enabled() &&
+                  kzt_tbbridge_contains(tb->pc);
+#endif
+    if (!is_tbbridge) {
+        tr_disasm(tb, max_insns);
+    }
     /* return code_size and skip translate */
-    if (!tb->icount && tb->pc < reserved_va) {
+    if (!tb->icount && !is_tbbridge) {
         return 0;
     }
 

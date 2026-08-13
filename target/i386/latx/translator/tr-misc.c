@@ -9,6 +9,9 @@
 #include "latx-config.h"
 #include "lsenv.h"
 #include "flag-lbt.h"
+#if defined(CONFIG_LATX_KZT)
+#include "bridge.h"
+#endif
 #include "translate.h"
 #include "syscall-tunnel.h"
 #include "profile.h"
@@ -19,7 +22,6 @@
 #if defined(CONFIG_LATX_KZT)
 #include "wrapper.h"
 #include "debug.h"
-#include "bridge_private.h"
 #include "exec/tb-lookup.h"
 #include "elfloader.h"
 
@@ -41,11 +43,6 @@ bool translate_endbr32(IR1_INST *pir1) { return true; }
 bool translate_endbr64(IR1_INST *pir1) { return true; }
 
 #if defined(CONFIG_LATX_KZT)
-static uint8_t Peek8(uintptr_t addr, uintptr_t offset)
-{
-    return *(uint8_t*)(addr+offset);
-}
-
 static void gen_set_next_tb_code(IR2_OPND *esp_ir2_opnd)
 {
     IR2_OPND nextip_ir2_opnd = ra_alloc_dbt_arg2();
@@ -203,22 +200,28 @@ static void do_translate_free_brick_tb(void)
     tr_generate_exit_tb_for_bridge();
 }
 
-static void do_translate_brick_tb(onebridge_t *bridge, struct cpu_state_info *state_info, CPUState *cpu, target_ulong tb_pc, TranslationBlock *tb)
+static void do_translate_brick_tb(wrapper_t wrapper, uintptr_t function,
+                                  struct cpu_state_info *state_info,
+                                  CPUState *cpu, target_ulong tb_pc,
+                                  TranslationBlock *tb)
 {
     tb = lsenv->tr_data->curr_tb;
     IR2_OPND esp_ir2_opnd = ra_alloc_gpr(esp_index);
-    if (bridge->f == (uintptr_t)my_free ||bridge->f == (uintptr_t)my___libc_free ||bridge->f == (uintptr_t)my___free ||bridge->f == (uintptr_t)my_cfree ) {
+    if (function == (uintptr_t)my_free ||
+        function == (uintptr_t)my___libc_free ||
+        function == (uintptr_t)my___free ||
+        function == (uintptr_t)my_cfree) {
         do_translate_free_brick_tb();
         return;
-    } else if (bridge->f == (uintptr_t)my_realloc) {
+    } else if (function == (uintptr_t)my_realloc) {
         do_translate_realloc_brick_tb();
         return;
     }
     kzt_native_to_wrapper();
-    wrapper_gpr_trans((ADDR)bridge->f);
+    wrapper_gpr_trans((ADDR)function);
 
     tr_set_running_of_cs(false);
-    li_d(ra_ir2_opnd, (ADDR)bridge->w);
+    li_d(ra_ir2_opnd, (ADDR)wrapper);
     la_jirl(ra_ir2_opnd, ra_ir2_opnd, 0);
     tr_set_running_of_cs(true);
 
@@ -256,14 +259,15 @@ bool translate_int_3(IR1_INST *pir1)
         state_info.cflags = cpu->tcg_cflags;
         cpu_get_tb_cpu_state(cpu->env_ptr, &state_info.current_pc,
                              &state_info.cs_base, &state_info.flags);
+        wrapper_t wrapper;
+        uintptr_t function;
         if (latx_kzt_runtime_enabled() &&
-            Peek8(state_info.current_pc + 1, 0) == 'S' &&
-            Peek8(state_info.current_pc + 1, 1) == 'C')
-        {
+            kzt_registered_onebridge_snapshot(state_info.current_pc,
+                                              &wrapper, &function)) {
             TranslationBlock *tb = NULL;
             mmap_lock();
-            onebridge_t *bridge= (onebridge_t*)state_info.current_pc;
-            do_translate_brick_tb(bridge, &state_info, cpu, state_info.current_pc, tb);
+            do_translate_brick_tb(wrapper, function, &state_info, cpu,
+                                  state_info.current_pc, tb);
             mmap_unlock();
         } else {
             la_break(0x5);

@@ -37,6 +37,10 @@
 #include "latx-options.h"
 #include "latx-backtrace.h"
 #include "latx-smc.h"
+#if defined(CONFIG_LATX_KZT)
+#include "bridge.h"
+#include "wrappertbbridge.h"
+#endif
 #endif
 #ifdef CONFIG_LATX_DEBUG
 #include "latx-debug.h"
@@ -724,8 +728,21 @@ static int probe_access_internal(CPUArchState *env, target_ulong addr,
         g_assert_not_reached();
     }
 
-    if (!guest_addr_valid_untagged(addr) ||
-        !page_check_range(addr, 1, flags)) {
+    bool valid = guest_addr_valid_untagged(addr) &&
+                 page_check_range(addr, 1, flags);
+
+#if defined(CONFIG_LATX_KZT)
+    if (!valid && latx_kzt_runtime_enabled()) {
+        if (access_type == MMU_INST_FETCH) {
+            valid = kzt_is_registered_onebridge(addr) ||
+                    kzt_tbbridge_contains(addr);
+        } else if (!guest_addr_valid_untagged(addr)) {
+            valid = kzt_data_addr_valid_untagged(addr);
+        }
+    }
+#endif
+
+    if (!valid) {
         if (nonfault) {
             return TLB_INVALID_MASK;
         } else {

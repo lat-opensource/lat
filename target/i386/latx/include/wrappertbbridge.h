@@ -13,5 +13,6 @@ struct kzt_tbbridge {
 
 void* kzt_tbbridge_init(void);
 struct kzt_tbbridge* kzt_tbbridge_lookup(target_ulong pc);
+bool kzt_tbbridge_contains(target_ulong pc);
 int kzt_tbbridge_insert(target_ulong pc, ADDR func, void * wrapper);
 #endif

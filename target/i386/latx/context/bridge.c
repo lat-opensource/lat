@@ -29,13 +29,45 @@ typedef struct brick_s {
     onebridge_t *b;
     int         sz;
     brick_t     *next;
+    brick_t     *registry_next;
 } brick_t;
 
 typedef struct bridge_s {
     brick_t         *head;
     brick_t         *last;      // to speed up
     kh_bridgemap_t  *bridgemap;
+    GMutex          lock;
 } bridge_t;
+
+static GMutex bridge_registry_lock;
+static brick_t *bridge_registry;
+
+static void register_brick(brick_t *brick)
+{
+    if (brick->b == MAP_FAILED) {
+        return;
+    }
+
+    g_mutex_lock(&bridge_registry_lock);
+    brick->registry_next = bridge_registry;
+    bridge_registry = brick;
+    g_mutex_unlock(&bridge_registry_lock);
+}
+
+static void unregister_brick(brick_t *brick)
+{
+    brick_t **link;
+
+    g_mutex_lock(&bridge_registry_lock);
+    for (link = &bridge_registry; *link; link = &(*link)->registry_next) {
+        if (*link == brick) {
+            *link = brick->registry_next;
+            break;
+        }
+    }
+    brick->registry_next = NULL;
+    g_mutex_unlock(&bridge_registry_lock);
+}
 
 //from wrapped/wrappedlibc.c
 //void* my_mmap(x64emu_t* emu, void* addr, unsigned long length, int prot, int flags, int fd, int64_t offset);
@@ -50,12 +82,14 @@ brick_t* NewBrick(void)
         printf("Warning, cannot allocate 0x%lx aligned bytes for bridge, will probably crash later\n", NBRICK*sizeof(onebridge_t));
     }
     ret->b = ptr;
+    register_brick(ret);
     return ret;
 }
 
 bridge_t *NewBridge(void)
 {
     bridge_t *b = (bridge_t*)box_calloc(1, sizeof(bridge_t));
+    g_mutex_init(&b->lock);
     b->head = NewBrick();
     b->last = b->head;
     b->bridgemap = kh_init(bridgemap);
@@ -66,14 +100,18 @@ void FreeBridge(bridge_t** bridge)
 {
     if(!bridge || !*bridge)
         return;
+    g_mutex_lock(&(*bridge)->lock);
     brick_t *b = (*bridge)->head;
     while(b) {
         brick_t *n = b->next;
+        unregister_brick(b);
         munmap(b->b, NBRICK*sizeof(onebridge_t));
         box_free(b);
         b = n;
     }
     kh_destroy(bridgemap, (*bridge)->bridgemap);
+    g_mutex_unlock(&(*bridge)->lock);
+    g_mutex_clear(&(*bridge)->lock);
     box_free(*bridge);
     *bridge = NULL;
 }
@@ -82,6 +120,7 @@ uintptr_t AddBridge(bridge_t* bridge, wrapper_t w, void* fnc, int N, const char*
 {
     brick_t *b = NULL;
     int sz = -1;
+    g_mutex_lock(&bridge->lock);
         b = bridge->last;
         if(b->sz == NBRICK) {
             b->next = NewBrick();
@@ -89,28 +128,81 @@ uintptr_t AddBridge(bridge_t* bridge, wrapper_t w, void* fnc, int N, const char*
             bridge->last = b;
         }
    	sz = b->sz;
-    b->sz++;
+    g_mutex_lock(&bridge_registry_lock);
     b->b[sz].CC = 0xCC;
     b->b[sz].S = 'S'; b->b[sz].C='C';
     b->b[sz].w = w;
     b->b[sz].f = (uintptr_t)fnc;
     b->b[sz].C3 = N?0xC2:0xC3;
     b->b[sz].N = N;
+    b->sz++;
+    g_mutex_unlock(&bridge_registry_lock);
     // add bridge to map, for fast recovery
     int ret;
     khint_t k = kh_put(bridgemap, bridge->bridgemap, (uintptr_t)fnc, &ret);
     kh_value(bridge->bridgemap, k) = (uintptr_t)&b->b[sz].CC;
 
+    g_mutex_unlock(&bridge->lock);
     return (uintptr_t)&b->b[sz].CC;
+}
+
+static onebridge_t *find_registered_onebridge(uintptr_t addr)
+{
+    for (brick_t *brick = bridge_registry; brick;
+         brick = brick->registry_next) {
+        uintptr_t start = (uintptr_t)brick->b;
+        uintptr_t used_end = start + brick->sz * sizeof(onebridge_t);
+
+        if (addr >= start && addr < used_end &&
+            (addr - start) % sizeof(onebridge_t) == 0) {
+            onebridge_t *slot = (onebridge_t *)addr;
+
+            return slot->CC == 0xCC && slot->S == 'S' && slot->C == 'C' &&
+                   (slot->C3 == 0xC3 || slot->C3 == 0xC2) ? slot : NULL;
+        }
+    }
+
+    return NULL;
+}
+
+bool kzt_is_registered_onebridge(uintptr_t addr)
+{
+    g_mutex_lock(&bridge_registry_lock);
+    bool found = find_registered_onebridge(addr) != NULL;
+    g_mutex_unlock(&bridge_registry_lock);
+    return found;
+}
+
+bool kzt_registered_onebridge_snapshot(uintptr_t addr, wrapper_t *wrapper,
+                                       uintptr_t *function)
+{
+    g_mutex_lock(&bridge_registry_lock);
+    onebridge_t *slot = find_registered_onebridge(addr);
+
+    if (slot) {
+        if (wrapper) {
+            *wrapper = slot->w;
+        }
+        if (function) {
+            *function = slot->f;
+        }
+    }
+    g_mutex_unlock(&bridge_registry_lock);
+    return slot != NULL;
 }
 
 uintptr_t CheckBridged(bridge_t* bridge, void* fnc)
 {
     // check if function alread have a bridge (the function wrapper will not be tested)
+    g_mutex_lock(&bridge->lock);
     khint_t k = kh_get(bridgemap, bridge->bridgemap, (uintptr_t)fnc);
-    if(k==kh_end(bridge->bridgemap))
+    if (k == kh_end(bridge->bridgemap)) {
+        g_mutex_unlock(&bridge->lock);
         return 0;
-    return kh_value(bridge->bridgemap, k);
+    }
+    uintptr_t ret = kh_value(bridge->bridgemap, k);
+    g_mutex_unlock(&bridge->lock);
+    return ret;
 }
 
 uintptr_t AddCheckBridge(bridge_t* bridge, wrapper_t w, void* fnc, int N, const char* name)

@@ -3816,11 +3816,6 @@ void *page_alloc_target_data(target_ulong address, size_t size)
 
 bool page_check_range(target_ulong start, target_ulong len, int flags)
 {
-#if defined(CONFIG_LATX_KZT)
-    if (latx_kzt_runtime_enabled() && start > reserved_va) {
-        return true;
-    }
-#endif
     target_ulong last;
     int locked;  /* tri-state: =0: unlocked, +1: global, -1: local */
     bool ret;

@@ -154,3 +154,18 @@ test(
   test_kzt_relocation_transaction,
   suite: 'lat-pr-fast',
 )
+
+test_kzt_address_policy = executable(
+  'test-kzt-address-policy',
+  files('kzt/test_kzt_address_policy.c'),
+  include_directories: include_directories(
+    '../../target/i386/latx/include',
+  ),
+  build_by_default: false,
+)
+
+test(
+  'test-kzt-address-policy',
+  test_kzt_address_policy,
+  suite: 'lat-pr-fast',
+)
