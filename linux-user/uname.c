@@ -30,6 +30,18 @@
  * return here */
 const char *cpu_to_uname_machine(void *cpu_env)
 {
+#if defined(CONFIG_LATX) && defined(TARGET_I386)
+    const char *override = getenv("LATX_UNAME_MACHINE");
+
+    if (override && override[0]) {
+        return override;
+    }
+#if !defined(TARGET_X86_64)
+    /* Let 32-bit launchers select their matching x86_64 helpers. */
+    return "x86_64";
+#endif
+#endif
+
 #if defined(TARGET_ARM) && !defined(TARGET_AARCH64)
 
     /* utsname machine name on linux arm is CPU arch name + endianness, e.g.
