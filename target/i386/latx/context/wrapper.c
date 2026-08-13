@@ -96,7 +96,7 @@ extern void* my__IO_2_1_stderr_;
 #endif
 
 typedef uintptr_t (*vFE_t)(void);
-typedef int64_t (*iFii_t)(int64_t, int64_t);
+typedef int32_t (*iFii_t)(int32_t, int32_t);
 typedef void* (*pFpiL_t)(void*, int64_t, uintptr_t);
 typedef void* (*pFppl_t)(void*, void*, intptr_t);
 typedef void* (*pFppL_t)(void*, void*, uintptr_t);
@@ -122,6 +122,7 @@ void vFppiip(uintptr_t fcn) { __CPU; vFppiip_t fn = (vFppiip_t)fcn; fn((void*)R_
 void vFppiiip(uintptr_t fcn) { __CPU; vFppiiip_t fn = (vFppiiip_t)fcn; fn((void*)R_RDI, (void*)R_RSI, (int32_t)R_RDX, (int32_t)R_RCX, (int32_t)R_R8, (void*)R_R9); DEBUG_LOG; (void)cpu; }
 void vFppii(uintptr_t fcn) { __CPU; vFppii_t fn = (vFppii_t)fcn; fn((void*)R_RDI, (void*)R_RSI, (int32_t)R_RDX, (int32_t)R_RCX); DEBUG_LOG; (void)cpu; }
 void vFE(uintptr_t fcn) { __CPU; vFE_t fn = (vFE_t)fcn; fn(); DEBUG_LOG; (void)cpu; }
+void iFii(uintptr_t fcn) { __CPU; iFii_t fn = (iFii_t)fcn; R_RAX=(int32_t)fn((int32_t)R_RDI, (int32_t)R_RSI); DEBUG_LOG; (void)cpu; }
 void pFppL(uintptr_t fcn) { __CPU; pFppL_t fn = (pFppL_t)fcn; R_RAX = (uintptr_t)fn((void*)R_RDI, (void*)R_RSI, (uintptr_t)R_RDX); DEBUG_LOG; (void)cpu; }
 
 typedef void (*vFv_t)(void);
