@@ -463,7 +463,11 @@ imm_cache_exit:
     case 0:
         ra_free_temp_auto(dest_op);
         dest_op = zero_ir2_opnd;
-        if (!has_seg && !arg_dest_op) {
+        if (!has_seg) {
+            if (arg_dest_op) {
+                return adjust_dest(dest_op, arg_dest_op, dest_size,
+                                   ir1_addr_size(pir1));
+            }
             return dest_op;
         }
         break;
