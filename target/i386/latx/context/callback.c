@@ -8,13 +8,12 @@
 
 #include <stdarg.h>
 
+#include "callback-args.h"
 #include "callback.h"
 #include "lsenv.h"
 #include "qemu.h"
 
 #ifdef TARGET_X86_64
-#define CALLBACK_GPR_ARGS 6
-
 typedef struct CallbackFrame {
     CPUX86State *cpu;
     CPUState *cs;
@@ -22,7 +21,7 @@ typedef struct CallbackFrame {
     size_t stack_words;
 } CallbackFrame;
 
-static const int callback_gpr_regs[CALLBACK_GPR_ARGS] = {
+static const int callback_gpr_regs[LATX_CALLBACK_GPR_ARGS] = {
     R_EDI, R_ESI, R_EDX, R_ECX, R_R8, R_R9,
 };
 
@@ -40,7 +39,8 @@ static void Push64(CPUX86State *cpu, uint64_t v)
     *(uint64_t *)cpu->regs[R_ESP] = v;
 }
 
-static CallbackFrame callback_frame_enter(size_t stack_args)
+static CallbackFrame callback_frame_enter(size_t stack_args,
+                                          bool align_guest_entry)
 {
     CPUX86State *cpu = (CPUX86State *)lsenv->cpu_state;
     CallbackFrame frame = {
@@ -65,7 +65,10 @@ static CallbackFrame callback_frame_enter(size_t stack_args)
     Push64(cpu, cpu->regs[R_R14]);
     Push64(cpu, cpu->regs[R_R15]);
 
-    frame.stack_words = stack_args + (stack_args & 1);
+    frame.stack_words = align_guest_entry
+                            ? latx_callback_stack_words(cpu->regs[R_ESP],
+                                                        stack_args)
+                            : stack_args + (stack_args & 1);
     cpu->regs[R_ESP] -= frame.stack_words * sizeof(uint64_t);
 
     return frame;
@@ -122,17 +125,18 @@ uint64_t RunFunctionWithState(uintptr_t fnc, int nargs, ...)
     va_list ap;
 
     lsassert(fnc);
+    lsassert(nargs >= 0);
     lsassert(CODEIS64);
 
-    stack_args = nargs > CALLBACK_GPR_ARGS
-                     ? nargs - CALLBACK_GPR_ARGS
+    stack_args = nargs > LATX_CALLBACK_GPR_ARGS
+                     ? nargs - LATX_CALLBACK_GPR_ARGS
                      : 0;
-    frame = callback_frame_enter(stack_args);
+    frame = callback_frame_enter(stack_args, false);
     stack = (uint64_t *)frame.cpu->regs[R_ESP];
 
     va_start(ap, nargs);
     for (int i = 0; i < nargs; i++) {
-        if (i < CALLBACK_GPR_ARGS) {
+        if (i < LATX_CALLBACK_GPR_ARGS) {
             frame.cpu->regs[callback_gpr_regs[i]] =
                 va_arg(ap, uint64_t);
         } else {
@@ -140,6 +144,45 @@ uint64_t RunFunctionWithState(uintptr_t fnc, int nargs, ...)
         }
     }
     va_end(ap);
+
+    return callback_frame_run(&frame, fnc);
+#else
+    return 0;
+#endif
+}
+
+uint64_t RunFunctionFmt(uintptr_t fnc, const char *fmt, ...)
+{
+#ifdef TARGET_X86_64
+    size_t stack_args;
+    CallbackFrame frame;
+    LatxCallbackArgs args;
+    va_list ap;
+
+    lsassert(fnc);
+    lsassert(fmt);
+    lsassert(CODEIS64);
+    if (!fnc || !fmt || !CODEIS64 ||
+        !latx_callback_stack_args(fmt, &stack_args)) {
+        return 0;
+    }
+
+    frame = callback_frame_enter(stack_args, true);
+    args = (LatxCallbackArgs) {
+        .stack = (uint64_t *)frame.cpu->regs[R_ESP],
+    };
+
+    va_start(ap, fmt);
+    latx_callback_collect_args(&args, fmt, &ap);
+    va_end(ap);
+
+    g_assert(args.stack_count == stack_args);
+    for (size_t i = 0; i < args.gpr_count; i++) {
+        frame.cpu->regs[callback_gpr_regs[i]] = args.gpr[i];
+    }
+    for (size_t i = 0; i < args.xmm_count; i++) {
+        frame.cpu->xmm_regs[i].ZMM_Q(0) = args.xmm[i];
+    }
 
     return callback_frame_run(&frame, fnc);
 #else

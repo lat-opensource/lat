@@ -9,7 +9,7 @@ def main() -> int:
     source = pathlib.Path(sys.argv[1]).read_text()
 
     callback = """static int my_XSynchronizeProc_##A(void *dpy)"""
-    dispatch = """RunFunctionWithState(my_XSynchronizeProc_fct_##A, 1, dpy)"""
+    dispatch = """RunFunctionFmt(my_XSynchronizeProc_fct_##A, "p", dpy)"""
     reverse = """AddBridge(lib->priv.w.bridge, iFp, fct, 0, NULL)"""
 
     assert callback in source, (

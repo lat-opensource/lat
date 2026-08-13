@@ -4,7 +4,7 @@
 #include <stdint.h>
 
 uint64_t RunFunctionWithState(uintptr_t fnc, int nargs, ...);
+uint64_t RunFunctionFmt(uintptr_t fnc, const char *fmt, ...);
 #define RunFunction RunFunctionWithState
-#define RunFunctionFmt(fnc,fmt, ...) RunFunctionWithState(fnc, strlen(fmt), ## __VA_ARGS__)
 
 #endif //__CALLBACK_H__

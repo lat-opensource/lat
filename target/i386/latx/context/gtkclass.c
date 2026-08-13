@@ -66,7 +66,7 @@ static uintptr_t my_##NAME##_fct_##A = 0;   \
 static RET my_##NAME##_##A DEF              \
 {                                           \
     printf_log(LOG_DEBUG, "Calling " #NAME "_" #A " wrapper\n");             \
-    return (RET)RunFunctionWithState(my_##NAME##_fct_##A, strlen(FMT), __VA_ARGS__);\
+    return (RET)RunFunctionFmt(my_##NAME##_fct_##A, FMT, __VA_ARGS__);\
 }
 
 #define FIND(A, NAME) \

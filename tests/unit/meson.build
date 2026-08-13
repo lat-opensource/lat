@@ -40,6 +40,24 @@ if 'CONFIG_LATX' in config_host
   )
 endif
 
+if 'CONFIG_LATX' in config_host
+  test_callback_args = executable(
+    'test-callback-args',
+    files(
+      'test-callback-args.c',
+      '../../target/i386/latx/context/callback-args.c',
+    ),
+    include_directories: include_directories('../..'),
+    build_by_default: false,
+  )
+
+  test(
+    'test-callback-args',
+    test_callback_args,
+    suite: 'lat-pr-fast',
+  )
+endif
+
 test(
   'test-x11-synchronize-callback',
   python,

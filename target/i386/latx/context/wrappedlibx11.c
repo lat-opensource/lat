@@ -664,7 +664,7 @@ static void* findXPendingAsyncHandlerFct(void* fct)
 static uintptr_t my_XSynchronizeProc_fct_##A = 0;                       \
 static int my_XSynchronizeProc_##A(void *dpy)                           \
 {                                                                       \
-    return (int)RunFunctionWithState(my_XSynchronizeProc_fct_##A, 1, dpy);\
+    return (int)RunFunctionFmt(my_XSynchronizeProc_fct_##A, "p", dpy); \
 }
 SUPER()
 #undef GO

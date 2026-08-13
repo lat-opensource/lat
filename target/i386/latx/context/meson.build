@@ -71,6 +71,7 @@ my_file = files(
   'myalign.c',
   'obstack.c',
   'globalsymbols.c',
+  'callback-args.c',
   'callback.c',
   'kzt_public_loader_observer.c',
   'kzt_relocation_transaction.c',
