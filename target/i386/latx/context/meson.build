@@ -1,4 +1,3 @@
-latx_new_world = 'CONFIG_LOONGARCH_NEW_WORLD' in config_host
 my_file = files(
   'wrappedvulkan.c',
   'wrappedlibc.c',
@@ -75,11 +74,9 @@ my_file = files(
   'callback.c',
   'kzt_public_loader_observer.c',
   'kzt_relocation_transaction.c',
+  'wrappedlibdl.c',
+  'x86dlfun.c',
   'wrappertbbridge.c'
   )
-
-if not latx_new_world
-  my_file += files('wrappedlibdl.c')
-endif
 
 i386_ss.add(when: 'CONFIG_LATX', if_true: my_file)

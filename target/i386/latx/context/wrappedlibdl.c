@@ -6,6 +6,7 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include "config-host.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -29,6 +30,12 @@
 #include "callback.h"
 #include "myalign.h"
 #include "fileutils.h"
+#include "x86dlfun.h"
+
+#ifndef CONFIG_LOONGARCH_NEW_WORLD
+#define LIBNAME libdl
+const char *libdlName = "libdl.so.2";
+#endif
 
 #define FORWORDBACK 0
 dlprivate_t *NewDLPrivate(void) {
@@ -38,19 +45,6 @@ dlprivate_t *NewDLPrivate(void) {
 void FreeDLPrivate(dlprivate_t **lib) {
     box_free(*lib);
 }
-
-void* my_dlopen(void *filename, int flag) EXPORT;
-void* my_dlmopen(void* mlid, void *filename, int flag) EXPORT;
-char* my_dlerror(void) EXPORT;
-void* my_dlsym(void *handle, void *symbol) EXPORT;
-int my_dlclose(void *handle) EXPORT;
-int my_dladdr(void *addr, void *info) EXPORT;
-int my_dladdr1(void *addr, void *info, void** extra_info, int flags) EXPORT;
-void* my_dlvsym(void *handle, void *symbol, const char *vername) EXPORT;
-int my_dlinfo(void* handle, int request, void* info) EXPORT;
-
-#define LIBNAME libdl
-const char* libdlName = "libdl.so.2";
 
 static __thread char dl_error_buffer[512];
 static __thread int dl_error_pending;
@@ -149,32 +143,19 @@ static void Push64(CPUX86State *cpu, uint64_t v)
     *((uint64_t*)cpu->regs[R_ESP]) = v;
 }
 
-int init_x86dlfun(void);
-int init_x86dlfun(void)
+#ifdef CONFIG_LOONGARCH_NEW_WORLD
+void kzt_wine_init_x86(void);
+#endif
+
+static int init_x86dlfun(void)
 {
-    elfheader_t* h = loadElfFromFile("libdl.so.2");
-    lsassert(h);
-    const char* syms[] = {
-        "dlopen", "dlsym", "dlclose", "dladdr",
-        "dladdr1", "dlinfo", "dlvsym", "dlerror",
-    };
-    void *rsyms[8] = {0};
-    int rrsyms = 0;
-    ResetSpecialCaseElf(h, syms, 8, rsyms, &rrsyms);
-    if (rrsyms != 8) {
-        h = loadElfFromFile("libc.so.6");
-        ResetSpecialCaseElf(h, syms, 8, rsyms, &rrsyms);
-    }
-    lsassert(rrsyms == 8);
-    my_context->dlprivate->x86dlopen = rsyms[0];
-    my_context->dlprivate->x86dlsym = rsyms[1];
-    my_context->dlprivate->x86dlclose = rsyms[2];
-    my_context->dlprivate->x86dladdr = rsyms[3];
-    my_context->dlprivate->x86dladdr1 = rsyms[4];
-    my_context->dlprivate->x86dlinfo = rsyms[5];
-    my_context->dlprivate->x86dlvsym = rsyms[6];
-    my_context->dlprivate->x86dlerror = rsyms[7];
+#ifdef CONFIG_LOONGARCH_NEW_WORLD
+    init_x86dlfun_from("libc.so.6", "libdl.so.2");
+    kzt_wine_init_x86();
     return 0;
+#else
+    return init_x86dlfun_from("libdl.so.2", "libc.so.6");
+#endif
 }
 static int callx86dlopen(void *filename, int flag, elfheader_t * h, int is_local) {
     struct link_map* ret = (struct link_map*)(uintptr_t)RunFunctionWithState((uintptr_t)my_context->dlprivate->x86dlopen, 2, filename, flag);
@@ -206,7 +187,7 @@ static void LatxResetElf(elfheader_t * h)
     h->latx_type = 0;
     h->latx_hasfix = 0;
 }
-void* my_dlopen(void *filename, int flag){
+EXPORT void* my_dlopen(void *filename, int flag){
     // TODO, handling special values for filename, like RTLD_SELF?
     // TODO, handling flags?
     library_t *lib = NULL;
@@ -364,7 +345,7 @@ void* my_dlopen(void *filename, int flag){
     return (void*)(idx+1);
 }
 
-void* my_dlmopen(void* lmid, void *filename, int flag)
+EXPORT void* my_dlmopen(void* lmid, void *filename, int flag)
 {
     dlprivate_t *dl = my_context->dlprivate;
 
@@ -433,7 +414,7 @@ static int find_dl_library_index(dlprivate_t *dl, void *handle, size_t *index)
     return 0;
 }
 
-void* my_dlsym(void *handle, void *symbol){
+EXPORT void* my_dlsym(void *handle, void *symbol){
     dlprivate_t *dl = my_context->dlprivate;
     uintptr_t start = 0, end = 0;
     char* rsymbol = (char*)symbol;
@@ -628,7 +609,7 @@ void* my_dlsym(void *handle, void *symbol){
     return (void*)start;
 }
 
-int my_dlclose(void *handle)
+EXPORT int my_dlclose(void *handle)
 {
     printf_dlsym(LOG_DEBUG, "Call to dlclose(%p)\n", handle);
     dlprivate_t *dl = my_context->dlprivate;
@@ -681,7 +662,7 @@ int my_dlclose(void *handle)
     return 0;
 }
 
-char* my_dlerror(void)
+EXPORT char* my_dlerror(void)
 {
     dlprivate_t *dl = my_context->dlprivate;
 
@@ -699,7 +680,7 @@ char* my_dlerror(void)
         (uintptr_t)dl->x86dlerror, 0);
 }
 
-int my_dladdr1(void *addr, void *i, void** extra_info, int flags)
+EXPORT int my_dladdr1(void *addr, void *i, void** extra_info, int flags)
 {
     //int dladdr(void *addr, Dl_info *info);
     dlprivate_t *dl = my_context->dlprivate;
@@ -735,7 +716,7 @@ int my_dladdr1(void *addr, void *i, void** extra_info, int flags)
     }
     return (info->dli_sname)?1:0;   // success is non-null here...
 }
-int my_dladdr(void *addr, void *i)
+EXPORT int my_dladdr(void *addr, void *i)
 {
     dlprivate_t *dl = my_context->dlprivate;
     CLEARERR
@@ -755,7 +736,7 @@ int my_dladdr(void *addr, void *i)
     }
     return my_dladdr1(addr, i, NULL, 0);
 }
-void* my_dlvsym(void *handle, void *symbol, const char *vername)
+EXPORT void* my_dlvsym(void *handle, void *symbol, const char *vername)
 {
     printf_dlsym(LOG_DEBUG, "Call to dlvsym(%p, \"%s\", %s)", handle, (char *)symbol, vername?vername:"(nil)");
     dlprivate_t *dl = my_context->dlprivate;
@@ -804,7 +785,7 @@ void* my_dlvsym(void *handle, void *symbol, const char *vername)
     return (void*)ret;
 }
 
-int my_dlinfo(void* handle, int request, void* info)
+EXPORT int my_dlinfo(void* handle, int request, void* info)
 {
     printf_dlsym(LOG_DEBUG, "Call to dlinfo(%p, %d, %p)\n", handle, request, info);
     dlprivate_t *dl = my_context->dlprivate;
@@ -854,4 +835,6 @@ int my_dlinfo(void* handle, int request, void* info)
     return ret;
 }
 
+#ifndef CONFIG_LOONGARCH_NEW_WORLD
 #include "wrappedlib_init.h"
+#endif
