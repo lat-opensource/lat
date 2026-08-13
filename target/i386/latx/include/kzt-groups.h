@@ -52,5 +52,7 @@ const char *kzt_groups_last_error(void);
 void kzt_groups_log_library(const char *soname, bool enabled);
 void kzt_groups_log_wrapper_rejection(const char *soname,
                                       const char *reason);
+void kzt_groups_log_wrapper_limitation(const char *soname,
+                                       const char *reason);
 
 #endif /* LATX_KZT_GROUPS_H */

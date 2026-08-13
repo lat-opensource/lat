@@ -23,6 +23,7 @@
     X(X11,    "x11",    1, STABLE,      KZT_GROUP_CORE)                 \
     X(GL,     "gl",     2, STABLE,      KZT_GROUP_CORE | KZT_GROUP_X11) \
     X(VULKAN, "vulkan", 3, STABLE,      KZT_GROUP_CORE | KZT_GROUP_X11) \
-    X(VAAPI,  "vaapi",  4, STABLE,      KZT_GROUP_CORE | KZT_GROUP_X11)
+    X(VAAPI,  "vaapi",  4, STABLE,      KZT_GROUP_CORE | KZT_GROUP_X11) \
+    X(CAIRO,  "cairo",  5, EXPERIMENTAL, KZT_GROUP_CORE | KZT_GROUP_X11)
 
 #endif /* LATX_KZT_GROUP_LIST_H */

@@ -433,3 +433,13 @@ void kzt_groups_log_wrapper_rejection(const char *soname,
     fprintf(stderr, "KZT: native wrapper rejected for %s: %s\n",
             soname, reason);
 }
+
+void kzt_groups_log_wrapper_limitation(const char *soname,
+                                       const char *reason)
+{
+    if (!group_log_enabled) {
+        return;
+    }
+    fprintf(stderr, "KZT: native wrapper limitation for %s: %s\n",
+            soname, reason);
+}

@@ -62,6 +62,7 @@ GO("libxcb-sync.so.1", libxcbsync, KZT_GROUP_X11)
 GO("libxcb-xinerama.so.0", libxcbxinerama, KZT_GROUP_X11)
 GO("libxcb-xinput.so.0", libxcbxinput, KZT_GROUP_X11)
 GO("libxcb-present.so.0", libxcbpresent, KZT_GROUP_X11)
+GO("libcairo.so.2", cairo, KZT_GROUP_CAIRO)
 
 
 GOALIAS("libxcb-cursor.so", libxcbcursor, KZT_GROUP_X11)
@@ -73,6 +74,7 @@ GOALIAS("libxcb-sync.so", libxcbsync, KZT_GROUP_X11)
 GOALIAS("libxcb-xinerama.so", libxcbxinerama, KZT_GROUP_X11)
 GOALIAS("libxcb-xinput.so", libxcbxinput, KZT_GROUP_X11)
 GOALIAS("libxcb-present.so", libxcbpresent, KZT_GROUP_X11)
+GOALIAS("libcairo.so", cairo, KZT_GROUP_CAIRO)
 GOALIAS("libvulkan.so", vulkan, KZT_GROUP_VULKAN)
 GOALIAS("libEGL.so", libegl, KZT_GROUP_GL)
 #ifndef CONFIG_LOONGARCH_NEW_WORLD
