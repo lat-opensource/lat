@@ -890,33 +890,54 @@ char in_white_list(char *lib)
 
 static int get_tb_num(char *lib_name, char *aot_file_name, CPUState *cpu)
 {
+    void *buffer = MAP_FAILED;
+    FILE *pf = NULL;
+    long file_size;
+    size_t file_sz = 0;
+    int aim_tb_num = 0;
+    int fd;
+
     if (get_aot_path(aot_file_name, aot_file_path, PATH_MAX) < 0) {
         return 0;
     }
     if (access(aot_file_path, 0) < 0) {
         return 0;
     }
-    int fd = open(aot_file_path, O_RDONLY);
-    FILE *pf = fdopen(fd, "r");
-    lsassert(pf && ("open aot file failed!"));
+    fd = open(aot_file_path, O_RDONLY);
+    if (fd < 0) {
+        return 0;
+    }
+    pf = fdopen(fd, "r");
+    if (!pf) {
+        close(fd);
+        return 0;
+    }
+
     /* Get file size */
-    fseek(pf, 0, SEEK_END);      /* seek to end of file */
-    size_t file_sz = ftell(pf);  /* get current file pointer */
+    if (fseek(pf, 0, SEEK_END) || (file_size = ftell(pf)) < 0) {
+        goto out;
+    }
+    file_sz = file_size;
+    if (file_sz < sizeof(aot_header)) {
+        qemu_log_mask(LAT_LOG_AOT, "aot file is too short %s\n", lib_name);
+        remove(aot_file_path);
+        goto out;
+    }
+
     /*check aot complete.*/
     if (!aot_file_has_footer(pf, AOT_VERSION)) {
         qemu_log_mask(LAT_LOG_AOT, "aot file is not complete %s\n", lib_name);
         remove(aot_file_path);
-        fclose(pf);
-        return 0;
+        goto out;
     }
     fseek(pf, 0, SEEK_SET);      /* seek back to beginning of file */
 
     /* Read aot file */
     /* buffer = malloc(file_sz); */
-    void *buffer = mmap(NULL, file_sz, PROT_READ, MAP_SHARED, fd, 0);
-    if (buffer < 0) {
+    buffer = mmap(NULL, file_sz, PROT_READ, MAP_SHARED, fd, 0);
+    if (buffer == MAP_FAILED) {
         qemu_log_mask(LAT_LOG_AOT, "aot file mmap error\n");
-        return 0;
+        goto out;
     }
     assert(buffer);
     aot_header *p_header = (aot_header *)buffer;
@@ -931,17 +952,19 @@ static int get_tb_num(char *lib_name, char *aot_file_name, CPUState *cpu)
                 aot_file_path, p_header->lib_size, statbuf.st_size);
         remove(aot_file_path);
         qemu_log_mask(LAT_LOG_AOT, "remove end\n");
-        return 0;
+        goto out;
     }
 
-    int aim_tb_num = 0;
     if (cpu->tcg_cflags & CF_PARALLEL) {
         aim_tb_num =  p_header->parallel_tb_num;
     } else {
         aim_tb_num = p_header->unparallel_tb_num;
     }
 
-    munmap(buffer, file_sz);
+out:
+    if (buffer != MAP_FAILED) {
+        munmap(buffer, file_sz);
+    }
     fclose(pf);
     return aim_tb_num;
 }
@@ -1295,15 +1318,29 @@ lib_info *aot_load(char *lib_name, char *aot_file_name,
     struct stat statbuf;
     lib_info *curr_lib_info = NULL;
     size_t file_sz = 0;
+    long file_size;
     int fd = open(aot_file_path, O_RDONLY);
     FILE *pf = NULL;
+
     if (fd < 0) {
         goto exit_aot_load;
     }
     pf = fdopen(fd, "r");
-    lsassert(pf && ("open aot file failed!"));
-    fseek(pf, 0, SEEK_END);      /* seek to end of file */
-    file_sz = ftell(pf);         /* get current file pointer */
+    if (!pf) {
+        close(fd);
+        fd = -1;
+        goto exit_aot_load;
+    }
+
+    if (fseek(pf, 0, SEEK_END) || (file_size = ftell(pf)) < 0) {
+        goto exit_aot_load;
+    }
+    if ((size_t)file_size < sizeof(aot_header)) {
+        qemu_log_mask(LAT_LOG_AOT, "aot file is too short %s\n", lib_name);
+        remove_curr_aot_file(fd);
+        goto exit_aot_load;
+    }
+    file_sz = file_size;
 
     /*check aot complete.*/
     if (!aot_file_has_footer(pf, AOT_VERSION)) {
@@ -1345,8 +1382,9 @@ exit_aot_load:
     }
     if (likely(pf)) {
         fclose(pf);
+    } else if (fd >= 0) {
+        close(fd);
     }
-    close(fd);
     return curr_lib_info;
 }
 
