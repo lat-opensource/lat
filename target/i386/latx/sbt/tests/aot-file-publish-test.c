@@ -90,6 +90,15 @@ int main(void)
     g_assert(aot_file_get_tmp_path(aot_path, tmp_path,
                                    sizeof(tmp_path)) == 0);
 
+    file = fopen(tmp_path, "w+");
+    g_assert(file != NULL);
+    g_assert(fputs("payload:Version: current", file) >= 0);
+    g_assert(aot_file_has_footer(file, "Version: current"));
+    g_assert(!aot_file_has_footer(file, "Version: currenT"));
+    g_assert(!aot_file_has_footer(file, "payload:Version: current+extra"));
+    g_assert(fclose(file) == 0);
+    g_assert(unlink(tmp_path) == 0);
+
     g_assert(g_file_set_contents(aot_path, "old", -1, NULL));
     file = fopen(tmp_path, "w");
     g_assert(file != NULL);
