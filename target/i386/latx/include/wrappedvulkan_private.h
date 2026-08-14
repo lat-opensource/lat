@@ -845,6 +845,14 @@ GO(vkGetDeviceImageSubresourceLayoutKHR, vFppp)
 GO(vkGetImageSubresourceLayout2KHR, vFpUpp)
 GO(vkGetRenderingAreaGranularityKHR, vFppp)
 
+// VK_KHR_maintenance6
+GO(vkCmdBindDescriptorBufferEmbeddedSamplers2EXT, vFpp)
+GO(vkCmdBindDescriptorSets2KHR, vFpp)
+GO(vkCmdPushConstants2KHR, vFpp)
+GO(vkCmdPushDescriptorSet2KHR, vFpp)
+GO(vkCmdPushDescriptorSetWithTemplate2KHR, vFpp)
+GO(vkCmdSetDescriptorBufferOffsets2EXT, vFpp)
+
 // VK_NV_memory_decompression
 GO(vkCmdDecompressMemoryIndirectCountNV, vFpUUu)
 GO(vkCmdDecompressMemoryNV, vFpup)
