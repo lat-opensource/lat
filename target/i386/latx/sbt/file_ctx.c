@@ -49,6 +49,28 @@ int aot_file_get_lock_path(const char *aot_file, char *lock_path,
     return 0;
 }
 
+bool aot_file_has_footer(FILE *file, const char *footer)
+{
+    size_t footer_len;
+    char *actual;
+    bool matches;
+
+    if (!file || !footer) {
+        return false;
+    }
+
+    footer_len = strlen(footer);
+    if (!footer_len || fseek(file, -(long)footer_len, SEEK_END) != 0) {
+        return false;
+    }
+
+    actual = g_malloc(footer_len);
+    matches = fread(actual, footer_len, 1, file) == 1 &&
+              !memcmp(actual, footer, footer_len);
+    g_free(actual);
+    return matches;
+}
+
 int aot_file_complete_write(FILE *file, const char *tmp_path)
 {
     int saved_errno = 0;

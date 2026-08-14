@@ -902,21 +902,11 @@ static int get_tb_num(char *lib_name, char *aot_file_name, CPUState *cpu)
     /* Get file size */
     fseek(pf, 0, SEEK_END);      /* seek to end of file */
     size_t file_sz = ftell(pf);  /* get current file pointer */
-    char aot_version[strlen(AOT_VERSION) + 1];
     /*check aot complete.*/
-    if (fseek(pf, -strlen(AOT_VERSION), SEEK_END) != 0) {
-        qemu_log_mask(LAT_LOG_AOT, "can't fseek aot file\n");
-        fclose(pf);
-        return 0;
-    }
-    if (fread(aot_version, strlen(AOT_VERSION), 1, pf) != 1) {
-        qemu_log_mask(LAT_LOG_AOT, "get error.\n");
-        fclose(pf);
-        return 0;
-    }
-    if (!strstr(aot_version, AOT_VERSION)) {
+    if (!aot_file_has_footer(pf, AOT_VERSION)) {
         qemu_log_mask(LAT_LOG_AOT, "aot file is not complete %s\n", lib_name);
         remove(aot_file_path);
+        fclose(pf);
         return 0;
     }
     fseek(pf, 0, SEEK_SET);      /* seek back to beginning of file */
@@ -1305,7 +1295,6 @@ lib_info *aot_load(char *lib_name, char *aot_file_name,
     struct stat statbuf;
     lib_info *curr_lib_info = NULL;
     size_t file_sz = 0;
-    char aot_version[strlen(AOT_VERSION) + 1];
     int fd = open(aot_file_path, O_RDONLY);
     FILE *pf = NULL;
     if (fd < 0) {
@@ -1317,11 +1306,7 @@ lib_info *aot_load(char *lib_name, char *aot_file_name,
     file_sz = ftell(pf);         /* get current file pointer */
 
     /*check aot complete.*/
-    if (fseek(pf, -strlen(AOT_VERSION), SEEK_END) != 0
-            || fread(aot_version, strlen(AOT_VERSION), 1, pf) != 1) {
-        goto exit_aot_load;
-    }
-    if (!strstr(aot_version, AOT_VERSION)) {
+    if (!aot_file_has_footer(pf, AOT_VERSION)) {
         qemu_log_mask(LAT_LOG_AOT, "aot file is not complete %s\n", lib_name);
         remove_curr_aot_file(fd);
         goto exit_aot_load;

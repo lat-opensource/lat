@@ -17,6 +17,7 @@ int aot_file_get_tmp_path(const char *aot_file, char *tmp_path,
                           size_t tmp_path_size);
 int aot_file_get_lock_path(const char *aot_file, char *lock_path,
                            size_t lock_path_size);
+bool aot_file_has_footer(FILE *file, const char *footer);
 int aot_file_complete_write(FILE *file, const char *tmp_path);
 /*
  * Negative: rename failed. Zero: rename and directory sync succeeded.
