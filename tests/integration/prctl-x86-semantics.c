@@ -10,7 +10,9 @@ typedef long guest_slong_t;
 #define __NR_read               0
 #define __NR_write              1
 #define __NR_close              3
+#define __NR_dup2              33
 #define __NR_execve            59
+#define __NR_fcntl             72
 #define __NR_mmap               9
 #define __NR_mprotect          10
 #define __NR_munmap            11
@@ -33,6 +35,7 @@ typedef long guest_slong_t;
 #define __NR_openat           257
 #define __NR_memfd_create     319
 #define __NR_readlinkat       267
+#define __NR_dup3             292
 #define __NR_execveat         322
 #define __NR_readlink          89
 #define __NR_rename            82
@@ -65,6 +68,10 @@ typedef long guest_slong_t;
 #define AT_FDCWD (-100)
 #define AT_EMPTY_PATH 0x1000
 #define O_DIRECTORY 00200000
+
+#define F_GETFD      1
+#define F_SETFD      2
+#define FD_CLOEXEC   1
 
 #define IPC_PRIVATE 0
 #define IPC_CREAT   01000
@@ -280,6 +287,34 @@ static guest_ulong_t string_length(const char *value)
         len++;
     }
     return len;
+}
+
+static int proc_fd_path(char *buffer, guest_ulong_t size, unsigned int fd)
+{
+    static const char prefix[] = "/proc/self/fd/";
+    char digits[16];
+    guest_ulong_t pos = 0;
+    unsigned int count = 0;
+
+    if (size < sizeof(prefix) + 1) {
+        return 0;
+    }
+    while (pos < sizeof(prefix) - 1) {
+        buffer[pos] = prefix[pos];
+        pos++;
+    }
+    do {
+        digits[count++] = '0' + fd % 10;
+        fd /= 10;
+    } while (fd && count < sizeof(digits));
+    if (pos + count >= size) {
+        return 0;
+    }
+    while (count) {
+        buffer[pos++] = digits[--count];
+    }
+    buffer[pos] = 0;
+    return 1;
 }
 
 static int contains(const char *buf, guest_ulong_t len, const char *needle,
@@ -1548,6 +1583,81 @@ static int test_exec_race(const char *target_path, int use_execveat)
     return 135;
 }
 
+static int find_exe_identity_fd(const char *self_path)
+{
+    char fd_path[32];
+    char link_path[4096];
+    guest_ulong_t self_len = string_length(self_path);
+    unsigned int fd;
+
+    for (fd = 3; fd < 1024; fd++) {
+        guest_slong_t flags;
+        guest_slong_t len;
+
+        if (!proc_fd_path(fd_path, sizeof(fd_path), fd)) {
+            return -1;
+        }
+        len = syscall3(__NR_readlink, (guest_slong_t)fd_path,
+                       (guest_slong_t)link_path, sizeof(link_path));
+        if (len != (guest_slong_t)self_len ||
+            !bytes_equal(link_path, self_path, self_len)) {
+            continue;
+        }
+        flags = syscall3(__NR_fcntl, fd, F_GETFD, 0);
+        if (flags >= 0 && (flags & FD_CLOEXEC)) {
+            return fd;
+        }
+    }
+    return -1;
+}
+
+static int test_exe_identity_mutation(const char *self_path, char mode,
+                                      int child)
+{
+    static char exe_path[] = "/proc/self/exe";
+    static char null_path[] = "/dev/null";
+    static char child_mode[] = "child";
+    char mode_arg[] = { mode, 0 };
+    char *argv[] = { exe_path, mode_arg, child_mode, 0 };
+    guest_slong_t fd;
+    guest_slong_t null_fd;
+    guest_slong_t ret;
+
+    if (child) {
+        return 0;
+    }
+    if (!self_path) {
+        return 136;
+    }
+    fd = find_exe_identity_fd(self_path);
+    if (fd < 0) {
+        return 136;
+    }
+    if (mode == 'q') {
+        ret = syscall1(__NR_close, fd);
+    } else if (mode == 'o') {
+        ret = syscall3(__NR_fcntl, fd, F_SETFD, 0);
+    } else {
+        null_fd = syscall4(__NR_openat, AT_FDCWD,
+                           (guest_slong_t)null_path, 0, 0);
+        if (null_fd < 0) {
+            return 137;
+        }
+        if (mode == 'n') {
+            ret = syscall2(__NR_dup2, null_fd, fd);
+        } else {
+            ret = syscall3(__NR_dup3, null_fd, fd, 0);
+        }
+        syscall1(__NR_close, null_fd);
+    }
+    if (ret < 0) {
+        return 137;
+    }
+    syscall3(__NR_execve, (guest_slong_t)exe_path,
+             (guest_slong_t)argv, 0);
+    return 138;
+}
+
 int test_main(guest_ulong_t *stack)
 {
     guest_ulong_t argc = stack[0];
@@ -1608,6 +1718,10 @@ int test_main(guest_ulong_t *stack)
     }
     if (mode == 'u') {
         return test_exec_race(argc == 3 ? argv[2] : 0, 1);
+    }
+    if (mode == 'q' || mode == 'o' || mode == 'n' || mode == 'j') {
+        return test_exe_identity_mutation(
+            argv[0], mode, argc == 3 && argv[2][0] == 'c');
     }
     return 101;
 }

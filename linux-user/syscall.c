@@ -10281,7 +10281,38 @@ static inline abi_long copy_to_user_flock64(abi_ulong target_flock_addr,
     return 0;
 }
 
-static abi_long do_fcntl(int fd, int cmd, abi_ulong arg)
+#ifdef TARGET_I386
+/*
+ * The executable identity fd belongs to the translator, not to the guest fd
+ * table.  If a guest operation would mutate or destroy that descriptor,
+ * move the identity reference first and let the operation keep its normal
+ * result on the old descriptor number.
+ */
+static abi_long guest_exe_identity_relocate(CPUArchState *env, int fd)
+{
+    TaskState *ts = env_cpu(env)->opaque;
+    int new_fd = -1;
+    abi_long ret = 0;
+
+    mmap_lock();
+    if (ts->info->prctl_mm_exe_fd == fd) {
+        new_fd = fcntl(fd, F_DUPFD_CLOEXEC, 0);
+        if (new_fd < 0) {
+            ret = get_errno(-1);
+        } else {
+            ts->info->prctl_mm_exe_fd = new_fd;
+        }
+    }
+    mmap_unlock();
+
+    if (new_fd >= 0) {
+        fd_trans_unregister(new_fd);
+    }
+    return ret;
+}
+#endif
+
+static abi_long do_fcntl(CPUArchState *env, int fd, int cmd, abi_ulong arg)
 {
     struct flock64 fl64;
 #ifdef F_GETOWN_EX
@@ -10293,6 +10324,17 @@ static abi_long do_fcntl(int fd, int cmd, abi_ulong arg)
 
     if (host_cmd == -TARGET_EINVAL)
 	    return host_cmd;
+
+#ifdef TARGET_I386
+    /* The identity copy is already close-on-exec.  Setting that same bit is
+     * harmless; only clearing it would mutate the translator's reference. */
+    if (cmd == TARGET_F_SETFD && !(arg & FD_CLOEXEC)) {
+        ret = guest_exe_identity_relocate(env, fd);
+        if (ret) {
+            return ret;
+        }
+    }
+#endif
 
     switch(cmd) {
     case TARGET_F_GETLK:
@@ -14408,6 +14450,12 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
         return ret;
 #endif
     case TARGET_NR_close:
+#ifdef TARGET_I386
+        ret = guest_exe_identity_relocate(cpu_env, arg1);
+        if (ret) {
+            return ret;
+        }
+#endif
         fd_trans_unregister(arg1);
         return get_errno(close(arg1));
 
@@ -15575,7 +15623,7 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
         return ret;
 #ifdef TARGET_NR_fcntl
     case TARGET_NR_fcntl:
-        return do_fcntl(arg1, arg2, arg3);
+        return do_fcntl(cpu_env, arg1, arg2, arg3);
 #endif
     case TARGET_NR_setpgid:
         return get_errno(setpgid(arg1, arg2));
@@ -15589,6 +15637,14 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
         return ret;
 #ifdef TARGET_NR_dup2
     case TARGET_NR_dup2:
+#ifdef TARGET_I386
+        if (arg1 != arg2) {
+            ret = guest_exe_identity_relocate(cpu_env, arg2);
+            if (ret) {
+                return ret;
+            }
+        }
+#endif
         ret = get_errno(dup2(arg1, arg2));
         if (ret >= 0) {
             fd_trans_dup(arg1, arg2);
@@ -15604,6 +15660,14 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
             return -EINVAL;
         }
         host_flags = target_to_host_bitmask(arg3, fcntl_flags_tbl);
+#ifdef TARGET_I386
+        if (arg1 != arg2) {
+            ret = guest_exe_identity_relocate(cpu_env, arg2);
+            if (ret) {
+                return ret;
+            }
+        }
+#endif
         ret = get_errno(dup3(arg1, arg2, host_flags));
         if (ret >= 0) {
             fd_trans_dup(arg1, arg2);
@@ -19273,7 +19337,7 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
             ret = get_errno(safe_fcntl(arg1, cmd, &fl));
 	    break;
         default:
-            ret = do_fcntl(arg1, arg2, arg3);
+            ret = do_fcntl(cpu_env, arg1, arg2, arg3);
             break;
         }
         return ret;

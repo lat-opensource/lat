@@ -64,3 +64,7 @@ run_case i
 run_case e "$workdir/prctl-native-env-helper"
 run_case a "$workdir/prctl-native-env-helper"
 run_case d "$workdir/relative"
+run_case q
+run_case o
+run_case n
+run_case j
