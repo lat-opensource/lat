@@ -3817,7 +3817,7 @@ void *page_alloc_target_data(target_ulong address, size_t size)
 bool page_check_range(target_ulong start, target_ulong len, int flags)
 {
 #if defined(CONFIG_LATX_KZT)
-    if (option_kzt && start > reserved_va) {
+    if (latx_kzt_runtime_enabled() && start > reserved_va) {
         return true;
     }
 #endif

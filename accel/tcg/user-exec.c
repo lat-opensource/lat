@@ -1360,7 +1360,8 @@ int cpu_signal_handler(int host_signum, void *pinfo,
         }
     }
 #if defined(CONFIG_LATX_KZT)
-    if (option_kzt && (int64_t)info->si_addr >= info1.start_data &&
+    if (latx_kzt_runtime_enabled() &&
+        (int64_t)info->si_addr >= info1.start_data &&
         (int64_t)info->si_addr <= info1.end_data &&
         info->si_signo == SIGSEGV) {
         int ret = elf_data_interpret(info, uc);
@@ -1369,7 +1370,7 @@ int cpu_signal_handler(int host_signum, void *pinfo,
             return 1;
         }
     }
-    if (option_kzt && info->si_signo == SIGSEGV) {
+    if (latx_kzt_runtime_enabled() && info->si_signo == SIGSEGV) {
         for (int i = 0; i < sizeof(elf_native_func) / sizeof(int); i++) {
             if (!find_stack_func_exist(elf_native_func[i], 4)) {
                 int ret = elf_data_interpret(info, uc);

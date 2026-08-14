@@ -106,6 +106,7 @@ done:
     }
 #if defined(CONFIG_LATX_KZT)
     CPU_FOREACH(cpu) {
+        /* The installer also checks the effective library-group mask. */
         if (cpu && option_kzt) {
             kzt_install_runtime_callbacks(cpu, &info1);
         }

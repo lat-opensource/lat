@@ -1308,7 +1308,8 @@ static void host_signal_handler(int host_signum, siginfo_t *info,
     cpu_exit(thread_cpu);
 #if defined(CONFIG_LATX_KZT)
 #define SIGCANCEL       __SIGRTMIN
-    if (host_signum == SIGCANCEL + 2 && option_kzt && pc > reserved_va) {
+    if (host_signum == SIGCANCEL + 2 && latx_kzt_runtime_enabled() &&
+        pc > reserved_va) {
         #define BTSIZT 64
         void    * array[BTSIZT] = {0};
         size_t  size;

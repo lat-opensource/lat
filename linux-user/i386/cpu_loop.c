@@ -221,7 +221,7 @@ void cpu_loop(CPUX86State *env)
         cpu_exec_end(cs);
         process_queued_cpu_work(cs);
 #if defined(CONFIG_LATX_KZT)
-        if(option_kzt && trapnr == 0xCC)
+        if (latx_kzt_runtime_enabled() && trapnr == 0xCC)
             break;
 #endif
         switch(trapnr) {

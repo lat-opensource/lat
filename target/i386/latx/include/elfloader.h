@@ -73,5 +73,5 @@ void PltResolver(void);
 int RelocateElfRELA(lib_t *maplib, lib_t *local_maplib, int bindnow, elfheader_t* head, int cnt, Elf64_Rela *rela, int* need_resolv);
 uintptr_t loadSoaddrFromMap(char * real_path);
 void ElfHeadReFix (elfheader_t* head, uintptr_t delta);
-int CheckEnableKZT(elfheader_t* h, char** target_argv, int target_argc);
+void CheckEnableKZT(elfheader_t *h, char **target_argv, int target_argc);
 #endif //__ELF_LOADER_H_

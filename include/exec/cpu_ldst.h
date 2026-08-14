@@ -58,7 +58,7 @@
 #define CPU_LDST_H
 
 #if defined(CONFIG_LATX_KZT)
-extern int option_kzt;
+#include "kzt-runtime.h"
 #endif
 #if defined(CONFIG_USER_ONLY)
 /* sparc32plus has 64bit long but 32bit space address
@@ -93,7 +93,7 @@ static inline void *g2h(CPUState *cs, abi_ptr x)
 static inline bool guest_addr_valid_untagged(abi_ulong x)
 {
 #if defined(CONFIG_LATX_KZT)
-    if (option_kzt) {
+    if (latx_kzt_runtime_enabled()) {
         return true;
     } else
 #endif
@@ -103,7 +103,7 @@ static inline bool guest_addr_valid_untagged(abi_ulong x)
 static inline bool guest_range_valid_untagged(abi_ulong start, abi_ulong len)
 {
 #if defined(CONFIG_LATX_KZT)
-    if (option_kzt) {
+    if (latx_kzt_runtime_enabled()) {
         return true;
     } else
 #endif

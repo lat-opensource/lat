@@ -256,7 +256,9 @@ bool translate_int_3(IR1_INST *pir1)
         state_info.cflags = cpu->tcg_cflags;
         cpu_get_tb_cpu_state(cpu->env_ptr, &state_info.current_pc,
                              &state_info.cs_base, &state_info.flags);
-        if(option_kzt && Peek8(state_info.current_pc + 1, 0) == 'S' && Peek8(state_info.current_pc + 1, 1) == 'C')
+        if (latx_kzt_runtime_enabled() &&
+            Peek8(state_info.current_pc + 1, 0) == 'S' &&
+            Peek8(state_info.current_pc + 1, 1) == 'C')
         {
             TranslationBlock *tb = NULL;
             mmap_lock();

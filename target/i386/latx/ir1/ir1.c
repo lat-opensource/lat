@@ -1719,7 +1719,10 @@ int ir1_is_syscall(IR1_INST *ir1)
 bool ir1_is_tb_ending(IR1_INST *ir1)
 {
 #if defined(CONFIG_LATX_KZT)
-    if(option_kzt && ir1_opcode(ir1) == dt_X86_INS_INT3) return true;
+    if (latx_kzt_runtime_enabled() &&
+        ir1_opcode(ir1) == dt_X86_INS_INT3) {
+        return true;
+    }
 #endif
     if (option_anonym &&
         (ir1_opcode(ir1) == dt_X86_INS_POPF ||

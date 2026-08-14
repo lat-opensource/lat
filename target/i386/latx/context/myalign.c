@@ -11,6 +11,7 @@
 #include "myalign.h"
 #include "elfloader.h"
 #include "elfloader_private.h"
+#include "kzt-groups.h"
 #include "kzt_public_loader_observer.h"
 #include "kzt_relro_preprotect.h"
 #include "latx-options.h"
@@ -2102,7 +2103,7 @@ int kzt_init(char** argv, int argc,char** target_argv, int target_argc,
         elf_header = LoadFromNative(bprm, info);
     }
     if (option_kzt == 1 && elf_header) {
-        option_kzt = CheckEnableKZT(elf_header, target_argv, target_argc);
+        CheckEnableKZT(elf_header, target_argv, target_argc);
     }
     const char* prog = argv[1];
     LoadEnvVars(my_context);
@@ -2735,7 +2736,8 @@ void kzt_try_bind_before_guest_relro(uintptr_t start, size_t length, int prot)
     size_t dynamic_count;
     int processed = 0;
 
-    if (!option_kzt || in_preprotect || !my_context || !elf_header ||
+    if (!latx_kzt_runtime_enabled() ||
+        in_preprotect || !my_context || !elf_header ||
         !have_mmap_lock() ||
         !(prot & PROT_READ) || (prot & PROT_WRITE) || !length ||
         (start & (TARGET_PAGE_SIZE - 1)) ||
@@ -3068,8 +3070,14 @@ void kzt_install_runtime_callbacks(CPUState *cpu, void *info)
 {
     struct image_info * execinfo = (struct image_info *)info;
     static uint32 jmpinst_exec [2] = {0};
-    CPUArchState *env = cpu->env_ptr;
-    target_ulong eip = env->eip;
+    CPUArchState *env;
+    target_ulong eip;
+
+    if (!latx_kzt_runtime_enabled()) {
+        return;
+    }
+    env = cpu->env_ptr;
+    eip = env->eip;
 
     kzt_public_loader_observer_reset(&kzt_public_loader_observer);
     memset(kzt_public_r_brk_inst, 0, sizeof(kzt_public_r_brk_inst));
@@ -3091,7 +3099,7 @@ void kzt_bridge_init(void)
     CPUState *cpu_tmp;
     kzt_tbbridge_init();
     CPU_FOREACH(cpu_tmp) {
-        if (cpu_tmp && elf_header  && option_kzt) {
+        if (cpu_tmp && elf_header && latx_kzt_runtime_enabled()) {
             kzt_install_runtime_callbacks(cpu_tmp, &info1);
         }
     }
@@ -3120,7 +3128,7 @@ static void m_handle_ld(char * file_name, abi_ulong start)
     };
     CPUState *cpu_tmp;
     CPU_FOREACH(cpu_tmp) {
-            if (cpu_tmp  && option_kzt) {
+            if (cpu_tmp && latx_kzt_runtime_enabled()) {
                 kzt_install_runtime_callbacks(cpu_tmp, &execinfo);
             }
     }
@@ -3204,7 +3212,8 @@ void kzt_wine_bridge(abi_ulong start, int fd)
 
 void kzt_wine_init_x86(void)
 {
-    if (!option_kzt ||!latx_wine  ||my_context->mallocmapsize) {
+    if (!latx_kzt_runtime_enabled() || !latx_wine ||
+        my_context->mallocmapsize) {
         return;
     }
     struct malloc_map* m = malloc(sizeof(struct malloc_map));

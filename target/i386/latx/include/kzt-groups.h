@@ -11,6 +11,7 @@
 #include <stdint.h>
 
 #include "kzt-group-list.h"
+#include "kzt-runtime.h"
 
 typedef enum KztLibraryGroup {
     KZT_GROUP_NONE = 0,
@@ -45,7 +46,17 @@ void kzt_groups_print_available(void);
 void kzt_groups_reset(void);
 bool kzt_groups_configure(const char *spec, bool log_enabled);
 void kzt_groups_reject_configuration(const char *reason, bool log_enabled);
-uint32_t kzt_groups_enabled_mask(void);
+
+/*
+ * requested_mask is the dependency-complete user selection.  Runtime
+ * compatibility checks remove unsafe families only from enabled_mask, so
+ * requested_mask & ~effective_mask identifies compatibility-disabled
+ * families.
+ */
+uint32_t kzt_groups_requested_mask(void);
+uint32_t kzt_groups_effective_mask(void);
+bool kzt_group_disable(KztLibraryGroup group, const char *reason);
+void kzt_groups_disable_all(const char *reason);
 bool kzt_group_is_enabled(KztLibraryGroup group);
 bool kzt_library_is_enabled(const char *soname);
 const char *kzt_groups_last_error(void);

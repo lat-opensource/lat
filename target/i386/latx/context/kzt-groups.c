@@ -39,7 +39,8 @@ static const KztLibraryGroupEntry kzt_library_groups[] = {
 #undef GO
 #undef GOALIAS
 
-static uint32_t enabled_groups = KZT_GROUP_STABLE;
+static uint32_t requested_groups = KZT_GROUP_STABLE;
+uint32_t kzt_effective_groups = KZT_GROUP_STABLE;
 static bool group_log_enabled;
 static char group_error[128];
 static bool library_decision_logged[ARRAY_SIZE(kzt_library_groups)];
@@ -268,7 +269,7 @@ static void kzt_groups_log_effective(const char *spec, uint32_t dependencies,
     if (pruned) {
         kzt_groups_log_mask("disabled dependent library groups", pruned);
     }
-    kzt_groups_log_mask("enabled library groups", enabled_groups);
+    kzt_groups_log_mask("enabled library groups", kzt_effective_groups);
 }
 
 KztLibraryGroup kzt_group_for_library(const char *soname)
@@ -326,7 +327,8 @@ void kzt_groups_print_available(void)
 
 void kzt_groups_reset(void)
 {
-    enabled_groups = KZT_GROUP_STABLE;
+    requested_groups = KZT_GROUP_STABLE;
+    kzt_effective_groups = KZT_GROUP_STABLE;
     group_log_enabled = false;
     group_error[0] = '\0';
     memset(library_decision_logged, 0, sizeof(library_decision_logged));
@@ -349,7 +351,8 @@ bool kzt_groups_configure(const char *spec, bool log_enabled)
     memset(library_decision_logged, 0, sizeof(library_decision_logged));
     if (!kzt_parse_group_spec(spec, &mode, &selected, &added, &removed,
                               &use_stable)) {
-        enabled_groups = KZT_GROUP_NONE;
+        requested_groups = KZT_GROUP_NONE;
+        kzt_effective_groups = KZT_GROUP_NONE;
         group_log_enabled = log_enabled;
         return false;
     }
@@ -367,8 +370,9 @@ bool kzt_groups_configure(const char *spec, bool log_enabled)
     dependencies = groups & ~before_dependencies;
     groups &= ~removed;
     before_prune = groups;
-    enabled_groups = kzt_prune_missing_dependencies(groups);
-    pruned = before_prune & ~enabled_groups;
+    requested_groups = kzt_prune_missing_dependencies(groups);
+    kzt_effective_groups = requested_groups;
+    pruned = before_prune & ~kzt_effective_groups;
     group_log_enabled = log_enabled;
     kzt_groups_log_effective(spec, dependencies, removed, pruned);
     return true;
@@ -376,19 +380,65 @@ bool kzt_groups_configure(const char *spec, bool log_enabled)
 
 void kzt_groups_reject_configuration(const char *reason, bool log_enabled)
 {
-    enabled_groups = KZT_GROUP_NONE;
+    requested_groups = KZT_GROUP_NONE;
+    kzt_effective_groups = KZT_GROUP_NONE;
     group_log_enabled = log_enabled;
     snprintf(group_error, sizeof(group_error), "%s", reason);
 }
 
-uint32_t kzt_groups_enabled_mask(void)
+uint32_t kzt_groups_requested_mask(void)
 {
-    return enabled_groups;
+    return requested_groups;
+}
+
+uint32_t kzt_groups_effective_mask(void)
+{
+    return kzt_effective_groups;
+}
+
+bool kzt_group_disable(KztLibraryGroup group, const char *reason)
+{
+    uint32_t before_prune;
+    uint32_t pruned;
+
+    if (group == KZT_GROUP_NONE || !(kzt_effective_groups & group)) {
+        return false;
+    }
+
+    kzt_effective_groups &= ~group;
+    before_prune = kzt_effective_groups;
+    kzt_effective_groups = kzt_prune_missing_dependencies(kzt_effective_groups);
+    pruned = before_prune & ~kzt_effective_groups;
+
+    if (group_log_enabled) {
+        fprintf(stderr, "KZT: disabled library group %s: %s\n",
+                kzt_group_name(group),
+                reason ? reason : "compatibility check failed");
+        if (pruned) {
+            kzt_groups_log_mask("disabled dependent library groups", pruned);
+        }
+        kzt_groups_log_mask("enabled library groups", kzt_effective_groups);
+    }
+    return true;
+}
+
+void kzt_groups_disable_all(const char *reason)
+{
+    if (kzt_effective_groups == KZT_GROUP_NONE) {
+        return;
+    }
+    kzt_effective_groups = KZT_GROUP_NONE;
+    if (group_log_enabled) {
+        fprintf(stderr, "KZT: disabled all library groups: %s\n",
+                reason ? reason : "compatibility check failed");
+        kzt_groups_log_mask("enabled library groups", kzt_effective_groups);
+    }
 }
 
 bool kzt_group_is_enabled(KztLibraryGroup group)
 {
-    return group != KZT_GROUP_NONE && (enabled_groups & group) == group;
+    return group != KZT_GROUP_NONE &&
+           (kzt_effective_groups & group) == group;
 }
 
 bool kzt_library_is_enabled(const char *soname)

@@ -653,7 +653,22 @@ static int isChromeApp(elfheader_t* h, int con_score)
     return 0;
 }
 
-int CheckEnableKZT(elfheader_t* h, char** target_argv, int target_argc)
+static bool kzt_soname_matches_filename(const char *soname,
+                                        const char *filename)
+{
+    const char *suffix = strstr(soname, ".so");
+    size_t prefix_length;
+
+    if (!suffix) {
+        return !strcmp(soname, filename);
+    }
+    prefix_length = suffix - soname + strlen(".so");
+    return !strncmp(soname, filename, prefix_length) &&
+           (filename[prefix_length] == '\0' ||
+            filename[prefix_length] == '.');
+}
+
+void CheckEnableKZT(elfheader_t *h, char **target_argv, int target_argc)
 {
     path_collection_t   lib_path = {0,0,0};
     char *rpathref;
@@ -675,11 +690,6 @@ int CheckEnableKZT(elfheader_t* h, char** target_argv, int target_argc)
                 }
                 break;
             case DT_NEEDED:
-                if (strstr(h->DynStrTab+h->delta+h->Dynamic[i].d_un.d_val, "libgtk-3.so")||//skip gtk
-                    strstr(h->DynStrTab+h->delta+h->Dynamic[i].d_un.d_val, "libXt.so")) {//skip mainexec needed libXt.so
-                    printf_log(LOG_INFO, "latx find libgtk or libXt, skip kzt\n");
-                    return 0;
-                }
                 ++needlibcnt;
                 break;
         }
@@ -696,11 +706,6 @@ int CheckEnableKZT(elfheader_t* h, char** target_argv, int target_argc)
         if (!kzt_library_is_enabled(wrappedlibs_name[i])) {
             continue;
         }
-        char *p = box_strdup(wrappedlibs_name[i]);
-        char *p2 = strchr(p, '.');
-        if (++p2) {
-            *p2 = '\0';
-        }
         for (int j=0; j<lib_path.size; ++j) {
             DIR *dir = opendir(lib_path.paths[j]);
             if (dir == NULL) {
@@ -710,26 +715,56 @@ int CheckEnableKZT(elfheader_t* h, char** target_argv, int target_argc)
 
             struct dirent *entry;
             while ((entry = readdir(dir)) != NULL) {
-                if (entry->d_type == DT_REG) {  // Check if it's a regular file
-                    if (!strncmp(entry->d_name, p, strlen(p))) {
-                        printf_log(LOG_INFO, "File starting with '%s' found: %s at %s\n", p, entry->d_name, lib_path.paths[j]);
-                        closedir(dir);
-                        FreeCollection(&lib_path);
-                        return 0;
-                    }
+                char candidate[PATH_MAX];
+                char reason[PATH_MAX + 96];
+                KztLibraryGroup group;
+                int candidate_length;
+
+                if (!kzt_soname_matches_filename(wrappedlibs_name[i],
+                                                 entry->d_name)) {
+                    continue;
                 }
+                candidate_length = snprintf(
+                    candidate, sizeof(candidate), "%s%s%s", lib_path.paths[j],
+                    lib_path.paths[j][strlen(lib_path.paths[j]) - 1] == '/'
+                        ? "" : "/",
+                    entry->d_name);
+                if (candidate_length < 0 ||
+                    (size_t)candidate_length >= sizeof(candidate)) {
+                    continue;
+                }
+                if (!FileExist(candidate, IS_FILE) ||
+                    !FileIsX64ELF(candidate)) {
+                    continue;
+                }
+                group = kzt_group_for_library(wrappedlibs_name[i]);
+                snprintf(reason, sizeof(reason),
+                         "guest %s resolved from application path %s",
+                         entry->d_name, lib_path.paths[j]);
+                kzt_group_disable(group, reason);
+                break;
             }
             closedir(dir);
+            if (!kzt_library_is_enabled(wrappedlibs_name[i])) {
+                break;
+            }
         }
     }
     FreeCollection(&lib_path);
     //disable kzt chrome app
     for(int i = 0; i < target_argc; i++) {
         if (!strcmp(target_argv[i], "--no-sandbox")) {
-            return !isChromeApp(h, 5);
+            if (isChromeApp(h, 5)) {
+                kzt_groups_disable_all(
+                    "main executable matched the Chrome compatibility gate");
+            }
+            return;
         }
     }
-    return !isChromeApp(h, 10);
+    if (isChromeApp(h, 10)) {
+        kzt_groups_disable_all(
+            "main executable matched the Chrome compatibility gate");
+    }
 }
 
 const char* ElfName(elfheader_t* head)

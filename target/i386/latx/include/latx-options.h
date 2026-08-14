@@ -32,6 +32,8 @@ extern int option_tu_link;
 #endif
 
 #ifdef CONFIG_LATX_KZT
+#include "kzt-runtime.h"
+
 extern int option_kzt_log;
 extern char *option_kzt_libs;
 extern char *option_kzt_error;

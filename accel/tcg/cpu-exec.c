@@ -195,7 +195,7 @@ cpu_tb_exec(CPUState *cpu, TranslationBlock *itb, int *tb_exit)
     if (qemu_loglevel_mask(CPU_LOG_EXEC)) {
 #ifdef CONFIG_LATX_KZT
         Dl_info dl_info;
-        if (option_kzt && itb->pc > reserved_va &&
+        if (latx_kzt_runtime_enabled() && itb->pc > reserved_va &&
             dladdr ((const void *)((onebridge_t *)itb->pc)->f, &dl_info)) {
             qemu_log_mask_and_addr(CPU_LOG_EXEC, itb->pc,
                    "pid(%d) - tid(%" PRIuPTR ") Trace cpu%d: %p [ "
@@ -285,7 +285,7 @@ cpu_tb_exec(CPUState *cpu, TranslationBlock *itb, int *tb_exit)
             }
             lazypc = rettb->pc + rettb->lazypc[0];
 #if defined(CONFIG_LATX_KZT)
-            if (option_kzt && lazypc >= reserved_va) {
+            if (latx_kzt_runtime_enabled() && lazypc >= reserved_va) {
                 uintptr_t alt_pc = (uintptr_t)getAlternate((void *)(uintptr_t)lazypc);
                 if (alt_pc != (uintptr_t)lazypc) {
                     lazypc = alt_pc;
@@ -853,7 +853,7 @@ TranslationBlock * kzt_tb_find_exp(
 static inline bool cpu_handle_exception(CPUState *cpu, int *ret)
 {
 #if defined(CONFIG_LATX_KZT)
-    if (option_kzt) {
+    if (latx_kzt_runtime_enabled()) {
         CPUArchState *env = cpu->env_ptr;
         if(env->eip == (uint64_t)&RunFunctionWithState){
             *ret = 0xCC;
@@ -945,7 +945,7 @@ static inline bool cpu_handle_interrupt(CPUState *cpu,
                                         TranslationBlock **last_tb)
 {
 #if defined(CONFIG_LATX_KZT)
-    if (option_kzt) {
+    if (latx_kzt_runtime_enabled()) {
         CPUArchState *env = cpu->env_ptr;
         if(env->eip == (uint64_t)&RunFunctionWithState){
             *last_tb = NULL;

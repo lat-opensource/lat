@@ -13,6 +13,7 @@
 #include "debug.h"
 #include "library.h"
 #include "fileutils.h"
+#include "latx-options.h"
 
 #if defined(CONFIG_LATX_KZT) && defined(CONFIG_LATX_DEBUG)
 void AddDebugInfo(int type, char *name, unsigned long start, unsigned long end)
@@ -44,14 +45,15 @@ static struct latx_kzt_debug * latx_kzt_debuginfo_scan(uintptr_t x86pc)
     }
     return NULL;
 }
-extern int option_kzt;
-
 void latx_kzt_debuginfo_check(void)
 {
     char buf[4096];
     FILE *f;
     uintptr_t tbptr, cs_base, threadhandle, x86pc, tbflags;
-    if (!option_kzt || !(qemu_loglevel & CPU_LOG_EXEC)) { //LAT_LOG=exec
+
+    /* LAT_LOG=exec */
+    if (!latx_kzt_runtime_enabled() ||
+        !(qemu_loglevel & CPU_LOG_EXEC)) {
         return;
     }
     QemuLogFile *logfile = qatomic_rcu_read(&qemu_logfile);

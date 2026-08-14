@@ -26,7 +26,7 @@ static int ss_generate_match_fail_native_code(void* code_buf);
 #if defined(CONFIG_LATX_KZT)
 uintptr_t kzt_get_alternate_pc(uintptr_t addr)
 {
-    if (!option_kzt || addr < reserved_va) {
+    if (!latx_kzt_runtime_enabled() || addr < reserved_va) {
         return addr;
     }
     return (uintptr_t)getAlternate((void *)addr);
@@ -2760,7 +2760,7 @@ direct_jmp:
         la_profile_begin();
 #endif
 #if defined(CONFIG_LATX_KZT)
-        if (option_kzt && succ_x86_addr >= reserved_va) {
+        if (latx_kzt_runtime_enabled() && succ_x86_addr >= reserved_va) {
             uintptr_t alt_pc = (uintptr_t)getAlternate((void *)(uintptr_t)succ_x86_addr);
             if (alt_pc != (uintptr_t)succ_x86_addr) {
                 succ_x86_addr = (ADDR)alt_pc;
