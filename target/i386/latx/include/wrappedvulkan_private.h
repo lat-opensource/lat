@@ -973,3 +973,44 @@ GO(vkCmdInitializeGraphScratchMemoryAMDX, vFpUU)
 GOM(vkCreateExecutionGraphPipelinesAMDX, iFEpUuppp)
 GO(vkGetExecutionGraphPipelineNodeIndexAMDX, iFpUpp)
 GO(vkGetExecutionGraphPipelineScratchSizeAMDX, iFpUp)
+
+// VK_KHR_dynamic_rendering_local_read
+GO(vkCmdSetRenderingAttachmentLocationsKHR, vFpp)
+GO(vkCmdSetRenderingInputAttachmentIndicesKHR, vFpp)
+
+// VK_KHR_line_rasterization
+GO(vkCmdSetLineStippleKHR, vFpuW)
+
+// VK_NV_cooperative_matrix2
+GO(vkGetPhysicalDeviceCooperativeMatrixFlexibleDimensionsPropertiesNV, iFppp)
+
+// VK_NV_cooperative_vector
+GO(vkGetPhysicalDeviceCooperativeVectorPropertiesNV, iFppp)
+
+// VK_ARM_tensors
+GO(vkGetPhysicalDeviceExternalTensorPropertiesARM, vFppp)
+
+// VK_ARM_data_graph
+GO(vkGetPhysicalDeviceQueueFamilyDataGraphProcessingEnginePropertiesARM, vFppp)
+GO(vkGetPhysicalDeviceQueueFamilyDataGraphPropertiesARM, iFpupp)
+
+// VK_ARM_performance_counters_by_region
+GO(vkEnumeratePhysicalDeviceQueueFamilyPerformanceCountersByRegionARM, iFpuppp)
+
+// VK_EXT_descriptor_heap
+GO(vkGetPhysicalDeviceDescriptorSizeEXT, UFpu)
+
+// VK_KHR_swapchain_maintenance1
+GO(vkReleaseSwapchainImagesKHR, iFpp)
+
+// VK_ARM_shader_instrumentation
+GO(vkEnumeratePhysicalDeviceShaderInstrumentationMetricsARM, iFppp)
+
+// VK_KHR_maintenance10
+GO(vkCmdEndRendering2KHR, vFpp)
+
+// VK_ARM_data_graph_instruction_set_tosa
+GO(vkGetPhysicalDeviceQueueFamilyDataGraphEngineOperationPropertiesARM, iFpupp)
+
+// VK_ARM_data_graph_optical_flow
+GO(vkGetPhysicalDeviceQueueFamilyDataGraphOpticalFlowImageFormatsARM, iFpupppp)

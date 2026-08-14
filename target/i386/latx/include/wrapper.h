@@ -1554,5 +1554,7 @@ void vFppipipiu(uintptr_t fcn);
 void uFpddpippppp(uintptr_t fcn);
 void iFpippu(uintptr_t fcn);
 void uFpupppp(uintptr_t fcn);
+void UFpu(uintptr_t fcn);
+void iFpupppp(uintptr_t fcn);
 //endxcbV2
 #endif // __WRAPPER_H_
