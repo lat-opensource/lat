@@ -27,6 +27,36 @@ struct aot_info {
     time_t st_actime;
 };
 
+int get_aot_path(const char *lib_name, char *file_path,
+                 size_t file_path_size)
+{
+    const char *home;
+    char *escaped_name;
+    int len;
+
+    if (!lib_name || !file_path || !file_path_size) {
+        return -EINVAL;
+    }
+    escaped_name = g_strdup(lib_name);
+    if (!escaped_name) {
+        return -ENOMEM;
+    }
+    for (char *p = escaped_name; *p; p++) {
+        if (*p == '/') {
+            *p = '+';
+        }
+    }
+    home = getenv("HOME");
+    len = snprintf(file_path, file_path_size, "%s/.cache/latx/%s.aot2",
+                   home ? home : "", escaped_name);
+    g_free(escaped_name);
+    if (len < 0 || (size_t)len >= file_path_size) {
+        file_path[0] = '\0';
+        return -ENAMETOOLONG;
+    }
+    return 0;
+}
+
 int aot_file_get_tmp_path(const char *aot_file, char *tmp_path,
                           size_t tmp_path_size)
 {

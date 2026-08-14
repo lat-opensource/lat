@@ -12,6 +12,7 @@
 #ifndef AOT_FILE_CTX_H
 #define AOT_FILE_CTX_H
 #include "aot.h"
+
 int aot_file_ctx(uint64_t maxSize, uint64_t leftMinSize);
 int aot_file_get_tmp_path(const char *aot_file, char *tmp_path,
                           size_t tmp_path_size);

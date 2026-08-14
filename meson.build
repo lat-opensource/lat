@@ -696,6 +696,28 @@ foreach target : target_dirs
       suite: 'lat-pr-fast',
     )
 
+    aot_cache_reader_test = executable(
+      'test-latx-aot-cache-reader',
+      files(
+        'target/i386/latx/sbt/tests/aot-cache-reader-test.c',
+        'target/i386/latx/sbt/aot_reader.c',
+        'target/i386/latx/sbt/aot_lib.c',
+        'target/i386/latx/sbt/file_ctx.c'
+      ) + genh + tcg_trace_genh + [syscall_nr_generated],
+      c_args: smc_reload_test_c_args,
+      dependencies: [glib],
+      include_directories: target_inc,
+      link_args: smc_reload_test_link_args + [
+        '-Wl,--wrap=fdopen',
+        '-Wl,--wrap=fclose'
+      ]
+    )
+    test(
+      'latx-aot-cache-reader',
+      aot_cache_reader_test,
+      suite: 'lat-pr-fast',
+    )
+
     aot_exit_worker_test = executable(
       'test-latx-aot-exit-worker',
       files(
