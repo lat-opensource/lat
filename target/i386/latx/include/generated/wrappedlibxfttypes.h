@@ -8,10 +8,13 @@
 #error You should only #include this file inside a wrapped*.c file
 #endif
 #ifndef ADDED_FUNCTIONS
-#define ADDED_FUNCTIONS() 
+#define ADDED_FUNCTIONS()
 #endif
 
+typedef void *(*pFpiV_t)(void *, int32_t, ...);
 
-#define SUPER() ADDED_FUNCTIONS()
+#define SUPER() ADDED_FUNCTIONS() \
+    GO(XftFontOpen, pFpiV_t) \
+    GO(XftListFonts, pFpiV_t)
 
 #endif // __wrappedlibxftTYPES_H_
