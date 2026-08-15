@@ -26,6 +26,7 @@
 #include "library_private.h"
 #include "myalign.h"
 #include "wrappedcairo-preflight.h"
+#include "wrappedfont-interop.h"
 #include "wrappedfont-preflight.h"
 #include "wrapper.h"
 
@@ -34,6 +35,15 @@
 
 const char *cairoName = "libcairo.so.2";
 #define LIBNAME cairo
+
+typedef void (*cairo_native_vFp_t)(void *);
+typedef void *(*cairo_native_pFpp_t)(void *, void *);
+typedef uint32_t (*cairo_native_uFp_t)(void *);
+
+#define ADDED_FUNCTIONS() \
+    GO(cairo_font_face_destroy, cairo_native_vFp_t) \
+    GO(cairo_font_face_get_user_data, cairo_native_pFpp_t) \
+    GO(cairo_font_face_status, cairo_native_uFp_t)
 
 #include "generated/wrappedcairotypes.h"
 
@@ -128,13 +138,23 @@ typedef struct CairoObjectTracker {
     struct CairoObjectTracker *next;
 } CairoObjectTracker;
 
+typedef struct CairoFtFaceLock {
+    void *scaled_font;
+    void *face;
+    GThread *owner;
+    unsigned references;
+    struct CairoFtFaceLock *next;
+} CairoFtFaceLock;
+
 static GMutex cairo_callback_lock;
 static CairoCallbackBinding *cairo_bindings;
 static CairoObjectTracker *cairo_trackers;
+static CairoFtFaceLock *cairo_ft_face_locks;
 static char cairo_surface_tracker_key;
 static char cairo_device_tracker_key;
 static char cairo_font_face_tracker_key;
 static char cairo_pattern_tracker_key;
+static char cairo_ft_face_key;
 
 static CairoCallbackSlot cairo_destroy_slots[CAIRO_CALLBACK_SLOT_COUNT];
 static CairoCallbackSlot cairo_io_slots[CAIRO_CALLBACK_SLOT_COUNT];
@@ -845,13 +865,7 @@ static uint32_t cairo_ft_interop_failure(void *font, void *cr, void *extents)
     return CAIRO_STATUS_FONT_TYPE_MISMATCH;
 }
 
-/*
- * The font wrapper family is available, but Cairo object interoperation stays
- * closed until FT_Face and FcPattern ownership and lifetime rules are wired
- * across both wrappers.  Return a valid host Cairo face that fails explicitly
- * on use instead of mixing guest and host opaque objects.
- */
-static void *cairo_ft_unsupported_font_face(void)
+static void *cairo_ft_error_font_face(const char *reason)
 {
     void *font_face = my->cairo_user_font_face_create();
 
@@ -859,9 +873,46 @@ static void *cairo_ft_unsupported_font_face(void)
         my->cairo_user_font_face_set_init_func(font_face,
                                                cairo_ft_interop_failure);
     }
-    kzt_groups_log_wrapper_limitation(
-        cairoName, "Cairo FreeType/Fontconfig object interop is not enabled");
+    kzt_groups_log_wrapper_limitation(cairoName, reason);
     return font_face;
+}
+
+static void cairo_ft_release_face(void *face)
+{
+    latx_freetype_face_release(face);
+}
+
+/*
+ * Cairo does not own a pre-opened FT_Face, so retain one wrapper-managed
+ * reference until the last cached cairo_font_face_t reference is released.
+ */
+static bool cairo_ft_keep_face_alive(void *font_face, void *face)
+{
+    void *retained;
+    uint32_t status;
+
+    if (!face) {
+        return true;
+    }
+    g_mutex_lock(&cairo_callback_lock);
+    retained = my->cairo_font_face_get_user_data(font_face,
+                                                  &cairo_ft_face_key);
+    if (retained) {
+        g_mutex_unlock(&cairo_callback_lock);
+        return retained == face;
+    }
+    if (!latx_freetype_face_reference(face)) {
+        g_mutex_unlock(&cairo_callback_lock);
+        return false;
+    }
+    status = my->cairo_font_face_set_user_data(
+        font_face, &cairo_ft_face_key, face, cairo_ft_release_face);
+    g_mutex_unlock(&cairo_callback_lock);
+    if (status != CAIRO_STATUS_SUCCESS) {
+        latx_freetype_face_release(face);
+        return false;
+    }
+    return true;
 }
 
 EXPORT void *my_cairo_user_font_face_create(void)
@@ -872,36 +923,133 @@ EXPORT void *my_cairo_user_font_face_create(void)
 EXPORT void *my_cairo_ft_font_face_create_for_ft_face(void *face,
                                                        int32_t load_flags)
 {
-    (void)face;
-    (void)load_flags;
-    return cairo_ft_unsupported_font_face();
+    void *font_face = my->cairo_ft_font_face_create_for_ft_face(face,
+                                                                load_flags);
+
+    if (!font_face ||
+        my->cairo_font_face_status(font_face) != CAIRO_STATUS_SUCCESS) {
+        return font_face;
+    }
+    if (cairo_ft_keep_face_alive(font_face, face)) {
+        return font_face;
+    }
+    my->cairo_font_face_destroy(font_face);
+    return cairo_ft_error_font_face(
+        "cannot retain FT_Face for Cairo font-face lifetime");
 }
 
 EXPORT void *my_cairo_ft_font_face_create_for_pattern(void *pattern)
 {
-    (void)pattern;
-    return cairo_ft_unsupported_font_face();
+    void *face = latx_fontconfig_pattern_ft_face(pattern);
+    void *font_face = my->cairo_ft_font_face_create_for_pattern(pattern);
+
+    if (!font_face || !face ||
+        my->cairo_font_face_status(font_face) != CAIRO_STATUS_SUCCESS) {
+        return font_face;
+    }
+    if (cairo_ft_keep_face_alive(font_face, face)) {
+        return font_face;
+    }
+    my->cairo_font_face_destroy(font_face);
+    return cairo_ft_error_font_face(
+        "cannot retain FcPattern FT_Face for Cairo font-face lifetime");
 }
 
-EXPORT void my_cairo_ft_font_options_substitute(void *pattern, void *options)
+EXPORT void my_cairo_ft_font_options_substitute(void *options, void *pattern)
 {
-    (void)pattern;
-    (void)options;
-    kzt_groups_log_wrapper_limitation(
-        cairoName, "Cairo Fontconfig object interop is not enabled");
+    my->cairo_ft_font_options_substitute(options, pattern);
 }
 
 EXPORT void *my_cairo_ft_scaled_font_lock_face(void *scaled_font)
 {
-    (void)scaled_font;
+    CairoFtFaceLock *tracker;
+    GThread *owner = g_thread_self();
+    void *face = my->cairo_ft_scaled_font_lock_face(scaled_font);
+
+    if (!face) {
+        return NULL;
+    }
+    /* The returned face is owned by Cairo and is valid only until unlock. */
+    if (!latx_freetype_face_borrow(face)) {
+        my->cairo_ft_scaled_font_unlock_face(scaled_font);
+        kzt_groups_log_wrapper_limitation(
+            cairoName, "cannot track Cairo-borrowed FT_Face");
+        return NULL;
+    }
+
+    g_mutex_lock(&cairo_callback_lock);
+    for (tracker = cairo_ft_face_locks; tracker; tracker = tracker->next) {
+        if (tracker->scaled_font != scaled_font) {
+            continue;
+        }
+        if (tracker->face == face && tracker->owner == owner) {
+            tracker->references++;
+            g_mutex_unlock(&cairo_callback_lock);
+            return face;
+        }
+        g_mutex_unlock(&cairo_callback_lock);
+        latx_freetype_face_return(face);
+        my->cairo_ft_scaled_font_unlock_face(scaled_font);
+        kzt_groups_log_wrapper_limitation(
+            cairoName, "inconsistent nested Cairo FT_Face lock");
+        return NULL;
+    }
+
+    tracker = calloc(1, sizeof(*tracker));
+    if (tracker) {
+        tracker->scaled_font = scaled_font;
+        tracker->face = face;
+        tracker->owner = owner;
+        tracker->references = 1;
+        tracker->next = cairo_ft_face_locks;
+        cairo_ft_face_locks = tracker;
+    }
+    g_mutex_unlock(&cairo_callback_lock);
+    if (tracker) {
+        return face;
+    }
+
+    latx_freetype_face_return(face);
+    my->cairo_ft_scaled_font_unlock_face(scaled_font);
     kzt_groups_log_wrapper_limitation(
-        cairoName, "returning a host FT_Face to guest code is unsupported");
+        cairoName, "cannot allocate Cairo FT_Face lock tracker");
     return NULL;
 }
 
 EXPORT void my_cairo_ft_scaled_font_unlock_face(void *scaled_font)
 {
-    (void)scaled_font;
+    CairoFtFaceLock **cursor;
+    CairoFtFaceLock *tracker = NULL;
+    GThread *owner = g_thread_self();
+    void *face;
+
+    g_mutex_lock(&cairo_callback_lock);
+    cursor = &cairo_ft_face_locks;
+    while (*cursor) {
+        if ((*cursor)->scaled_font != scaled_font ||
+            (*cursor)->owner != owner) {
+            cursor = &(*cursor)->next;
+            continue;
+        }
+        tracker = *cursor;
+        if (--tracker->references == 0) {
+            *cursor = tracker->next;
+        }
+        break;
+    }
+    g_mutex_unlock(&cairo_callback_lock);
+    if (!tracker) {
+        kzt_groups_log_wrapper_limitation(
+            cairoName, "Cairo FT_Face unlock has no matching guest lock");
+        return;
+    }
+
+    face = tracker->face;
+    my->cairo_ft_scaled_font_unlock_face(scaled_font);
+    latx_freetype_face_return(face);
+    if (tracker->references == 0) {
+        free(tracker);
+    }
 }
 
 #define DEFINE_USER_DATA_WRAPPER(name, object_type) \
@@ -1287,6 +1435,7 @@ static void cairo_callbacks_clear(void)
 {
     CairoCallbackBinding *binding;
     CairoObjectTracker *tracker;
+    CairoFtFaceLock *face_lock;
 
     for (;;) {
         g_mutex_lock(&cairo_callback_lock);
@@ -1304,6 +1453,14 @@ static void cairo_callbacks_clear(void)
     }
 
     g_mutex_lock(&cairo_callback_lock);
+    while ((face_lock = cairo_ft_face_locks)) {
+        cairo_ft_face_locks = face_lock->next;
+        while (face_lock->references > 0) {
+            face_lock->references--;
+            latx_freetype_face_return(face_lock->face);
+        }
+        free(face_lock);
+    }
     while ((binding = cairo_bindings)) {
         cairo_bindings = binding->next;
         free(binding);
