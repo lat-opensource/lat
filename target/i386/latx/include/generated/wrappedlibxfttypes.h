@@ -14,7 +14,10 @@
 typedef void *(*pFpiV_t)(void *, int32_t, ...);
 
 #define SUPER() ADDED_FUNCTIONS() \
+    GO(XftFontClose, xft_vFpp_t) \
     GO(XftFontOpen, pFpiV_t) \
-    GO(XftListFonts, pFpiV_t)
+    GO(XftListFonts, pFpiV_t) \
+    GO(XftLockFace, xft_pFp_t) \
+    GO(XftUnlockFace, xft_vFp_t)
 
 #endif // __wrappedlibxftTYPES_H_

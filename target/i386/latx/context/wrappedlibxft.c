@@ -16,9 +16,11 @@
 
 #include "box64context.h"
 #include "bridge.h"
+#include "kzt-groups.h"
 #include "library_private.h"
 #include "wrappedfont-vaargs.h"
 #include "wrappedfont-preflight.h"
+#include "wrappedfont-interop.h"
 #include "wrapper.h"
 
 #pragma GCC diagnostic push
@@ -41,6 +43,8 @@ const char *libxftName = "libXft.so.2";
     } while (0);
 
 typedef void (*xft_vFp_t)(void *);
+typedef void (*xft_vFpp_t)(void *, void *);
+typedef void *(*xft_pFp_t)(void *);
 typedef void *(*xft_pFpp_t)(void *, void *);
 typedef void *(*xft_pFpipp_t)(void *, int32_t, void *, void *);
 typedef void *(*xft_pFppp_t)(void *, void *, void *);
@@ -55,6 +59,80 @@ typedef void *(*xft_pFppp_t)(void *, void *, void *);
 #include "generated/wrappedlibxfttypes.h"
 
 #include "wrappercallback.h"
+
+#define XFT_FACE_LOCK_DEPTH 16
+
+typedef struct XftFaceLockEntry {
+    void *font;
+    void *face;
+} XftFaceLockEntry;
+
+static __thread XftFaceLockEntry xft_face_locks[XFT_FACE_LOCK_DEPTH];
+static __thread size_t xft_face_lock_depth;
+
+EXPORT void *my_XftLockFace(void *font)
+{
+    void *face = my->XftLockFace(font);
+
+    if (!face) {
+        return NULL;
+    }
+    if (xft_face_lock_depth == XFT_FACE_LOCK_DEPTH ||
+        !latx_freetype_face_prepare_host_destruction(face) ||
+        !latx_freetype_face_borrow(face)) {
+        my->XftUnlockFace(font);
+        if (xft_face_lock_depth == XFT_FACE_LOCK_DEPTH) {
+            kzt_groups_log_wrapper_limitation(
+                libxftName, "XftLockFace nesting limit reached");
+        }
+        return NULL;
+    }
+    xft_face_locks[xft_face_lock_depth++] = (XftFaceLockEntry) {
+        .font = font,
+        .face = face,
+    };
+    return face;
+}
+
+EXPORT void my_XftUnlockFace(void *font)
+{
+    size_t index = xft_face_lock_depth;
+    void *face;
+
+    while (index && xft_face_locks[index - 1].font != font) {
+        index--;
+    }
+    if (!index) {
+        kzt_groups_log_wrapper_limitation(
+            libxftName, "XftUnlockFace has no matching guest lock");
+        return;
+    }
+    index--;
+    face = xft_face_locks[index].face;
+    if (!latx_freetype_face_prepare_host_destruction(face)) {
+        return;
+    }
+    memmove(&xft_face_locks[index], &xft_face_locks[index + 1],
+            (xft_face_lock_depth - index - 1) * sizeof(xft_face_locks[0]));
+    xft_face_lock_depth--;
+    my->XftUnlockFace(font);
+    latx_freetype_face_return(face);
+}
+
+EXPORT void my_XftFontClose(void *display, void *font)
+{
+    void *face = my->XftLockFace(font);
+
+    if (face) {
+        bool safe = latx_freetype_face_prepare_host_destruction(face);
+
+        my->XftUnlockFace(font);
+        if (!safe) {
+            return;
+        }
+    }
+    my->XftFontClose(display, font);
+}
 
 EXPORT void *my_XftFontOpen(void *display, int32_t screen, void *stack)
 {
