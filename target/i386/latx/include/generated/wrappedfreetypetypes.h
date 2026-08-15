@@ -46,13 +46,16 @@ typedef int32_t (*iFv_t)(void);
     GO(FT_Outline_Decompose, iFppp_t) \
     GO(FT_Outline_Render, iFppp_t) \
     GO(FT_Get_Paint, iFppip_t) \
+    GO(FT_Init_FreeType, iFp_t) \
     GO(FT_Palette_Set_Foreground_Color, iFpu_t) \
     GO(FT_Reference_Face, iFp_t) \
+    GO(FT_Reference_Library, iFp_t) \
     GO(FT_Set_Debug_Hook, vFpup_t) \
     GO(FT_Set_Log_Handler, vFp_t) \
     GO(FT_Stream_OpenBzip2, iFpp_t) \
     GO(FT_Stream_OpenGzip, iFpp_t) \
     GO(FT_Stream_OpenLZW, iFpp_t) \
+    GO(FTC_Manager_Done, vFp_t) \
     GO(FTC_Manager_New, iFpuuLppp_t) \
     GO(TT_New_Context, pFv_t) \
     GO(TT_RunIns, iFv_t)

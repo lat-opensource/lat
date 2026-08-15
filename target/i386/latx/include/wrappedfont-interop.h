@@ -13,6 +13,7 @@ bool latx_freetype_face_reference(void *face);
 void latx_freetype_face_release(void *face);
 bool latx_freetype_face_borrow(void *face);
 void latx_freetype_face_return(void *face);
+bool latx_freetype_face_prepare_host_destruction(void *face);
 
 void *latx_fontconfig_pattern_ft_face(void *pattern);
 
