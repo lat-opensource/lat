@@ -26,6 +26,7 @@
 #include "library_private.h"
 #include "myalign.h"
 #include "wrappedcairo-preflight.h"
+#include "wrappedfont-preflight.h"
 #include "wrapper.h"
 
 #pragma GCC diagnostic push
@@ -845,9 +846,10 @@ static uint32_t cairo_ft_interop_failure(void *font, void *cr, void *extents)
 }
 
 /*
- * LAT does not yet wrap FreeType or Fontconfig.  Their opaque guest objects
- * cannot be passed to host Cairo, and a host FT_Face cannot be returned to
- * guest code.  Return a valid host Cairo face that fails explicitly on use.
+ * The font wrapper family is available, but Cairo object interoperation stays
+ * closed until FT_Face and FcPattern ownership and lifetime rules are wired
+ * across both wrappers.  Return a valid host Cairo face that fails explicitly
+ * on use instead of mixing guest and host opaque objects.
  */
 static void *cairo_ft_unsupported_font_face(void)
 {
@@ -858,8 +860,7 @@ static void *cairo_ft_unsupported_font_face(void)
                                                cairo_ft_interop_failure);
     }
     kzt_groups_log_wrapper_limitation(
-        cairoName, "Cairo FreeType/Fontconfig interop requires native "
-                   "FreeType and Fontconfig wrappers");
+        cairoName, "Cairo FreeType/Fontconfig object interop is not enabled");
     return font_face;
 }
 
@@ -887,8 +888,7 @@ EXPORT void my_cairo_ft_font_options_substitute(void *pattern, void *options)
     (void)pattern;
     (void)options;
     kzt_groups_log_wrapper_limitation(
-        cairoName, "Cairo Fontconfig interop requires a native Fontconfig "
-                   "wrapper");
+        cairoName, "Cairo Fontconfig object interop is not enabled");
 }
 
 EXPORT void *my_cairo_ft_scaled_font_lock_face(void *scaled_font)
@@ -1330,12 +1330,17 @@ static void cairo_callbacks_clear(void)
 #define PRE_INIT_GUEST \
     do { \
         char reason[256]; \
+        if (latx_font_preflight_or_disable(&box64->box64_ld_lib, \
+                                           cairoName) != 0) { \
+            return -1; \
+        } \
         char *guest_path = ResolveFile(lib->path, &box64->box64_ld_lib); \
         bool safe = latx_cairo_preflight_guest(guest_path, cairoName, reason, \
                                                sizeof(reason)); \
         box_free(guest_path); \
         if (!safe) { \
             kzt_groups_log_wrapper_rejection(cairoName, reason); \
+            kzt_group_disable(KZT_GROUP_CAIRO, reason); \
             return -1; \
         } \
     } while (0);
