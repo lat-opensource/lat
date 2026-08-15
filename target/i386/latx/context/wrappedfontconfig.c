@@ -48,6 +48,15 @@ typedef struct FcValueAbi {
 
 _Static_assert(sizeof(FcValueAbi) == 16, "FcValue ABI");
 
+typedef struct FcFontSetAbi {
+    int32_t nfont;
+    int32_t sfont;
+    void **fonts;
+} FcFontSetAbi;
+
+_Static_assert(sizeof(FcFontSetAbi) == 16, "FcFontSet ABI");
+_Static_assert(offsetof(FcFontSetAbi, fonts) == 8, "FcFontSet fonts ABI");
+
 typedef void *(*fc_pFv_t)(void);
 typedef void *(*fc_pFp_t)(void *);
 typedef void *(*fc_pFpp_t)(void *, void *);
@@ -62,6 +71,8 @@ typedef void (*fc_vFp_t)(void *);
     GO(FcObjectSetAdd, fc_iFpp_t) \
     GO(FcObjectSetCreate, fc_pFv_t) \
     GO(FcObjectSetDestroy, fc_vFp_t) \
+    GO(FcFontSetDestroy, fc_vFp_t) \
+    GO(FcFontSetSortDestroy, fc_vFp_t) \
     GO(FcPatternAddBool, fc_iFppi_t) \
     GO(FcPatternAddCharSet, fc_iFppp_t) \
     GO(FcPatternAddDouble, fc_iFppd_t) \
@@ -276,6 +287,89 @@ EXPORT void my_FcValuePrint(unsigned __int128 bits)
 
     memcpy(&value, &bits, sizeof(value));
     my->FcValuePrint(value);
+}
+
+extern void *x86free;
+
+static void fontconfig_free_container(void *pointer)
+{
+    if (!pointer) {
+        return;
+    }
+    if ((uintptr_t)pointer >= reserved_va) {
+        free(pointer);
+        return;
+    }
+    if (!x86free) {
+        kzt_groups_log_wrapper_limitation(
+            fontconfigName, "guest FcFontSet container cannot be freed");
+        return;
+    }
+    RunFunctionFmt((uintptr_t)x86free, "p", pointer);
+}
+
+static void fontconfig_font_set_destroy(void *pointer, fc_vFp_t destroy)
+{
+    FcFontSetAbi *font_set = pointer;
+    FcFontSetAbi *native_set;
+    void **native_fonts = NULL;
+    size_t font_count;
+
+    if (!font_set) {
+        destroy(NULL);
+        return;
+    }
+    if ((uintptr_t)font_set >= reserved_va &&
+        (!font_set->fonts || (uintptr_t)font_set->fonts >= reserved_va)) {
+        destroy(font_set);
+        return;
+    }
+    if (font_set->nfont < 0 || font_set->sfont < font_set->nfont ||
+        (font_set->nfont && !font_set->fonts)) {
+        kzt_groups_log_wrapper_limitation(
+            fontconfigName, "invalid guest FcFontSet container");
+        return;
+    }
+
+    font_count = (size_t)font_set->nfont;
+    if (font_count > SIZE_MAX / sizeof(*native_fonts)) {
+        kzt_groups_log_wrapper_limitation(
+            fontconfigName, "oversized guest FcFontSet container");
+        return;
+    }
+    native_set = malloc(sizeof(*native_set));
+    if (font_count) {
+        native_fonts = malloc(font_count * sizeof(*native_fonts));
+    }
+    if (!native_set || (font_count && !native_fonts)) {
+        free(native_fonts);
+        free(native_set);
+        kzt_groups_log_wrapper_limitation(
+            fontconfigName, "guest FcFontSet transfer allocation failed");
+        return;
+    }
+
+    if (font_count) {
+        memcpy(native_fonts, font_set->fonts,
+               font_count * sizeof(*native_fonts));
+    }
+    native_set->nfont = font_set->nfont;
+    native_set->sfont = font_set->nfont;
+    native_set->fonts = native_fonts;
+
+    fontconfig_free_container(font_set->fonts);
+    fontconfig_free_container(font_set);
+    destroy(native_set);
+}
+
+EXPORT void my_FcFontSetDestroy(void *font_set)
+{
+    fontconfig_font_set_destroy(font_set, my->FcFontSetDestroy);
+}
+
+EXPORT void my_FcFontSetSortDestroy(void *font_set)
+{
+    fontconfig_font_set_destroy(font_set, my->FcFontSetSortDestroy);
 }
 
 EXPORT unsigned __int128 my_FcValueSave(unsigned __int128 bits)
