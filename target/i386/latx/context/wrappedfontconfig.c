@@ -67,6 +67,18 @@ typedef int32_t (*fc_iFppp_t)(void *, void *, void *);
 typedef int32_t (*fc_iFppip_t)(void *, void *, int32_t, void *);
 typedef void (*fc_vFp_t)(void *);
 
+typedef int32_t (*fc_scandir_select_t)(const void *entry);
+typedef int32_t (*fc_scandir_compare_t)(const void *left,
+                                        const void *right);
+
+typedef struct FcScandirCallbackContext {
+    void *callbacks[2];
+    void *native_callbacks[2];
+    struct FcScandirCallbackContext *previous;
+} FcScandirCallbackContext;
+
+static __thread FcScandirCallbackContext *fontconfig_scandir_context;
+
 #define ADDED_FUNCTIONS() \
     GO(FcObjectSetAdd, fc_iFpp_t) \
     GO(FcObjectSetCreate, fc_pFv_t) \
@@ -384,19 +396,60 @@ EXPORT unsigned __int128 my_FcValueSave(unsigned __int128 bits)
     return result_bits;
 }
 
+static int32_t fontconfig_scandir_select(const void *entry)
+{
+    FcScandirCallbackContext *context = fontconfig_scandir_context;
+
+    if (!context || !context->callbacks[0]) {
+        return 0;
+    }
+    if (context->native_callbacks[0]) {
+        return ((fc_scandir_select_t)context->native_callbacks[0])(entry);
+    }
+    return (int32_t)RunFunctionFmt((uintptr_t)context->callbacks[0], "p",
+                                   entry);
+}
+
+static int32_t fontconfig_scandir_compare(const void *left,
+                                          const void *right)
+{
+    FcScandirCallbackContext *context = fontconfig_scandir_context;
+
+    if (!context || !context->callbacks[1]) {
+        return 0;
+    }
+    if (context->native_callbacks[1]) {
+        return ((fc_scandir_compare_t)context->native_callbacks[1])(
+            left, right);
+    }
+    return (int32_t)RunFunctionFmt((uintptr_t)context->callbacks[1], "pp",
+                                   left, right);
+}
+
 EXPORT int32_t my_FcScandir(void *directory, void *namelist,
                             void *select_callback, void *compare_callback)
 {
-    void *native_select = GetNativeFnc((uintptr_t)select_callback);
-    void *native_compare = GetNativeFnc((uintptr_t)compare_callback);
+    FcScandirCallbackContext context = {
+        .callbacks = {select_callback, compare_callback},
+        .native_callbacks = {
+            GetNativeFnc((uintptr_t)select_callback),
+            GetNativeFnc((uintptr_t)compare_callback),
+        },
+        .previous = fontconfig_scandir_context,
+    };
+    void *native_select = context.native_callbacks[0];
+    void *native_compare = context.native_callbacks[1];
+    int32_t result;
 
     if ((select_callback && !native_select) ||
         (compare_callback && !native_compare)) {
-        kzt_groups_log_wrapper_limitation(
-            fontconfigName, "FcScandir guest callbacks are unsupported");
-        return -1;
+        native_select = select_callback ? fontconfig_scandir_select : NULL;
+        native_compare = compare_callback ? fontconfig_scandir_compare : NULL;
+        fontconfig_scandir_context = &context;
     }
-    return my->FcScandir(directory, namelist, native_select, native_compare);
+    result = my->FcScandir(directory, namelist, native_select, native_compare);
+    fontconfig_scandir_context = context.previous;
+    return result;
 }
 
 EXPORT void *my_FcStrBuildFilename(const char *first, void *stack)
