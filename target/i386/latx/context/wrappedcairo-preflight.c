@@ -24,6 +24,11 @@
 static const char *const cairo_supported_symbols[] = {
 #include "wrappedcairo_private.h"
 };
+static const char *const cairo_required_host_symbols[] = {
+    "cairo_font_face_destroy",
+    "cairo_font_face_get_user_data",
+    "cairo_font_face_status",
+};
 #undef GO
 #undef GOM
 #undef GOW
@@ -47,5 +52,7 @@ bool latx_cairo_preflight_guest(const char *guest_path,
     return latx_wrappedlib_preflight_guest(
         guest_path, host_soname, "Cairo", cairo_symbol_filter,
         cairo_supported_symbols, ARRAY_SIZE(cairo_supported_symbols),
+        cairo_required_host_symbols,
+        ARRAY_SIZE(cairo_required_host_symbols),
         reason, reason_size);
 }

@@ -44,6 +44,8 @@ bool latx_wrappedlib_preflight_guest(
     const char *guest_path, const char *host_soname,
     const char *library_label, LatxWrappedSymbolFilter symbol_filter,
     const char *const *supported_symbols, size_t supported_symbol_count,
+    const char *const *required_host_symbols,
+    size_t required_host_symbol_count,
     char *reason, size_t reason_size)
 {
     Elf64_Ehdr ehdr;
@@ -60,7 +62,8 @@ bool latx_wrappedlib_preflight_guest(
     }
     reason[0] = '\0';
     if (!guest_path || !host_soname || !library_label || !symbol_filter ||
-        !supported_symbols || !supported_symbol_count) {
+        !supported_symbols || !supported_symbol_count ||
+        (required_host_symbol_count && !required_host_symbols)) {
         snprintf(reason, reason_size,
                  "wrapped-library preflight configuration is incomplete");
         return false;
@@ -108,6 +111,14 @@ bool latx_wrappedlib_preflight_guest(
         snprintf(reason, reason_size, "cannot load host %s: %s",
                  library_label, dlerror());
         goto out;
+    }
+    for (size_t i = 0; i < required_host_symbol_count; i++) {
+        if (!dlsym(host, required_host_symbols[i])) {
+            snprintf(reason, reason_size,
+                     "host %s is missing wrapper prerequisite '%s'",
+                     library_label, required_host_symbols[i]);
+            goto out;
+        }
     }
 
     for (size_t section_index = 0; section_index < ehdr.e_shnum;

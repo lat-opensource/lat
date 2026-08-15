@@ -33,6 +33,20 @@ static const char *const fontconfig_supported_symbols[] = {
 static const char *const libxft_supported_symbols[] = {
 #include "wrappedlibxft_private.h"
 };
+static const char *const freetype_required_host_symbols[] = {
+    "FT_Done_Face",
+    "FT_Reference_Face",
+};
+static const char *const fontconfig_required_host_symbols[] = {
+    "FcPatternGetFTFace",
+};
+static const char *const libxft_required_host_symbols[] = {
+    "FcFontList",
+    "FcObjectSetDestroy",
+    "FcPatternDestroy",
+    "XftFontMatch",
+    "XftFontOpenPattern",
+};
 #undef GO
 #undef GOM
 #undef GOW
@@ -51,6 +65,8 @@ typedef struct FontLibraryPreflight {
     LatxWrappedSymbolFilter symbol_filter;
     const char *const *supported_symbols;
     size_t supported_symbol_count;
+    const char *const *required_host_symbols;
+    size_t required_host_symbol_count;
 } FontLibraryPreflight;
 
 static bool freetype_symbol_filter(const char *name)
@@ -80,6 +96,9 @@ bool latx_font_preflight_guest(path_collection_t *guest_paths,
             .symbol_filter = freetype_symbol_filter,
             .supported_symbols = freetype_supported_symbols,
             .supported_symbol_count = ARRAY_SIZE(freetype_supported_symbols),
+            .required_host_symbols = freetype_required_host_symbols,
+            .required_host_symbol_count =
+                ARRAY_SIZE(freetype_required_host_symbols),
         },
         {
             .guest_soname = "libfontconfig.so.1",
@@ -88,6 +107,9 @@ bool latx_font_preflight_guest(path_collection_t *guest_paths,
             .symbol_filter = fontconfig_symbol_filter,
             .supported_symbols = fontconfig_supported_symbols,
             .supported_symbol_count = ARRAY_SIZE(fontconfig_supported_symbols),
+            .required_host_symbols = fontconfig_required_host_symbols,
+            .required_host_symbol_count =
+                ARRAY_SIZE(fontconfig_required_host_symbols),
         },
         {
             .guest_soname = "libXft.so.2",
@@ -96,6 +118,9 @@ bool latx_font_preflight_guest(path_collection_t *guest_paths,
             .symbol_filter = xft_symbol_filter,
             .supported_symbols = libxft_supported_symbols,
             .supported_symbol_count = ARRAY_SIZE(libxft_supported_symbols),
+            .required_host_symbols = libxft_required_host_symbols,
+            .required_host_symbol_count =
+                ARRAY_SIZE(libxft_required_host_symbols),
         },
     };
 
@@ -109,7 +134,9 @@ bool latx_font_preflight_guest(path_collection_t *guest_paths,
         bool safe = latx_wrappedlib_preflight_guest(
             guest_path, library->host_soname, library->label,
             library->symbol_filter, library->supported_symbols,
-            library->supported_symbol_count, reason, reason_size);
+            library->supported_symbol_count,
+            library->required_host_symbols,
+            library->required_host_symbol_count, reason, reason_size);
 
         box_free(guest_path);
         if (!safe) {
