@@ -24,6 +24,7 @@
 #include "kzt-groups.h"
 #include "library_private.h"
 #include "wrappedfont-preflight.h"
+#include "wrappedfont-interop.h"
 #include "wrapper.h"
 
 #pragma GCC diagnostic push
@@ -197,9 +198,16 @@ typedef struct FtSizeTracker {
     struct FtSizeTracker *next;
 } FtSizeTracker;
 
+typedef struct FtBorrowTracker {
+    void *face;
+    unsigned references;
+    struct FtBorrowTracker *next;
+} FtBorrowTracker;
+
 static GMutex freetype_lock;
 static FtFaceTracker *freetype_faces;
 static FtSizeTracker *freetype_sizes;
+static FtBorrowTracker *freetype_borrowed_faces;
 
 static bool freetype_generic_is_safe(const FtGenericAbi *generic)
 {
@@ -332,6 +340,68 @@ static void freetype_untrack_library_locked(void *library)
         }
         face = next;
     }
+}
+
+static bool freetype_face_is_borrowed_locked(void *face)
+{
+    for (FtBorrowTracker *tracker = freetype_borrowed_faces; tracker;
+         tracker = tracker->next) {
+        if (tracker->face == face) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool latx_freetype_face_borrow(void *face)
+{
+    FtBorrowTracker *tracker;
+
+    if (!face) {
+        return false;
+    }
+    g_mutex_lock(&freetype_lock);
+    for (tracker = freetype_borrowed_faces; tracker;
+         tracker = tracker->next) {
+        if (tracker->face == face) {
+            tracker->references++;
+            g_mutex_unlock(&freetype_lock);
+            return true;
+        }
+    }
+    tracker = calloc(1, sizeof(*tracker));
+    if (!tracker) {
+        g_mutex_unlock(&freetype_lock);
+        return false;
+    }
+    tracker->face = face;
+    tracker->references = 1;
+    tracker->next = freetype_borrowed_faces;
+    freetype_borrowed_faces = tracker;
+    g_mutex_unlock(&freetype_lock);
+    return true;
+}
+
+void latx_freetype_face_return(void *face)
+{
+    FtBorrowTracker **cursor;
+
+    g_mutex_lock(&freetype_lock);
+    cursor = &freetype_borrowed_faces;
+    while (*cursor) {
+        FtBorrowTracker *tracker = *cursor;
+
+        if (tracker->face != face) {
+            cursor = &tracker->next;
+            continue;
+        }
+        if (--tracker->references == 0) {
+            *cursor = tracker->next;
+            free(tracker);
+        }
+        break;
+    }
+    g_mutex_unlock(&freetype_lock);
 }
 
 #define FT_CALLBACK_SLOTS 16
@@ -593,6 +663,12 @@ EXPORT int32_t my_FT_Done_Face(void *face)
     int32_t status;
 
     g_mutex_lock(&freetype_lock);
+    if (freetype_face_is_borrowed_locked(face)) {
+        g_mutex_unlock(&freetype_lock);
+        kzt_groups_log_wrapper_limitation(
+            freetypeName, "cannot destroy a Cairo-borrowed FT_Face");
+        return FT_ERROR_INVALID_ARGUMENT;
+    }
     if (!freetype_face_is_safe(face)) {
         g_mutex_unlock(&freetype_lock);
         kzt_groups_log_wrapper_limitation(
@@ -647,6 +723,19 @@ EXPORT int32_t my_FT_Reference_Face(void *face)
     }
     my->FT_Done_Face(face);
     return FT_ERROR_OUT_OF_MEMORY;
+}
+
+bool latx_freetype_face_reference(void *face)
+{
+    return my_lib && my_FT_Reference_Face(face) == FT_ERROR_SUCCESS;
+}
+
+void latx_freetype_face_release(void *face)
+{
+    if (!my_lib || my_FT_Done_Face(face) != FT_ERROR_SUCCESS) {
+        kzt_groups_log_wrapper_limitation(
+            freetypeName, "cannot release Cairo-owned FT_Face reference");
+    }
 }
 
 static int32_t freetype_done_library(void *library,
@@ -937,6 +1026,12 @@ static void freetype_state_clear(void)
 
         free(freetype_sizes);
         freetype_sizes = next;
+    }
+    while (freetype_borrowed_faces) {
+        FtBorrowTracker *next = freetype_borrowed_faces->next;
+
+        free(freetype_borrowed_faces);
+        freetype_borrowed_faces = next;
     }
     memset(ft_move_slots, 0, sizeof(ft_move_slots));
     memset(ft_line_slots, 0, sizeof(ft_line_slots));

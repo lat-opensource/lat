@@ -24,6 +24,7 @@
 #include "library_private.h"
 #include "wrappedfont-vaargs.h"
 #include "wrappedfont-preflight.h"
+#include "wrappedfont-interop.h"
 #include "wrapper.h"
 
 #pragma GCC diagnostic push
@@ -54,6 +55,7 @@ typedef int32_t (*fc_iFpp_t)(void *, void *);
 typedef int32_t (*fc_iFppi_t)(void *, void *, int32_t);
 typedef int32_t (*fc_iFppd_t)(void *, void *, double);
 typedef int32_t (*fc_iFppp_t)(void *, void *, void *);
+typedef int32_t (*fc_iFppip_t)(void *, void *, int32_t, void *);
 typedef void (*fc_vFp_t)(void *);
 
 #define ADDED_FUNCTIONS() \
@@ -71,6 +73,7 @@ typedef void (*fc_vFp_t)(void *);
     GO(FcPatternAddString, fc_iFppp_t) \
     GO(FcPatternCreate, fc_pFv_t) \
     GO(FcPatternDestroy, fc_vFp_t) \
+    GO(FcPatternGetFTFace, fc_iFppip_t) \
     GO(FcStrCopy, fc_pFp_t)
 
 #include "generated/wrappedfontconfigtypes.h"
@@ -89,6 +92,18 @@ enum {
     FC_TYPE_LANGSET = 8,
     FC_TYPE_RANGE = 9,
 };
+
+void *latx_fontconfig_pattern_ft_face(void *pattern)
+{
+    static const char fc_ft_face[] = "ftface";
+    void *face = NULL;
+
+    if (my_lib && my->FcPatternGetFTFace(pattern, (void *)fc_ft_face, 0,
+                                        &face) == 0) {
+        return face;
+    }
+    return NULL;
+}
 
 static bool fontconfig_pattern_add_value(void *pattern, const char *object,
                                          int32_t type,
