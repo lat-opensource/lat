@@ -224,15 +224,16 @@ bool latx_wrappedlib_preflight_guest(
             if (!wrapped_symbol_is_supported(name, supported_symbols,
                                              supported_symbol_count)) {
                 snprintf(reason, reason_size,
-                         "guest symbol '%s' has no safe wrapper", name);
+                         "guest %s symbol '%s' has no safe wrapper",
+                         library_label, name);
                 free(symbols);
                 free(strings);
                 goto out;
             }
             if (!dlsym(host, name)) {
                 snprintf(reason, reason_size,
-                         "host %s is missing guest symbol '%s'",
-                         library_label, name);
+                         "host %s is missing guest %s symbol '%s'",
+                         library_label, library_label, name);
                 free(symbols);
                 free(strings);
                 goto out;
