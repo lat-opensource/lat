@@ -12,9 +12,14 @@
 
 #include "pathcoll.h"
 
+typedef enum LatxFontCapability {
+    LATX_FONT_CAP_LEGACY_OUTLINE_MEMORY = 1u << 0,
+} LatxFontCapability;
+
 bool latx_font_preflight_guest(path_collection_t *guest_paths,
                                char *reason, size_t reason_size);
 int latx_font_preflight_or_disable(path_collection_t *guest_paths,
                                    const char *requesting_soname);
+bool latx_font_capability_enabled(LatxFontCapability capability);
 
 #endif /* LATX_WRAPPEDFONT_PREFLIGHT_H */

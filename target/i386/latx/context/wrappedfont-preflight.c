@@ -47,6 +47,23 @@ static const char *const libxft_required_host_symbols[] = {
     "XftFontMatch",
     "XftFontOpenPattern",
 };
+enum {
+    FREETYPE_OBSERVED_OUTLINE_NEW_INTERNAL = 1u << 0,
+    FREETYPE_OBSERVED_OUTLINE_DONE_INTERNAL = 1u << 1,
+    FREETYPE_OBSERVED_LEGACY_OUTLINE_MEMORY =
+        FREETYPE_OBSERVED_OUTLINE_NEW_INTERNAL |
+        FREETYPE_OBSERVED_OUTLINE_DONE_INTERNAL,
+};
+static const LatxWrappedObservedSymbol freetype_observed_symbols[] = {
+    {
+        .name = "FT_Outline_New_Internal",
+        .bit = FREETYPE_OBSERVED_OUTLINE_NEW_INTERNAL,
+    },
+    {
+        .name = "FT_Outline_Done_Internal",
+        .bit = FREETYPE_OBSERVED_OUTLINE_DONE_INTERNAL,
+    },
+};
 #undef GO
 #undef GOM
 #undef GOW
@@ -67,7 +84,11 @@ typedef struct FontLibraryPreflight {
     size_t supported_symbol_count;
     const char *const *required_host_symbols;
     size_t required_host_symbol_count;
+    const LatxWrappedObservedSymbol *observed_symbols;
+    size_t observed_symbol_count;
 } FontLibraryPreflight;
+
+static gint font_capabilities;
 
 static bool freetype_symbol_filter(const char *name)
 {
@@ -88,6 +109,7 @@ static bool xft_symbol_filter(const char *name)
 bool latx_font_preflight_guest(path_collection_t *guest_paths,
                                char *reason, size_t reason_size)
 {
+    gint capabilities = 0;
     static const FontLibraryPreflight libraries[] = {
         {
             .guest_soname = "libfreetype.so.6",
@@ -99,6 +121,9 @@ bool latx_font_preflight_guest(path_collection_t *guest_paths,
             .required_host_symbols = freetype_required_host_symbols,
             .required_host_symbol_count =
                 ARRAY_SIZE(freetype_required_host_symbols),
+            .observed_symbols = freetype_observed_symbols,
+            .observed_symbol_count =
+                ARRAY_SIZE(freetype_observed_symbols),
         },
         {
             .guest_soname = "libfontconfig.so.1",
@@ -131,19 +156,41 @@ bool latx_font_preflight_guest(path_collection_t *guest_paths,
     for (size_t i = 0; i < ARRAY_SIZE(libraries); i++) {
         const FontLibraryPreflight *library = &libraries[i];
         char *guest_path = ResolveFile(library->guest_soname, guest_paths);
+        uint64_t observed_symbol_mask = 0;
         bool safe = latx_wrappedlib_preflight_guest(
             guest_path, library->host_soname, library->label,
             library->symbol_filter, library->supported_symbols,
             library->supported_symbol_count,
             library->required_host_symbols,
-            library->required_host_symbol_count, reason, reason_size);
+            library->required_host_symbol_count,
+            library->observed_symbols, library->observed_symbol_count,
+            library->observed_symbol_count ? &observed_symbol_mask : NULL,
+            reason, reason_size);
 
         box_free(guest_path);
         if (!safe) {
             return false;
         }
+        if (library->observed_symbols && observed_symbol_mask &&
+            observed_symbol_mask !=
+                FREETYPE_OBSERVED_LEGACY_OUTLINE_MEMORY) {
+            snprintf(reason, reason_size,
+                     "guest FreeType exposes an incomplete legacy "
+                     "outline-memory API");
+            return false;
+        }
+        if (observed_symbol_mask ==
+            FREETYPE_OBSERVED_LEGACY_OUTLINE_MEMORY) {
+            capabilities |= LATX_FONT_CAP_LEGACY_OUTLINE_MEMORY;
+        }
     }
+    g_atomic_int_set(&font_capabilities, capabilities);
     return true;
+}
+
+bool latx_font_capability_enabled(LatxFontCapability capability)
+{
+    return (g_atomic_int_get(&font_capabilities) & capability) == capability;
 }
 
 int latx_font_preflight_or_disable(path_collection_t *guest_paths,

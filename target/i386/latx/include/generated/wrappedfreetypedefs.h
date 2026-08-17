@@ -11,6 +11,7 @@
 #define iFEppp iFppp
 #define iFEpplp iFpplp
 #define iFEppllp iFppllp
+#define iFEpuip iFpuip
 #define iFEppip iFppip
 #define iFEpu iFpu
 #define vFEpup vFpup

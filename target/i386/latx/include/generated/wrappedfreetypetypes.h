@@ -12,6 +12,7 @@
 #endif
 
 typedef int32_t (*iFpp_t)(void *, void *);
+typedef int32_t (*iFpuip_t)(void *, uint32_t, int32_t, void *);
 typedef void (*vFp_t)(void *);
 typedef int32_t (*iFppLLppu_t)(void *, void *, FtVectorAbi, void *,
                                void *, FtColorAbi);
@@ -44,6 +45,8 @@ typedef int32_t (*iFv_t)(void);
     GO(FT_New_Size, iFpp_t) \
     GO(FT_Open_Face, iFpplp_t) \
     GO(FT_Outline_Decompose, iFppp_t) \
+    GO(FT_Outline_Done_Internal, iFpp_t) \
+    GO(FT_Outline_New_Internal, iFpuip_t) \
     GO(FT_Outline_Render, iFppp_t) \
     GO(FT_Get_Paint, iFppip_t) \
     GO(FT_Init_FreeType, iFp_t) \

@@ -1652,6 +1652,56 @@ EXPORT int32_t my_FT_Outline_Render(void *library, void *outline,
     return my->FT_Outline_Render(library, outline, &native);
 }
 
+static FtMemoryAbi *freetype_outline_memory_native(
+    FtMemoryAbi *memory, FtMemoryBridge **bridge)
+{
+    *bridge = NULL;
+    if (!freetype_memory_requires_bridge(memory)) {
+        return memory;
+    }
+    *bridge = freetype_memory_bridge_new(memory);
+    return *bridge ? &(*bridge)->native : NULL;
+}
+
+EXPORT int32_t my_FT_Outline_New_Internal(FtMemoryAbi *memory,
+                                           uint32_t num_points,
+                                           int32_t num_contours,
+                                           void *outline)
+{
+    FtMemoryBridge *bridge;
+    FtMemoryAbi *native_memory =
+        freetype_outline_memory_native(memory, &bridge);
+    int32_t status;
+
+    if ((memory && !native_memory) || !my->FT_Outline_New_Internal) {
+        free(bridge);
+        return memory && !native_memory
+            ? FT_ERROR_OUT_OF_MEMORY : FT_ERROR_UNIMPLEMENTED_FEATURE;
+    }
+    status = my->FT_Outline_New_Internal(
+        native_memory, num_points, num_contours, outline);
+    free(bridge);
+    return status;
+}
+
+EXPORT int32_t my_FT_Outline_Done_Internal(FtMemoryAbi *memory,
+                                            void *outline)
+{
+    FtMemoryBridge *bridge;
+    FtMemoryAbi *native_memory =
+        freetype_outline_memory_native(memory, &bridge);
+    int32_t status;
+
+    if ((memory && !native_memory) || !my->FT_Outline_Done_Internal) {
+        free(bridge);
+        return memory && !native_memory
+            ? FT_ERROR_OUT_OF_MEMORY : FT_ERROR_UNIMPLEMENTED_FEATURE;
+    }
+    status = my->FT_Outline_Done_Internal(native_memory, outline);
+    free(bridge);
+    return status;
+}
+
 EXPORT int32_t my_FT_List_Iterate(void *list, void *iterator, void *user)
 {
     void *native = freetype_slot_acquire(
@@ -1957,12 +2007,25 @@ static void freetype_state_clear(void)
     g_mutex_unlock(&freetype_lock);
 }
 
+static bool freetype_wrapper_function_enabled(const char *name)
+{
+    if (strcmp(name, "FT_Outline_New_Internal") &&
+        strcmp(name, "FT_Outline_Done_Internal")) {
+        return true;
+    }
+    return latx_font_capability_enabled(
+        LATX_FONT_CAP_LEGACY_OUTLINE_MEMORY);
+}
+
 #define CUSTOM_INIT \
     getMy(lib);
 
 #define CUSTOM_FINI \
     freetype_state_clear(); \
     freeMy();
+
+#define WRAPPEDLIB_FUNCTION_ENABLED(name) \
+    freetype_wrapper_function_enabled(name)
 
 #include "wrappedlib_init.h"
 
