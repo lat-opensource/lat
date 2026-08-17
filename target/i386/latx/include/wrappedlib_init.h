@@ -112,6 +112,12 @@ static const map_onedata_t MAPNAME(mydatamap)[] = {
 #undef _DOIT
 
 #include "library.h"
+
+/* A wrapper may omit runtime-incompatible functions before publishing maps. */
+#ifndef WRAPPEDLIB_FUNCTION_ENABLED
+#define WRAPPEDLIB_FUNCTION_ENABLED(name) 1
+#endif
+
 int FUNC(_init)(library_t* lib, box64context_t* box64)
 {
     (void)box64;
@@ -154,6 +160,9 @@ int FUNC(_init)(library_t* lib, box64context_t* box64)
 #define DOIT(mapname) \
 	cnt = sizeof(MAPNAME(mapname))/sizeof(map_onesymbol_t);                         \
 	for (int i = 0; i < cnt; ++i) {                                                 \
+        if (!WRAPPEDLIB_FUNCTION_ENABLED(MAPNAME(mapname)[i].name)) {              \
+            continue;                                                              \
+        }                                                                          \
         if (MAPNAME(mapname)[i].weak) {                                             \
             k = kh_put(symbolmap, lib->w##mapname, MAPNAME(mapname)[i].name, &ret); \
             kh_value(lib->w##mapname, k) = MAPNAME(mapname)[i].w;                   \
@@ -169,6 +178,9 @@ int FUNC(_init)(library_t* lib, box64context_t* box64)
 #undef DOIT
     cnt = sizeof(MAPNAME(stsymbolmap))/sizeof(map_onesymbol_t);
     for (int i=0; i<cnt; ++i) {
+        if (!WRAPPEDLIB_FUNCTION_ENABLED(MAPNAME(stsymbolmap)[i].name)) {
+            continue;
+        }
         k = kh_put(symbolmap, lib->stsymbolmap, MAPNAME(stsymbolmap)[i].name, &ret);
         kh_value(lib->stsymbolmap, k) = MAPNAME(stsymbolmap)[i].w;
         if(strchr(MAPNAME(stsymbolmap)[i].name, '@'))
@@ -176,6 +188,9 @@ int FUNC(_init)(library_t* lib, box64context_t* box64)
     }
     cnt = sizeof(MAPNAME(symbol2map))/sizeof(map_onesymbol2_t);
     for (int i=0; i<cnt; ++i) {
+        if (!WRAPPEDLIB_FUNCTION_ENABLED(MAPNAME(symbol2map)[i].name)) {
+            continue;
+        }
         k = kh_put(symbol2map, lib->symbol2map, MAPNAME(symbol2map)[i].name, &ret);
         kh_value(lib->symbol2map, k).name = MAPNAME(symbol2map)[i].name2;
         kh_value(lib->symbol2map, k).w = MAPNAME(symbol2map)[i].w;
@@ -204,6 +219,7 @@ int FUNC(_init)(library_t* lib, box64context_t* box64)
 
     return 0;
 }
+#undef WRAPPEDLIB_FUNCTION_ENABLED
 
 void FUNC(_fini)(library_t* lib)
 {

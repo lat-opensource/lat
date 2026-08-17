@@ -54,5 +54,6 @@ bool latx_cairo_preflight_guest(const char *guest_path,
         cairo_supported_symbols, ARRAY_SIZE(cairo_supported_symbols),
         cairo_required_host_symbols,
         ARRAY_SIZE(cairo_required_host_symbols),
+        NULL, 0, NULL,
         reason, reason_size);
 }

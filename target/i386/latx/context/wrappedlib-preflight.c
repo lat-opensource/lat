@@ -28,6 +28,20 @@ static bool wrapped_symbol_is_supported(
     return false;
 }
 
+static void observe_wrapped_symbol(
+    const char *name, const LatxWrappedObservedSymbol *observed_symbols,
+    size_t observed_symbol_count, uint64_t *observed_symbol_mask)
+{
+    if (!observed_symbol_mask) {
+        return;
+    }
+    for (size_t i = 0; i < observed_symbol_count; i++) {
+        if (!strcmp(name, observed_symbols[i].name)) {
+            *observed_symbol_mask |= observed_symbols[i].bit;
+        }
+    }
+}
+
 static bool read_exact(FILE *file, void *buffer, size_t size, long offset)
 {
     return fseek(file, offset, SEEK_SET) == 0 &&
@@ -46,6 +60,8 @@ bool latx_wrappedlib_preflight_guest(
     const char *const *supported_symbols, size_t supported_symbol_count,
     const char *const *required_host_symbols,
     size_t required_host_symbol_count,
+    const LatxWrappedObservedSymbol *observed_symbols,
+    size_t observed_symbol_count, uint64_t *observed_symbol_mask,
     char *reason, size_t reason_size)
 {
     Elf64_Ehdr ehdr;
@@ -61,12 +77,25 @@ bool latx_wrappedlib_preflight_guest(
         return false;
     }
     reason[0] = '\0';
+    if (observed_symbol_mask) {
+        *observed_symbol_mask = 0;
+    }
     if (!guest_path || !host_soname || !library_label || !symbol_filter ||
         !supported_symbols || !supported_symbol_count ||
-        (required_host_symbol_count && !required_host_symbols)) {
+        (required_host_symbol_count && !required_host_symbols) ||
+        (observed_symbol_count &&
+         (!observed_symbols || !observed_symbol_mask))) {
         snprintf(reason, reason_size,
                  "wrapped-library preflight configuration is incomplete");
         return false;
+    }
+    for (size_t i = 0; i < observed_symbol_count; i++) {
+        if (!observed_symbols[i].name || !observed_symbols[i].bit) {
+            snprintf(reason, reason_size,
+                     "wrapped-library observed-symbol configuration "
+                     "is incomplete");
+            return false;
+        }
     }
 
     file = fopen(guest_path, "rb");
@@ -208,6 +237,9 @@ bool latx_wrappedlib_preflight_guest(
                 free(strings);
                 goto out;
             }
+            observe_wrapped_symbol(name, observed_symbols,
+                                   observed_symbol_count,
+                                   observed_symbol_mask);
         }
         free(symbols);
         free(strings);
