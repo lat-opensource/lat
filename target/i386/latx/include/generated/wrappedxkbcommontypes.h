@@ -8,10 +8,23 @@
 #error You should only #include this file inside a wrapped*.c file
 #endif
 #ifndef ADDED_FUNCTIONS
-#define ADDED_FUNCTIONS() 
+#define ADDED_FUNCTIONS()
 #endif
 
+typedef void *(*pFpppuu_t)(void *, void *, void *, uint32_t, uint32_t);
+typedef void (*vFpp_t)(void *, void *);
+typedef void *(*pFpu_t)(void *, uint32_t);
+typedef void (*vFppp_t)(void *, void *, void *);
+typedef void *(*pFppuu_t)(void *, void *, uint32_t, uint32_t);
+typedef int32_t (*iFpuu_t)(void *, uint32_t, uint32_t);
 
-#define SUPER() ADDED_FUNCTIONS()
+#define SUPER() ADDED_FUNCTIONS() \
+    GO(xkb_compose_table_new_from_file, pFpppuu_t) \
+    GO(xkb_context_set_log_fn, vFpp_t) \
+    GO(xkb_keymap_get_as_string, pFpu_t) \
+    GO(xkb_keymap_key_for_each, vFppp_t) \
+    GO(xkb_keymap_new_from_file, pFppuu_t) \
+    GO(xkb_state_mod_indices_are_active, iFpuu_t) \
+    GO(xkb_state_mod_names_are_active, iFpuu_t)
 
 #endif // __wrappedxkbcommonTYPES_H_
