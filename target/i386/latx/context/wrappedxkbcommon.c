@@ -25,6 +25,7 @@
 #include "kzt-groups.h"
 #include "library_private.h"
 #include "myalign.h"
+#include "wrappedinput-preflight.h"
 #include "wrapper.h"
 #include "x64-vaargs.h"
 
@@ -33,6 +34,14 @@
 
 const char *xkbcommonName = "libxkbcommon.so.0";
 #define LIBNAME xkbcommon
+
+#define PRE_INIT_GUEST \
+    do { \
+        if (latx_input_preflight_or_disable(&box64->box64_ld_lib, \
+                                            xkbcommonName) != 0) { \
+            return -1; \
+        } \
+    } while (0);
 
 enum {
     XKB_LOG_SLOT_COUNT = 16,

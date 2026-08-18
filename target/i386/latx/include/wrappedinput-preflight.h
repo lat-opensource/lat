@@ -1,0 +1,20 @@
+/*
+ * SPDX-FileCopyrightText: 2026 LAT Project Authors
+ *
+ * SPDX-License-Identifier: GPL-2.0-only
+ */
+
+#ifndef LATX_WRAPPEDINPUT_PREFLIGHT_H
+#define LATX_WRAPPEDINPUT_PREFLIGHT_H
+
+#include <stdbool.h>
+#include <stddef.h>
+
+#include "pathcoll.h"
+
+bool latx_input_preflight_guest(path_collection_t *guest_paths,
+                                char *reason, size_t reason_size);
+int latx_input_preflight_or_disable(path_collection_t *guest_paths,
+                                    const char *requesting_soname);
+
+#endif /* LATX_WRAPPEDINPUT_PREFLIGHT_H */

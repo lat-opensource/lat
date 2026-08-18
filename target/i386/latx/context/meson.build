@@ -28,6 +28,7 @@ my_file = files(
   'wrappedlib-preflight.c',
   'wrappedcairo-preflight.c',
   'wrappedfont-preflight.c',
+  'wrappedinput-preflight.c',
   'wrappedcairo.c',
   'wrappedlibx11xcb.c',
   'wrappedxkbcommon.c',
