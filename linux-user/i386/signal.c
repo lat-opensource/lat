@@ -471,15 +471,21 @@ cs->previous_exception_index = -1;
     __put_user(env->regs[R_ESP], &sc->esp_at_signal);
     __put_user(env->segs[R_SS].selector, (unsigned int *)&sc->ss);
 
-    cpu_x86_fsave(env, fpstate_addr, 1);
-    fpstate->status = fpstate->sw;
     if (!(env->features[FEAT_1_EDX] & CPUID_FXSR)) {
         magic = 0xffff;
     } else {
+        /*
+         * cpu_x86_fsave() has FSAVE semantics and resets the x87 state.
+         * Capture the non-destructive extended state first, then let FSAVE
+         * fill the legacy area and initialize the state used by the handler.
+         * Sigreturn restores the interrupted state from the signal frame.
+         */
         xsave_sigcontext(env, &fpstate->fxsave,
                           fpstate_addr + TARGET_FPSTATE_FXSAVE_OFFSET);
         magic = 0;
     }
+    cpu_x86_fsave(env, fpstate_addr, 1);
+    fpstate->status = fpstate->sw;
     __put_user(magic, &fpstate->magic);
 #else
     __put_user(env->regs[R_EDI], &sc->rdi);
