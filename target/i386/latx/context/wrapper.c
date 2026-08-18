@@ -1559,6 +1559,18 @@ typedef uintptr_t (*LFpuuupL_t)(void*, uint32_t, uint32_t, uint32_t,
                                 void*, uintptr_t);
 typedef uint32_t (*uFpuuuuuu_t)(void*, uint32_t, uint32_t, uint32_t,
                                 uint32_t, uint32_t, uint32_t);
+typedef int32_t (*iFipip_t)(int32_t, void*, int32_t, void*);
+typedef uint32_t (*uFc_t)(int8_t);
+typedef uint8_t (*CFu_t)(uint32_t);
+typedef int8_t (*cFu_t)(uint32_t);
+typedef void* (*pFC_t)(uint8_t);
+typedef int8_t (*cFpipp_t)(void*, int32_t, void*, void*);
+typedef int8_t (*cFppipp_t)(void*, void*, int32_t, void*, void*);
+typedef int8_t (*cFpippppp_t)(void*, int32_t, void*, void*, void*, void*,
+                              void*);
+typedef int8_t (*cFupiiuppp_t)(uint32_t, void*, int32_t, int32_t, uint32_t,
+                               void*, void*, void*);
+typedef void (*vFupipp_t)(uint32_t, void*, int32_t, void*, void*);
 typedef intptr_t (*lFl_t)(intptr_t);
 typedef intptr_t (*lFll_t)(intptr_t, intptr_t);
 typedef intptr_t (*lFlll_t)(intptr_t, intptr_t, intptr_t);
@@ -3256,6 +3268,16 @@ void pFppLpuu(uintptr_t fcn) { __CPU; pFppLpuu_t fn = (pFppLpuu_t)fcn; R_RAX=(ui
 void pFppLuu(uintptr_t fcn) { __CPU; pFppLuu_t fn = (pFppLuu_t)fcn; R_RAX=(uintptr_t)fn((void*)R_RDI, (void*)R_RSI, (uintptr_t)R_RDX, (uint32_t)R_RCX, (uint32_t)R_R8); DEBUG_LOG; (void)cpu; }
 void LFpuuupL(uintptr_t fcn) { __CPU; LFpuuupL_t fn = (LFpuuupL_t)fcn; R_RAX=(uintptr_t)fn((void*)R_RDI, (uint32_t)R_RSI, (uint32_t)R_RDX, (uint32_t)R_RCX, (void*)R_R8, (uintptr_t)R_R9); DEBUG_LOG; (void)cpu; }
 void uFpuuuuuu(uintptr_t fcn) { __CPU; uFpuuuuuu_t fn = (uFpuuuuuu_t)fcn; R_RAX=(uint32_t)fn((void*)R_RDI, (uint32_t)R_RSI, (uint32_t)R_RDX, (uint32_t)R_RCX, (uint32_t)R_R8, (uint32_t)R_R9, *(uint32_t*)(R_RSP + 8)); DEBUG_LOG; (void)cpu; }
+void iFipip(uintptr_t fcn) { __CPU; iFipip_t fn = (iFipip_t)fcn; R_RAX=(int32_t)fn((int32_t)R_RDI, (void*)R_RSI, (int32_t)R_RDX, (void*)R_RCX); DEBUG_LOG; (void)cpu; }
+void uFc(uintptr_t fcn) { __CPU; uFc_t fn = (uFc_t)fcn; R_RAX=(uint32_t)fn((int8_t)R_RDI); DEBUG_LOG; (void)cpu; }
+void CFu(uintptr_t fcn) { __CPU; CFu_t fn = (CFu_t)fcn; R_RAX=(uint8_t)fn((uint32_t)R_RDI); DEBUG_LOG; (void)cpu; }
+void cFu(uintptr_t fcn) { __CPU; cFu_t fn = (cFu_t)fcn; R_RAX=(int8_t)fn((uint32_t)R_RDI); DEBUG_LOG; (void)cpu; }
+void pFC(uintptr_t fcn) { __CPU; pFC_t fn = (pFC_t)fcn; R_RAX=(uintptr_t)fn((uint8_t)R_RDI); DEBUG_LOG; (void)cpu; }
+void cFpipp(uintptr_t fcn) { __CPU; cFpipp_t fn = (cFpipp_t)fcn; R_RAX=(int8_t)fn((void*)R_RDI, (int32_t)R_RSI, (void*)R_RDX, (void*)R_RCX); DEBUG_LOG; (void)cpu; }
+void cFppipp(uintptr_t fcn) { __CPU; cFppipp_t fn = (cFppipp_t)fcn; R_RAX=(int8_t)fn((void*)R_RDI, (void*)R_RSI, (int32_t)R_RDX, (void*)R_RCX, (void*)R_R8); DEBUG_LOG; (void)cpu; }
+void cFpippppp(uintptr_t fcn) { __CPU; cFpippppp_t fn = (cFpippppp_t)fcn; R_RAX=(int8_t)fn((void*)R_RDI, (int32_t)R_RSI, (void*)R_RDX, (void*)R_RCX, (void*)R_R8, (void*)R_R9, *(void**)(R_RSP + 8)); DEBUG_LOG; (void)cpu; }
+void cFupiiuppp(uintptr_t fcn) { __CPU; cFupiiuppp_t fn = (cFupiiuppp_t)fcn; R_RAX=(int8_t)fn((uint32_t)R_RDI, (void*)R_RSI, (int32_t)R_RDX, (int32_t)R_RCX, (uint32_t)R_R8, (void*)R_R9, *(void**)(R_RSP + 8), *(void**)(R_RSP + 16)); DEBUG_LOG; (void)cpu; }
+void vFupipp(uintptr_t fcn) { __CPU; vFupipp_t fn = (vFupipp_t)fcn; fn((uint32_t)R_RDI, (void*)R_RSI, (int32_t)R_RDX, (void*)R_RCX, (void*)R_R8); DEBUG_LOG; (void)cpu; }
 void lFl(uintptr_t fcn) { __CPU; lFl_t fn = (lFl_t)fcn; R_RAX=(intptr_t)fn((intptr_t)R_RDI); DEBUG_LOG; (void)cpu; }
 void lFll(uintptr_t fcn) { __CPU; lFll_t fn = (lFll_t)fcn; R_RAX=(intptr_t)fn((intptr_t)R_RDI, (intptr_t)R_RSI); DEBUG_LOG; (void)cpu; }
 void lFlll(uintptr_t fcn) { __CPU; lFlll_t fn = (lFlll_t)fcn; R_RAX=(intptr_t)fn((intptr_t)R_RDI, (intptr_t)R_RSI, (intptr_t)R_RDX); DEBUG_LOG; (void)cpu; }
