@@ -778,7 +778,7 @@ static void handle_arg_latx_mem_test(const char *arg)
 {
     option_mem_test = strtol(arg, NULL, 0);
     if (option_mem_test) {
-        if (sysconf(_SC_PAGESIZE) != 16384) {
+        if (sysconf(_SC_PAGESIZE) != LATX_HOST_16K_PAGE_SIZE) {
             option_mem_test = 0;
         } else {
             option_aot = 0;
@@ -1447,6 +1447,12 @@ int main(int argc, char **argv, char **envp)
 
     /* set environment variables */
     options_set(target_argv);
+
+#if defined(CONFIG_LATX) && defined(TARGET_I386) && TARGET_ABI_BITS == 32
+    if (option_mem_test) {
+        latx_init_16k_write_checks();
+    }
+#endif
 
     if (!latx_options_finalize()) {
 #if defined(CONFIG_LATX_KZT)
