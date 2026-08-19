@@ -16,5 +16,9 @@ bool latx_text_preflight_guest(path_collection_t *guest_paths,
                                char *reason, size_t reason_size);
 int latx_text_preflight_or_disable(path_collection_t *guest_paths,
                                    const char *requesting_soname);
+bool latx_harfbuzz_preflight_guest(path_collection_t *guest_paths,
+                                   char *reason, size_t reason_size);
+int latx_harfbuzz_preflight_or_disable(path_collection_t *guest_paths,
+                                       const char *requesting_soname);
 
 #endif /* LATX_WRAPPEDTEXT_PREFLIGHT_H */
