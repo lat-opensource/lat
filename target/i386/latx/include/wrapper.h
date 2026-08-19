@@ -1607,5 +1607,18 @@ void vFpll(uintptr_t fnc);
 void vFpluul(uintptr_t fnc);
 void vFpppiipui(uintptr_t fnc);
 void vFpppuip(uintptr_t fnc);
+void LFppu(uintptr_t fnc);
+void cFc(uintptr_t fnc);
+void iFLi(uintptr_t fnc);
+void iFc(uintptr_t fnc);
+void lFpl(uintptr_t fnc);
+void lFppu(uintptr_t fnc);
+void pFpid(uintptr_t fnc);
+void pFpipd(uintptr_t fnc);
+void pFpl(uintptr_t fnc);
+void pFplu(uintptr_t fnc);
+void pFppc(uintptr_t fnc);
+void uFL(uintptr_t fnc);
+void uFpl(uintptr_t fnc);
 //endxcbV2
 #endif // __WRAPPER_H_
