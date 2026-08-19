@@ -12,6 +12,8 @@
 #include "debug.h"
 #include "fileutils.h"
 #include "kzt-groups.h"
+#include "wrappedcairo-preflight.h"
+#include "wrappedfont-preflight.h"
 #include "wrappedlib-preflight.h"
 #include "wrappedtext-preflight.h"
 
@@ -31,6 +33,9 @@ static const char *const fribidi_supported_symbols[] = {
 static const char *const fribidi_required_host_symbols[] = {
     "fribidi_unicode_version",
     "fribidi_version_info",
+};
+static const char *const graphite2_supported_symbols[] = {
+#include "wrappedgraphite2_private.h"
 };
 static const char *const harfbuzz_supported_symbols[] = {
 #include "wrappedharfbuzz_private.h"
@@ -123,6 +128,12 @@ static bool harfbuzz_symbol_filter(const char *name)
     return !strncmp(name, "hb_", 3);
 }
 
+static bool graphite2_symbol_filter(const char *name)
+{
+    return !strncmp(name, "gr_", 3) ||
+           !strncmp(name, "graphite_", 9);
+}
+
 typedef struct HarfBuzzLibraryPreflight {
     const char *soname;
     const char *label;
@@ -200,15 +211,71 @@ bool latx_harfbuzz_preflight_guest(path_collection_t *guest_paths,
     return true;
 }
 
-int latx_harfbuzz_preflight_or_disable(path_collection_t *guest_paths,
-                                       const char *requesting_soname)
+static bool latx_graphite2_preflight_guest(path_collection_t *guest_paths,
+                                           char *reason,
+                                           size_t reason_size)
 {
-    char reason[256];
+    char *guest_path;
+    bool safe;
 
-    if (latx_harfbuzz_preflight_guest(guest_paths, reason,
-                                      sizeof(reason))) {
-        return 0;
+    guest_path = ResolveFile("libgraphite2.so.3", guest_paths);
+    safe = latx_wrappedlib_preflight_guest(
+        guest_path, "libgraphite2.so.3", "Graphite2",
+        graphite2_symbol_filter, graphite2_supported_symbols,
+        ARRAY_SIZE(graphite2_supported_symbols), NULL, 0, NULL, 0, NULL,
+        reason, reason_size);
+    box_free(guest_path);
+    return safe;
+}
+
+static bool text_guest_library_exists(path_collection_t *guest_paths,
+                                      const char *soname)
+{
+    char *path = ResolveFile(soname, guest_paths);
+    bool exists = path && access(path, R_OK) == 0;
+
+    box_free(path);
+    return exists;
+}
+
+int latx_text_family_preflight_or_disable(path_collection_t *guest_paths,
+                                          const char *requesting_soname)
+{
+    char *cairo_path;
+    char reason[256];
+    bool cairo_safe;
+
+    if (latx_font_preflight_or_disable(guest_paths,
+                                       requesting_soname) != 0) {
+        return -1;
     }
+    cairo_path = ResolveFile("libcairo.so.2", guest_paths);
+    cairo_safe = latx_cairo_preflight_guest(
+        cairo_path, "libcairo.so.2", reason, sizeof(reason));
+    box_free(cairo_path);
+    if (!cairo_safe) {
+        kzt_groups_log_wrapper_rejection(requesting_soname, reason);
+        kzt_group_disable(KZT_GROUP_CAIRO, reason);
+        return -1;
+    }
+    if (text_guest_library_exists(guest_paths, "libfribidi.so.0") &&
+        !latx_text_preflight_guest(guest_paths, reason, sizeof(reason))) {
+        goto reject_text;
+    }
+    if (text_guest_library_exists(guest_paths, "libgraphite2.so.3") &&
+        !latx_graphite2_preflight_guest(guest_paths, reason,
+                                        sizeof(reason))) {
+        goto reject_text;
+    }
+    if (text_guest_library_exists(guest_paths, "libharfbuzz.so.0")) {
+        if (!latx_harfbuzz_preflight_guest(guest_paths, reason,
+                                           sizeof(reason))) {
+            goto reject_text;
+        }
+    }
+    return 0;
+
+reject_text:
     kzt_groups_log_wrapper_rejection(requesting_soname, reason);
     kzt_group_disable(KZT_GROUP_TEXT, reason);
     return -1;
@@ -233,17 +300,4 @@ bool latx_text_preflight_guest(path_collection_t *guest_paths,
         reason, reason_size);
     box_free(guest_path);
     return safe;
-}
-
-int latx_text_preflight_or_disable(path_collection_t *guest_paths,
-                                   const char *requesting_soname)
-{
-    char reason[256];
-
-    if (latx_text_preflight_guest(guest_paths, reason, sizeof(reason))) {
-        return 0;
-    }
-    kzt_groups_log_wrapper_rejection(requesting_soname, reason);
-    kzt_group_disable(KZT_GROUP_TEXT, reason);
-    return -1;
 }

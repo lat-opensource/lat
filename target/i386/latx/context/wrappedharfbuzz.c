@@ -1243,18 +1243,12 @@ EXPORT void *my_hb_glib_blob_create(void *bytes)
 
 EXPORT void *my_hb_graphite2_face_get_gr_face(void *face)
 {
-    (void)face;
-    kzt_groups_log_wrapper_limitation(
-        harfbuzzName, "Graphite2 object interop is not enabled");
-    return NULL;
+    return my->hb_graphite2_face_get_gr_face(face);
 }
 
 EXPORT void *my_hb_graphite2_font_get_gr_font(void *font)
 {
-    (void)font;
-    kzt_groups_log_wrapper_limitation(
-        harfbuzzName, "Graphite2 object interop is not enabled");
-    return NULL;
+    return my->hb_graphite2_font_get_gr_font(font);
 }
 
 static void hb_ft_locks_clear(void)
@@ -1317,7 +1311,7 @@ static bool hb_resolve_guest_glib(void)
 
 #define PRE_INIT_GUEST \
     do { \
-        if (latx_harfbuzz_preflight_or_disable( \
+        if (latx_text_family_preflight_or_disable( \
                 &box64->box64_ld_lib, harfbuzzName) != 0) { \
             return -1; \
         } \

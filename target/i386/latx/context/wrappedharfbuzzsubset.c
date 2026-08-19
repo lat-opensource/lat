@@ -46,7 +46,7 @@ DEFINE_HB_SUBSET_USER_DATA(hb_subset_plan)
 
 #define PRE_INIT_GUEST \
     do { \
-        if (latx_harfbuzz_preflight_or_disable( \
+        if (latx_text_family_preflight_or_disable( \
                 &box64->box64_ld_lib, harfbuzzsubsetName) != 0) { \
             return -1; \
         } \

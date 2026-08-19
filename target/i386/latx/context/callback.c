@@ -190,3 +190,45 @@ uint64_t RunFunctionFmt(uintptr_t fnc, const char *fmt, ...)
     return 0;
 #endif
 }
+
+float RunFunctionFmtFloat(uintptr_t fnc, const char *fmt, ...)
+{
+#ifdef TARGET_X86_64
+    float result;
+    size_t stack_args;
+    CallbackFrame frame;
+    LatxCallbackArgs args;
+    va_list ap;
+
+    lsassert(fnc);
+    lsassert(fmt);
+    lsassert(CODEIS64);
+    if (!fnc || !fmt || !CODEIS64 ||
+        !latx_callback_stack_args(fmt, &stack_args)) {
+        return 0.0f;
+    }
+
+    frame = callback_frame_enter(stack_args, true);
+    args = (LatxCallbackArgs) {
+        .stack = (uint64_t *)frame.cpu->regs[R_ESP],
+    };
+
+    va_start(ap, fmt);
+    latx_callback_collect_args(&args, fmt, &ap);
+    va_end(ap);
+
+    g_assert(args.stack_count == stack_args);
+    for (size_t i = 0; i < args.gpr_count; i++) {
+        frame.cpu->regs[callback_gpr_regs[i]] = args.gpr[i];
+    }
+    for (size_t i = 0; i < args.xmm_count; i++) {
+        frame.cpu->xmm_regs[i].ZMM_Q(0) = args.xmm[i];
+    }
+
+    callback_frame_run(&frame, fnc);
+    memcpy(&result, &frame.cpu->xmm_regs[0].ZMM_L(0), sizeof(result));
+    return result;
+#else
+    return 0.0f;
+#endif
+}

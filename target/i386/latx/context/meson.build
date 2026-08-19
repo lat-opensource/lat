@@ -32,6 +32,7 @@ my_file = files(
   'wrappedtext-preflight.c',
   'wrappedcairo.c',
   'wrappedfribidi.c',
+  'wrappedgraphite2.c',
   'wrappedharfbuzz-interop.c',
   'wrappedharfbuzz.c',
   'wrappedharfbuzzsubset.c',

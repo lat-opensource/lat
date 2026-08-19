@@ -22,8 +22,8 @@ EXPORT const char *my_fribidi_version_info;
 
 #define PRE_INIT_GUEST \
     do { \
-        if (latx_text_preflight_or_disable(&box64->box64_ld_lib, \
-                                           fribidiName) != 0) { \
+        if (latx_text_family_preflight_or_disable( \
+                &box64->box64_ld_lib, fribidiName) != 0) { \
             return -1; \
         } \
     } while (0);

@@ -157,7 +157,7 @@ EXPORT void my_hb_cairo_glyphs_from_buffer(
 
 #define PRE_INIT_GUEST \
     do { \
-        if (latx_harfbuzz_preflight_or_disable( \
+        if (latx_text_family_preflight_or_disable( \
                 &box64->box64_ld_lib, harfbuzzcairoName) != 0) { \
             return -1; \
         } \
