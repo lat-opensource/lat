@@ -18,6 +18,11 @@
  *
  *     X(identifier, name, bit, STABLE|EXPERIMENTAL, dependencies)
  */
+/*
+ * TEXT depends on CAIRO because the HarfBuzz family includes hb-ft and its
+ * optional Cairo DSO. Those entry points exchange opaque FT_Face, hb_font_t,
+ * and cairo_font_face_t objects, so a partially native family is unsafe.
+ */
 #define KZT_GROUP_LIST(X)                                                \
     X(CORE,   "core",   0, STABLE,      KZT_GROUP_NONE)                 \
     X(X11,    "x11",    1, STABLE,      KZT_GROUP_CORE)                 \
@@ -26,7 +31,7 @@
     X(VAAPI,  "vaapi",  4, STABLE,      KZT_GROUP_CORE | KZT_GROUP_X11) \
     X(FONT,   "font",   6, EXPERIMENTAL, KZT_GROUP_CORE | KZT_GROUP_X11) \
     X(INPUT,  "input",  7, EXPERIMENTAL, KZT_GROUP_CORE | KZT_GROUP_X11) \
-    X(TEXT,   "text",   8, EXPERIMENTAL, KZT_GROUP_CORE)                 \
+    X(TEXT,   "text",   8, EXPERIMENTAL, KZT_GROUP_CAIRO)                \
     X(CAIRO,  "cairo",  5, EXPERIMENTAL, KZT_GROUP_FONT)
 
 #endif /* LATX_KZT_GROUP_LIST_H */
