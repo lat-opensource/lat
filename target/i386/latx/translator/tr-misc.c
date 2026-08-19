@@ -269,17 +269,50 @@ bool translate_int_3(IR1_INST *pir1)
             do_translate_brick_tb(wrapper, function, &state_info, cpu,
                                   state_info.current_pc, tb);
             mmap_unlock();
-        } else {
-            la_break(0x5);
+            return true;
         }
-    } else {
-        la_break(0x5);
     }
-    return true;
-#else
-    la_break(0x5);
-    return true;
 #endif
+    /*
+     * Host SIGTRAP recovery maps the instruction after la_break() back to a
+     * guest PC.  A terminal INT3 has no following guest mapping, so record
+     * the software-interrupt next EIP explicitly instead.
+     */
+#ifdef TARGET_X86_64
+    IR2_OPND codemode_value_opnd = ra_alloc_itemp();
+    IR2_OPND not_64 = ra_alloc_label();
+
+    la_ld_d(codemode_value_opnd, env_ir2_opnd,
+            offsetof(CPUX86State, sys.codemode));
+    la_beq(codemode_value_opnd, zero_ir2_opnd, not_64);
+    ra_free_temp(codemode_value_opnd);
+    tr_save_x64_8_registers_to_env(0xff, option_save_xmm);
+    la_label(not_64);
+#endif
+    tr_save_fcsr_to_env();
+    tr_save_registers_to_env(0xff, 0xff, 0xff, options_to_save());
+
+    IR2_OPND intno = ra_alloc_itemp();
+    li_guest_addr(intno, EXCP03_INT3);
+    la_st_w(intno, env_ir2_opnd, lsenv_offset_exception_index(lsenv));
+    ra_free_temp(intno);
+
+    IR2_OPND next_pc = ra_alloc_itemp();
+    target_ulong call_offset __attribute__((unused)) =
+            aot_get_call_offset(ir1_addr_next(pir1));
+    aot_load_guest_addr(next_pc, ir1_addr_next(pir1),
+                        LOAD_CALL_TARGET, call_offset);
+    la_store_addrx(next_pc, env_ir2_opnd,
+                   lsenv_offset_exception_next_eip(lsenv));
+    ra_free_temp(next_pc);
+
+    IR2_OPND helper_addr_opnd = ra_alloc_dbt_arg2();
+    aot_load_host_addr(helper_addr_opnd, (ADDR)helper_raise_int,
+                       LOAD_HELPER_RAISE_INT, 0);
+    la_jirl(ra_ir2_opnd, helper_addr_opnd, 0);
+
+    tr_load_registers_from_env(0x1, 0, 0, options_to_save());
+    return true;
 }
 
 bool translate_in(IR1_INST *pir1)

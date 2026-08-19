@@ -39,4 +39,14 @@ if 'x86_64-linux-user' in target_dirs
       files('../../guest-fatal-signal-status.S'),
     ],
   }]
+  if 'CONFIG_LATX_KZT' in config_host
+    latx_integration_tests += [{
+      'name': 'test-int3-sigtrap-rip',
+      'runner': find_program('../../test-int3-sigtrap-rip.sh'),
+      'args': [
+        emulators['latx-x86_64'],
+        files('../../int3-sigtrap-rip.S'),
+      ],
+    }]
+  endif
 endif
