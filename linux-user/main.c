@@ -786,6 +786,22 @@ static void handle_arg_latx_mem_test(const char *arg)
     }
 }
 
+#define LATX_MINKE_PROGRAM_NAME "Minke.MI.Organ.exe"
+
+static void handle_arg_latx_minke_16k_page_check(const char *arg)
+{
+    option_minke_16k_page_check = strtol(arg, NULL, 0);
+    if (option_minke_16k_page_check) {
+#if TARGET_ABI_BITS == 32
+        if (sysconf(_SC_PAGESIZE) != LATX_HOST_16K_PAGE_SIZE) {
+            option_minke_16k_page_check = 0;
+        }
+#else
+        option_minke_16k_page_check = 0;
+#endif
+    }
+}
+
 static void handle_arg_latx_real_maps(const char *arg)
 {
     option_real_maps = strtol(arg, NULL, 0);
@@ -944,6 +960,9 @@ static const struct qemu_argument arg_table[] = {
     "",           "enable imm reg optimization"},
     {"latx-mem-test",    "LATX_MT",     true,  handle_arg_latx_mem_test,
     "",           "test memory right when memory access"},
+    {"latx-minke-16k-page-check", "LATX_MINKE_16K_PAGE_CHECK", true,
+    handle_arg_latx_minke_16k_page_check, "0|1",
+    "enable Minke-specific mixed 16K write checks"},
     {"latx-real-maps",    "LATX_REAL_MAPS",     true,  handle_arg_latx_real_maps,
     "",           "enable get real self maps"},
     {"latx-monitor-shared-mem",    "LATX_MONITOR_SHARED_MEM",     true,  handle_arg_latx_monitor_shared_mem,
@@ -1451,6 +1470,19 @@ int main(int argc, char **argv, char **envp)
 #if defined(CONFIG_LATX) && defined(TARGET_I386) && TARGET_ABI_BITS == 32
     if (option_mem_test) {
         latx_init_16k_write_checks();
+    }
+    if (option_minke_16k_page_check) {
+        const char *program = guest_program(target_argv);
+        bool enable_minke_checks = program &&
+            !strcasecmp(program, LATX_MINKE_PROGRAM_NAME);
+
+        option_minke_16k_page_check = enable_minke_checks;
+        if (enable_minke_checks) {
+#ifdef CONFIG_LATX_AOT
+            option_aot = 0;
+#endif
+            latx_enable_minke_16k_write_checks();
+        }
     }
 #endif
 

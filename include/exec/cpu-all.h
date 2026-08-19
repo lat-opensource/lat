@@ -251,6 +251,9 @@ extern intptr_t qemu_host_page_mask;
 extern uint8_t *latx_4k_page_writable;
 extern uint8_t *latx_16k_page_write_mixed;
 void latx_init_16k_write_checks(void);
+void latx_enable_minke_16k_write_checks(void);
+bool latx_minke_16k_write_check_pc(target_ulong pc);
+void latx_minke_register_16k_tb_range(abi_ulong start, abi_ulong end);
 #endif
 #endif
 

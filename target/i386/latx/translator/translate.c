@@ -4122,7 +4122,20 @@ static inline void helper_restore_reg(IR2_OPND opnd)
 void gen_test_page_flag(IR2_OPND mem_opnd, int mem_imm, uint32_t flag)
 {
     if (!option_mem_test) {
+#if TARGET_ABI_BITS == 32
+        TranslationBlock *current_tb;
+
+        if (!option_minke_16k_page_check) {
+            return;
+        }
+        current_tb = (TranslationBlock *)lsenv->tr_data->curr_tb;
+        if (!current_tb ||
+            !latx_minke_16k_write_check_pc(current_tb->pc)) {
+            return;
+        }
+#else
         return;
+#endif
     }
 #if TARGET_ABI_BITS == 32
     if (qemu_host_page_size == LATX_HOST_16K_PAGE_SIZE &&

@@ -3105,6 +3105,47 @@ void latx_init_16k_write_checks(void)
         g_new0(uint8_t, LATX_HOST_16K_PAGE_COUNT);
 }
 
+#define LATX_MINKE_WINE_HELPER_PC       UINT32_C(0x7b71d000)
+#define LATX_MINKE_MAX_JIT_MAPPING_SIZE (64 * KiB)
+
+static uint8_t *latx_minke_16k_write_tb_pages;
+
+void latx_enable_minke_16k_write_checks(void)
+{
+    latx_init_16k_write_checks();
+    if (!latx_4k_page_writable || latx_minke_16k_write_tb_pages) {
+        return;
+    }
+
+    latx_minke_16k_write_tb_pages =
+        g_new0(uint8_t, LATX_GUEST_PAGE_COUNT);
+    qatomic_set(&latx_minke_16k_write_tb_pages[
+                LATX_MINKE_WINE_HELPER_PC >> TARGET_PAGE_BITS], 1);
+}
+
+bool latx_minke_16k_write_check_pc(target_ulong pc)
+{
+    return latx_minke_16k_write_tb_pages &&
+        qatomic_read(&latx_minke_16k_write_tb_pages[
+                     pc >> TARGET_PAGE_BITS]);
+}
+
+void latx_minke_register_16k_tb_range(abi_ulong start, abi_ulong end)
+{
+    uint32_t first, last, i;
+
+    if (!latx_minke_16k_write_tb_pages || start >= end ||
+        end - start > LATX_MINKE_MAX_JIT_MAPPING_SIZE) {
+        return;
+    }
+
+    first = start >> TARGET_PAGE_BITS;
+    last = (end - 1) >> TARGET_PAGE_BITS;
+    for (i = first; i <= last; i++) {
+        qatomic_set(&latx_minke_16k_write_tb_pages[i], 1);
+    }
+}
+
 static void latx_update_write_permissions(target_ulong start, target_ulong end)
 {
     target_ulong addr, host_addr;
