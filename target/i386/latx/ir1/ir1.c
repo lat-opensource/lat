@@ -15,6 +15,10 @@
 #include "insts-pattern.h"
 #include "lsenv.h"
 
+#if defined(CONFIG_LATX_KZT)
+#include "bridge.h"
+#endif
+
 IR1_OPND al_ir1_opnd;
 IR1_OPND ah_ir1_opnd;
 IR1_OPND ax_ir1_opnd;
@@ -1719,8 +1723,9 @@ int ir1_is_syscall(IR1_INST *ir1)
 bool ir1_is_tb_ending(IR1_INST *ir1)
 {
 #if defined(CONFIG_LATX_KZT)
-    if (latx_kzt_runtime_enabled() &&
-        ir1_opcode(ir1) == dt_X86_INS_INT3) {
+    if (CODEIS64 && latx_kzt_runtime_enabled() &&
+        ir1_opcode(ir1) == dt_X86_INS_INT3 &&
+        kzt_is_registered_onebridge(ir1_addr(ir1))) {
         return true;
     }
 #endif
