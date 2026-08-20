@@ -16,6 +16,13 @@
     TARGET_IOWR('d', 0x47, union drm_amdgpu_gem_wait_idle)
 #define TARGET_DRM_IOCTL_AMDGPU_GEM_VA \
     TARGET_IOWR('d', 0x48, struct drm_amdgpu_gem_va)
+#if defined(TARGET_I386) && !defined(TARGET_X86_64) && \
+    !defined(CONFIG_AMDGPU_GEN_VA_OLD)
+/* Older libdrm clients pass this 40-byte pre-timeline request. */
+#define TARGET_DRM_IOCTL_AMDGPU_GEM_VA_OLD \
+    TARGET_IOWR('d', 0x48, struct target_drm_amdgpu_gem_va_old)
+#define DRM_IOCTL_AMDGPU_GEM_VA_OLD DRM_IOCTL_AMDGPU_GEM_VA
+#endif
 #define TARGET_DRM_IOCTL_AMDGPU_WAIT_CS \
     TARGET_IOWR('d', 0x49, union drm_amdgpu_wait_cs)
 #define TARGET_DRM_IOCTL_AMDGPU_GEM_OP \
@@ -88,3 +95,15 @@ struct target_drm_amdgpu_fence_to_handle_in {
     abi_uint pad;
 };
 
+#if defined(TARGET_I386) && !defined(TARGET_X86_64) && \
+    !defined(CONFIG_AMDGPU_GEN_VA_OLD)
+struct target_drm_amdgpu_gem_va_old {
+    abi_uint handle;
+    abi_uint _pad;
+    abi_uint operation;
+    abi_uint flags;
+    abi_ullong va_address;
+    abi_ullong offset_in_bo;
+    abi_ullong map_size;
+};
+#endif

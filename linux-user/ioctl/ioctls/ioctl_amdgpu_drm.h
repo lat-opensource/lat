@@ -14,6 +14,11 @@ IOCTL_SPECIAL(DRM_IOCTL_AMDGPU_GEM_METADATA, IOC_RW, do_ioctl_amdgpu_drm,
       MK_PTR(MK_STRUCT(STRUCT_drm_amdgpu_gem_metadata)))
 IOCTL(DRM_IOCTL_AMDGPU_GEM_WAIT_IDLE, IOC_RW,
       MK_PTR(MK_STRUCT(STRUCT_drm_amdgpu_gem_wait_idle_in)))
+#if defined(TARGET_I386) && !defined(TARGET_X86_64) && \
+    !defined(CONFIG_AMDGPU_GEN_VA_OLD)
+IOCTL_SPECIAL(DRM_IOCTL_AMDGPU_GEM_VA_OLD, IOC_W, do_ioctl_amdgpu_drm,
+      MK_PTR(MK_STRUCT(STRUCT_drm_amdgpu_gem_va_old)))
+#endif
 IOCTL(DRM_IOCTL_AMDGPU_GEM_VA, IOC_RW,
       MK_PTR(MK_STRUCT(STRUCT_drm_amdgpu_gem_va)))
 IOCTL(DRM_IOCTL_AMDGPU_WAIT_CS, IOC_RW,
