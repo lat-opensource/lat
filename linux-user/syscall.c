@@ -166,7 +166,7 @@
 #include "exec/fasttb.h"
 #endif
 
-#ifdef CONFIG_LATX_TUNNEL_LIB
+#if defined(CONFIG_LATX) && defined(TARGET_I386)
 static bool is_tunnel_loader_address(const TaskState *ts, abi_ulong addr)
 {
     if (!ts->info || !ts->info->interpreter_path) {
@@ -177,6 +177,9 @@ static bool is_tunnel_loader_address(const TaskState *ts, abi_ulong addr)
            (page_get_flags(addr) & PAGE_TUNNEL_LOADER);
 }
 
+#endif
+
+#ifdef CONFIG_LATX_TUNNEL_LIB
 static bool is_tunnel_loader_notification(CPUArchState *env,
                                           abi_ulong method)
 {
@@ -12872,6 +12875,47 @@ static int has_x_permission(struct stat *st) {
     }
 }
 
+#if defined(CONFIG_LATX) && defined(TARGET_I386) && !defined(TARGET_X86_64)
+static char *latx_i386_interpreter_library(CPUArchState *env,
+                                            const char *pathname)
+{
+    TaskState *ts = env_cpu(env)->opaque;
+    const char *basename;
+    const char *program;
+    const char *so;
+    char *interpreter;
+    char *directory;
+    char *candidate;
+
+    basename = strrchr(pathname, '/');
+    if (!ts || !ts->bprm || !ts->bprm->filename ||
+        !is_tunnel_loader_address(ts, env->eip) ||
+        pathname[0] != '/' || !basename ||
+        !g_str_has_prefix(++basename, "lib")) {
+        return NULL;
+    }
+    program = strrchr(ts->bprm->filename, '/');
+    program = program ? program + 1 : ts->bprm->filename;
+    if (strcmp(program, "gldriverquery") && strcmp(program, "steam")) {
+        return NULL;
+    }
+    so = strstr(basename, ".so");
+    if (!so || (so[3] && so[3] != '.')) {
+        return NULL;
+    }
+
+    interpreter = realpath(path(ts->info->interpreter_path), NULL);
+    if (!interpreter) {
+        return NULL;
+    }
+    directory = g_path_get_dirname(interpreter);
+    free(interpreter);
+    candidate = g_build_filename(directory, basename, NULL);
+    g_free(directory);
+    return candidate;
+}
+#endif
+
 static int do_openat(void *cpu_env, int dirfd, const char *pathname, int flags, mode_t mode)
 {
     struct fake_open {
@@ -12980,7 +13024,26 @@ static int do_openat(void *cpu_env, int dirfd, const char *pathname, int flags, 
             }
         }
     }
-    return safe_openat(dirfd, path(pathname), flags, mode);
+    int ret = safe_openat(dirfd, realpath, flags, mode);
+
+#if defined(CONFIG_LATX) && defined(TARGET_I386) && !defined(TARGET_X86_64)
+    if (ret < 0 && errno == ENOENT && realpath == pathname &&
+        (flags & (O_ACCMODE | O_CREAT | O_TRUNC | O_APPEND)) == O_RDONLY) {
+        char *runtime_path;
+        int saved_errno = errno;
+
+        runtime_path = latx_i386_interpreter_library(cpu_env, pathname);
+        if (runtime_path) {
+            ret = safe_openat(dirfd, runtime_path, flags, mode);
+            g_free(runtime_path);
+        }
+        if (ret < 0) {
+            errno = saved_errno;
+        }
+    }
+#endif
+
+    return ret;
 }
 
 #define MAX_PATH_SIZE 1024
