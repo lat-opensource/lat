@@ -230,6 +230,10 @@ typedef struct TaskState {
     /* This thread's sigaltstack, if it has one */
     struct target_sigaltstack sigaltstack_used;
 #ifdef TARGET_I386
+#if defined(CONFIG_LATX) && !defined(TARGET_X86_64)
+    /* i386 robust futex list head in guest address space. */
+    abi_ulong robust_list_head;
+#endif
     /* This thread's syscall user dispatch state; ~0 means disabled. */
     abi_ulong sys_dispatch;
     abi_ulong sys_dispatch_selector;

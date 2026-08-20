@@ -9928,6 +9928,9 @@ static int do_fork(CPUArchState *env, unsigned int flags, abi_ulong newsp,
             if (flags & CLONE_CHILD_SETTID)
                 put_user_u32(sys_gettid(), child_tidptr);
             ts = (TaskState *)cpu->opaque;
+#if defined(CONFIG_LATX) && defined(TARGET_I386) && !defined(TARGET_X86_64)
+            qatomic_set(&ts->robust_list_head, 0);
+#endif
             /* Linux clears syscall user dispatch in every fork child. */
 #ifdef TARGET_I386
             ts->sys_dispatch = 0;
@@ -11065,6 +11068,38 @@ static int do_safe_futex(int *uaddr, int op, int val,
 #endif /* HOST_LONG_BITS == 64 */
     return -TARGET_ENOSYS;
 }
+
+#if defined(CONFIG_LATX) && defined(TARGET_I386) && !defined(TARGET_X86_64)
+#define I386_ROBUST_LIST_HEAD_SIZE       (3 * sizeof(uint32_t))
+
+static abi_long i386_latx_set_robust_list(CPUState *cpu, abi_ulong head,
+                                           abi_ulong len)
+{
+    if (len != I386_ROBUST_LIST_HEAD_SIZE) {
+        return -TARGET_EINVAL;
+    }
+
+    /* The i386 list layout cannot be registered with the native kernel. */
+    qatomic_set(&((TaskState *)cpu->opaque)->robust_list_head, head);
+    return 0;
+}
+
+static abi_long i386_latx_get_robust_list(CPUState *cpu, abi_long pid,
+                                           abi_ulong head_ptr,
+                                           abi_ulong len_ptr)
+{
+    TaskState *current = cpu->opaque;
+
+    if (pid && pid != sys_gettid()) {
+        return -TARGET_ESRCH;
+    }
+    if (put_user_u32(I386_ROBUST_LIST_HEAD_SIZE, len_ptr) ||
+        put_user_u32(qatomic_read(&current->robust_list_head), head_ptr)) {
+        return -TARGET_EFAULT;
+    }
+    return 0;
+}
+#endif
 
 /* ??? Using host futex calls even when target atomic operations
    are not really atomic probably breaks things.  However implementing
@@ -19713,8 +19748,15 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
 
 #ifdef TARGET_NR_set_robust_list
     case TARGET_NR_set_robust_list:
-         return get_errno(syscall(__NR_set_robust_list, arg1, arg2));
+#if defined(CONFIG_LATX) && defined(TARGET_I386) && !defined(TARGET_X86_64)
+        return i386_latx_set_robust_list(cpu, arg1, arg2);
+#else
+        return get_errno(syscall(__NR_set_robust_list, arg1, arg2));
+#endif
     case TARGET_NR_get_robust_list:
+#if defined(CONFIG_LATX) && defined(TARGET_I386) && !defined(TARGET_X86_64)
+        return i386_latx_get_robust_list(cpu, arg1, arg2, arg3);
+#else
         /* The ABI for supporting robust futexes has userspace pass
          * the kernel a pointer to a linked list which is updated by
          * userspace after the syscall; the list is walked by the kernel
@@ -19729,6 +19771,7 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
          */
         return get_errno(syscall(__NR_get_robust_list, arg1, g2h_untagged(arg2),
                         g2h_untagged(arg3)));
+#endif
 #endif
 
 #if defined(TARGET_NR_utimensat)
