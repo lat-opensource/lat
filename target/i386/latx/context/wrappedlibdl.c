@@ -150,7 +150,9 @@ void kzt_wine_init_x86(void);
 static int init_x86dlfun(void)
 {
 #ifdef CONFIG_LOONGARCH_NEW_WORLD
-    init_x86dlfun_from("libc.so.6", "libdl.so.2");
+    if (init_x86dlfun_from("libc.so.6", "libdl.so.2") != 0) {
+        return -1;
+    }
     kzt_wine_init_x86();
     return 0;
 #else
@@ -196,8 +198,10 @@ EXPORT void* my_dlopen(void *filename, int flag){
     int is_local = (flag&0x100)?0:1;  // if not global, then local, and that means symbols are not put in the global "pot" for other libs
     CLEARERR
     if (!dl->x86dlopen) {
-        init_x86dlfun();
-        lsassert(dl->x86dlopen);
+        if (init_x86dlfun() != 0 || !dl->x86dlopen) {
+            set_dl_error(dl, "Cannot resolve guest dlfcn entry points");
+            return NULL;
+        }
     }
     if(filename) {
         char* rfilename = expand_dlopen_path((char*)filename);
@@ -420,8 +424,10 @@ EXPORT void* my_dlsym(void *handle, void *symbol){
     char* rsymbol = (char*)symbol;
     CLEARERR
     if (!dl->x86dlsym) {
-        init_x86dlfun();
-        lsassert(dl->x86dlsym);
+        if (init_x86dlfun() != 0 || !dl->x86dlsym) {
+            set_dl_error(dl, "Cannot resolve guest dlfcn entry points");
+            return NULL;
+        }
     }
     printf_dlsym(LOG_DEBUG, "Call to dlsym(%p, \"%s\")%s\n", handle, rsymbol, dlsym_error?"":"\n");
     if (handle && handle != (void*)~0LL) {
@@ -615,8 +621,10 @@ EXPORT int my_dlclose(void *handle)
     dlprivate_t *dl = my_context->dlprivate;
     CLEARERR
     if (!dl->x86dlclose) {
-        init_x86dlfun();
-        lsassert(dl->x86dlclose);
+        if (init_x86dlfun() != 0 || !dl->x86dlclose) {
+            set_dl_error(dl, "Cannot resolve guest dlfcn entry points");
+            return -1;
+        }
     }
     size_t nlib = (size_t)handle;
     if(nlib > dl->lib_sz) {
@@ -686,8 +694,10 @@ EXPORT int my_dladdr1(void *addr, void *i, void** extra_info, int flags)
     dlprivate_t *dl = my_context->dlprivate;
     CLEARERR
     if (!dl->x86dladdr1) {
-        init_x86dlfun();
-        lsassert(dl->x86dladdr1);
+        if (init_x86dlfun() != 0 || !dl->x86dladdr1) {
+            set_dl_error(dl, "Cannot resolve guest dlfcn entry points");
+            return 0;
+        }
     }
     Dl_info *info = (Dl_info*)i;
     printf_dlsym(LOG_DEBUG, "Warning: partially unimplement call to dladdr/dladdr1(%p, %p, %p, %d)\n", addr, info, extra_info, flags);
@@ -721,8 +731,10 @@ EXPORT int my_dladdr(void *addr, void *i)
     dlprivate_t *dl = my_context->dlprivate;
     CLEARERR
     if (!dl->x86dladdr) {
-        init_x86dlfun();
-        lsassert(dl->x86dladdr);
+        if (init_x86dlfun() != 0 || !dl->x86dladdr) {
+            set_dl_error(dl, "Cannot resolve guest dlfcn entry points");
+            return 0;
+        }
     }
 #ifdef CONFIG_LATX_DEBUG
     Dl_info *info = (Dl_info*)i;
@@ -791,8 +803,10 @@ EXPORT int my_dlinfo(void* handle, int request, void* info)
     dlprivate_t *dl = my_context->dlprivate;
     CLEARERR
     if (!dl->x86dlinfo) {
-        init_x86dlfun();
-        lsassert(dl->x86dlinfo);
+        if (init_x86dlfun() != 0 || !dl->x86dlinfo) {
+            set_dl_error(dl, "Cannot resolve guest dlfcn entry points");
+            return -1;
+        }
     }
     size_t nlib;
     void *guest_handle = handle;

@@ -159,5 +159,6 @@ TranslationBlock * kzt_tb_find_exp(
 void kzt_bridge_init(void);
 void kzt_wine_bridge(abi_ulong start, int fd);
 int latx_dpy_xcb_sync(void *v1);
+uintptr_t kzt_resolve_guest_symbol(const char *name);
 elfheader_t* loadElfFromFile(const char* name);
 #endif  //__MY_ALIGN__H_
