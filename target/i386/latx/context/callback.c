@@ -9,6 +9,7 @@
 #include <stdarg.h>
 
 #include "callback-args.h"
+#include "callback-fpr.h"
 #include "callback.h"
 #include "lsenv.h"
 #include "qemu.h"
@@ -88,7 +89,7 @@ static uint64_t callback_frame_run(CallbackFrame *frame, uintptr_t fnc)
     memcpy(&buf, &cs->jmp_env, sizeof(buf));
 
     old_running = qatomic_read(&cs->running);
-    cpu_loop(cpu);
+    latx_kzt_callback_cpu_loop(cpu);
     qatomic_set(&cs->running, old_running);
 
     memcpy(&cs->jmp_env, &buf, sizeof(buf));

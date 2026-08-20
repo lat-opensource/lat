@@ -78,6 +78,7 @@ my_file = files(
   'globalsymbols.c',
   'callback-args.c',
   'callback.c',
+  'callback-fpr.S',
   'kzt_public_loader_observer.c',
   'kzt_relocation_transaction.c',
   'wrappedlibdl.c',

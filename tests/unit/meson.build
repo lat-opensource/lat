@@ -58,6 +58,25 @@ if 'CONFIG_LATX' in config_host
   )
 endif
 
+if 'CONFIG_LATX' in config_host and host_machine.cpu_family() == 'loongarch64'
+  test_kzt_callback_fpr = executable(
+    'test-kzt-callback-fpr',
+    files(
+      'test-kzt-callback-fpr.c',
+      '../../target/i386/latx/context/callback-fpr.S',
+    ),
+    include_directories: include_directories('../..'),
+    dependencies: glib,
+    build_by_default: false,
+  )
+
+  test(
+    'test-kzt-callback-fpr',
+    test_kzt_callback_fpr,
+    suite: 'lat-pr-fast',
+  )
+endif
+
 test(
   'test-x11-synchronize-callback',
   python,
