@@ -295,8 +295,126 @@ enum {
     QEMU___RTA_MAX
 };
 
-TargetFdTrans **target_fd_trans;
-unsigned int target_fd_max;
+static TargetFdTrans **target_fd_trans;
+static unsigned int target_fd_max;
+/* Guest threads can grow this table while other threads query it. */
+static pthread_mutex_t target_fd_trans_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static TargetFdTrans *fd_trans_lookup_locked(int fd)
+{
+    if (fd >= 0 && fd < target_fd_max) {
+        return target_fd_trans[fd];
+    }
+    return NULL;
+}
+
+static void fd_trans_register_locked(int fd, TargetFdTrans *trans)
+{
+    unsigned int oldmax;
+    unsigned int newmax;
+    TargetFdTrans **new_trans;
+
+    if (fd < 0) {
+        return;
+    }
+    if (fd >= target_fd_max) {
+        oldmax = target_fd_max;
+        newmax = ((fd >> 6) + 1) << 6;
+        new_trans = g_renew(TargetFdTrans *, target_fd_trans, newmax);
+        memset(new_trans + oldmax, 0,
+               (newmax - oldmax) * sizeof(*new_trans));
+        target_fd_trans = new_trans;
+        target_fd_max = newmax;
+    }
+    target_fd_trans[fd] = trans;
+}
+
+TargetFdDataFunc fd_trans_target_to_host_data(int fd)
+{
+    TargetFdTrans *trans;
+    TargetFdDataFunc func = NULL;
+
+    pthread_mutex_lock(&target_fd_trans_mutex);
+    trans = fd_trans_lookup_locked(fd);
+    if (trans) {
+        func = trans->target_to_host_data;
+    }
+    pthread_mutex_unlock(&target_fd_trans_mutex);
+    return func;
+}
+
+TargetFdDataFunc fd_trans_host_to_target_data(int fd)
+{
+    TargetFdTrans *trans;
+    TargetFdDataFunc func = NULL;
+
+    pthread_mutex_lock(&target_fd_trans_mutex);
+    trans = fd_trans_lookup_locked(fd);
+    if (trans) {
+        func = trans->host_to_target_data;
+    }
+    pthread_mutex_unlock(&target_fd_trans_mutex);
+    return func;
+}
+
+TargetFdAddrFunc fd_trans_target_to_host_addr(int fd)
+{
+    TargetFdTrans *trans;
+    TargetFdAddrFunc func = NULL;
+
+    pthread_mutex_lock(&target_fd_trans_mutex);
+    trans = fd_trans_lookup_locked(fd);
+    if (trans) {
+        func = trans->target_to_host_addr;
+    }
+    pthread_mutex_unlock(&target_fd_trans_mutex);
+    return func;
+}
+
+void fd_trans_register(int fd, TargetFdTrans *trans)
+{
+    pthread_mutex_lock(&target_fd_trans_mutex);
+    fd_trans_register_locked(fd, trans);
+    pthread_mutex_unlock(&target_fd_trans_mutex);
+}
+
+void fd_trans_unregister(int fd)
+{
+    pthread_mutex_lock(&target_fd_trans_mutex);
+    if (fd >= 0 && fd < target_fd_max) {
+        target_fd_trans[fd] = NULL;
+    }
+    pthread_mutex_unlock(&target_fd_trans_mutex);
+}
+
+void fd_trans_dup(int oldfd, int newfd)
+{
+    TargetFdTrans *trans;
+
+    if (oldfd == newfd) {
+        return;
+    }
+
+    pthread_mutex_lock(&target_fd_trans_mutex);
+    trans = fd_trans_lookup_locked(oldfd);
+    if (newfd >= 0 && newfd < target_fd_max) {
+        target_fd_trans[newfd] = NULL;
+    }
+    if (trans) {
+        fd_trans_register_locked(newfd, trans);
+    }
+    pthread_mutex_unlock(&target_fd_trans_mutex);
+}
+
+void fd_trans_fork_start(void)
+{
+    pthread_mutex_lock(&target_fd_trans_mutex);
+}
+
+void fd_trans_fork_end(void)
+{
+    pthread_mutex_unlock(&target_fd_trans_mutex);
+}
 
 static void tswap_nlmsghdr(struct nlmsghdr *nlh)
 {

@@ -24,63 +24,12 @@ typedef struct TargetFdTrans {
     TargetFdAddrFunc target_to_host_addr;
 } TargetFdTrans;
 
-extern TargetFdTrans **target_fd_trans;
-
-extern unsigned int target_fd_max;
-
-static inline TargetFdDataFunc fd_trans_target_to_host_data(int fd)
-{
-    if (fd >= 0 && fd < target_fd_max && target_fd_trans[fd]) {
-        return target_fd_trans[fd]->target_to_host_data;
-    }
-    return NULL;
-}
-
-static inline TargetFdDataFunc fd_trans_host_to_target_data(int fd)
-{
-    if (fd >= 0 && fd < target_fd_max && target_fd_trans[fd]) {
-        return target_fd_trans[fd]->host_to_target_data;
-    }
-    return NULL;
-}
-
-static inline TargetFdAddrFunc fd_trans_target_to_host_addr(int fd)
-{
-    if (fd >= 0 && fd < target_fd_max && target_fd_trans[fd]) {
-        return target_fd_trans[fd]->target_to_host_addr;
-    }
-    return NULL;
-}
-
-static inline void fd_trans_register(int fd, TargetFdTrans *trans)
-{
-    unsigned int oldmax;
-
-    if (fd >= target_fd_max) {
-        oldmax = target_fd_max;
-        target_fd_max = ((fd >> 6) + 1) << 6; /* by slice of 64 entries */
-        target_fd_trans = g_renew(TargetFdTrans *,
-                                  target_fd_trans, target_fd_max);
-        memset((void *)(target_fd_trans + oldmax), 0,
-               (target_fd_max - oldmax) * sizeof(TargetFdTrans *));
-    }
-    target_fd_trans[fd] = trans;
-}
-
-static inline void fd_trans_unregister(int fd)
-{
-    if (fd >= 0 && fd < target_fd_max) {
-        target_fd_trans[fd] = NULL;
-    }
-}
-
-static inline void fd_trans_dup(int oldfd, int newfd)
-{
-    fd_trans_unregister(newfd);
-    if (oldfd < target_fd_max && target_fd_trans[oldfd]) {
-        fd_trans_register(newfd, target_fd_trans[oldfd]);
-    }
-}
+TargetFdDataFunc fd_trans_target_to_host_data(int fd);
+TargetFdDataFunc fd_trans_host_to_target_data(int fd);
+TargetFdAddrFunc fd_trans_target_to_host_addr(int fd);
+void fd_trans_register(int fd, TargetFdTrans *trans);
+void fd_trans_unregister(int fd);
+void fd_trans_dup(int oldfd, int newfd);
 
 extern TargetFdTrans target_packet_trans;
 #ifdef CONFIG_RTNETLINK

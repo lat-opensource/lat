@@ -216,6 +216,7 @@ void fork_start(void)
     mmap_fork_start();
     sigact_fork_start();
     path_fork_start();
+    fd_trans_fork_start();
     cpu_list_lock();
 }
 
@@ -224,6 +225,7 @@ void fork_end(int child)
     mmap_fork_end(child);
     sigact_fork_end(child);
     path_fork_end(child);
+    fd_trans_fork_end();
     if (child) {
         CPUState *cpu, *next_cpu;
         /* Child processes created by fork() only have a single thread.
