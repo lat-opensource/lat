@@ -178,6 +178,13 @@ kzt_public_loader_result_t kzt_public_loader_observer_refresh(
     kzt_public_loader_visit_fn visit,
     void *visit_opaque);
 
+/* Resolve one unique defined symbol from the live in-memory link_map set. */
+kzt_public_loader_result_t kzt_public_loader_find_symbol(
+    const kzt_public_loader_observer_t *observer,
+    const kzt_public_loader_reader_t *reader,
+    const char *symbol_name,
+    uintptr_t *symbol_addr);
+
 const char *kzt_public_loader_result_name(
     kzt_public_loader_result_t result);
 

@@ -27,6 +27,15 @@ _Static_assert(sizeof(kzt_x86_64_link_map_prefix_t) == 40,
 #define KZT_X86_64_ELFDATA2LSB 1
 #define KZT_X86_64_EV_CURRENT 1
 #define KZT_X86_64_PT_GNU_RELRO UINT32_C(0x6474e552)
+#define KZT_X86_64_DT_HASH 4
+#define KZT_X86_64_DT_STRTAB 5
+#define KZT_X86_64_DT_SYMTAB 6
+#define KZT_X86_64_DT_STRSZ 10
+#define KZT_X86_64_DT_SYMENT 11
+#define KZT_X86_64_DT_GNU_HASH INT64_C(0x6ffffef5)
+#define KZT_PUBLIC_LOADER_MAX_DYNAMIC_ENTRIES 4096
+#define KZT_PUBLIC_LOADER_MAX_SYMBOLS (1024 * 1024)
+#define KZT_PUBLIC_LOADER_MAX_SYMBOL_NAME 512
 
 typedef struct kzt_x86_64_elf_header {
     uint8_t ident[16];
@@ -56,10 +65,21 @@ typedef struct kzt_x86_64_program_header {
     uint64_t align;
 } kzt_x86_64_program_header_t;
 
+typedef struct kzt_x86_64_symbol {
+    uint32_t name;
+    uint8_t info;
+    uint8_t other;
+    uint16_t section_index;
+    uint64_t value;
+    uint64_t size;
+} kzt_x86_64_symbol_t;
+
 _Static_assert(sizeof(kzt_x86_64_elf_header_t) == 64,
                "unexpected x86_64 ELF header layout");
 _Static_assert(sizeof(kzt_x86_64_program_header_t) == 56,
                "unexpected x86_64 program header layout");
+_Static_assert(sizeof(kzt_x86_64_symbol_t) == 24,
+               "unexpected x86_64 symbol layout");
 
 static int kzt_public_loader_read(
     const kzt_public_loader_reader_t *reader,
@@ -91,6 +111,282 @@ static int kzt_public_loader_add_offset(uintptr_t base,
     }
     *result = base + offset;
     return 0;
+}
+
+static int kzt_public_loader_dynamic_pointer(
+    const kzt_public_loader_object_t *object,
+    uint64_t value,
+    uintptr_t *result)
+{
+    if (!object || !value || !result) {
+        return -1;
+    }
+    if (value >= object->load_bias) {
+        *result = (uintptr_t)value;
+        return 0;
+    }
+    if (value > UINTPTR_MAX - object->load_bias) {
+        return -1;
+    }
+    *result = object->load_bias + (uintptr_t)value;
+    return 0;
+}
+
+static kzt_public_loader_result_t kzt_public_loader_gnu_symbol_count(
+    const kzt_public_loader_reader_t *reader,
+    uintptr_t hash_addr,
+    size_t *symbol_count)
+{
+    uint32_t header[4];
+    uintptr_t buckets_addr;
+    uintptr_t chains_addr;
+    size_t maximum = 0;
+    size_t bucket_index;
+
+    if (kzt_public_loader_read(reader, hash_addr,
+                               header, sizeof(header)) != 0) {
+        return KZT_PUBLIC_LOADER_READ_ERROR;
+    }
+    if (!header[0] || !header[2] ||
+        header[0] > KZT_PUBLIC_LOADER_MAX_SYMBOLS ||
+        header[1] > KZT_PUBLIC_LOADER_MAX_SYMBOLS ||
+        header[2] > KZT_PUBLIC_LOADER_MAX_SYMBOLS) {
+        return KZT_PUBLIC_LOADER_LIMIT;
+    }
+    if (hash_addr > UINTPTR_MAX - sizeof(header) ||
+        header[2] > (UINTPTR_MAX - hash_addr - sizeof(header)) /
+                        sizeof(uint64_t)) {
+        return KZT_PUBLIC_LOADER_OVERFLOW;
+    }
+    buckets_addr = hash_addr + sizeof(header) +
+                   (uintptr_t)header[2] * sizeof(uint64_t);
+    if (header[0] > (UINTPTR_MAX - buckets_addr) / sizeof(uint32_t)) {
+        return KZT_PUBLIC_LOADER_OVERFLOW;
+    }
+    chains_addr = buckets_addr +
+                  (uintptr_t)header[0] * sizeof(uint32_t);
+
+    for (bucket_index = 0; bucket_index < header[0]; ++bucket_index) {
+        uintptr_t entry_addr;
+        uint32_t symbol_index;
+        size_t chain_steps = 0;
+
+        if (kzt_public_loader_add_offset(
+                buckets_addr, bucket_index, sizeof(symbol_index),
+                &entry_addr) != 0) {
+            return KZT_PUBLIC_LOADER_OVERFLOW;
+        }
+        if (kzt_public_loader_read(reader, entry_addr,
+                                   &symbol_index,
+                                   sizeof(symbol_index)) != 0) {
+            return KZT_PUBLIC_LOADER_READ_ERROR;
+        }
+        if (!symbol_index) {
+            continue;
+        }
+        if (symbol_index < header[1] ||
+            symbol_index > KZT_PUBLIC_LOADER_MAX_SYMBOLS) {
+            return KZT_PUBLIC_LOADER_INVALID_STATE;
+        }
+        while (1) {
+            uint32_t chain;
+
+            if (kzt_public_loader_add_offset(
+                    chains_addr, symbol_index - header[1],
+                    sizeof(chain), &entry_addr) != 0) {
+                return KZT_PUBLIC_LOADER_OVERFLOW;
+            }
+            if (kzt_public_loader_read(reader, entry_addr,
+                                       &chain, sizeof(chain)) != 0) {
+                return KZT_PUBLIC_LOADER_READ_ERROR;
+            }
+            if (symbol_index > maximum) {
+                maximum = symbol_index;
+            }
+            if (chain & 1) {
+                break;
+            }
+            if (++chain_steps == KZT_PUBLIC_LOADER_MAX_SYMBOLS ||
+                ++symbol_index > KZT_PUBLIC_LOADER_MAX_SYMBOLS) {
+                return KZT_PUBLIC_LOADER_LIMIT;
+            }
+        }
+    }
+    *symbol_count = maximum ? maximum + 1 : header[1];
+    return KZT_PUBLIC_LOADER_OK;
+}
+
+static int kzt_public_loader_symbol_name_matches(
+    const kzt_public_loader_reader_t *reader,
+    uintptr_t string_addr,
+    size_t available,
+    const char *symbol_name,
+    size_t symbol_name_size)
+{
+    size_t index;
+
+    if (symbol_name_size + 1 > available) {
+        return 0;
+    }
+    for (index = 0; index <= symbol_name_size; ++index) {
+        char byte;
+
+        if (string_addr > UINTPTR_MAX - index ||
+            kzt_public_loader_read(reader, string_addr + index,
+                                   &byte, sizeof(byte)) != 0) {
+            return -1;
+        }
+        if (byte != symbol_name[index]) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static kzt_public_loader_result_t kzt_public_loader_find_object_symbol(
+    const kzt_public_loader_object_t *object,
+    const kzt_public_loader_reader_t *reader,
+    const char *symbol_name,
+    size_t symbol_name_size,
+    uintptr_t *symbol_addr)
+{
+    uintptr_t hash_addr = 0;
+    uintptr_t string_table_addr = 0;
+    uintptr_t symbol_table_addr = 0;
+    uint64_t string_table_value = 0;
+    uint64_t symbol_table_value = 0;
+    uint64_t hash_value = 0;
+    uint64_t gnu_hash_value = 0;
+    uint64_t string_table_size = 0;
+    uint64_t symbol_entry_size = 0;
+    uint32_t hash_header[2];
+    size_t symbol_count;
+    size_t index;
+    int terminated = 0;
+
+    if (!object->dynamic_addr) {
+        return KZT_PUBLIC_LOADER_NOT_FOUND;
+    }
+    for (index = 0; index < KZT_PUBLIC_LOADER_MAX_DYNAMIC_ENTRIES;
+         ++index) {
+        kzt_x86_64_dynamic_entry_t entry;
+        uintptr_t entry_addr;
+
+        if (kzt_public_loader_add_offset(
+                object->dynamic_addr, index, sizeof(entry),
+                &entry_addr) != 0) {
+            return KZT_PUBLIC_LOADER_OVERFLOW;
+        }
+        if (kzt_public_loader_read(reader, entry_addr,
+                                   &entry, sizeof(entry)) != 0) {
+            return KZT_PUBLIC_LOADER_READ_ERROR;
+        }
+        if (entry.tag == KZT_X86_64_DT_NULL) {
+            terminated = 1;
+            break;
+        }
+        switch (entry.tag) {
+        case KZT_X86_64_DT_HASH:
+            hash_value = entry.value;
+            break;
+        case KZT_X86_64_DT_GNU_HASH:
+            gnu_hash_value = entry.value;
+            break;
+        case KZT_X86_64_DT_STRTAB:
+            string_table_value = entry.value;
+            break;
+        case KZT_X86_64_DT_SYMTAB:
+            symbol_table_value = entry.value;
+            break;
+        case KZT_X86_64_DT_STRSZ:
+            string_table_size = entry.value;
+            break;
+        case KZT_X86_64_DT_SYMENT:
+            symbol_entry_size = entry.value;
+            break;
+        default:
+            break;
+        }
+    }
+    if (!terminated) {
+        return KZT_PUBLIC_LOADER_LIMIT;
+    }
+    if ((!hash_value && !gnu_hash_value) ||
+        !string_table_value || !symbol_table_value ||
+        !string_table_size ||
+        symbol_entry_size != sizeof(kzt_x86_64_symbol_t)) {
+        return KZT_PUBLIC_LOADER_NOT_FOUND;
+    }
+    if (kzt_public_loader_dynamic_pointer(
+            object, hash_value ? hash_value : gnu_hash_value,
+            &hash_addr) != 0 ||
+        kzt_public_loader_dynamic_pointer(
+            object, string_table_value, &string_table_addr) != 0 ||
+        kzt_public_loader_dynamic_pointer(
+            object, symbol_table_value, &symbol_table_addr) != 0) {
+        return KZT_PUBLIC_LOADER_OVERFLOW;
+    }
+    if (hash_value) {
+        if (kzt_public_loader_read(reader, hash_addr,
+                                   hash_header, sizeof(hash_header)) != 0) {
+            return KZT_PUBLIC_LOADER_READ_ERROR;
+        }
+        if (!hash_header[1]) {
+            return KZT_PUBLIC_LOADER_NOT_FOUND;
+        }
+        if (hash_header[1] > KZT_PUBLIC_LOADER_MAX_SYMBOLS) {
+            return KZT_PUBLIC_LOADER_LIMIT;
+        }
+        symbol_count = hash_header[1];
+    } else {
+        kzt_public_loader_result_t result =
+            kzt_public_loader_gnu_symbol_count(
+                reader, hash_addr, &symbol_count);
+
+        if (result != KZT_PUBLIC_LOADER_OK) {
+            return result;
+        }
+    }
+
+    for (index = 0; index < symbol_count; ++index) {
+        kzt_x86_64_symbol_t symbol;
+        uintptr_t entry_addr;
+        uintptr_t name_addr;
+        int matches;
+
+        if (kzt_public_loader_add_offset(
+                symbol_table_addr, index, sizeof(symbol),
+                &entry_addr) != 0) {
+            return KZT_PUBLIC_LOADER_OVERFLOW;
+        }
+        if (kzt_public_loader_read(reader, entry_addr,
+                                   &symbol, sizeof(symbol)) != 0) {
+            return KZT_PUBLIC_LOADER_READ_ERROR;
+        }
+        if (!symbol.name || symbol.name >= string_table_size ||
+            !symbol.section_index || !symbol.value) {
+            continue;
+        }
+        if (string_table_addr > UINTPTR_MAX - symbol.name) {
+            return KZT_PUBLIC_LOADER_OVERFLOW;
+        }
+        name_addr = string_table_addr + symbol.name;
+        matches = kzt_public_loader_symbol_name_matches(
+            reader, name_addr, string_table_size - symbol.name,
+            symbol_name, symbol_name_size);
+        if (matches < 0) {
+            return KZT_PUBLIC_LOADER_READ_ERROR;
+        }
+        if (!matches) {
+            continue;
+        }
+        if (symbol.value > UINTPTR_MAX - object->load_bias) {
+            return KZT_PUBLIC_LOADER_OVERFLOW;
+        }
+        *symbol_addr = object->load_bias + (uintptr_t)symbol.value;
+        return KZT_PUBLIC_LOADER_OK;
+    }
+    return KZT_PUBLIC_LOADER_NOT_FOUND;
 }
 
 static kzt_public_loader_result_t kzt_public_loader_find_r_debug(
@@ -628,6 +924,65 @@ kzt_public_loader_result_t kzt_public_loader_observer_refresh(
         return KZT_PUBLIC_LOADER_INVALID_STATE;
     }
     return result;
+}
+
+kzt_public_loader_result_t kzt_public_loader_find_symbol(
+    const kzt_public_loader_observer_t *observer,
+    const kzt_public_loader_reader_t *reader,
+    const char *symbol_name,
+    uintptr_t *symbol_addr)
+{
+    uintptr_t found_addr = 0;
+    size_t symbol_name_size;
+    size_t index;
+
+    if (!observer || !observer->active || !reader ||
+        !reader->read_memory || !symbol_name || !symbol_addr) {
+        return KZT_PUBLIC_LOADER_INVALID_INPUT;
+    }
+    symbol_name_size = strlen(symbol_name);
+    if (!symbol_name_size ||
+        symbol_name_size > KZT_PUBLIC_LOADER_MAX_SYMBOL_NAME) {
+        return KZT_PUBLIC_LOADER_INVALID_INPUT;
+    }
+    *symbol_addr = 0;
+
+    for (index = 0; index < observer->live_map_count; ++index) {
+        kzt_x86_64_link_map_prefix_t map;
+        kzt_public_loader_object_t object;
+        uintptr_t candidate = 0;
+        kzt_public_loader_result_t result;
+
+        if (kzt_public_loader_read(reader, observer->live_maps[index],
+                                   &map, sizeof(map)) != 0) {
+            return KZT_PUBLIC_LOADER_READ_ERROR;
+        }
+        object = (kzt_public_loader_object_t) {
+            .link_map_addr = observer->live_maps[index],
+            .load_bias = (uintptr_t)map.load_bias,
+            .name_addr = (uintptr_t)map.name,
+            .dynamic_addr = (uintptr_t)map.dynamic_addr,
+            .next_addr = (uintptr_t)map.next,
+            .previous_addr = (uintptr_t)map.previous,
+        };
+        result = kzt_public_loader_find_object_symbol(
+            &object, reader, symbol_name, symbol_name_size, &candidate);
+        if (result == KZT_PUBLIC_LOADER_NOT_FOUND) {
+            continue;
+        }
+        if (result != KZT_PUBLIC_LOADER_OK) {
+            return result;
+        }
+        if (found_addr && found_addr != candidate) {
+            return KZT_PUBLIC_LOADER_INVALID_STATE;
+        }
+        found_addr = candidate;
+    }
+    if (!found_addr) {
+        return KZT_PUBLIC_LOADER_NOT_FOUND;
+    }
+    *symbol_addr = found_addr;
+    return KZT_PUBLIC_LOADER_OK;
 }
 
 const char *kzt_public_loader_result_name(
