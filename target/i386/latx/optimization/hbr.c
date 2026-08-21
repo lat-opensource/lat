@@ -2260,10 +2260,6 @@ static void deal_hide_opnd_def(TranslationBlock *tb, IR1_INST *ir1)
         ir1->gpr_def |= 1 << edx_index;
         tb->s_data->gpr_def |= 1 << edx_index;
         break;
-    case WRAP(POPAW):
-        ir1->gpr_def |= 0xff & ~esp_index;
-        tb->s_data->gpr_def |= 0xff & ~esp_index;
-        break;
     default:
         break;
     }

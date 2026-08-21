@@ -179,6 +179,15 @@ class HbrAuditTest(unittest.TestCase):
                 block.index("src_des_update_des(ir1, xmm);"),
             )
 
+    def test_ghbr_hidden_uses_and_definitions(self):
+        source = (
+            REPO_ROOT / "target/i386/latx/optimization/hbr.c"
+        ).read_text(encoding="utf-8")
+        hidden_def = source.split(
+            "static void deal_hide_opnd_def", 1
+        )[1].split("static bool def_h32", 1)[0]
+        self.assertNotIn("WRAP(POPAW)", hidden_def)
+
     def test_ghbr_rejects_external_tu_successors(self):
         source = (
             REPO_ROOT / "target/i386/latx/optimization/hbr.c"
