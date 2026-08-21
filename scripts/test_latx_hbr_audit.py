@@ -233,6 +233,104 @@ class HbrAuditTest(unittest.TestCase):
             "target_tb ? target_tb->s_data->xmm_in : SHBR_XMM_ALL", solver,
         )
 
+    def test_self_zeroing_rejects_float_sub_and_external_sources(self):
+        source = (
+            REPO_ROOT / "target/i386/latx/optimization/hbr.c"
+        ).read_text(encoding="utf-8")
+        self_zeroing = source.split(
+            "static bool shbr_is_self_zeroing_op", 1
+        )[1].split("static bool shbr_is_zero_preserving_op", 1)[0]
+        self.assertNotIn("WRAP(SUBPS)", self_zeroing)
+        self.assertNotIn("WRAP(SUBPD)", self_zeroing)
+        self.assertNotIn("WRAP(VSUBPS)", self_zeroing)
+        self.assertNotIn("WRAP(VSUBPD)", self_zeroing)
+        zero_preserving = source.split(
+            "static bool shbr_is_zero_preserving_op", 1
+        )[1].split("static bool apply_access_semantic", 1)[0]
+        for opcode in (
+            "VADDSUBPD", "VADDSUBPS", "VHSUBPD", "VHSUBPS",
+            "VSUBPD", "VSUBPS",
+        ):
+            self.assertIn(f"WRAP({opcode})", zero_preserving)
+        explicit = source.split(
+            "static bool apply_explicit_semantic", 1
+        )[1].split("uint8_t get_inst_type", 1)[0]
+        self.assertIn("only_same_vector_sources && dependencies", explicit)
+        self.assertIn("only_same_vector_sources = false;", explicit)
+
+    def test_legacy_fp_false_zero_is_invalidated(self):
+        source = (
+            REPO_ROOT / "target/i386/latx/optimization/hbr.c"
+        ).read_text(encoding="utf-8")
+        common = source.split("static bool deal_xmm_common", 1)[1]
+        common = common.split("static bool deal_dest_not_xmm_32", 1)[0]
+        for opcode in (
+            "ADDSUBPD", "ADDSUBPS", "DIVPD", "DIVPS", "SUBPD", "SUBPS",
+        ):
+            self.assertIn(f"case WRAP({opcode}):", common)
+        self.assertIn("xmm[des_num] = SHBR_XMM_OTHER;", common)
+
+    def test_legacy_compare_false_zero_is_invalidated(self):
+        source = (
+            REPO_ROOT / "target/i386/latx/optimization/hbr.c"
+        ).read_text(encoding="utf-8")
+        common = source.split("static bool deal_xmm_common", 1)[1]
+        common = common.split("static bool deal_dest_not_xmm_32", 1)[0]
+
+        floating = "case WRAP(CMPPD):" + common.split(
+            "case WRAP(CMPPD):", 1
+        )[1].split("return true;", 1)[0]
+        for opcode in ("CMPPD", "CMPPS"):
+            self.assertIn(f"WRAP({opcode})", floating)
+        self.assertIn("xmm[des_num] = SHBR_XMM_OTHER;", floating)
+
+        equal = "case WRAP(PCMPEQB):" + common.split(
+            "case WRAP(PCMPEQB):", 1
+        )[1].split("return true;", 1)[0]
+        for opcode in ("PCMPEQB", "PCMPEQW", "PCMPEQD", "PCMPEQQ"):
+            self.assertIn(f"WRAP({opcode})", equal)
+        self.assertIn("xmm[des_num] = SHBR_XMM_OTHER;", equal)
+
+        greater = "case WRAP(PCMPGTB):" + common.split(
+            "case WRAP(PCMPGTB):", 1
+        )[1].split("return true;", 1)[0]
+        for opcode in ("PCMPGTB", "PCMPGTW", "PCMPGTD", "PCMPGTQ"):
+            self.assertIn(f"WRAP({opcode})", greater)
+        self.assertIn("zero_update_des(ir1, xmm);", greater)
+
+    def test_low_lanes_entering_high_state_are_not_zero(self):
+        source = (
+            REPO_ROOT / "target/i386/latx/optimization/hbr.c"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            "[WRAP(PALIGNR)] = { SHBR_RULE_ACCESS_READ, "
+            "SHBR_RULE_ACCESS_READ }", source,
+        )
+        self.assertIn(
+            "[WRAP(SHUFPS)] = { SHBR_RULE_SHUFPS, SHBR_RULE_SHUFPS }",
+            source,
+        )
+        broadcast = source.split("static bool apply_broadcast_semantic", 1)[1]
+        broadcast = broadcast.split("static bool apply_shufps_semantic", 1)[0]
+        self.assertIn("high_bits == 32 && element_bits == 64", broadcast)
+        self.assertIn("state |= SHBR_XMM_OTHER;", broadcast)
+        self.assertGreaterEqual(
+            source.count(
+                "xmm[ir1_opnd_base_reg_num(ir1_get_opnd(ir1, 0))] |="
+            ), 2,
+        )
+
+    def test_legacy_memory_sources_invalidate_zero_state(self):
+        source = (
+            REPO_ROOT / "target/i386/latx/optimization/hbr.c"
+        ).read_text(encoding="utf-8")
+        common = source.split("static bool deal_xmm_common", 1)[1]
+        common = common.split("static bool deal_dest_not_xmm_32", 1)[0]
+        self.assertIn("static inline void external_update_des", source)
+        self.assertGreaterEqual(
+            common.count("external_update_des(ir1, xmm)"), 8,
+        )
+
     def test_special_dispatch_is_supported(self):
         names = latx_hbr_audit.parse_translator_mnemonics(
             "TRANS_FUNC_GEN(ADDSS, addss),\n"
