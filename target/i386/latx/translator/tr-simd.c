@@ -1444,12 +1444,16 @@ bool translate_rcpss(IR1_INST *pir1)
     lsassert(ir1_opnd_is_xmm(ir1_get_opnd(pir1, 0)));
     IR2_OPND dest = load_freg128_from_ir1(ir1_get_opnd(pir1, 0));
     IR2_OPND src = load_freg128_from_ir1(ir1_get_opnd(pir1, 1));
-    IR2_OPND temp = ra_alloc_ftemp();
-    la_vfrecip_s(temp, src);
-    if (option_enable_lasx) {
-        la_xvinsve0_w(dest, temp, 0);
+    if (SHBR_ON_32(pir1)) {
+        la_vfrecip_s(dest, src);
     } else {
-        la_vextrins_w(dest, temp, 0);
+        IR2_OPND temp = ra_alloc_ftemp();
+        la_vfrecip_s(temp, src);
+        if (option_enable_lasx) {
+            la_xvinsve0_w(dest, temp, 0);
+        } else {
+            la_vextrins_w(dest, temp, 0);
+        }
     }
     return true;
 }
@@ -1468,12 +1472,16 @@ bool translate_rsqrtss(IR1_INST *pir1)
     lsassert(ir1_opnd_is_xmm(ir1_get_opnd(pir1, 0)));
     IR2_OPND dest = load_freg128_from_ir1(ir1_get_opnd(pir1, 0));
     IR2_OPND src = load_freg128_from_ir1(ir1_get_opnd(pir1, 1));
-    IR2_OPND temp = ra_alloc_ftemp();
-    la_frsqrt_s(temp, src);
-    if (option_enable_lasx) {
-        la_xvinsve0_w(dest, temp, 0);
+    if (SHBR_ON_32(pir1)) {
+        la_frsqrt_s(dest, src);
     } else {
-        la_vextrins_w(dest, temp, 0);
+        IR2_OPND temp = ra_alloc_ftemp();
+        la_frsqrt_s(temp, src);
+        if (option_enable_lasx) {
+            la_xvinsve0_w(dest, temp, 0);
+        } else {
+            la_vextrins_w(dest, temp, 0);
+        }
     }
     return true;
 }
@@ -2560,9 +2568,10 @@ bool translate_roundss(IR1_INST *pir1)
     IR2_OPND dest = load_freg128_from_ir1(opnd0);
     IR2_OPND src1 = load_freg128_from_ir1(opnd1);
     uint8_t imm = ir1_opnd_uimm(opnd2);
+    bool dead_high = SHBR_ON_32(pir1);
 
     IR2_OPND temp = ra_alloc_ftemp();
-    IR2_OPND temp_dest = ra_alloc_ftemp();
+    IR2_OPND temp_dest = dead_high ? dest : ra_alloc_ftemp();
     IR2_OPND src = ra_alloc_ftemp();
     IR2_OPND fcsr = ra_alloc_itemp();
     IR2_OPND fcsr_save = ra_alloc_itemp();
@@ -2595,10 +2604,12 @@ bool translate_roundss(IR1_INST *pir1)
         la_bstrins_w(fcsr, temp, 9, 8);
         la_movgr2fcsr(fcsr_ir2_opnd, fcsr);
         la_vfrint_s(temp_dest, src);
-        if (option_enable_lasx) {
-            la_xvinsve0_w(dest, temp_dest, 0);
-        } else {
-            la_vextrins_w(dest, temp_dest, 0);
+        if (!dead_high) {
+            if (option_enable_lasx) {
+                la_xvinsve0_w(dest, temp_dest, 0);
+            } else {
+                la_vextrins_w(dest, temp_dest, 0);
+            }
         }
         set_high128_xreg_to_zero(dest);
         la_movgr2fcsr(fcsr_ir2_opnd, fcsr_save);
@@ -2619,10 +2630,12 @@ bool translate_roundss(IR1_INST *pir1)
     } else if ((imm & 0x3) == 0x3) {
         la_vfrintrz_s(temp_dest, src);
 	}
-    if (option_enable_lasx) {
-        la_xvinsve0_w(dest, temp_dest, 0);
-    } else {
-        la_vextrins_w(dest, temp_dest, 0);
+    if (!dead_high) {
+        if (option_enable_lasx) {
+            la_xvinsve0_w(dest, temp_dest, 0);
+        } else {
+            la_vextrins_w(dest, temp_dest, 0);
+        }
     }
     set_high128_xreg_to_zero(dest);
     la_movgr2fcsr(fcsr_ir2_opnd, fcsr_save);
@@ -2708,9 +2721,10 @@ bool translate_roundsd(IR1_INST *pir1)
     IR2_OPND dest = load_freg128_from_ir1(opnd0);
     IR2_OPND src1 = load_freg128_from_ir1(opnd1);
     uint8_t imm = ir1_opnd_uimm(opnd2);
+    bool dead_high = SHBR_ON_64(pir1);
 
     IR2_OPND temp = ra_alloc_ftemp();
-    IR2_OPND temp_dest = ra_alloc_ftemp();
+    IR2_OPND temp_dest = dead_high ? dest : ra_alloc_ftemp();
     IR2_OPND src = ra_alloc_ftemp();
     IR2_OPND fcsr = ra_alloc_itemp();
     IR2_OPND fcsr_save = ra_alloc_itemp();
@@ -2744,10 +2758,12 @@ bool translate_roundsd(IR1_INST *pir1)
         la_bstrins_w(fcsr, temp, 9, 8);
         la_movgr2fcsr(fcsr_ir2_opnd, fcsr);
         la_vfrint_d(temp_dest, src);
-        if (option_enable_lasx) {
-            la_xvinsve0_d(dest, temp_dest, 0);
-        } else {
-            la_vextrins_d(dest, temp_dest, 0);
+        if (!dead_high) {
+            if (option_enable_lasx) {
+                la_xvinsve0_d(dest, temp_dest, 0);
+            } else {
+                la_vextrins_d(dest, temp_dest, 0);
+            }
         }
         set_high128_xreg_to_zero(dest);
         la_movgr2fcsr(fcsr_ir2_opnd, fcsr_save);
@@ -2768,10 +2784,12 @@ bool translate_roundsd(IR1_INST *pir1)
     } else if ((imm & 0x3) == 0x3) {
         la_vfrintrz_d(temp_dest, src);
 	}
-    if (option_enable_lasx) {
-        la_xvinsve0_d(dest, temp_dest, 0);
-    } else {
-        la_vextrins_d(dest, temp_dest, 0);
+    if (!dead_high) {
+        if (option_enable_lasx) {
+            la_xvinsve0_d(dest, temp_dest, 0);
+        } else {
+            la_vextrins_d(dest, temp_dest, 0);
+        }
     }
     set_high128_xreg_to_zero(dest);
     la_movgr2fcsr(fcsr_ir2_opnd, fcsr_save);
