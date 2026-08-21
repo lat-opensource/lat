@@ -12,6 +12,7 @@
 #include "lsenv.h"
 #include "ir1.h"
 #include "hbr.h"
+#include "hbr-semantic.h"
 #include "translate.h"
 #include "reg-alloc.h"
 #include "latx-options.h"
@@ -20,11 +21,178 @@
 
 #define WRAP(ins) (dt_X86_INS_##ins)
 
+typedef enum ShbrExplicitRule {
+    SHBR_RULE_NONE,
+    SHBR_RULE_SRC1,
+    SHBR_RULE_ALL_SOURCES,
+} ShbrExplicitRule;
+
+typedef struct ShbrExplicitSemantic {
+    uint8_t high32;
+    uint8_t high64;
+} ShbrExplicitSemantic;
+
+static const ShbrExplicitSemantic shbr_explicit_semantics[dt_X86_INS_ENDING] = {
+    [WRAP(VADDPD)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VADDPS)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VADDSD)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_SRC1 },
+    [WRAP(VADDSS)] = { SHBR_RULE_SRC1, SHBR_RULE_SRC1 },
+    [WRAP(VADDSUBPD)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VADDSUBPS)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VANDNPD)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VANDNPS)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VANDPD)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VANDPS)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VDIVPD)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VDIVPS)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VDIVSD)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_SRC1 },
+    [WRAP(VDIVSS)] = { SHBR_RULE_SRC1, SHBR_RULE_SRC1 },
+    [WRAP(VHADDPD)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VHADDPS)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VHSUBPD)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VHSUBPS)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VMAXPD)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VMAXPS)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VMAXSD)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_SRC1 },
+    [WRAP(VMAXSS)] = { SHBR_RULE_SRC1, SHBR_RULE_SRC1 },
+    [WRAP(VMINPD)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VMINPS)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VMINSD)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_SRC1 },
+    [WRAP(VMINSS)] = { SHBR_RULE_SRC1, SHBR_RULE_SRC1 },
+    [WRAP(VMULPD)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VMULPS)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VMULSD)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_SRC1 },
+    [WRAP(VMULSS)] = { SHBR_RULE_SRC1, SHBR_RULE_SRC1 },
+    [WRAP(VORPD)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VORPS)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VRCPPS)] = { SHBR_RULE_SRC1, SHBR_RULE_SRC1 },
+    [WRAP(VRSQRTPS)] = { SHBR_RULE_SRC1, SHBR_RULE_SRC1 },
+    [WRAP(VSQRTPD)] = { SHBR_RULE_SRC1, SHBR_RULE_SRC1 },
+    [WRAP(VSQRTPS)] = { SHBR_RULE_SRC1, SHBR_RULE_SRC1 },
+    [WRAP(VSQRTSD)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_SRC1 },
+    [WRAP(VSQRTSS)] = { SHBR_RULE_SRC1, SHBR_RULE_SRC1 },
+    [WRAP(VSUBPD)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VSUBPS)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VSUBSD)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_SRC1 },
+    [WRAP(VSUBSS)] = { SHBR_RULE_SRC1, SHBR_RULE_SRC1 },
+    [WRAP(VXORPD)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VXORPS)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VPABSB)] = { SHBR_RULE_SRC1, SHBR_RULE_SRC1 },
+    [WRAP(VPABSD)] = { SHBR_RULE_SRC1, SHBR_RULE_SRC1 },
+    [WRAP(VPABSW)] = { SHBR_RULE_SRC1, SHBR_RULE_SRC1 },
+    [WRAP(VPADDB)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VPADDD)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VPADDQ)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VPADDSB)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VPADDSW)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VPADDUSB)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VPADDUSW)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VPADDW)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VPAND)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VPANDN)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VPAVGB)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VPAVGW)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VPCMPEQB)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VPCMPEQD)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VPCMPEQQ)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VPCMPEQW)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VPCMPGTB)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VPCMPGTD)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VPCMPGTQ)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VPCMPGTW)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VPMADDUBSW)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VPMADDWD)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VPMAXSB)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VPMAXSD)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VPMAXSW)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VPMAXUB)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VPMAXUD)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VPMAXUW)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VPMINSB)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VPMINSD)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VPMINSW)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VPMINUB)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VPMINUD)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VPMINUW)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VPMULDQ)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VPMULHRSW)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VPMULHUW)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VPMULHW)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VPMULLD)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VPMULLW)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VPMULUDQ)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VPOR)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VPSADBW)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VPSUBB)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VPSUBD)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VPSUBQ)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VPSUBSB)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VPSUBSW)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VPSUBUSB)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VPSUBUSW)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VPSUBW)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VPXOR)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+};
+
+static inline bool shbr_opnd_is_vector(const IR1_OPND *opnd)
+{
+    return ir1_opnd_is_xmm(opnd) || ir1_opnd_is_ymm(opnd);
+}
+
+static inline uint16_t shbr_opnd_mask(const IR1_OPND *opnd)
+{
+    int reg = ir1_opnd_base_reg_num(opnd);
+    lsassert(reg >= 0 && reg < XMM_NUM);
+    return 1U << reg;
+}
+
+static bool apply_explicit_semantic(IR1_INST *ir1, uint32_t *xmm,
+        int high_bits)
+{
+    const ShbrExplicitSemantic *semantic =
+        &shbr_explicit_semantics[ir1_opcode(ir1)];
+    ShbrExplicitRule rule = high_bits == 32 ?
+        semantic->high32 : semantic->high64;
+    int opnd_num = ir1_get_opnd_num(ir1);
+
+    if (rule == SHBR_RULE_NONE || opnd_num < 2) {
+        return false;
+    }
+
+    IR1_OPND *dest = ir1_get_opnd(ir1, 0);
+    if (!shbr_opnd_is_vector(dest)) {
+        return false;
+    }
+
+    uint16_t dependencies = 0;
+    uint32_t state = 0;
+    int source_end = rule == SHBR_RULE_SRC1 ? 2 : opnd_num;
+    for (int i = 1; i < source_end; i++) {
+        IR1_OPND *source = ir1_get_opnd(ir1, i);
+        if (shbr_opnd_is_vector(source)) {
+            uint16_t source_mask = shbr_opnd_mask(source);
+            dependencies |= source_mask;
+            state |= xmm[ir1_opnd_base_reg_num(source)];
+        } else if (ir1_opnd_is_mem(source)) {
+            state |= SHBR_XMM_OTHER;
+        }
+    }
+    if (!state) {
+        state = SHBR_XMM_OTHER;
+    }
+
+    uint16_t dest_mask = shbr_opnd_mask(dest);
+    ir1->shbr_def |= dest_mask;
+    ir1->shbr_dep |= dependencies;
+    xmm[ir1_opnd_base_reg_num(dest)] = state;
+    return true;
+}
+
 uint8_t get_inst_type(IR1_INST *ir1)
 {
     int opnd_num = ir1_get_opnd_num(ir1);
     for (int i = 0; i < opnd_num; ++i) {
-        if (ir1_opnd_is_xmm(ir1_get_opnd(ir1, i))) {
+        if (shbr_opnd_is_vector(ir1_get_opnd(ir1, i))) {
             return SHBR_SSE;
         }
     }
@@ -37,78 +205,78 @@ static inline void src_des_update_des(IR1_INST *ir1, uint32_t *xmm)
     IR1_OPND *opnd0 = ir1_get_opnd(ir1, 0);
     IR1_OPND *opnd1 = ir1_get_opnd(ir1, 1);
 
-    if (!ir1_opnd_is_xmm(opnd1)) {
+    if (!shbr_opnd_is_vector(opnd1)) {
         return;
-    } else if (!ir1_opnd_is_xmm(opnd0)) {
+    } else if (!shbr_opnd_is_vector(opnd0)) {
         return;
     }
 
-    assert(ir1_opnd_is_xmm(opnd0) && ir1_opnd_is_xmm(opnd1));
+    assert(shbr_opnd_is_vector(opnd0) && shbr_opnd_is_vector(opnd1));
     int dest_num = ir1_opnd_base_reg_num(opnd0);
     int src_num = ir1_opnd_base_reg_num(opnd1);
-    ir1->xmm_def |= SHBR_UPDATE_DES;
-    ir1->xmm_use |= SHBR_NEED_SRC | SHBR_NEED_DES;
+    ir1->shbr_def |= (1U << dest_num);
+    ir1->shbr_dep |= (1U << dest_num) | (1U << src_num);
     xmm[dest_num] |= xmm[src_num];
 }
 
 static inline void src_update_des(IR1_INST *ir1, uint32_t *xmm)
 {
-    ir1->xmm_def |= SHBR_UPDATE_DES;
-    ir1->xmm_use |= SHBR_NEED_SRC;
     IR1_OPND *opnd0 = ir1_get_opnd(ir1, 0);
     IR1_OPND *opnd1 = ir1_get_opnd(ir1, 1);
-    if (!ir1_opnd_is_xmm(opnd1)) {
+    if (!shbr_opnd_is_vector(opnd1)) {
         return;
-    } else if (!ir1_opnd_is_xmm(opnd0)) {
+    } else if (!shbr_opnd_is_vector(opnd0)) {
         return;
     }
-    assert(ir1_opnd_is_xmm(opnd0) && ir1_opnd_is_xmm(opnd1));
+    assert(shbr_opnd_is_vector(opnd0) && shbr_opnd_is_vector(opnd1));
     int src_num = ir1_opnd_base_reg_num(opnd1);
     int dest_num = ir1_opnd_base_reg_num(opnd0);
+    ir1->shbr_def |= (1U << dest_num);
+    ir1->shbr_dep |= (1U << src_num);
     xmm[dest_num] = xmm[src_num];
 }
 
 static inline void other_update_des(IR1_INST *ir1, uint32_t *xmm)
 {
     IR1_OPND *opnd0 = ir1_get_opnd(ir1, 0);
-    if (!ir1_opnd_is_xmm(opnd0)) {
+    if (!shbr_opnd_is_vector(opnd0)) {
         return;
     }
     int dest_num = ir1_opnd_base_reg_num(opnd0);
-    ir1->xmm_def = SHBR_UPDATE_DES;
+    ir1->shbr_def |= (1U << dest_num);
     xmm[dest_num] = SHBR_XMM_OTHER;
 }
 
 static inline void zero_update_des(IR1_INST *ir1, uint32_t *xmm)
 {
     IR1_OPND *opnd0 = ir1_get_opnd(ir1, 0);
-    if (!ir1_opnd_is_xmm(opnd0)) {
+    if (!shbr_opnd_is_vector(opnd0)) {
         return;
     }
     int dest_num = ir1_opnd_base_reg_num(opnd0);
-    ir1->xmm_def |= SHBR_UPDATE_DES;
+    ir1->shbr_def |= (1U << dest_num);
     xmm[dest_num] = SHBR_XMM_ZERO;
 }
 
 static inline void src_no_opt(IR1_INST *ir1, uint32_t *xmm)
 {
     IR1_OPND *opnd1 = ir1_get_opnd(ir1, 1);
-    if (!ir1_opnd_is_xmm(opnd1)) {
+    if (!shbr_opnd_is_vector(opnd1)) {
         return;
     }
     int src_num = ir1_opnd_base_reg_num(opnd1);
-    ir1->xmm_use |= SHBR_NO_OPT_SRC;
+    ir1->shbr_read |= (1U << src_num);
     ir1->xmm_use |= xmm[src_num];
 }
 
 static inline void des_no_opt(IR1_INST *ir1, uint32_t *xmm)
 {
     IR1_OPND *opnd0 = ir1_get_opnd(ir1, 0);
-    if (!ir1_opnd_is_xmm(opnd0)) {
+    if (!shbr_opnd_is_vector(opnd0)) {
         return;
     }
     int des_num = ir1_opnd_base_reg_num(opnd0);
-    ir1->xmm_use |= SHBR_NO_OPT_DES;
+    ir1->shbr_read |= (1U << des_num);
     ir1->xmm_use |= xmm[des_num];
 }
 
@@ -368,7 +536,6 @@ static bool deal_dest_not_xmm_32(TranslationBlock *tb,
         break;
     }
 
-    src_no_opt(ir1, xmm);
     return false;
 }
 
@@ -376,7 +543,6 @@ static bool deal_dest_not_xmm_32(TranslationBlock *tb,
 static bool deal_src_not_xmm_32(TranslationBlock *tb,
         IR1_INST *ir1, uint32_t xmm[XMM_NUM])
 {
-    des_no_opt(ir1, xmm);
     return false;
 }
 
@@ -385,6 +551,9 @@ static bool deal_src_not_xmm_32(TranslationBlock *tb,
 static bool xmm_analyse_32(TranslationBlock *tb,
         IR1_INST *ir1, uint32_t xmm[XMM_NUM])
 {
+    if (apply_explicit_semantic(ir1, xmm, 32)) {
+        return true;
+    }
     if (deal_xmm_common(tb, ir1, xmm)) {
         return true;
     }
@@ -403,11 +572,14 @@ static bool xmm_analyse_32(TranslationBlock *tb,
     case WRAP(MULSD):
     case WRAP(SUBSD):
     case WRAP(SQRTSD):
-    case WRAP(COMISD):
-    case WRAP(UCOMISD):
         if (ir1_opnd_is_xmm(src_opnd)) {
             src_des_update_des(ir1, xmm);
         }
+        return true;
+    case WRAP(COMISD):
+    case WRAP(UCOMISD):
+        des_no_opt(ir1, xmm);
+        src_no_opt(ir1, xmm);
         return true;
     /* MOVSD xmm, m64 : h64 zero. */
     /* MOVSD xmm, xmm : h64 keep. */
@@ -563,23 +735,18 @@ static bool xmm_analyse_32(TranslationBlock *tb,
         return deal_src_not_xmm_32(tb, ir1, xmm);
     }
 
-    src_des_update_des(ir1, xmm);
-    src_no_opt(ir1, xmm);
-    des_no_opt(ir1, xmm);
     return false;
 }
 
 static bool deal_dest_not_xmm_64(TranslationBlock *tb,
         IR1_INST *ir1, uint32_t xmm[XMM_NUM])
 {
-    src_no_opt(ir1, xmm);
     return false;
 }
 
 static bool deal_src_not_xmm_64(TranslationBlock *tb,
         IR1_INST *ir1, uint32_t xmm[XMM_NUM])
 {
-    des_no_opt(ir1, xmm);
     return false;
 }
 
@@ -588,6 +755,9 @@ static bool deal_src_not_xmm_64(TranslationBlock *tb,
 static bool xmm_analyse_64(TranslationBlock *tb,
         IR1_INST *ir1, uint32_t xmm[XMM_NUM])
 {
+    if (apply_explicit_semantic(ir1, xmm, 64)) {
+        return true;
+    }
     if (deal_xmm_common(tb, ir1, xmm)) {
         return true;
     }
@@ -730,9 +900,6 @@ static bool xmm_analyse_64(TranslationBlock *tb,
         return deal_src_not_xmm_64(tb, ir1, xmm);
     }
 
-    src_des_update_des(ir1, xmm);
-    src_no_opt(ir1, xmm);
-    des_no_opt(ir1, xmm);
     return false;
 }
 
@@ -740,6 +907,91 @@ static void init_xmm_state(uint32_t xmm[XMM_NUM])
 {
     for (int i = 0; i < XMM_NUM; ++i) {
         xmm[i] = 1 << i;
+    }
+}
+
+static void conservative_explicit_semantic(IR1_INST *ir1, uint32_t *xmm)
+{
+    int opnd_num = ir1_get_opnd_num(ir1);
+    for (int i = 0; i < opnd_num; i++) {
+        IR1_OPND *opnd = ir1_get_opnd(ir1, i);
+        if (!shbr_opnd_is_vector(opnd)) {
+            continue;
+        }
+        int reg = ir1_opnd_base_reg_num(opnd);
+        ir1->shbr_read |= (1U << reg);
+        ir1->xmm_use |= xmm[reg];
+    }
+}
+
+static bool apply_implicit_semantic(TranslationBlock *tb, IR1_INST *ir1,
+        uint32_t *xmm)
+{
+    switch (ir1_opcode(ir1)) {
+    case WRAP(FXSAVE):
+    case WRAP(FXSAVE64):
+    case WRAP(XSAVE):
+    case WRAP(XSAVEOPT):
+        ir1->shbr_read |= SHBR_XMM_ALL;
+        for (int i = 0; i < XMM_NUM; i++) {
+            ir1->xmm_use |= xmm[i];
+        }
+        return true;
+    case WRAP(FXRSTOR):
+    case WRAP(FXRSTOR64):
+        ir1->shbr_def |= SHBR_XMM_ALL;
+        for (int i = 0; i < XMM_NUM; i++) {
+            xmm[i] = SHBR_XMM_OTHER;
+        }
+        return true;
+    case WRAP(XRSTOR):
+        /* XRSTOR preserves XMM when EDX:EAX does not request SSE state. */
+        ir1->shbr_read |= SHBR_XMM_ALL;
+        ir1->shbr_def |= SHBR_XMM_ALL;
+        for (int i = 0; i < XMM_NUM; i++) {
+            ir1->xmm_use |= xmm[i];
+            xmm[i] = SHBR_XMM_OTHER;
+        }
+        return true;
+    case WRAP(VZEROALL):
+        ir1->shbr_def |= SHBR_XMM_ALL;
+        for (int i = 0; i < XMM_NUM; i++) {
+            xmm[i] = SHBR_XMM_ZERO;
+        }
+        return true;
+    case WRAP(BLENDVPD):
+    case WRAP(BLENDVPS):
+    case WRAP(PBLENDVB):
+    case WRAP(SHA256RNDS2):
+        ir1->shbr_read |= 1U;
+        ir1->xmm_use |= xmm[0];
+        return false;
+    case WRAP(VZEROUPPER):
+        return true;
+    default:
+        return false;
+    }
+}
+
+static bool has_implicit_semantic(IR1_INST *ir1)
+{
+    switch (ir1_opcode(ir1)) {
+    case WRAP(FXSAVE):
+    case WRAP(FXSAVE64):
+    case WRAP(XSAVE):
+    case WRAP(XSAVEOPT):
+    case WRAP(FXRSTOR):
+    case WRAP(FXRSTOR64):
+    case WRAP(XRSTOR):
+    case WRAP(VZEROALL):
+    case WRAP(BLENDVPD):
+    case WRAP(BLENDVPS):
+    case WRAP(PBLENDVB):
+    case WRAP(SHA256RNDS2):
+    case WRAP(VZEROUPPER):
+        return true;
+    default:
+        return false;
     }
 }
 
@@ -759,14 +1011,22 @@ static void tb_xmm_analyse(TranslationBlock *tb,
         ir1 = tb_ir1_inst(tb, i);
         ir1->xmm_def = 0;
         ir1->xmm_use = 0;
+        ir1->shbr_read = 0;
+        ir1->shbr_def = 0;
+        ir1->shbr_dep = 0;
         uint8_t curr = get_inst_type(ir1);
-        if (curr == SHBR_NTYPE) {
+        bool implicit = has_implicit_semantic(ir1);
+        if (curr == SHBR_NTYPE && !implicit) {
             continue;
         } else if (tb->s_data->shbr_type == SHBR_NTYPE) {
             tb->s_data->shbr_type = SHBR_SSE;
         }
-        if (!analyse_func(tb, ir1, xmm)) {
-            /* fprintf (stderr, "%d\n ", i); */
+        bool handled = apply_implicit_semantic(tb, ir1, xmm);
+        if (!handled && curr != SHBR_NTYPE) {
+            handled = analyse_func(tb, ir1, xmm);
+        }
+        if (!handled && curr != SHBR_NTYPE) {
+            conservative_explicit_semantic(ir1, xmm);
         }
         /* tb->s_data->xmm_def |= ir1->xmm_def; */
         tb->s_data->xmm_use |= ir1->xmm_use;
@@ -818,7 +1078,7 @@ static void over_tb_shbr_opt(TranslationBlock **tb_list, int tb_num_in_tu,
                         (next_tb ? next_tb->s_data->xmm_in : SHBR_XMM_ALL);
                     break;
                 case IR1_TYPE_SYSCALL:
-                    tb->s_data->xmm_out = 0;
+                    tb->s_data->xmm_out = SHBR_XMM_ALL;
                     break;
                 case IR1_TYPE_CALLIN:
                 case IR1_TYPE_JUMPIN:
@@ -839,7 +1099,6 @@ static void over_tb_shbr_opt(TranslationBlock **tb_list, int tb_num_in_tu,
 
     }
 
-    int src_num, dest_num;
     /* bool need_print_tu = false; */
     for (int i = 0; i < tb_num_in_tu; i++) {
         TranslationBlock *tb = tb_list[i];
@@ -850,38 +1109,22 @@ static void over_tb_shbr_opt(TranslationBlock **tb_list, int tb_num_in_tu,
                 /* fprintf(stderr, "%x\n", tb->s_data->xmm_out); */
                 ir1 = tb_ir1_inst(tb, j);
                 uint8_t curr = get_inst_type(ir1);
-                if (curr == SHBR_NTYPE) {
+                if (curr == SHBR_NTYPE && !has_implicit_semantic(ir1)) {
                     continue;
                 }
-                IR1_OPND *opnd0 = ir1_get_opnd(ir1, 0);
-                IR1_OPND *opnd1 = ir1_get_opnd(ir1, 1);
-                if (ir1_opnd_is_xmm(opnd0)) {
-                    dest_num = ir1_opnd_base_reg_num(opnd0);
-                    /* have no_opt_xmm. */
-                    if (no_opt_xmm & (1 << dest_num)) {
-                        /* reverse transmission. */
-                        if ((ir1->xmm_def & SHBR_UPDATE_DES) && !(ir1->xmm_use & SHBR_NEED_DES)) {
-                            no_opt_xmm &= ~(1 << dest_num);
+                uint16_t live_after = no_opt_xmm;
+                if (ir1_get_opnd_num(ir1) > 0) {
+                    IR1_OPND *opnd0 = ir1_get_opnd(ir1, 0);
+                    if (shbr_opnd_is_vector(opnd0)) {
+                        uint16_t dest = shbr_opnd_mask(opnd0);
+                        if (shbr_dest_is_dead(live_after, dest,
+                                ir1->shbr_read)) {
+                            ir1->hbr_flag |= opt_flag;
                         }
-                        if ((ir1->xmm_use & SHBR_NEED_SRC) && ir1_opnd_is_xmm(opnd1)) {
-                            src_num = ir1_opnd_base_reg_num(opnd1);
-                            no_opt_xmm |= (1 << src_num);
-                        }
-                    } else if (ir1->xmm_use & SHBR_NO_OPT_DES) {
-                        assert(ir1_opnd_is_xmm(opnd0));
-                        no_opt_xmm |= (1 << dest_num);
-                    } else {
-                        /* can opt. */
-                        ir1->hbr_flag |= opt_flag;
                     }
                 }
-
-                if (ir1->xmm_use & SHBR_NO_OPT_SRC) {
-                    assert(ir1_opnd_is_xmm(opnd1));
-                    src_num = ir1_opnd_base_reg_num(opnd1);
-                    no_opt_xmm |= (1 << src_num);
-                }
-
+                no_opt_xmm = shbr_live_before(live_after, ir1->shbr_def,
+                        ir1->shbr_dep, ir1->shbr_read);
             }
         }
 
@@ -922,12 +1165,10 @@ static void clear_ir1_flag(TranslationBlock **tb_list, int tb_num_in_tu)
 {
     for (int i = 0; i < tb_num_in_tu; i++) {
         TranslationBlock *tb = tb_list[i];
-        if (tb->s_data->shbr_type != SHBR_NTYPE) {
-            IR1_INST *ir1 = NULL;
-            for (int j = 0; j < tb_ir1_num(tb); j++) {
-                ir1 = tb_ir1_inst(tb, j);
-                ir1->hbr_flag = 0;
-            }
+        IR1_INST *ir1 = NULL;
+        for (int j = 0; j < tb_ir1_num(tb); j++) {
+            ir1 = tb_ir1_inst(tb, j);
+            ir1->hbr_flag = 0;
         }
     }
 }

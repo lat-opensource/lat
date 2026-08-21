@@ -135,6 +135,9 @@ typedef struct IR1_INST {
         uint32_t xmm_use;
         uint32_t gpr_use;
     };
+    uint16_t shbr_read;
+    uint16_t shbr_def;
+    uint16_t shbr_dep;
 #define SHBR_CAN_OPT32    0x02
 #define SHBR_CAN_OPT64    0x04
 #define GHBR_CAN_OPT      0x08
