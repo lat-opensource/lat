@@ -189,6 +189,13 @@ class HbrAuditTest(unittest.TestCase):
         self.assertIn("TranslationBlock *next_tb = next_tbs[i];", ghbr)
         self.assertIn("TranslationBlock *target_tb = target_tbs[i];", ghbr)
 
+    def test_shbr_opt_macro_calls_public_entry_point(self):
+        source = (
+            REPO_ROOT / "target/i386/latx/include/hbr.h"
+        ).read_text(encoding="utf-8")
+        self.assertIn("hbr_opt((_tb), (_tb_num));", source)
+        self.assertNotIn("shbr_opt(", source)
+
     def test_o1_preserves_capstone_operand_access(self):
         configure = (REPO_ROOT / "configure").read_text(encoding="utf-8")
         meson = (

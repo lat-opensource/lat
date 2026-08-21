@@ -29,7 +29,7 @@ bool can_shbr_opt32(IR1_INST *ir1);
 #define SHBR_ON_32(_ir1) can_shbr_opt32(_ir1)
 #define SHBR_OPT(_tb, _tb_num)              \
     do {                                    \
-        shbr_opt(_tb, tb_num);              \
+        hbr_opt((_tb), (_tb_num));          \
     } while (0)                             \
 
 #ifdef TARGET_X86_64
@@ -42,6 +42,7 @@ bool can_ghbr_opt(IR1_INST *ir1);
 #else /* !CONFIG_LATX_HBR */
 #define SHBR_ON_64(_ir1) (0)
 #define SHBR_ON_32(_ir1) (0)
+#define SHBR_OPT(_tb, _tb_num) do { } while (0)
 #define GHBR_ON(_ir1) (0)
 #endif
 
