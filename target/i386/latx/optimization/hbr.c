@@ -1838,9 +1838,32 @@ static void get_xmm_in(TranslationBlock *tb, uint32 *xmm)
     }
 }
 
+static TranslationBlock *hbr_in_tu_successor(TranslationBlock **tb_list,
+        int tb_num_in_tu, TranslationBlock *successor)
+{
+    for (int i = 0; successor && i < tb_num_in_tu; i++) {
+        if (tb_list[i] == successor) {
+            return successor;
+        }
+    }
+    return NULL;
+}
+
 static void over_tb_shbr_opt(TranslationBlock **tb_list, int tb_num_in_tu,
         uint32 opt_flag, uint32 xmm[][XMM_NUM])
 {
+    TranslationBlock *next_tbs[tb_num_in_tu];
+    TranslationBlock *target_tbs[tb_num_in_tu];
+    for (int i = 0; i < tb_num_in_tu; i++) {
+        TranslationBlock *tb = tb_list[i];
+        /* Recovered or previously translated TBs may share or retain stale
+         * separated_data.  Only summaries recomputed for this TU are valid. */
+        next_tbs[i] = hbr_in_tu_successor(tb_list, tb_num_in_tu,
+            (TranslationBlock *)tb->s_data->next_tb[TU_TB_INDEX_NEXT]);
+        target_tbs[i] = hbr_in_tu_successor(tb_list, tb_num_in_tu,
+            (TranslationBlock *)tb->s_data->next_tb[TU_TB_INDEX_TARGET]);
+    }
+
     bool continue_flag = true;
     uint32_t old_live_in, old_live_out;
     while(continue_flag) {
@@ -1849,10 +1872,8 @@ static void over_tb_shbr_opt(TranslationBlock **tb_list, int tb_num_in_tu,
             TranslationBlock *tb = tb_list[i];
             old_live_in = tb->s_data->xmm_in;
             old_live_out = tb->s_data->xmm_out;
-            TranslationBlock *next_tb =
-                (TranslationBlock *)tb->s_data->next_tb[TU_TB_INDEX_NEXT];
-            TranslationBlock *target_tb =
-                (TranslationBlock *)tb->s_data->next_tb[TU_TB_INDEX_TARGET];
+            TranslationBlock *next_tb = next_tbs[i];
+            TranslationBlock *target_tb = target_tbs[i];
             switch (tb->s_data->last_ir1_type) {
                 case IR1_TYPE_BRANCH:
                     tb->s_data->xmm_out =
@@ -1968,6 +1989,16 @@ static void clear_ir1_flag(TranslationBlock **tb_list, int tb_num_in_tu)
 #ifdef TARGET_X86_64
 static void over_tb_gpr_opt(TranslationBlock **tb_list, int tb_num_in_tu)
 {
+    TranslationBlock *next_tbs[tb_num_in_tu];
+    TranslationBlock *target_tbs[tb_num_in_tu];
+    for (int i = 0; i < tb_num_in_tu; i++) {
+        TranslationBlock *tb = tb_list[i];
+        next_tbs[i] = hbr_in_tu_successor(tb_list, tb_num_in_tu,
+            (TranslationBlock *)tb->s_data->next_tb[TU_TB_INDEX_NEXT]);
+        target_tbs[i] = hbr_in_tu_successor(tb_list, tb_num_in_tu,
+            (TranslationBlock *)tb->s_data->next_tb[TU_TB_INDEX_TARGET]);
+    }
+
     bool continue_flag = true;
     uint32_t old_live_in, old_live_out;
     while(continue_flag) {
@@ -1976,10 +2007,8 @@ static void over_tb_gpr_opt(TranslationBlock **tb_list, int tb_num_in_tu)
             TranslationBlock *tb = tb_list[i];
             old_live_in = tb->s_data->gpr_in;
             old_live_out = tb->s_data->gpr_out;
-            TranslationBlock *next_tb =
-                (TranslationBlock *)tb->s_data->next_tb[TU_TB_INDEX_NEXT];
-            TranslationBlock *target_tb =
-                (TranslationBlock *)tb->s_data->next_tb[TU_TB_INDEX_TARGET];
+            TranslationBlock *next_tb = next_tbs[i];
+            TranslationBlock *target_tb = target_tbs[i];
             switch (tb->s_data->last_ir1_type) {
                 case IR1_TYPE_BRANCH:
                     tb->s_data->gpr_out =
