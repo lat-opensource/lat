@@ -422,11 +422,10 @@ static void _printOperand(MCInst *MI, unsigned OpNo, SStream *O)
 	}
 }
 
-#ifndef CAPSTONE_DIET
+#if !defined(CAPSTONE_DIET) || defined(LATX_CAPSTONE_OP_ACCESS)
 // copy & normalize access info
 static void get_op_access(cs_struct *h, unsigned int id, uint8_t *access, uint64_t *eflags)
 {
-#ifndef CAPSTONE_DIET
 	uint8_t i;
 	const uint8_t *arr = X86_get_op_access(h, id, eflags);
 
@@ -445,7 +444,6 @@ static void get_op_access(cs_struct *h, unsigned int id, uint8_t *access, uint64
 
 	// mark the end of array
 	access[i] = 0;
-#endif
 }
 #endif
 
@@ -746,6 +744,16 @@ void X86_Intel_printInst(MCInst *MI, SStream *O, void *Info)
 		get_op_access(MI->csh, MCInst_getOpcode(MI), access, &MI->flat_insn->detail->x86.eflags);
 		MI->flat_insn->detail->x86.operands[0].access = access[0];
 		MI->flat_insn->detail->x86.operands[1].access = access[1];
+#endif
+#if defined(CAPSTONE_DIET) && defined(LATX_CAPSTONE_OP_ACCESS)
+        uint8_t access[6] = {0};
+        get_op_access(MI->csh, MCInst_getOpcode(MI), access,
+                      &MI->flat_insn->detail->x86.eflags);
+        for (uint8_t i = 0;
+             i < MI->flat_insn->detail->x86.op_count &&
+             i < ARR_SIZE(access); i++) {
+            MI->flat_insn->detail->x86.operands[i].access = access[i];
+        }
 #endif
 	}
 
