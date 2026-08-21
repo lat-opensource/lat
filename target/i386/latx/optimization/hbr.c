@@ -2400,11 +2400,14 @@ static void deal_hide_opnd_use(TranslationBlock *tb, IR1_INST *ir1)
         set_use_reg(tb, ir1, ecx_index);
         break;
     case WRAP(MUL):
-    case WRAP(DIV):
-    case WRAP(IDIV):
     case WRAP(RDTSC):
     case WRAP(CQO):
         set_use_reg(tb, ir1, eax_index);
+        break;
+    case WRAP(DIV):
+    case WRAP(IDIV):
+        set_use_reg(tb, ir1, eax_index);
+        set_use_reg(tb, ir1, edx_index);
         break;
     case WRAP(IMUL):
         if (ir1_opnd_num(ir1) == 1) {
