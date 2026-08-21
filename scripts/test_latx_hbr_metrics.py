@@ -17,10 +17,10 @@ class ShbrMetricsTests(unittest.TestCase):
         self.assertEqual(result["coverage"]["precise"], 774)
         self.assertEqual(result["coverage"]["conservative"], 0)
         self.assertEqual(result["coverage"]["relevant"], 774)
-        self.assertEqual(result["generation_site_counts"]["SHBR_ON_32"], 7)
-        self.assertEqual(result["generation_site_counts"]["SHBR_ON_64"], 8)
-        self.assertEqual(result["minimum_removed_per_full_hit"]["lasx"], 15)
-        self.assertEqual(result["minimum_removed_per_full_hit"]["lsx"], 16)
+        self.assertEqual(result["generation_site_counts"]["SHBR_ON_32"], 12)
+        self.assertEqual(result["generation_site_counts"]["SHBR_ON_64"], 10)
+        self.assertEqual(result["minimum_removed_per_full_hit"]["lasx"], 22)
+        self.assertEqual(result["minimum_removed_per_full_hit"]["lsx"], 24)
 
     def test_missing_gate_is_rejected(self):
         original = latx_hbr_metrics.GENERATION_SITES
@@ -34,6 +34,15 @@ class ShbrMetricsTests(unittest.TestCase):
                 latx_hbr_metrics.collect(REPO_ROOT)
         finally:
             latx_hbr_metrics.GENERATION_SITES = original
+
+    def test_all_translator_gates_are_tracked(self):
+        actual = latx_hbr_metrics.translator_gate_sites(REPO_ROOT)
+        declared = {
+            (source, function, gate)
+            for source, function, gate, _lasx, _lsx
+            in latx_hbr_metrics.GENERATION_SITES
+        }
+        self.assertEqual(actual, declared)
 
 
 if __name__ == "__main__":

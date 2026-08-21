@@ -9,6 +9,7 @@
 #include "lsenv.h"
 #include "latx-options.h"
 #include "translate.h"
+#include "hbr.h"
 
 bool translate_cvtdq2pd(IR1_INST *pir1)
 {
@@ -1035,12 +1036,16 @@ bool translate_cvtsd2ss(IR1_INST *pir1)
     IR2_OPND fcsr_opnd = set_fpu_fcsr_rounding_field_by_x86();
     IR2_OPND dest = load_freg128_from_ir1(ir1_get_opnd(pir1, 0));
     IR2_OPND src = load_freg128_from_ir1(ir1_get_opnd(pir1, 1));
-    IR2_OPND temp = ra_alloc_ftemp();
-    la_fcvt_s_d(temp, src);
-    if (option_enable_lasx) {
-        la_xvinsve0_w(dest, temp, 0);
+    if (SHBR_ON_32(pir1)) {
+        la_fcvt_s_d(dest, src);
     } else {
-        la_vextrins_w(dest, temp, 0);
+        IR2_OPND temp = ra_alloc_ftemp();
+        la_fcvt_s_d(temp, src);
+        if (option_enable_lasx) {
+            la_xvinsve0_w(dest, temp, 0);
+        } else {
+            la_vextrins_w(dest, temp, 0);
+        }
     }
     set_fpu_rounding_mode(fcsr_opnd);
     return true;
@@ -1102,12 +1107,16 @@ bool translate_cvtss2sd(IR1_INST *pir1)
     lsassert(ir1_opnd_is_xmm(ir1_get_opnd(pir1, 0)));
     IR2_OPND dest = load_freg128_from_ir1(ir1_get_opnd(pir1, 0));
     IR2_OPND src = load_freg128_from_ir1(ir1_get_opnd(pir1, 1));
-    IR2_OPND temp = ra_alloc_ftemp();
-    la_fcvt_d_s(temp, src);
-    if (option_enable_lasx) {
-        la_xvinsve0_d(dest, temp, 0);
+    if (SHBR_ON_64(pir1)) {
+        la_fcvt_d_s(dest, src);
     } else {
-        la_vextrins_d(dest, temp, 0);
+        IR2_OPND temp = ra_alloc_ftemp();
+        la_fcvt_d_s(temp, src);
+        if (option_enable_lasx) {
+            la_xvinsve0_d(dest, temp, 0);
+        } else {
+            la_vextrins_d(dest, temp, 0);
+        }
     }
     return true;
 }
