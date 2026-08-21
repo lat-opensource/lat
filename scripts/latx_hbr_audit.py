@@ -8,14 +8,45 @@ import re
 import sys
 from pathlib import Path
 
+import generate_latx_hbr_semantics
+
 
 TRANSLATOR_RE = re.compile(
     r"TRANS_FUNC_GEN\(\s*([A-Z][A-Z0-9_]*)\s*,"
+)
+TRANSLATOR_ENTRY_RE = re.compile(
+    r"TRANS_FUNC_GEN\(\s*([A-Z][A-Z0-9_]*)\s*,\s*"
+    r"([A-Za-z_][A-Za-z0-9_]*)\s*\)"
 )
 SPECIAL_DISPATCH_RE = re.compile(
     r"ir1_opcode\(ir1\)\s*==\s*dt_X86_INS_([A-Z][A-Z0-9_]*)"
 )
 HBR_OPCODE_RE = re.compile(r"WRAP\(([A-Z][A-Z0-9_]*)\)")
+EXPLICIT_TABLE_RE = re.compile(
+    r"static\s+const\s+ShbrExplicitSemantic\s+"
+    r"shbr_explicit_semantics\s*\[[^\]]+\]\s*=\s*\{"
+)
+EXPLICIT_ENTRY_RE = re.compile(
+    r"\[\s*WRAP\(([A-Z][A-Z0-9_]*)\)\s*\]\s*=\s*\{\s*"
+    r"SHBR_RULE_([A-Z0-9_]+)\s*,\s*SHBR_RULE_([A-Z0-9_]+)\s*\}"
+)
+MODEL_DOMAINS = ("high32", "high64")
+DUAL_DOMAIN_FUNCTIONS = (
+    "deal_xmm_common",
+    "apply_implicit_semantic",
+)
+SINGLE_DOMAIN_FUNCTIONS = {
+    "high32": (
+        "deal_dest_not_xmm_32",
+        "deal_src_not_xmm_32",
+        "xmm_analyse_32",
+    ),
+    "high64": (
+        "deal_dest_not_xmm_64",
+        "deal_src_not_xmm_64",
+        "xmm_analyse_64",
+    ),
+}
 
 
 class AuditError(Exception):
@@ -37,6 +68,17 @@ def parse_translator_mnemonics(source):
     return names
 
 
+def parse_translator_trailing_x_aliases(source):
+    """Find trailing-X opcodes mapped to the same translator as their base."""
+    entries = dict(TRANSLATOR_ENTRY_RE.findall(strip_c_comments(source)))
+    return {
+        mnemonic
+        for mnemonic, handler in entries.items()
+        if mnemonic.endswith("X")
+        and entries.get(mnemonic[:-1]) == handler
+    }
+
+
 def parse_hbr_models(source):
     source = strip_c_comments(source)
     marker = "static void init_xmm_state"
@@ -48,6 +90,99 @@ def parse_hbr_models(source):
         line = source.count("\n", 0, match.start()) + 1
         models.setdefault(match.group(1), []).append(line)
     return models
+
+
+def _braced_region(source, opening_brace):
+    depth = 0
+    for offset in range(opening_brace, len(source)):
+        char = source[offset]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return opening_brace + 1, offset
+    raise AuditError("unterminated braced region in hbr.c")
+
+
+def _function_body_region(source, function_name):
+    match = re.search(
+        rf"static\s+bool\s+{re.escape(function_name)}\s*\(", source
+    )
+    if not match:
+        return None
+    opening_brace = source.find("{", match.end())
+    if opening_brace < 0:
+        raise AuditError(f"hbr.c function has no body: {function_name}")
+    return _braced_region(source, opening_brace)
+
+
+def _record_domain_models(models, source, start, end, domains):
+    for match in HBR_OPCODE_RE.finditer(source, start, end):
+        line = source.count("\n", 0, match.start()) + 1
+        opcode = match.group(1)
+        entry = models.setdefault(
+            opcode, {domain: [] for domain in MODEL_DOMAINS}
+        )
+        for domain in domains:
+            entry[domain].append(line)
+
+
+def parse_hbr_model_domains(source):
+    """Return opcode model locations split by SHBR high-bit domain."""
+    source = strip_c_comments(source)
+    models = {}
+
+    table = EXPLICIT_TABLE_RE.search(source)
+    if not table:
+        raise AuditError("hbr.c is missing shbr_explicit_semantics")
+    table_start, table_end = _braced_region(source, table.end() - 1)
+    for match in EXPLICIT_ENTRY_RE.finditer(source, table_start, table_end):
+        opcode, high32_rule, high64_rule = match.groups()
+        line = source.count("\n", 0, match.start()) + 1
+        entry = models.setdefault(
+            opcode, {domain: [] for domain in MODEL_DOMAINS}
+        )
+        if high32_rule != "NONE":
+            entry["high32"].append(line)
+        if high64_rule != "NONE":
+            entry["high64"].append(line)
+
+    for function_name in DUAL_DOMAIN_FUNCTIONS:
+        region = _function_body_region(source, function_name)
+        if region:
+            _record_domain_models(
+                models, source, *region, domains=MODEL_DOMAINS
+            )
+
+    for domain, function_names in SINGLE_DOMAIN_FUNCTIONS.items():
+        for function_name in function_names:
+            region = _function_body_region(source, function_name)
+            if region:
+                _record_domain_models(
+                    models, source, *region, domains=(domain,)
+                )
+
+    for entry in models.values():
+        for domain in MODEL_DOMAINS:
+            entry[domain] = sorted(set(entry[domain]))
+    return models
+
+
+def require_complete_hbr_model_domains(models, required=()):
+    """Reject opcode models that omit either SHBR high-bit domain."""
+    incomplete = []
+    for opcode in sorted(set(models) | set(required)):
+        entry = models.get(opcode, {})
+        missing = [
+            domain for domain in MODEL_DOMAINS if not entry.get(domain)
+        ]
+        if missing:
+            incomplete.append(f"{opcode} missing {','.join(missing)}")
+    if incomplete:
+        raise AuditError(
+            "opcode domain coverage incomplete: " + "; ".join(incomplete)
+        )
 
 
 def load_inventory(path):
@@ -129,9 +264,8 @@ def audit(repo_root, inventory_path=None):
     policies = data["semantic_policies"]
     translator_path = repo_root / data["generated_from"]["translator_map"]
     hbr_path = repo_root / data["generated_from"]["hbr_model"]
-    translator = parse_translator_mnemonics(
-        translator_path.read_text(encoding="utf-8")
-    )
+    translator_source = translator_path.read_text(encoding="utf-8")
+    translator = parse_translator_mnemonics(translator_source)
     translator_digest = hashlib.sha256(
         ("\n".join(sorted(translator)) + "\n").encode("ascii")
     ).hexdigest()
@@ -141,11 +275,59 @@ def audit(repo_root, inventory_path=None):
             "translator mnemonic set drift: "
             f"expected {expected_digest}, actual {translator_digest}"
         )
-    models = parse_hbr_models(hbr_path.read_text(encoding="utf-8"))
-    modeled = set(models)
+
     baseline_rows = _unmodeled_rows(data, policies)
     baseline_unmodeled = {row["mnemonic"] for row in baseline_rows}
-    expected_promoted = set(data.get("promoted_opcode_specific", []))
+    trailing_x_aliases = parse_translator_trailing_x_aliases(translator_source)
+    relevant_x_aliases = {
+        alias for alias in trailing_x_aliases
+        if alias[:-1] in baseline_unmodeled
+    }
+    missing_x_aliases = relevant_x_aliases - baseline_unmodeled
+    if missing_x_aliases:
+        raise AuditError(
+            "translator trailing-X aliases missing from inventory: "
+            f"{sorted(missing_x_aliases)}"
+        )
+
+    hbr_source = hbr_path.read_text(encoding="utf-8")
+    generated_path = repo_root / data["generated_rule_table"]
+    generated_source = generated_path.read_text(encoding="utf-8")
+    generated_include = f'#include "{generated_path.name}"'
+    if generated_include not in hbr_source:
+        raise AuditError(
+            f"hbr model does not include generated table: {generated_include}"
+        )
+    try:
+        expected_generated = generate_latx_hbr_semantics.render(data)
+    except generate_latx_hbr_semantics.GenerationError as exc:
+        raise AuditError(str(exc)) from exc
+    if generated_source != expected_generated:
+        raise AuditError(f"generated semantic table is stale: {generated_path}")
+
+    expanded_hbr_source = hbr_source.replace(
+        generated_include, generated_source, 1
+    )
+    all_model_domains = parse_hbr_model_domains(expanded_hbr_source)
+    require_complete_hbr_model_domains(
+        all_model_domains, required=baseline_unmodeled
+    )
+    excluded = set(data.get("exclusions", {}))
+    model_domains = {
+        opcode: entry for opcode, entry in all_model_domains.items()
+        if opcode not in excluded
+    }
+    models = {
+        opcode: sorted(set(
+            entry["high32"] + entry["high64"]
+        ))
+        for opcode, entry in model_domains.items()
+    }
+    modeled = set(models)
+    if data.get("promote_all_inventory"):
+        expected_promoted = baseline_unmodeled
+    else:
+        expected_promoted = set(data.get("promoted_opcode_specific", []))
     if not expected_promoted <= baseline_unmodeled:
         raise AuditError(
             "promoted mnemonics are not baseline inventory entries: "
@@ -177,20 +359,35 @@ def audit(repo_root, inventory_path=None):
             f"{sorted(unsupported)}"
         )
 
-    modeled_policy = _require_semantics("opcode-specific", policies)
+    _require_semantics("opcode-specific", policies)
+    generated_rules = generate_latx_hbr_semantics.exact_rules(data)
+    baseline_by_mnemonic = {
+        row["mnemonic"]: row for row in baseline_rows
+    }
     for mnemonic in modeled:
-        rows.append({
+        baseline = baseline_by_mnemonic.get(mnemonic)
+        override = data.get("policy_overrides", {}).get(mnemonic)
+        policy_name = (
+            baseline["policy"] if baseline and override
+            else "opcode-specific"
+        )
+        policy = _require_semantics(policy_name, policies)
+        row = {
             "mnemonic": mnemonic,
             "coverage": "opcode-specific",
             "group": "current-hbr-model",
             "form_scope": "decoded-ir1-form",
-            "policy": "opcode-specific",
-            "high32": modeled_policy["high32"],
-            "high64": modeled_policy["high64"],
-            "implicit": [],
+            "policy": policy_name,
+            "high32": policy["high32"],
+            "high64": policy["high64"],
+            "implicit": baseline["implicit"] if baseline and override else [],
             "current_handling": "opcode-specific",
             "model_lines": models[mnemonic],
-        })
+            "model_lines_by_domain": model_domains[mnemonic],
+        }
+        if mnemonic in generated_rules:
+            row["semantic_rules"] = generated_rules[mnemonic]
+        rows.append(row)
 
     ymm_only = next(
         group for group in data["unmodeled_groups"]
@@ -212,7 +409,6 @@ def audit(repo_root, inventory_path=None):
     if drift:
         raise AuditError(f"inventory count drift: {json.dumps(drift)}")
 
-    excluded = set(data.get("exclusions", {}))
     if excluded & (modeled | unmodeled):
         raise AuditError(
             f"excluded mnemonics are in the inventory: "
@@ -233,6 +429,7 @@ def audit(repo_root, inventory_path=None):
             for group in data["unmodeled_groups"]
         },
         "promoted_opcode_specific": sorted(actual_promoted),
+        "generated_opcode_specific": len(generated_rules),
         "rows": sorted(rows, key=lambda row: row["mnemonic"]),
     }
 

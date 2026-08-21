@@ -5734,6 +5734,10 @@ if test "$latx" = "yes" ; then
   elif test "$latx_opt_Ofast" = "yes" ; then
     echo "CONFIG_LATX_OFAST=y" >> $config_host_mak
   fi
+  if test "$latx_opt_O1" = "yes" || test "$latx_opt_O2" = "yes" || \
+     test "$latx_opt_O3" = "yes" ; then
+    echo "CONFIG_LATX_CAPSTONE_OP_ACCESS=y" >> $config_host_mak
+  fi
   if test "$latx_low_mem0" = "yes" ; then
     echo "CONFIG_LATX_LOW_MEM_0=y" >> $config_host_mak
   fi

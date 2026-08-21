@@ -2093,7 +2093,7 @@ void op_addAvxBroadcast(MCInst *MI, x86_avx_bcast v)
 	}
 }
 
-#ifndef CAPSTONE_DIET
+#if !defined(CAPSTONE_DIET) || defined(LATX_CAPSTONE_OP_ACCESS)
 // map instruction to its characteristics
 typedef struct insn_op {
 	uint64_t flags;	// how this instruction update EFLAGS(arithmetic instrcutions) of FPU FLAGS(for FPU instructions)
@@ -2119,7 +2119,9 @@ const uint8_t *X86_get_op_access(cs_struct *h, unsigned int id, uint64_t *eflags
 
 	return NULL;
 }
+#endif
 
+#ifndef CAPSTONE_DIET
 void X86_reg_access(const cs_insn *insn,
 		cs_regs regs_read, uint8_t *regs_read_count,
 		cs_regs regs_write, uint8_t *regs_write_count)

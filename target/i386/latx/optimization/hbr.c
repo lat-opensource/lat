@@ -19,12 +19,40 @@
 
 #if defined(CONFIG_LATX_HBR) && defined(CONFIG_LATX_TU)
 
+#if defined(CONFIG_CAPSTONE_DIET) && \
+    !defined(CONFIG_LATX_CAPSTONE_OP_ACCESS)
+#error "SHBR requires decoded x86 operand access metadata"
+#endif
+
 #define WRAP(ins) (dt_X86_INS_##ins)
 
 typedef enum ShbrExplicitRule {
     SHBR_RULE_NONE,
     SHBR_RULE_SRC1,
+    SHBR_RULE_SRC1_READ,
     SHBR_RULE_ALL_SOURCES,
+    SHBR_RULE_ALL_SOURCES_READ,
+    SHBR_RULE_ACCESS,
+    SHBR_RULE_ACCESS_READ,
+    SHBR_RULE_DEST,
+    SHBR_RULE_READ_ACCESS,
+    SHBR_RULE_OTHER,
+    SHBR_RULE_ZERO,
+    SHBR_RULE_IGNORE,
+    SHBR_RULE_MOVSS,
+    SHBR_RULE_MOVSD,
+    SHBR_RULE_MOVD,
+    SHBR_RULE_MOVQ,
+    SHBR_RULE_BROADCAST,
+    SHBR_RULE_EXTRACT,
+    SHBR_RULE_EXTRACT128,
+    SHBR_RULE_BYTE_SHIFT,
+    SHBR_RULE_SCALAR_SHIFT,
+    SHBR_RULE_GATHER,
+    SHBR_RULE_MASKMOV,
+    SHBR_RULE_PCMPSTR,
+    SHBR_RULE_PSIGN,
+    SHBR_RULE_IMPLICIT,
 } ShbrExplicitRule;
 
 typedef struct ShbrExplicitSemantic {
@@ -33,47 +61,85 @@ typedef struct ShbrExplicitSemantic {
 } ShbrExplicitSemantic;
 
 static const ShbrExplicitSemantic shbr_explicit_semantics[dt_X86_INS_ENDING] = {
-    [WRAP(VADDPD)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
-    [WRAP(VADDPS)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
-    [WRAP(VADDSD)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_SRC1 },
+    [WRAP(MOVDQ2Q)] = { SHBR_RULE_READ_ACCESS, SHBR_RULE_IGNORE },
+    [WRAP(PCMPESTRI)] = { SHBR_RULE_PCMPSTR, SHBR_RULE_PCMPSTR },
+    [WRAP(PCMPESTRM)] = { SHBR_RULE_PCMPSTR, SHBR_RULE_PCMPSTR },
+    [WRAP(PCMPISTRI)] = { SHBR_RULE_PCMPSTR, SHBR_RULE_PCMPSTR },
+    [WRAP(PCMPISTRM)] = { SHBR_RULE_PCMPSTR, SHBR_RULE_PCMPSTR },
+    [WRAP(PSIGNB)] = { SHBR_RULE_PSIGN, SHBR_RULE_PSIGN },
+    [WRAP(PSIGND)] = { SHBR_RULE_PSIGN, SHBR_RULE_PSIGN },
+    [WRAP(PSIGNW)] = { SHBR_RULE_PSIGN, SHBR_RULE_PSIGN },
+    [WRAP(PSLLD)] = { SHBR_RULE_SCALAR_SHIFT, SHBR_RULE_SCALAR_SHIFT },
+    [WRAP(PSLLDQ)] = { SHBR_RULE_BYTE_SHIFT, SHBR_RULE_BYTE_SHIFT },
+    [WRAP(PSLLQ)] = { SHBR_RULE_SCALAR_SHIFT, SHBR_RULE_SCALAR_SHIFT },
+    [WRAP(PSLLW)] = { SHBR_RULE_SCALAR_SHIFT, SHBR_RULE_SCALAR_SHIFT },
+    [WRAP(PSRAD)] = { SHBR_RULE_SCALAR_SHIFT, SHBR_RULE_SCALAR_SHIFT },
+    [WRAP(PSRAW)] = { SHBR_RULE_SCALAR_SHIFT, SHBR_RULE_SCALAR_SHIFT },
+    [WRAP(PSRLD)] = { SHBR_RULE_SCALAR_SHIFT, SHBR_RULE_SCALAR_SHIFT },
+    [WRAP(PSRLDQ)] = { SHBR_RULE_BYTE_SHIFT, SHBR_RULE_BYTE_SHIFT },
+    [WRAP(PSRLQ)] = { SHBR_RULE_SCALAR_SHIFT, SHBR_RULE_SCALAR_SHIFT },
+    [WRAP(PSRLW)] = { SHBR_RULE_SCALAR_SHIFT, SHBR_RULE_SCALAR_SHIFT },
+    [WRAP(PUNPCKHQDQ)] = { SHBR_RULE_ACCESS_READ, SHBR_RULE_ACCESS_READ },
+    [WRAP(UNPCKHPD)] = { SHBR_RULE_ACCESS_READ, SHBR_RULE_ACCESS_READ },
+    [WRAP(VADDPD)] = {
+        SHBR_RULE_ALL_SOURCES_READ, SHBR_RULE_ALL_SOURCES_READ },
+    [WRAP(VADDPS)] = {
+        SHBR_RULE_ALL_SOURCES_READ, SHBR_RULE_ALL_SOURCES_READ },
+    [WRAP(VADDSD)] = { SHBR_RULE_ACCESS_READ, SHBR_RULE_SRC1 },
     [WRAP(VADDSS)] = { SHBR_RULE_SRC1, SHBR_RULE_SRC1 },
-    [WRAP(VADDSUBPD)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
-    [WRAP(VADDSUBPS)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VADDSUBPD)] = {
+        SHBR_RULE_ALL_SOURCES_READ, SHBR_RULE_ALL_SOURCES_READ },
+    [WRAP(VADDSUBPS)] = {
+        SHBR_RULE_ALL_SOURCES_READ, SHBR_RULE_ALL_SOURCES_READ },
     [WRAP(VANDNPD)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
     [WRAP(VANDNPS)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
     [WRAP(VANDPD)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
     [WRAP(VANDPS)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
-    [WRAP(VDIVPD)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
-    [WRAP(VDIVPS)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
-    [WRAP(VDIVSD)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_SRC1 },
+    [WRAP(VDIVPD)] = {
+        SHBR_RULE_ALL_SOURCES_READ, SHBR_RULE_ALL_SOURCES_READ },
+    [WRAP(VDIVPS)] = {
+        SHBR_RULE_ALL_SOURCES_READ, SHBR_RULE_ALL_SOURCES_READ },
+    [WRAP(VDIVSD)] = { SHBR_RULE_ACCESS_READ, SHBR_RULE_SRC1 },
     [WRAP(VDIVSS)] = { SHBR_RULE_SRC1, SHBR_RULE_SRC1 },
-    [WRAP(VHADDPD)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
-    [WRAP(VHADDPS)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
-    [WRAP(VHSUBPD)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
-    [WRAP(VHSUBPS)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
-    [WRAP(VMAXPD)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
-    [WRAP(VMAXPS)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
-    [WRAP(VMAXSD)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_SRC1 },
+    [WRAP(VHADDPD)] = {
+        SHBR_RULE_ALL_SOURCES_READ, SHBR_RULE_ALL_SOURCES_READ },
+    [WRAP(VHADDPS)] = {
+        SHBR_RULE_ALL_SOURCES_READ, SHBR_RULE_ALL_SOURCES_READ },
+    [WRAP(VHSUBPD)] = {
+        SHBR_RULE_ALL_SOURCES_READ, SHBR_RULE_ALL_SOURCES_READ },
+    [WRAP(VHSUBPS)] = {
+        SHBR_RULE_ALL_SOURCES_READ, SHBR_RULE_ALL_SOURCES_READ },
+    [WRAP(VMAXPD)] = {
+        SHBR_RULE_ALL_SOURCES_READ, SHBR_RULE_ALL_SOURCES_READ },
+    [WRAP(VMAXPS)] = {
+        SHBR_RULE_ALL_SOURCES_READ, SHBR_RULE_ALL_SOURCES_READ },
+    [WRAP(VMAXSD)] = { SHBR_RULE_ACCESS_READ, SHBR_RULE_SRC1 },
     [WRAP(VMAXSS)] = { SHBR_RULE_SRC1, SHBR_RULE_SRC1 },
-    [WRAP(VMINPD)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
-    [WRAP(VMINPS)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
-    [WRAP(VMINSD)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_SRC1 },
+    [WRAP(VMINPD)] = {
+        SHBR_RULE_ALL_SOURCES_READ, SHBR_RULE_ALL_SOURCES_READ },
+    [WRAP(VMINPS)] = {
+        SHBR_RULE_ALL_SOURCES_READ, SHBR_RULE_ALL_SOURCES_READ },
+    [WRAP(VMINSD)] = { SHBR_RULE_ACCESS_READ, SHBR_RULE_SRC1 },
     [WRAP(VMINSS)] = { SHBR_RULE_SRC1, SHBR_RULE_SRC1 },
-    [WRAP(VMULPD)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
-    [WRAP(VMULPS)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
-    [WRAP(VMULSD)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_SRC1 },
+    [WRAP(VMULPD)] = {
+        SHBR_RULE_ALL_SOURCES_READ, SHBR_RULE_ALL_SOURCES_READ },
+    [WRAP(VMULPS)] = {
+        SHBR_RULE_ALL_SOURCES_READ, SHBR_RULE_ALL_SOURCES_READ },
+    [WRAP(VMULSD)] = { SHBR_RULE_ACCESS_READ, SHBR_RULE_SRC1 },
     [WRAP(VMULSS)] = { SHBR_RULE_SRC1, SHBR_RULE_SRC1 },
     [WRAP(VORPD)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
     [WRAP(VORPS)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
     [WRAP(VRCPPS)] = { SHBR_RULE_SRC1, SHBR_RULE_SRC1 },
     [WRAP(VRSQRTPS)] = { SHBR_RULE_SRC1, SHBR_RULE_SRC1 },
-    [WRAP(VSQRTPD)] = { SHBR_RULE_SRC1, SHBR_RULE_SRC1 },
-    [WRAP(VSQRTPS)] = { SHBR_RULE_SRC1, SHBR_RULE_SRC1 },
-    [WRAP(VSQRTSD)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_SRC1 },
+    [WRAP(VSQRTPD)] = { SHBR_RULE_SRC1_READ, SHBR_RULE_SRC1_READ },
+    [WRAP(VSQRTPS)] = { SHBR_RULE_SRC1_READ, SHBR_RULE_SRC1_READ },
+    [WRAP(VSQRTSD)] = { SHBR_RULE_ACCESS_READ, SHBR_RULE_SRC1 },
     [WRAP(VSQRTSS)] = { SHBR_RULE_SRC1, SHBR_RULE_SRC1 },
-    [WRAP(VSUBPD)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
-    [WRAP(VSUBPS)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
-    [WRAP(VSUBSD)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_SRC1 },
+    [WRAP(VSUBPD)] = {
+        SHBR_RULE_ALL_SOURCES_READ, SHBR_RULE_ALL_SOURCES_READ },
+    [WRAP(VSUBPS)] = {
+        SHBR_RULE_ALL_SOURCES_READ, SHBR_RULE_ALL_SOURCES_READ },
+    [WRAP(VSUBSD)] = { SHBR_RULE_ACCESS_READ, SHBR_RULE_SRC1 },
     [WRAP(VSUBSS)] = { SHBR_RULE_SRC1, SHBR_RULE_SRC1 },
     [WRAP(VXORPD)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
     [WRAP(VXORPS)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
@@ -122,7 +188,7 @@ static const ShbrExplicitSemantic shbr_explicit_semantics[dt_X86_INS_ENDING] = {
     [WRAP(VPMULLW)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
     [WRAP(VPMULUDQ)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
     [WRAP(VPOR)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
-    [WRAP(VPSADBW)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+    [WRAP(VPSADBW)] = { SHBR_RULE_ACCESS_READ, SHBR_RULE_ALL_SOURCES },
     [WRAP(VPSUBB)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
     [WRAP(VPSUBD)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
     [WRAP(VPSUBQ)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
@@ -132,6 +198,7 @@ static const ShbrExplicitSemantic shbr_explicit_semantics[dt_X86_INS_ENDING] = {
     [WRAP(VPSUBUSW)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
     [WRAP(VPSUBW)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
     [WRAP(VPXOR)] = { SHBR_RULE_ALL_SOURCES, SHBR_RULE_ALL_SOURCES },
+#include "hbr-xmm-semantics.inc"
 };
 
 static inline bool shbr_opnd_is_vector(const IR1_OPND *opnd)
@@ -146,6 +213,704 @@ static inline uint16_t shbr_opnd_mask(const IR1_OPND *opnd)
     return 1U << reg;
 }
 
+#define SHBR_ACCESS_READ  (1U << 0)
+#define SHBR_ACCESS_WRITE (1U << 1)
+
+static inline bool shbr_opnd_has_vector_index(IR1_OPND *opnd)
+{
+    if (!ir1_opnd_is_mem(opnd) || !ir1_opnd_has_index(opnd)) {
+        return false;
+    }
+    dt_x86_reg index = ir1_opnd_index_reg(opnd);
+    return (index >= dt_X86_REG_XMM0 && index <= dt_X86_REG_XMM15) ||
+           (index >= dt_X86_REG_YMM0 && index <= dt_X86_REG_YMM15);
+}
+
+static inline uint16_t shbr_vector_index_mask(IR1_OPND *opnd)
+{
+    int reg = ir1_opnd_vsib_index_reg_num(opnd);
+    lsassert(reg >= 0 && reg < XMM_NUM);
+    return 1U << reg;
+}
+
+static inline void shbr_record_read(IR1_INST *ir1, uint32_t *xmm,
+        uint16_t mask)
+{
+    ir1->shbr_read |= mask;
+    for (int i = 0; i < XMM_NUM; i++) {
+        if (mask & (1U << i)) {
+            ir1->xmm_use |= xmm[i];
+        }
+    }
+}
+
+static void shbr_record_vector_reads(IR1_INST *ir1, uint32_t *xmm)
+{
+    uint16_t reads = 0;
+    int opnd_num = ir1_get_opnd_num(ir1);
+
+    for (int i = 0; i < opnd_num; i++) {
+        IR1_OPND *opnd = ir1_get_opnd(ir1, i);
+        if (shbr_opnd_is_vector(opnd) &&
+            (opnd->access & SHBR_ACCESS_READ)) {
+            reads |= shbr_opnd_mask(opnd);
+        }
+    }
+    shbr_record_read(ir1, xmm, reads);
+}
+
+static inline void shbr_define_vector(IR1_INST *ir1, uint32_t *xmm,
+        IR1_OPND *dest, uint16_t dependencies, uint32_t state)
+{
+    uint16_t dest_mask = shbr_opnd_mask(dest);
+    ir1->shbr_def |= dest_mask;
+    ir1->shbr_dep |= dependencies;
+    xmm[ir1_opnd_base_reg_num(dest)] = state;
+}
+
+static IR1_OPND *shbr_vector_dest(IR1_INST *ir1);
+
+static bool apply_access_semantic(IR1_INST *ir1, uint32_t *xmm,
+        bool direct_reads)
+{
+    uint16_t dependencies = 0;
+    uint16_t definitions = 0;
+    uint16_t address_reads = 0;
+    uint32_t state = 0;
+    bool external_source = false;
+    bool saw_vector_access = false;
+    int opnd_num = ir1_get_opnd_num(ir1);
+
+    for (int i = 0; i < opnd_num; i++) {
+        IR1_OPND *opnd = ir1_get_opnd(ir1, i);
+        if (shbr_opnd_has_vector_index(opnd)) {
+            uint16_t mask = shbr_vector_index_mask(opnd);
+            address_reads |= mask;
+            saw_vector_access = true;
+        }
+        if (shbr_opnd_is_vector(opnd)) {
+            uint16_t mask = shbr_opnd_mask(opnd);
+            if (opnd->access & SHBR_ACCESS_READ) {
+                dependencies |= mask;
+                state |= xmm[ir1_opnd_base_reg_num(opnd)];
+                saw_vector_access = true;
+            }
+            if (opnd->access & SHBR_ACCESS_WRITE) {
+                definitions |= mask;
+                saw_vector_access = true;
+            }
+        } else if ((opnd->access & SHBR_ACCESS_READ) &&
+                   !ir1_opnd_is_imm(opnd)) {
+            external_source = true;
+        }
+    }
+
+    if (!saw_vector_access) {
+        return false;
+    }
+    if (direct_reads || !definitions) {
+        shbr_record_read(ir1, xmm, dependencies | address_reads);
+        return true;
+    }
+
+    if (external_source) {
+        state |= SHBR_XMM_OTHER;
+    }
+    if (!state) {
+        /* No predecessor dependency does not imply a zero result. */
+        state = SHBR_XMM_OTHER;
+    }
+    ir1->shbr_def |= definitions;
+    ir1->shbr_dep |= dependencies;
+    shbr_record_read(ir1, xmm, address_reads);
+    for (int i = 0; i < opnd_num; i++) {
+        IR1_OPND *opnd = ir1_get_opnd(ir1, i);
+        if (shbr_opnd_is_vector(opnd) &&
+            (opnd->access & SHBR_ACCESS_WRITE)) {
+            xmm[ir1_opnd_base_reg_num(opnd)] = state;
+        }
+    }
+    return true;
+}
+
+static bool apply_access_read_semantic(IR1_INST *ir1, uint32_t *xmm)
+{
+    uint16_t reads = 0;
+    uint32_t use = 0;
+    int opnd_num = ir1_get_opnd_num(ir1);
+    for (int i = 0; i < opnd_num; i++) {
+        IR1_OPND *opnd = ir1_get_opnd(ir1, i);
+        if (shbr_opnd_is_vector(opnd) &&
+            (opnd->access & SHBR_ACCESS_READ)) {
+            uint16_t mask = shbr_opnd_mask(opnd);
+            reads |= mask;
+            use |= xmm[ir1_opnd_base_reg_num(opnd)];
+        }
+        if (shbr_opnd_has_vector_index(opnd)) {
+            uint16_t mask = shbr_vector_index_mask(opnd);
+            reads |= mask;
+            use |= xmm[ir1_opnd_vsib_index_reg_num(opnd)];
+        }
+    }
+    if (!apply_access_semantic(ir1, xmm, false)) {
+        return false;
+    }
+    ir1->shbr_read |= reads;
+    ir1->xmm_use |= use;
+    return true;
+}
+
+static bool apply_constant_semantic(IR1_INST *ir1, uint32_t *xmm,
+        uint32_t state)
+{
+    IR1_OPND *dest = shbr_vector_dest(ir1);
+    if (!dest) {
+        return true;
+    }
+    shbr_define_vector(ir1, xmm, dest, 0, state);
+    return true;
+}
+
+static bool apply_dest_semantic(IR1_INST *ir1, uint32_t *xmm)
+{
+    if (ir1_get_opnd_num(ir1) < 1) {
+        return false;
+    }
+    IR1_OPND *dest = ir1_get_opnd(ir1, 0);
+    if (!shbr_opnd_is_vector(dest)) {
+        return false;
+    }
+    uint16_t mask = shbr_opnd_mask(dest);
+    shbr_define_vector(ir1, xmm, dest, mask,
+                       xmm[ir1_opnd_base_reg_num(dest)]);
+    return true;
+}
+
+static IR1_OPND *shbr_first_read_vector(IR1_INST *ir1, int first)
+{
+    int opnd_num = ir1_get_opnd_num(ir1);
+    for (int i = first; i < opnd_num; i++) {
+        IR1_OPND *opnd = ir1_get_opnd(ir1, i);
+        if (shbr_opnd_is_vector(opnd) &&
+            (opnd->access & SHBR_ACCESS_READ)) {
+            return opnd;
+        }
+    }
+    return NULL;
+}
+
+static IR1_OPND *shbr_vector_dest(IR1_INST *ir1)
+{
+    int opnd_num = ir1_get_opnd_num(ir1);
+    for (int i = 0; i < opnd_num; i++) {
+        IR1_OPND *opnd = ir1_get_opnd(ir1, i);
+        if (shbr_opnd_is_vector(opnd) &&
+            (opnd->access & SHBR_ACCESS_WRITE)) {
+            return opnd;
+        }
+    }
+    return NULL;
+}
+
+static bool apply_movss_semantic(IR1_INST *ir1, uint32_t *xmm)
+{
+    IR1_OPND *dest = shbr_vector_dest(ir1);
+    if (!dest) {
+        /* Stores consume only bits 31:0. */
+        return true;
+    }
+    if (ir1_get_opnd_num(ir1) == 2 &&
+        !shbr_opnd_is_vector(ir1_get_opnd(ir1, 1))) {
+        shbr_define_vector(ir1, xmm, dest, 0, SHBR_XMM_ZERO);
+        return true;
+    }
+    IR1_OPND *src1 = shbr_first_read_vector(ir1, 1);
+    if (!src1) {
+        return false;
+    }
+    uint16_t mask = shbr_opnd_mask(src1);
+    shbr_define_vector(ir1, xmm, dest, mask,
+                       xmm[ir1_opnd_base_reg_num(src1)]);
+    return true;
+}
+
+static bool apply_movsd_semantic(IR1_INST *ir1, uint32_t *xmm,
+        int high_bits)
+{
+    IR1_OPND *dest = shbr_vector_dest(ir1);
+    if (!dest) {
+        if (high_bits == 32) {
+            IR1_OPND *source = shbr_first_read_vector(ir1, 0);
+            if (source) {
+                shbr_record_read(ir1, xmm, shbr_opnd_mask(source));
+            }
+        }
+        return true;
+    }
+    if (ir1_get_opnd_num(ir1) == 2 &&
+        !shbr_opnd_is_vector(ir1_get_opnd(ir1, 1))) {
+        shbr_define_vector(ir1, xmm, dest, 0,
+                           high_bits == 64 ? SHBR_XMM_ZERO : SHBR_XMM_OTHER);
+        return true;
+    }
+    if (high_bits == 64) {
+        IR1_OPND *src1 = shbr_first_read_vector(ir1, 1);
+        if (!src1) {
+            return false;
+        }
+        uint16_t mask = shbr_opnd_mask(src1);
+        shbr_define_vector(ir1, xmm, dest, mask,
+                           xmm[ir1_opnd_base_reg_num(src1)]);
+        return true;
+    }
+    return apply_access_semantic(ir1, xmm, false);
+}
+
+static bool apply_movd_semantic(IR1_INST *ir1, uint32_t *xmm)
+{
+    IR1_OPND *dest = shbr_vector_dest(ir1);
+    if (dest) {
+        shbr_define_vector(ir1, xmm, dest, 0, SHBR_XMM_ZERO);
+    }
+    /* Register and memory destinations consume only bits 31:0. */
+    return true;
+}
+
+static bool apply_movq_semantic(IR1_INST *ir1, uint32_t *xmm,
+        int high_bits)
+{
+    IR1_OPND *dest = shbr_vector_dest(ir1);
+    IR1_OPND *source = shbr_first_read_vector(ir1, dest ? 1 : 0);
+    if (!dest) {
+        if (high_bits == 32 && source) {
+            shbr_record_read(ir1, xmm, shbr_opnd_mask(source));
+        }
+        return true;
+    }
+    if (high_bits == 64) {
+        shbr_define_vector(ir1, xmm, dest, 0, SHBR_XMM_ZERO);
+    } else if (source) {
+        uint16_t mask = shbr_opnd_mask(source);
+        shbr_define_vector(ir1, xmm, dest, mask,
+                           xmm[ir1_opnd_base_reg_num(source)]);
+    } else {
+        shbr_define_vector(ir1, xmm, dest, 0, SHBR_XMM_OTHER);
+    }
+    return true;
+}
+
+static int shbr_broadcast_element_bits(IR1_INST *ir1)
+{
+    switch (ir1_opcode(ir1)) {
+    case WRAP(VBROADCASTSS):
+    case WRAP(VPBROADCASTD):
+        return 32;
+    case WRAP(VPBROADCASTB):
+        return 8;
+    case WRAP(VPBROADCASTW):
+        return 16;
+    case WRAP(VBROADCASTSD):
+    case WRAP(VPBROADCASTQ):
+    case WRAP(MOVDDUP):
+    case WRAP(VMOVDDUP):
+        return 64;
+    case WRAP(VBROADCASTF128):
+    case WRAP(VBROADCASTI128):
+        return 128;
+    default:
+        return 0;
+    }
+}
+
+static bool apply_broadcast_semantic(IR1_INST *ir1, uint32_t *xmm,
+        int high_bits)
+{
+    IR1_OPND *dest = shbr_vector_dest(ir1);
+    if (!dest) {
+        return false;
+    }
+    IR1_OPND *source = shbr_first_read_vector(ir1, 1);
+    int element_bits = shbr_broadcast_element_bits(ir1);
+    if (source && element_bits > high_bits) {
+        uint16_t mask = shbr_opnd_mask(source);
+        shbr_define_vector(ir1, xmm, dest, mask,
+                           xmm[ir1_opnd_base_reg_num(source)]);
+    } else {
+        shbr_define_vector(ir1, xmm, dest, 0, SHBR_XMM_OTHER);
+    }
+    return true;
+}
+
+static int shbr_extract_element_bits(IR1_INST *ir1)
+{
+    switch (ir1_opcode(ir1)) {
+    case WRAP(PEXTRB):
+    case WRAP(VPEXTRB):
+        return 8;
+    case WRAP(PEXTRW):
+    case WRAP(VPEXTRW):
+        return 16;
+    case WRAP(EXTRACTPS):
+    case WRAP(VEXTRACTPS):
+    case WRAP(PEXTRD):
+    case WRAP(VPEXTRD):
+        return 32;
+    case WRAP(PEXTRQ):
+    case WRAP(VPEXTRQ):
+        return 64;
+    default:
+        return 0;
+    }
+}
+
+static bool apply_extract_semantic(IR1_INST *ir1, uint32_t *xmm,
+        int high_bits)
+{
+    int opnd_num = ir1_get_opnd_num(ir1);
+    int element_bits = shbr_extract_element_bits(ir1);
+    if (!element_bits || opnd_num < 3 ||
+        !ir1_opnd_is_imm(ir1_get_opnd(ir1, opnd_num - 1))) {
+        return false;
+    }
+    IR1_OPND *source = shbr_first_read_vector(ir1, 0);
+    if (!source) {
+        return false;
+    }
+    unsigned int elements = 128 / element_bits;
+    unsigned int selected =
+        ir1_opnd_uimm(ir1_get_opnd(ir1, opnd_num - 1)) & (elements - 1);
+    if ((selected + 1) * element_bits > (unsigned int)high_bits) {
+        shbr_record_read(ir1, xmm, shbr_opnd_mask(source));
+    }
+    return true;
+}
+
+static bool apply_extract128_semantic(IR1_INST *ir1, uint32_t *xmm)
+{
+    int opnd_num = ir1_get_opnd_num(ir1);
+    if (opnd_num < 3 ||
+        !ir1_opnd_is_imm(ir1_get_opnd(ir1, opnd_num - 1))) {
+        return false;
+    }
+    IR1_OPND *source = shbr_first_read_vector(ir1, 0);
+    if (!source) {
+        return false;
+    }
+    bool low_lane = !(ir1_opnd_uimm(ir1_get_opnd(ir1, opnd_num - 1)) & 1);
+    IR1_OPND *dest = shbr_vector_dest(ir1);
+    if (!dest) {
+        if (low_lane) {
+            shbr_record_read(ir1, xmm, shbr_opnd_mask(source));
+        }
+    } else if (low_lane) {
+        uint16_t mask = shbr_opnd_mask(source);
+        shbr_define_vector(ir1, xmm, dest, mask,
+                           xmm[ir1_opnd_base_reg_num(source)]);
+    } else {
+        shbr_define_vector(ir1, xmm, dest, 0, SHBR_XMM_OTHER);
+    }
+    return true;
+}
+
+static bool apply_byte_shift_semantic(IR1_INST *ir1, uint32_t *xmm,
+        int high_bits)
+{
+    int opnd_num = ir1_get_opnd_num(ir1);
+    if (opnd_num < 2 ||
+        !ir1_opnd_is_imm(ir1_get_opnd(ir1, opnd_num - 1))) {
+        return false;
+    }
+    IR1_OPND *dest = shbr_vector_dest(ir1);
+    IR1_OPND *source = shbr_first_read_vector(ir1, 1);
+    if (!source && dest && (dest->access & SHBR_ACCESS_READ)) {
+        source = dest;
+    }
+    if (!dest || !source) {
+        return false;
+    }
+    unsigned int count = ir1_opnd_uimm(ir1_get_opnd(ir1, opnd_num - 1));
+    unsigned int boundary = 16 - high_bits / 8;
+    bool right = ir1_opcode(ir1) == WRAP(PSRLDQ) ||
+                 ir1_opcode(ir1) == WRAP(VPSRLDQ);
+    uint16_t mask = shbr_opnd_mask(source);
+    uint32_t source_state = xmm[ir1_opnd_base_reg_num(source)];
+
+    if (right && count > 0 && count < 16) {
+        shbr_record_read(ir1, xmm, mask);
+    } else if (!right && count > 0 && count < 16) {
+        source_state |= SHBR_XMM_OTHER;
+    }
+
+    if (count >= 16) {
+        shbr_define_vector(ir1, xmm, dest, 0, SHBR_XMM_ZERO);
+    } else if (count < boundary) {
+        shbr_define_vector(ir1, xmm, dest, mask, source_state);
+    } else {
+        shbr_define_vector(ir1, xmm, dest, 0,
+                           right ? SHBR_XMM_ZERO : SHBR_XMM_OTHER);
+    }
+    return true;
+}
+
+static int shbr_scalar_shift_element_bits(IR1_INST *ir1)
+{
+    switch (ir1_opcode(ir1)) {
+    case WRAP(PSLLW):
+    case WRAP(PSRAW):
+    case WRAP(PSRLW):
+    case WRAP(VPSLLW):
+    case WRAP(VPSRAW):
+    case WRAP(VPSRLW):
+        return 16;
+    case WRAP(PSLLD):
+    case WRAP(PSRAD):
+    case WRAP(PSRLD):
+    case WRAP(VPSLLD):
+    case WRAP(VPSRAD):
+    case WRAP(VPSRLD):
+        return 32;
+    case WRAP(PSLLQ):
+    case WRAP(PSRLQ):
+    case WRAP(VPSLLQ):
+    case WRAP(VPSLLVQ):
+    case WRAP(VPSRLQ):
+    case WRAP(VPSRLVQ):
+        return 64;
+    default:
+        return 0;
+    }
+}
+
+static bool shbr_scalar_shift_is_right(IR1_INST *ir1)
+{
+    switch (ir1_opcode(ir1)) {
+    case WRAP(PSRAW):
+    case WRAP(PSRAD):
+    case WRAP(PSRLW):
+    case WRAP(PSRLD):
+    case WRAP(PSRLQ):
+    case WRAP(VPSRAW):
+    case WRAP(VPSRAD):
+    case WRAP(VPSRLW):
+    case WRAP(VPSRLD):
+    case WRAP(VPSRLQ):
+    case WRAP(VPSRLVQ):
+        return true;
+    default:
+        return false;
+    }
+}
+
+static bool shbr_scalar_shift_is_arithmetic(IR1_INST *ir1)
+{
+    switch (ir1_opcode(ir1)) {
+    case WRAP(PSRAW):
+    case WRAP(PSRAD):
+    case WRAP(VPSRAW):
+    case WRAP(VPSRAD):
+        return true;
+    default:
+        return false;
+    }
+}
+
+static bool shbr_scalar_shift_has_per_element_count(IR1_INST *ir1)
+{
+    return ir1_opcode(ir1) == WRAP(VPSLLVQ) ||
+           ir1_opcode(ir1) == WRAP(VPSRLVQ);
+}
+
+static bool apply_scalar_shift_semantic(IR1_INST *ir1, uint32_t *xmm,
+        int high_bits)
+{
+    int opnd_num = ir1_get_opnd_num(ir1);
+    IR1_OPND *dest = shbr_vector_dest(ir1);
+    if (!dest) {
+        return false;
+    }
+    bool two_operand = opnd_num == 2 && (dest->access & SHBR_ACCESS_READ);
+    IR1_OPND *data = two_operand ? dest : ir1_get_opnd(ir1, 1);
+    if (!data || (!shbr_opnd_is_vector(data) && !ir1_opnd_is_mem(data))) {
+        return false;
+    }
+    int element_bits = shbr_scalar_shift_element_bits(ir1);
+    if (!element_bits) {
+        return false;
+    }
+    bool vector_data = shbr_opnd_is_vector(data);
+    uint16_t data_mask = vector_data ? shbr_opnd_mask(data) : 0;
+    uint16_t dependencies = data_mask;
+    uint32_t state = vector_data ?
+        xmm[ir1_opnd_base_reg_num(data)] : SHBR_XMM_OTHER;
+    IR1_OPND *count = NULL;
+    int count_first = two_operand ? 1 : 2;
+    for (int i = count_first; i < opnd_num; i++) {
+        IR1_OPND *opnd = ir1_get_opnd(ir1, i);
+        if ((shbr_opnd_is_vector(opnd) &&
+             (opnd->access & SHBR_ACCESS_READ)) ||
+            ir1_opnd_is_mem(opnd) || ir1_opnd_is_imm(opnd)) {
+            count = opnd;
+            break;
+        }
+    }
+    if (!count) {
+        return false;
+    }
+
+    bool known_count = ir1_opnd_is_imm(count);
+    unsigned int count_value = known_count ? ir1_opnd_uimm(count) : 0;
+    bool zero_result = known_count &&
+        !shbr_scalar_shift_is_arithmetic(ir1) &&
+        count_value >= (unsigned int)element_bits;
+    bool data_moves_to_low = high_bits == 32 && element_bits == 64 &&
+        shbr_scalar_shift_is_right(ir1) &&
+        (!known_count || (count_value > 0 && !zero_result));
+
+    if (data_moves_to_low && vector_data) {
+        shbr_record_read(ir1, xmm, data_mask);
+    }
+    bool low_data_moves_to_high = high_bits == 32 && element_bits == 64 &&
+        !shbr_scalar_shift_is_right(ir1) &&
+        (!known_count || (count_value > 0 && !zero_result));
+    if (low_data_moves_to_high) {
+        state |= SHBR_XMM_OTHER;
+    }
+    bool count_affects_high = high_bits == 32 ||
+        shbr_scalar_shift_has_per_element_count(ir1);
+    if (shbr_opnd_is_vector(count) && count_affects_high) {
+        uint16_t count_mask = shbr_opnd_mask(count);
+        dependencies |= count_mask;
+        state |= xmm[ir1_opnd_base_reg_num(count)];
+        if (high_bits == 32) {
+            shbr_record_read(ir1, xmm, count_mask);
+        }
+    }
+    if (zero_result) {
+        shbr_define_vector(ir1, xmm, dest, 0, SHBR_XMM_ZERO);
+    } else {
+        shbr_define_vector(ir1, xmm, dest, dependencies, state);
+    }
+    return true;
+}
+
+static bool apply_psign_semantic(IR1_INST *ir1, uint32_t *xmm)
+{
+    int opnd_num = ir1_get_opnd_num(ir1);
+    IR1_OPND *dest = shbr_vector_dest(ir1);
+    if (!dest || (opnd_num != 2 && opnd_num != 3)) {
+        return false;
+    }
+
+    IR1_OPND *data = opnd_num == 2 ? dest : ir1_get_opnd(ir1, 1);
+    IR1_OPND *sign = ir1_get_opnd(ir1, opnd_num - 1);
+    bool vector_data = shbr_opnd_is_vector(data);
+    bool vector_sign = shbr_opnd_is_vector(sign);
+    uint16_t data_mask = vector_data ? shbr_opnd_mask(data) : 0;
+    uint16_t sign_mask = vector_sign ? shbr_opnd_mask(sign) : 0;
+    uint32_t data_state = vector_data ?
+        xmm[ir1_opnd_base_reg_num(data)] : SHBR_XMM_OTHER;
+    uint32_t sign_state = vector_sign ?
+        xmm[ir1_opnd_base_reg_num(sign)] : SHBR_XMM_OTHER;
+
+    if (data_state == SHBR_XMM_ZERO) {
+        if (shbr_opnd_mask(dest) != data_mask) {
+            shbr_define_vector(ir1, xmm, dest, data_mask, SHBR_XMM_ZERO);
+        }
+    } else if (sign_state == SHBR_XMM_ZERO) {
+        shbr_define_vector(ir1, xmm, dest, sign_mask, SHBR_XMM_ZERO);
+    } else {
+        shbr_define_vector(ir1, xmm, dest, data_mask | sign_mask,
+                           data_state | sign_state);
+    }
+    return true;
+}
+
+static bool apply_maskmov_semantic(IR1_INST *ir1, uint32_t *xmm)
+{
+    IR1_OPND *dest = shbr_vector_dest(ir1);
+    if (!dest) {
+        return apply_access_semantic(ir1, xmm, true);
+    }
+    IR1_OPND *mask = shbr_first_read_vector(ir1, 1);
+    uint16_t dependencies = mask ? shbr_opnd_mask(mask) : 0;
+    uint32_t state = SHBR_XMM_OTHER;
+    if (mask) {
+        state |= xmm[ir1_opnd_base_reg_num(mask)];
+        shbr_record_read(ir1, xmm, dependencies);
+    }
+    shbr_define_vector(ir1, xmm, dest, dependencies, state);
+    return true;
+}
+
+static bool apply_gather_semantic(IR1_INST *ir1, uint32_t *xmm)
+{
+    int opnd_num = ir1_get_opnd_num(ir1);
+    if (opnd_num < 3 || !shbr_opnd_is_vector(ir1_get_opnd(ir1, 0))) {
+        return false;
+    }
+    IR1_OPND *dest = ir1_get_opnd(ir1, 0);
+    IR1_OPND *mask = shbr_first_read_vector(ir1, 1);
+    if (!mask) {
+        return false;
+    }
+    uint16_t dest_mask = shbr_opnd_mask(dest);
+    uint16_t mask_mask = shbr_opnd_mask(mask);
+    uint16_t address_reads = 0;
+    for (int i = 0; i < opnd_num; i++) {
+        IR1_OPND *opnd = ir1_get_opnd(ir1, i);
+        if (shbr_opnd_has_vector_index(opnd)) {
+            address_reads |= shbr_vector_index_mask(opnd);
+        }
+    }
+    uint16_t dependencies = dest_mask | mask_mask;
+    uint32_t state = xmm[ir1_opnd_base_reg_num(dest)] |
+                     xmm[ir1_opnd_base_reg_num(mask)] | SHBR_XMM_OTHER;
+    shbr_define_vector(ir1, xmm, dest, dependencies, state);
+    shbr_record_read(ir1, xmm, mask_mask | address_reads);
+    ir1->shbr_def |= mask_mask;
+    xmm[ir1_opnd_base_reg_num(mask)] = SHBR_XMM_ZERO;
+    return true;
+}
+
+static bool shbr_pcmpstr_writes_xmm0(IR1_INST *ir1)
+{
+    switch (ir1_opcode(ir1)) {
+    case WRAP(PCMPESTRM):
+    case WRAP(PCMPISTRM):
+    case WRAP(VPCMPESTRM):
+    case WRAP(VPCMPISTRM):
+        return true;
+    default:
+        return false;
+    }
+}
+
+static bool apply_pcmpstr_semantic(IR1_INST *ir1, uint32_t *xmm)
+{
+    uint16_t reads = 0;
+    uint32_t state = 0;
+    int opnd_num = ir1_get_opnd_num(ir1);
+    for (int i = 0; i < opnd_num; i++) {
+        IR1_OPND *opnd = ir1_get_opnd(ir1, i);
+        if (shbr_opnd_is_vector(opnd) &&
+            (opnd->access & SHBR_ACCESS_READ)) {
+            uint16_t mask = shbr_opnd_mask(opnd);
+            reads |= mask;
+            state |= xmm[ir1_opnd_base_reg_num(opnd)];
+        }
+    }
+    if (!reads) {
+        return false;
+    }
+    shbr_record_read(ir1, xmm, reads);
+    if (shbr_pcmpstr_writes_xmm0(ir1)) {
+        ir1->shbr_def |= 1U;
+        ir1->shbr_dep |= reads;
+        xmm[0] = state | SHBR_XMM_OTHER;
+    }
+    return true;
+}
+
 static bool apply_explicit_semantic(IR1_INST *ir1, uint32_t *xmm,
         int high_bits)
 {
@@ -154,6 +919,52 @@ static bool apply_explicit_semantic(IR1_INST *ir1, uint32_t *xmm,
     ShbrExplicitRule rule = high_bits == 32 ?
         semantic->high32 : semantic->high64;
     int opnd_num = ir1_get_opnd_num(ir1);
+
+    switch (rule) {
+    case SHBR_RULE_ACCESS:
+        return apply_access_semantic(ir1, xmm, false);
+    case SHBR_RULE_ACCESS_READ:
+        return apply_access_read_semantic(ir1, xmm);
+    case SHBR_RULE_DEST:
+        return apply_dest_semantic(ir1, xmm);
+    case SHBR_RULE_READ_ACCESS:
+        return apply_access_semantic(ir1, xmm, true);
+    case SHBR_RULE_OTHER:
+        return apply_constant_semantic(ir1, xmm, SHBR_XMM_OTHER);
+    case SHBR_RULE_ZERO:
+        return apply_constant_semantic(ir1, xmm, SHBR_XMM_ZERO);
+    case SHBR_RULE_IGNORE:
+    case SHBR_RULE_IMPLICIT:
+        return true;
+    case SHBR_RULE_MOVSS:
+        return apply_movss_semantic(ir1, xmm);
+    case SHBR_RULE_MOVSD:
+        return apply_movsd_semantic(ir1, xmm, high_bits);
+    case SHBR_RULE_MOVD:
+        return apply_movd_semantic(ir1, xmm);
+    case SHBR_RULE_MOVQ:
+        return apply_movq_semantic(ir1, xmm, high_bits);
+    case SHBR_RULE_BROADCAST:
+        return apply_broadcast_semantic(ir1, xmm, high_bits);
+    case SHBR_RULE_EXTRACT:
+        return apply_extract_semantic(ir1, xmm, high_bits);
+    case SHBR_RULE_EXTRACT128:
+        return apply_extract128_semantic(ir1, xmm);
+    case SHBR_RULE_BYTE_SHIFT:
+        return apply_byte_shift_semantic(ir1, xmm, high_bits);
+    case SHBR_RULE_SCALAR_SHIFT:
+        return apply_scalar_shift_semantic(ir1, xmm, high_bits);
+    case SHBR_RULE_GATHER:
+        return apply_gather_semantic(ir1, xmm);
+    case SHBR_RULE_MASKMOV:
+        return apply_maskmov_semantic(ir1, xmm);
+    case SHBR_RULE_PCMPSTR:
+        return apply_pcmpstr_semantic(ir1, xmm);
+    case SHBR_RULE_PSIGN:
+        return apply_psign_semantic(ir1, xmm);
+    default:
+        break;
+    }
 
     if (rule == SHBR_RULE_NONE || opnd_num < 2) {
         return false;
@@ -166,7 +977,8 @@ static bool apply_explicit_semantic(IR1_INST *ir1, uint32_t *xmm,
 
     uint16_t dependencies = 0;
     uint32_t state = 0;
-    int source_end = rule == SHBR_RULE_SRC1 ? 2 : opnd_num;
+    int source_end = (rule == SHBR_RULE_SRC1 ||
+                      rule == SHBR_RULE_SRC1_READ) ? 2 : opnd_num;
     for (int i = 1; i < source_end; i++) {
         IR1_OPND *source = ir1_get_opnd(ir1, i);
         if (shbr_opnd_is_vector(source)) {
@@ -181,6 +993,10 @@ static bool apply_explicit_semantic(IR1_INST *ir1, uint32_t *xmm,
         state = SHBR_XMM_OTHER;
     }
 
+    if (rule == SHBR_RULE_SRC1_READ ||
+        rule == SHBR_RULE_ALL_SOURCES_READ) {
+        shbr_record_read(ir1, xmm, dependencies);
+    }
     uint16_t dest_mask = shbr_opnd_mask(dest);
     ir1->shbr_def |= dest_mask;
     ir1->shbr_dep |= dependencies;
@@ -293,10 +1109,6 @@ static bool deal_xmm_common(TranslationBlock *tb, IR1_INST *ir1, uint32_t *xmm)
     }
 
     switch (ir1_opcode(ir1)) {
-    case WRAP(ADDPD):
-    case WRAP(ADDPS):
-    case WRAP(ADDSUBPD):
-    case WRAP(ADDSUBPS):
     case WRAP(PADDB):
     case WRAP(PADDW):
     case WRAP(PADDD):
@@ -315,14 +1127,8 @@ static bool deal_xmm_common(TranslationBlock *tb, IR1_INST *ir1, uint32_t *xmm)
     case WRAP(PSUBSW):
     case WRAP(PSUBUSB):
     case WRAP(PSUBUSW):
-    case WRAP(SUBPS):
-    case WRAP(SUBPD):
-    case WRAP(DIVPD):
-    case WRAP(DIVPS):
     case WRAP(PMULDQ):
     case WRAP(PMULUDQ):
-    case WRAP(MULPD):
-    case WRAP(MULPS):
     case WRAP(PMULLW):
     case WRAP(PMULLD):
     case WRAP(PMULHW):
@@ -331,6 +1137,35 @@ static bool deal_xmm_common(TranslationBlock *tb, IR1_INST *ir1, uint32_t *xmm)
         /* src is xmm. */
         if (ir1_opnd_is_xmm(src_opnd)) {
             src_des_update_des(ir1, xmm);
+        } else if (ir1_opnd_is_mem(src_opnd)) {
+            external_update_des(ir1, xmm);
+        }
+        return true;
+    case WRAP(ADDPD):
+    case WRAP(ADDPS):
+    case WRAP(MULPD):
+    case WRAP(MULPS):
+        /* Capture the input provenance before an aliased destination is
+         * overwritten below.  Packed FP inputs are architectural reads even
+         * when the vector result is dead because they can update MXCSR. */
+        shbr_record_vector_reads(ir1, xmm);
+        if (ir1_opnd_is_xmm(src_opnd)) {
+            src_des_update_des(ir1, xmm);
+        } else if (ir1_opnd_is_mem(src_opnd)) {
+            external_update_des(ir1, xmm);
+        }
+        return true;
+    case WRAP(ADDSUBPS):
+    case WRAP(ADDSUBPD):
+    case WRAP(DIVPS):
+    case WRAP(DIVPD):
+    case WRAP(SUBPS):
+    case WRAP(SUBPD):
+        shbr_record_vector_reads(ir1, xmm);
+        if (ir1_opnd_is_xmm(src_opnd)) {
+            src_des_update_des(ir1, xmm);
+        } else if (ir1_opnd_is_mem(src_opnd)) {
+            external_update_des(ir1, xmm);
         }
         return true;
     /* 32 ~ 127 Unmodified. */
@@ -355,13 +1190,6 @@ static bool deal_xmm_common(TranslationBlock *tb, IR1_INST *ir1, uint32_t *xmm)
     /* if src is 32 bit: dest 0 ~ 31 from src 0 ~ 31. */
     case WRAP(CVTSI2SS):
     case WRAP(CVTSI2SD):
-        return true;
-    case WRAP(PSIGNB):
-    case WRAP(PSIGNW):
-    case WRAP(PSIGND):
-        if (ir1_opnd_is_xmm(src_opnd)) {
-            src_update_des(ir1, xmm);
-        }
         return true;
     /* mov 128. */
     case WRAP(MOVUPS):
@@ -405,18 +1233,25 @@ static bool deal_xmm_common(TranslationBlock *tb, IR1_INST *ir1, uint32_t *xmm)
     case WRAP(PMOVSXWQ):
         other_update_des(ir1, xmm);
         return true;
+    case WRAP(CMPPD):
+    case WRAP(CMPPS):
+        /* The immediate predicate and NaN inputs determine the result even
+         * when both encoded register operands alias. */
+        shbr_record_vector_reads(ir1, xmm);
+        if (ir1_opnd_is_xmm(src_opnd)) {
+            src_des_update_des(ir1, xmm);
+        } else if (ir1_opnd_is_mem(src_opnd)) {
+            external_update_des(ir1, xmm);
+        }
+        return true;
     case WRAP(PCMPEQB):
     case WRAP(PCMPEQW):
     case WRAP(PCMPEQD):
     case WRAP(PCMPEQQ):
-    case WRAP(CMPPD):
-    case WRAP(CMPPS):
     case WRAP(PCMPGTB):
     case WRAP(PCMPGTW):
     case WRAP(PCMPGTD):
     case WRAP(PCMPGTQ):
-    case WRAP(PCMPISTRM):
-    case WRAP(PCMPESTRM):
         /* ALL is 1. */
         if (src_num == des_num) {
             other_update_des(ir1, xmm);
@@ -425,27 +1260,6 @@ static bool deal_xmm_common(TranslationBlock *tb, IR1_INST *ir1, uint32_t *xmm)
         }
         return true;
 
-    case WRAP(PCMPESTRI):
-    case WRAP(PCMPISTRI):
-        des_no_opt(ir1, xmm);
-        if (ir1_opnd_is_xmm(src_opnd)) {
-            src_des_update_des(ir1, xmm);
-            src_no_opt(ir1, xmm);
-        }
-        return true;
-    case WRAP(PSLLDQ):
-        des_no_opt(ir1, xmm);
-        return true;
-    case WRAP(PSLLW):
-    case WRAP(PSLLD):
-    case WRAP(PSLLQ):
-    case WRAP(PSRAW):
-    case WRAP(PSRAD):
-    /* case WRAP(PSRAQ): */
-    case WRAP(PSRLW):
-    case WRAP(PSRLD):
-    case WRAP(PSRLQ):
-        return true;
     /* src and des h64 change des l64. */
     case WRAP(PUNPCKHBW):
     case WRAP(PUNPCKHDQ):
@@ -529,9 +1343,6 @@ static bool deal_dest_not_xmm_32(TranslationBlock *tb,
 
     switch (ir1_opcode(ir1)) {
     /* MOVDQ2Q mm, xmm : xmm mov l64 to mmx. */
-    case WRAP(MOVDQ2Q):
-        src_no_opt(ir1, xmm);
-        return true;
     default:
         break;
     }
@@ -660,19 +1471,6 @@ static bool xmm_analyse_32(TranslationBlock *tb,
             src_no_opt(ir1, xmm);
         }
         return true;
-    case WRAP(PSRLDQ):
-        assert(ir1_opnd_is_imm(src_opnd));
-        if (ir1_opnd_uimm(src_opnd) >= 12) {
-            other_update_des(ir1, xmm);
-        }
-        return true;
-    /* des h64 to des l64, src h64 to des h64. */
-    case WRAP(PUNPCKHQDQ):
-    case WRAP(UNPCKHPD):
-        des_no_opt(ir1, xmm);
-        if (ir1_opnd_is_xmm(src_opnd)) {
-            src_des_update_des(ir1, xmm);
-        }
     default:
         break;
     }
@@ -830,12 +1628,6 @@ static bool xmm_analyse_64(TranslationBlock *tb,
     /* mov h64 to l64. */
     case WRAP(MOVHLPS):
         src_no_opt(ir1, xmm);
-        return true;
-    case WRAP(PSRLDQ):
-        assert(ir1_opnd_is_imm(src_opnd));
-        if (ir1_opnd_uimm(src_opnd) >= 8) {
-            other_update_des(ir1, xmm);
-        }
         return true;
     default:
         break;
