@@ -188,6 +188,15 @@ class HbrAuditTest(unittest.TestCase):
         )[1].split("static bool def_h32", 1)[0]
         self.assertNotIn("WRAP(POPAW)", hidden_def)
 
+        hidden_use = source.split(
+            "static void deal_hide_opnd_use", 1
+        )[1].split("static void use_h32", 1)[0]
+        div = hidden_use.split("case WRAP(DIV):", 1)[1]
+        div = div.split("case WRAP(IMUL):", 1)[0]
+        self.assertIn("case WRAP(IDIV):", div)
+        self.assertIn("set_use_reg(tb, ir1, eax_index);", div)
+        self.assertIn("set_use_reg(tb, ir1, edx_index);", div)
+
     def test_ghbr_rejects_external_tu_successors(self):
         source = (
             REPO_ROOT / "target/i386/latx/optimization/hbr.c"
