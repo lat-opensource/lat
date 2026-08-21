@@ -52,6 +52,7 @@ typedef enum ShbrExplicitRule {
     SHBR_RULE_MASKMOV,
     SHBR_RULE_PCMPSTR,
     SHBR_RULE_PSIGN,
+    SHBR_RULE_SHUFPS,
     SHBR_RULE_IMPLICIT,
 } ShbrExplicitRule;
 
@@ -61,6 +62,7 @@ typedef struct ShbrExplicitSemantic {
 } ShbrExplicitSemantic;
 
 static const ShbrExplicitSemantic shbr_explicit_semantics[dt_X86_INS_ENDING] = {
+    [WRAP(PALIGNR)] = { SHBR_RULE_ACCESS_READ, SHBR_RULE_ACCESS_READ },
     [WRAP(MOVDQ2Q)] = { SHBR_RULE_READ_ACCESS, SHBR_RULE_IGNORE },
     [WRAP(PCMPESTRI)] = { SHBR_RULE_PCMPSTR, SHBR_RULE_PCMPSTR },
     [WRAP(PCMPESTRM)] = { SHBR_RULE_PCMPSTR, SHBR_RULE_PCMPSTR },
@@ -69,6 +71,7 @@ static const ShbrExplicitSemantic shbr_explicit_semantics[dt_X86_INS_ENDING] = {
     [WRAP(PSIGNB)] = { SHBR_RULE_PSIGN, SHBR_RULE_PSIGN },
     [WRAP(PSIGND)] = { SHBR_RULE_PSIGN, SHBR_RULE_PSIGN },
     [WRAP(PSIGNW)] = { SHBR_RULE_PSIGN, SHBR_RULE_PSIGN },
+    [WRAP(SHUFPS)] = { SHBR_RULE_SHUFPS, SHBR_RULE_SHUFPS },
     [WRAP(PSLLD)] = { SHBR_RULE_SCALAR_SHIFT, SHBR_RULE_SCALAR_SHIFT },
     [WRAP(PSLLDQ)] = { SHBR_RULE_BYTE_SHIFT, SHBR_RULE_BYTE_SHIFT },
     [WRAP(PSLLQ)] = { SHBR_RULE_SCALAR_SHIFT, SHBR_RULE_SCALAR_SHIFT },
@@ -269,6 +272,51 @@ static inline void shbr_define_vector(IR1_INST *ir1, uint32_t *xmm,
 }
 
 static IR1_OPND *shbr_vector_dest(IR1_INST *ir1);
+
+/* XOR, integer SUB and ANDN zero the whole lane when all source operands
+ * resolve to a single register (dest op dest == 0). Floating subtraction is
+ * excluded because infinities and NaNs do not produce zero. */
+static bool shbr_is_self_zeroing_op(IR1_INST *ir1)
+{
+    switch (ir1_opcode(ir1)) {
+    case WRAP(XORPS):  case WRAP(XORPD):  case WRAP(PXOR):
+    case WRAP(VXORPS): case WRAP(VXORPD): case WRAP(VPXOR):
+    case WRAP(PSUBB):  case WRAP(PSUBW):  case WRAP(PSUBD):
+    case WRAP(PSUBQ):  case WRAP(PSUBSB): case WRAP(PSUBSW):
+    case WRAP(PSUBUSB): case WRAP(PSUBUSW):
+    case WRAP(VPSUBB): case WRAP(VPSUBW): case WRAP(VPSUBD):
+    case WRAP(VPSUBQ): case WRAP(VPSUBSB): case WRAP(VPSUBSW):
+    case WRAP(VPSUBUSB): case WRAP(VPSUBUSW):
+    case WRAP(ANDNPS): case WRAP(ANDNPD): case WRAP(PANDN):
+    case WRAP(VANDNPS): case WRAP(VANDNPD): case WRAP(VPANDN):
+        return true;
+    default:
+        return false;
+    }
+}
+
+/* A handful of packed ops do not keep an all-zero source state in the tracked
+ * high bits: packed division (0/0 is NaN), packed subtraction (round-down can
+ * produce negative zero), packed equality comparison (equal lanes become
+ * all-ones), and packed reciprocal/rsqrt (1/0 is infinity).
+ * Scalar div (VDIVSS/VDIVSD) and greater-than comparison (VPCMPGT*) are
+ * deliberately excluded from this list: the former copies its high bits from
+ * the VEX.vvvv source, the latter yields zero for equal (zero) lanes. */
+static bool shbr_is_zero_preserving_op(IR1_INST *ir1)
+{
+    switch (ir1_opcode(ir1)) {
+    case WRAP(VADDSUBPD): case WRAP(VADDSUBPS):
+    case WRAP(VDIVPD): case WRAP(VDIVPS):
+    case WRAP(VHSUBPD): case WRAP(VHSUBPS):
+    case WRAP(VPCMPEQB): case WRAP(VPCMPEQD):
+    case WRAP(VPCMPEQQ): case WRAP(VPCMPEQW):
+    case WRAP(VRCPPS): case WRAP(VRSQRTPS):
+    case WRAP(VSUBPD): case WRAP(VSUBPS):
+        return false;
+    default:
+        return true;
+    }
+}
 
 static bool apply_access_semantic(IR1_INST *ir1, uint32_t *xmm,
         bool direct_reads)
@@ -533,11 +581,70 @@ static bool apply_broadcast_semantic(IR1_INST *ir1, uint32_t *xmm,
     int element_bits = shbr_broadcast_element_bits(ir1);
     if (source && element_bits > high_bits) {
         uint16_t mask = shbr_opnd_mask(source);
+        uint32_t state = xmm[ir1_opnd_base_reg_num(source)];
+        if (high_bits == 32 && element_bits == 64) {
+            /* The broadcasted low dword is outside the SHBR32 state. */
+            state |= SHBR_XMM_OTHER;
+        }
         shbr_define_vector(ir1, xmm, dest, mask,
-                           xmm[ir1_opnd_base_reg_num(source)]);
+                           state);
     } else {
         shbr_define_vector(ir1, xmm, dest, 0, SHBR_XMM_OTHER);
     }
+    return true;
+}
+
+static bool apply_shufps_semantic(IR1_INST *ir1, uint32_t *xmm,
+        int high_bits)
+{
+    if (ir1_get_opnd_num(ir1) != 3 ||
+        !ir1_opnd_is_imm(ir1_get_opnd(ir1, 2))) {
+        return false;
+    }
+    IR1_OPND *dest = ir1_get_opnd(ir1, 0);
+    IR1_OPND *source = ir1_get_opnd(ir1, 1);
+    if (!shbr_opnd_is_vector(dest)) {
+        return false;
+    }
+
+    unsigned int imm = ir1_opnd_uimm(ir1_get_opnd(ir1, 2));
+    unsigned int select[4] = {
+        imm & 3, (imm >> 2) & 3, (imm >> 4) & 3, (imm >> 6) & 3,
+    };
+    unsigned int first_tracked_lane = high_bits / 32;
+    uint16_t dest_mask = shbr_opnd_mask(dest);
+    uint16_t source_mask = shbr_opnd_is_vector(source) ?
+        shbr_opnd_mask(source) : 0;
+    uint16_t dependencies = 0;
+    uint16_t reads = 0;
+    uint32_t state = 0;
+
+    int low_dest_lanes = high_bits / 32;
+    for (int lane = 0; lane < low_dest_lanes; lane++) {
+        if (select[lane] >= first_tracked_lane) {
+            reads |= dest_mask;
+        }
+    }
+
+    if (high_bits == 32) {
+        if (select[1] >= first_tracked_lane) {
+            dependencies |= dest_mask;
+            state |= xmm[ir1_opnd_base_reg_num(dest)];
+        } else {
+            state |= SHBR_XMM_OTHER;
+        }
+    }
+    for (int lane = 2; lane < 4; lane++) {
+        if (source_mask && select[lane] >= first_tracked_lane) {
+            dependencies |= source_mask;
+            state |= xmm[ir1_opnd_base_reg_num(source)];
+        } else {
+            state |= SHBR_XMM_OTHER;
+        }
+    }
+
+    shbr_record_read(ir1, xmm, reads);
+    shbr_define_vector(ir1, xmm, dest, dependencies, state);
     return true;
 }
 
@@ -962,6 +1069,8 @@ static bool apply_explicit_semantic(IR1_INST *ir1, uint32_t *xmm,
         return apply_pcmpstr_semantic(ir1, xmm);
     case SHBR_RULE_PSIGN:
         return apply_psign_semantic(ir1, xmm);
+    case SHBR_RULE_SHUFPS:
+        return apply_shufps_semantic(ir1, xmm, high_bits);
     default:
         break;
     }
@@ -977,20 +1086,39 @@ static bool apply_explicit_semantic(IR1_INST *ir1, uint32_t *xmm,
 
     uint16_t dependencies = 0;
     uint32_t state = 0;
+    bool only_same_vector_sources = true;
+    uint16_t first_source_mask = 0;
     int source_end = (rule == SHBR_RULE_SRC1 ||
                       rule == SHBR_RULE_SRC1_READ) ? 2 : opnd_num;
     for (int i = 1; i < source_end; i++) {
         IR1_OPND *source = ir1_get_opnd(ir1, i);
         if (shbr_opnd_is_vector(source)) {
             uint16_t source_mask = shbr_opnd_mask(source);
+            if (first_source_mask && first_source_mask != source_mask) {
+                only_same_vector_sources = false;
+            }
+            first_source_mask = source_mask;
             dependencies |= source_mask;
             state |= xmm[ir1_opnd_base_reg_num(source)];
         } else if (ir1_opnd_is_mem(source)) {
+            only_same_vector_sources = false;
             state |= SHBR_XMM_OTHER;
+        } else {
+            only_same_vector_sources = false;
         }
     }
-    if (!state) {
-        state = SHBR_XMM_OTHER;
+    if (only_same_vector_sources && dependencies &&
+        !(dependencies & (dependencies - 1)) &&
+        shbr_is_self_zeroing_op(ir1)) {
+        /* All sources resolve to one register and the op zeroes it, so the
+         * tracked high bits are zero and carry no dependency. */
+        dependencies = 0;
+        state = SHBR_XMM_ZERO;
+    } else if (!state) {
+        /* All read XMM sources are zero. The result stays zero only for
+         * zero-preserving ops; a missing XMM source is never provably zero. */
+        state = (dependencies && shbr_is_zero_preserving_op(ir1)) ?
+            SHBR_XMM_ZERO : SHBR_XMM_OTHER;
     }
 
     if (rule == SHBR_RULE_SRC1_READ ||
@@ -1063,6 +1191,18 @@ static inline void other_update_des(IR1_INST *ir1, uint32_t *xmm)
     xmm[dest_num] = SHBR_XMM_OTHER;
 }
 
+static inline void external_update_des(IR1_INST *ir1, uint32_t *xmm)
+{
+    IR1_OPND *opnd0 = ir1_get_opnd(ir1, 0);
+    if (!shbr_opnd_is_vector(opnd0)) {
+        return;
+    }
+    int dest_num = ir1_opnd_base_reg_num(opnd0);
+    ir1->shbr_def |= (1U << dest_num);
+    ir1->shbr_dep |= (1U << dest_num);
+    xmm[dest_num] |= SHBR_XMM_OTHER;
+}
+
 static inline void zero_update_des(IR1_INST *ir1, uint32_t *xmm)
 {
     IR1_OPND *opnd0 = ir1_get_opnd(ir1, 0);
@@ -1119,14 +1259,6 @@ static bool deal_xmm_common(TranslationBlock *tb, IR1_INST *ir1, uint32_t *xmm)
     case WRAP(PADDUSW):
     case WRAP(PMADDWD):
     case WRAP(PMADDUBSW):
-    case WRAP(PSUBB):
-    case WRAP(PSUBW):
-    case WRAP(PSUBD):
-    case WRAP(PSUBQ):
-    case WRAP(PSUBSB):
-    case WRAP(PSUBSW):
-    case WRAP(PSUBUSB):
-    case WRAP(PSUBUSW):
     case WRAP(PMULDQ):
     case WRAP(PMULUDQ):
     case WRAP(PMULLW):
@@ -1164,6 +1296,44 @@ static bool deal_xmm_common(TranslationBlock *tb, IR1_INST *ir1, uint32_t *xmm)
         shbr_record_vector_reads(ir1, xmm);
         if (ir1_opnd_is_xmm(src_opnd)) {
             src_des_update_des(ir1, xmm);
+        } else if (ir1_opnd_is_mem(src_opnd)) {
+            external_update_des(ir1, xmm);
+        }
+        return true;
+    /* Integer subtraction is self-zeroing when dest == src. */
+    case WRAP(PSUBB):
+    case WRAP(PSUBW):
+    case WRAP(PSUBD):
+    case WRAP(PSUBQ):
+    case WRAP(PSUBSB):
+    case WRAP(PSUBSW):
+    case WRAP(PSUBUSB):
+    case WRAP(PSUBUSW):
+        if (ir1_opnd_is_xmm(src_opnd)) {
+            if (src_num == des_num) {
+                zero_update_des(ir1, xmm);
+            } else {
+                src_des_update_des(ir1, xmm);
+            }
+        } else if (ir1_opnd_is_mem(src_opnd)) {
+            external_update_des(ir1, xmm);
+        }
+        return true;
+    /* Packed FP division of zero produces NaN.  Packed FP subtraction of
+     * positive zero can produce negative zero under round-toward-negative.
+     * Keep the source dependencies, but never propagate an exact-zero fact
+     * through these operations. */
+    case WRAP(ADDSUBPS):
+    case WRAP(ADDSUBPD):
+    case WRAP(DIVPS):
+    case WRAP(DIVPD):
+    case WRAP(SUBPS):
+    case WRAP(SUBPD):
+        if (ir1_opnd_is_xmm(src_opnd)) {
+            src_des_update_des(ir1, xmm);
+            if (xmm[des_num] == SHBR_XMM_ZERO) {
+                xmm[des_num] = SHBR_XMM_OTHER;
+            }
         } else if (ir1_opnd_is_mem(src_opnd)) {
             external_update_des(ir1, xmm);
         }
@@ -1240,6 +1410,9 @@ static bool deal_xmm_common(TranslationBlock *tb, IR1_INST *ir1, uint32_t *xmm)
         shbr_record_vector_reads(ir1, xmm);
         if (ir1_opnd_is_xmm(src_opnd)) {
             src_des_update_des(ir1, xmm);
+            if (xmm[des_num] == SHBR_XMM_ZERO) {
+                xmm[des_num] = SHBR_XMM_OTHER;
+            }
         } else if (ir1_opnd_is_mem(src_opnd)) {
             external_update_des(ir1, xmm);
         }
@@ -1248,15 +1421,30 @@ static bool deal_xmm_common(TranslationBlock *tb, IR1_INST *ir1, uint32_t *xmm)
     case WRAP(PCMPEQW):
     case WRAP(PCMPEQD):
     case WRAP(PCMPEQQ):
+        /* Equal registers compare equal regardless of their contents.  Two
+         * distinct registers that are currently zero still produce all-ones,
+         * so do not propagate the exact-zero state through the result. */
+        if (src_num == des_num) {
+            other_update_des(ir1, xmm);
+        } else if (ir1_opnd_is_xmm(src_opnd)) {
+            src_des_update_des(ir1, xmm);
+            if (xmm[des_num] == SHBR_XMM_ZERO) {
+                xmm[des_num] = SHBR_XMM_OTHER;
+            }
+        } else if (ir1_opnd_is_mem(src_opnd)) {
+            external_update_des(ir1, xmm);
+        }
+        return true;
     case WRAP(PCMPGTB):
     case WRAP(PCMPGTW):
     case WRAP(PCMPGTD):
     case WRAP(PCMPGTQ):
-        /* ALL is 1. */
         if (src_num == des_num) {
-            other_update_des(ir1, xmm);
-        } else if(ir1_opnd_is_xmm(src_opnd)){
+            zero_update_des(ir1, xmm);
+        } else if (ir1_opnd_is_xmm(src_opnd)) {
             src_des_update_des(ir1, xmm);
+        } else if (ir1_opnd_is_mem(src_opnd)) {
+            external_update_des(ir1, xmm);
         }
         return true;
 
@@ -1265,6 +1453,14 @@ static bool deal_xmm_common(TranslationBlock *tb, IR1_INST *ir1, uint32_t *xmm)
     case WRAP(PUNPCKHDQ):
     case WRAP(PUNPCKHWD):
     case WRAP(UNPCKHPS):
+        des_no_opt(ir1, xmm);
+        if (ir1_opnd_is_xmm(src_opnd)) {
+            src_des_update_des(ir1, xmm);
+            src_no_opt(ir1, xmm);
+        } else if (ir1_opnd_is_mem(src_opnd)) {
+            external_update_des(ir1, xmm);
+        }
+        return true;
     case WRAP(PACKUSDW):
     case WRAP(PACKSSWB):
     case WRAP(PACKSSDW):
@@ -1273,7 +1469,10 @@ static bool deal_xmm_common(TranslationBlock *tb, IR1_INST *ir1, uint32_t *xmm)
         if (ir1_opnd_is_xmm(src_opnd)) {
             src_des_update_des(ir1, xmm);
             src_no_opt(ir1, xmm);
+        } else if (ir1_opnd_is_mem(src_opnd)) {
+            external_update_des(ir1, xmm);
         }
+        xmm[des_num] |= SHBR_XMM_OTHER;
         return true;
     default:
         break;
@@ -1283,9 +1482,6 @@ static bool deal_xmm_common(TranslationBlock *tb, IR1_INST *ir1, uint32_t *xmm)
     case WRAP(POR):
     case WRAP(ORPS):
     case WRAP(ORPD):
-    case WRAP(ANDNPD):
-    case WRAP(ANDNPS):
-    case WRAP(PANDN):
     case WRAP(PMINSW):
     case WRAP(PMINSD):
     case WRAP(PMINSB):
@@ -1294,11 +1490,31 @@ static bool deal_xmm_common(TranslationBlock *tb, IR1_INST *ir1, uint32_t *xmm)
     case WRAP(PMINUB):
         if (ir1_opnd_is_xmm(src_opnd)) {
             src_des_update_des(ir1, xmm);
+        } else if (ir1_opnd_is_mem(src_opnd)) {
+            external_update_des(ir1, xmm);
+        }
+        return true;
+    /* ANDN is self-zeroing when dest == src (~x & x == 0). */
+    case WRAP(ANDNPD):
+    case WRAP(ANDNPS):
+    case WRAP(PANDN):
+        if (ir1_opnd_is_xmm(src_opnd)) {
+            if (src_num == des_num) {
+                zero_update_des(ir1, xmm);
+            } else {
+                src_des_update_des(ir1, xmm);
+            }
+        } else if (ir1_opnd_is_mem(src_opnd)) {
+            external_update_des(ir1, xmm);
         }
         return true;
     case WRAP(ANDPD):
     case WRAP(ANDPS):
     case WRAP(PAND):
+        if (ir1_opnd_is_mem(src_opnd)) {
+            external_update_des(ir1, xmm);
+            return true;
+        }
         if (!ir1_opnd_is_xmm(src_opnd)) {
             return true;
         }
@@ -1317,6 +1533,10 @@ static bool deal_xmm_common(TranslationBlock *tb, IR1_INST *ir1, uint32_t *xmm)
     case WRAP(PXOR):
     case WRAP(XORPD):
     case WRAP(XORPS):
+        if (ir1_opnd_is_mem(src_opnd)) {
+            external_update_des(ir1, xmm);
+            return true;
+        }
         if (!ir1_opnd_is_xmm(src_opnd)) {
             return true;
         }
@@ -1385,6 +1605,8 @@ static bool xmm_analyse_32(TranslationBlock *tb,
     case WRAP(SQRTSD):
         if (ir1_opnd_is_xmm(src_opnd)) {
             src_des_update_des(ir1, xmm);
+        } else if (ir1_opnd_is_mem(src_opnd)) {
+            external_update_des(ir1, xmm);
         }
         return true;
     case WRAP(COMISD):
@@ -1426,13 +1648,20 @@ static bool xmm_analyse_32(TranslationBlock *tb,
             src_update_des(ir1, xmm);
         }
         return true;
-    /* mov l64 to h64. */
+    /* mov l64 to h64.  The source low dword is outside SHBR32. */
     case WRAP(MOVLHPS):
+        if (ir1_opnd_is_xmm(src_opnd)) {
+            src_des_update_des(ir1, xmm);
+            xmm[ir1_opnd_base_reg_num(des_opnd)] |= SHBR_XMM_OTHER;
+        }
+        return true;
     /* mov l64 to l64, h64 unchange. */
     case WRAP(MOVLPD):
     case WRAP(MOVLPS):
         if (ir1_opnd_is_xmm(src_opnd)) {
             src_des_update_des(ir1, xmm);
+        } else if (ir1_opnd_is_mem(src_opnd)) {
+            external_update_des(ir1, xmm);
         }
         return true;
     /* mov h64 to l64. */
@@ -1452,7 +1681,12 @@ static bool xmm_analyse_32(TranslationBlock *tb,
     case WRAP(PUNPCKLQDQ):
     case WRAP(UNPCKLPS):
     case WRAP(UNPCKLPD):
-        src_des_update_des(ir1, xmm);
+        if (ir1_opnd_is_xmm(src_opnd)) {
+            src_des_update_des(ir1, xmm);
+        } else if (ir1_opnd_is_mem(src_opnd)) {
+            external_update_des(ir1, xmm);
+        }
+        xmm[ir1_opnd_base_reg_num(des_opnd)] |= SHBR_XMM_OTHER;
         return true;
     /* src 0 ~ 63 update des 0 ~ 127. */
     case WRAP(PMOVSXBW):
@@ -1485,39 +1719,8 @@ static bool xmm_analyse_32(TranslationBlock *tb,
                src_no_opt(ir1, xmm);
                src_update_des(ir1, xmm);
             }
-            return true;
-        /* tmp[255:0] := ((des[127:0] << 128)[255:0] OR src[127:0]) >> (imm8*8) */
-        /* des[127:0] := tmp[127:0] */
-        case WRAP(PALIGNR):
-            if (imm <= 4) {
-                if (ir1_opnd_is_xmm(src_opnd)) {
-                    src_update_des(ir1, xmm);
-                    src_no_opt(ir1, xmm);
-                } else {
-                    other_update_des(ir1, xmm);
-                }
-            } else if (imm < 16) {
-                if (ir1_opnd_is_xmm(src_opnd)) {
-                    src_des_update_des(ir1, xmm);
-                    src_no_opt(ir1, xmm);
-                }
-            } else if (imm > 16) {
-                des_no_opt(ir1, xmm);
-            }
-            return true;
-        case WRAP(SHUFPS):
-            if (imm & 0x3) {
-                des_no_opt(ir1, xmm);
-            }
-            if (imm & 0xf0) {
-                if (imm & 0x0f) {
-                    src_des_update_des(ir1, xmm);
-                } else {
-                    src_update_des(ir1, xmm);
-                }
-            } else if (imm == 0x00) {
-                other_update_des(ir1, xmm);
-            }
+            xmm[ir1_opnd_base_reg_num(ir1_get_opnd(ir1, 0))] |=
+                SHBR_XMM_OTHER;
             return true;
         default:
             break;
@@ -1643,39 +1846,8 @@ static bool xmm_analyse_64(TranslationBlock *tb,
                src_no_opt(ir1, xmm);
                src_update_des(ir1, xmm);
             }
-            return true;
-        /* tmp[255:0] := ((des[127:0] << 128)[255:0] OR src[127:0]) >> (imm8*8) */
-        /* des[127:0] := tmp[127:0] */
-        case WRAP(PALIGNR):
-            if (imm <= 8) {
-                if (ir1_opnd_is_xmm(src_opnd)) {
-                    src_update_des(ir1, xmm);
-                    src_no_opt(ir1, xmm);
-                } else {
-                    other_update_des(ir1, xmm);
-                }
-            } else if (imm < 16) {
-                if (ir1_opnd_is_xmm(src_opnd)) {
-                    src_des_update_des(ir1, xmm);
-                    src_no_opt(ir1, xmm);
-                }
-            } else if (imm > 16) {
-                des_no_opt(ir1, xmm);
-            }
-            return true;
-        case WRAP(SHUFPS):
-            if (imm & 0xa) {
-                des_no_opt(ir1, xmm);
-            }
-            if (imm & 0xa0) {
-                if (imm & 0x0a) {
-                    src_des_update_des(ir1, xmm);
-                } else {
-                    src_update_des(ir1, xmm);
-                }
-            } else if ((imm & 0xaa) == 0x00) {
-                other_update_des(ir1, xmm);
-            }
+            xmm[ir1_opnd_base_reg_num(ir1_get_opnd(ir1, 0))] |=
+                SHBR_XMM_OTHER;
             return true;
         default:
             break;
