@@ -179,6 +179,16 @@ class HbrAuditTest(unittest.TestCase):
                 block.index("src_des_update_des(ir1, xmm);"),
             )
 
+    def test_ghbr_rejects_external_tu_successors(self):
+        source = (
+            REPO_ROOT / "target/i386/latx/optimization/hbr.c"
+        ).read_text(encoding="utf-8")
+        ghbr = source.split("static void over_tb_gpr_opt", 1)[1]
+        ghbr = ghbr.split("static void des_def_gpr", 1)[0]
+        self.assertIn("hbr_in_tu_successor", ghbr)
+        self.assertIn("TranslationBlock *next_tb = next_tbs[i];", ghbr)
+        self.assertIn("TranslationBlock *target_tb = target_tbs[i];", ghbr)
+
     def test_o1_preserves_capstone_operand_access(self):
         configure = (REPO_ROOT / "configure").read_text(encoding="utf-8")
         meson = (
@@ -201,6 +211,26 @@ class HbrAuditTest(unittest.TestCase):
         self.assertIn(
             "defined(CAPSTONE_DIET) && defined(LATX_CAPSTONE_OP_ACCESS)",
             printer,
+        )
+
+    def test_external_successors_do_not_supply_shbr_summaries(self):
+        source = (
+            REPO_ROOT / "target/i386/latx/optimization/hbr.c"
+        ).read_text(encoding="utf-8")
+        solver = source.split("static void over_tb_shbr_opt", 1)[1]
+        solver = solver.split("static void do_shbr_opt32", 1)[0]
+        self.assertIn("hbr_in_tu_successor", source)
+        self.assertIn(
+            "next_tbs[i] = hbr_in_tu_successor", solver,
+        )
+        self.assertIn(
+            "target_tbs[i] = hbr_in_tu_successor", solver,
+        )
+        self.assertIn(
+            "next_tb ? next_tb->s_data->xmm_in : SHBR_XMM_ALL", solver,
+        )
+        self.assertIn(
+            "target_tb ? target_tb->s_data->xmm_in : SHBR_XMM_ALL", solver,
         )
 
     def test_special_dispatch_is_supported(self):
