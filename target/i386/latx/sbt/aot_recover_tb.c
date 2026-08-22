@@ -214,7 +214,7 @@ static void recover_tb_range(target_ulong page, struct aot_tb *p_aot_tbs,
         /* Reserve space for tu tbmin table. */
         TBMini *tbmini_ptr= (TBMini *)
             ROUND_UP((uintptr_t)tcg_ctx->code_gen_ptr, CODE_GEN_ALIGN);
-        qatomic_set(&tcg_ctx->code_gen_ptr, ROUND_UP((uintptr_t)tbmini_ptr +
+        qatomic_set(&tcg_ctx->code_gen_ptr, (void *)ROUND_UP((uintptr_t)tbmini_ptr +
                     sizeof(struct TBMini) * (tb_num_in_tu + 1), qemu_icache_linesize));
         /* First tbm save tb_num_in_tu and TB_MAGIC. */
         aot_tbmini_set_pointer((uintptr_t)tbmini_ptr, tb_num_in_tu, TB_MAGIC);

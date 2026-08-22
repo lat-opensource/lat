@@ -1741,9 +1741,8 @@ if test "$latx" = "yes" ; then
     QEMU_LDFLAGS="$latx_ldflags $QEMU_LDFLAGS"
     ;;
   esac
-  if test "$debug" = "yes" ; then
-    # add `--export-dynamic`, used for backtrace
-    QEMU_LDFLAGS="-export-dynamic $QEMU_LDFLAGS"
+  if echo | $cc -dM -E - | grep __clang__ > /dev/null 2>&1 ; then
+    QEMU_LDFLAGS="-fuse-ld=bfd -Wl,-export-dynamic $QEMU_LDFLAGS"
   else
     QEMU_LDFLAGS="-export-dynamic $QEMU_LDFLAGS"
   fi

@@ -20,6 +20,10 @@
     ".ifc \\r, $r" #n "\n\t"                 \
     "\\var = " #n "\n\t"                     \
     ".endif\n\t"
+#define PARSE_R_IFC_ALIAS(n, alias)             \
+    ".ifc \\r, $" #alias "\n\t"              \
+    "\\var = " #n "\n\t"                     \
+    ".endif\n\t"
 /*
  * LTO may duplicate or reorder file-scope assembly.  Keep the assembler
  * macro with its users and give each extended asm statement a unique name.
@@ -43,6 +47,22 @@
     PARSE_R_IFC_REG(26) PARSE_R_IFC_REG(27) \
     PARSE_R_IFC_REG(28) PARSE_R_IFC_REG(29) \
     PARSE_R_IFC_REG(30) PARSE_R_IFC_REG(31) \
+    PARSE_R_IFC_ALIAS(0, zero) PARSE_R_IFC_ALIAS(1, ra) \
+    PARSE_R_IFC_ALIAS(2, tp)   PARSE_R_IFC_ALIAS(3, sp) \
+    PARSE_R_IFC_ALIAS(4, a0)   PARSE_R_IFC_ALIAS(5, a1) \
+    PARSE_R_IFC_ALIAS(6, a2)   PARSE_R_IFC_ALIAS(7, a3) \
+    PARSE_R_IFC_ALIAS(8, a4)   PARSE_R_IFC_ALIAS(9, a5) \
+    PARSE_R_IFC_ALIAS(10, a6)  PARSE_R_IFC_ALIAS(11, a7) \
+    PARSE_R_IFC_ALIAS(12, t0)  PARSE_R_IFC_ALIAS(13, t1) \
+    PARSE_R_IFC_ALIAS(14, t2)  PARSE_R_IFC_ALIAS(15, t3) \
+    PARSE_R_IFC_ALIAS(16, t4)  PARSE_R_IFC_ALIAS(17, t5) \
+    PARSE_R_IFC_ALIAS(18, t6)  PARSE_R_IFC_ALIAS(19, t7) \
+    PARSE_R_IFC_ALIAS(20, t8)  PARSE_R_IFC_ALIAS(21, u0) \
+    PARSE_R_IFC_ALIAS(22, fp)  PARSE_R_IFC_ALIAS(23, s0) \
+    PARSE_R_IFC_ALIAS(24, s1)  PARSE_R_IFC_ALIAS(25, s2) \
+    PARSE_R_IFC_ALIAS(26, s3)  PARSE_R_IFC_ALIAS(27, s4) \
+    PARSE_R_IFC_ALIAS(28, s5)  PARSE_R_IFC_ALIAS(29, s6) \
+    PARSE_R_IFC_ALIAS(30, s7)  PARSE_R_IFC_ALIAS(31, s8) \
     ".iflt \\var\n\t"                         \
     ".error \"Unable to parse register name \\r\"\n\t" \
     ".endif\n\t"                                \

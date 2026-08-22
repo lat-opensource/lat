@@ -71,6 +71,7 @@ jobs:
           DOCKER_CMD="./latxbuild/${{ matrix.type.NAME }}.sh ${{ matrix.type.OPT }}"
           docker run --rm \
             --platform linux/loong64 \
+            --env RUNNER_ARCH \
             --volume /tmp/.cache:/root/.cache \
             --volume "$(pwd):/io" \
             --workdir /io \

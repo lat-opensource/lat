@@ -6,6 +6,10 @@ opt_level=1
 low_mem_mode=""
 avx_support=""
 
+if [ -n "${RUNNER_ARCH}" ] && [ -d "/opt/clang/bin" ]; then
+    export PATH=/opt/clang/bin:$PATH
+fi
+
 help() {
     echo "Usage:"
     echo "  -c              configure"
@@ -68,20 +72,20 @@ make_cmd() {
         if [ "$opt_level" = "0" ] ; then
             ../configure --target-list=i386-linux-user --enable-latx \
                 --enable-guest-base-zero  --enable-debug --optimize-O0 \
-                --disable-docs ${low_mem_mode} ${avx_support}
+                --disable-docs --disable-werror --disable-kvm ${low_mem_mode} ${avx_support}
         elif [ "$opt_level" = "1" ] ; then
             ../configure --target-list=i386-linux-user --enable-latx \
                 --enable-guest-base-zero  --enable-debug --optimize-O1 \
-                --disable-docs ${low_mem_mode} ${avx_support}
+                --disable-docs --disable-werror --disable-kvm ${low_mem_mode} ${avx_support}
         elif [ "$opt_level" = "2" ] ; then
             ../configure --target-list=i386-linux-user --enable-latx \
                 --enable-guest-base-zero  --enable-debug --optimize-O2 \
-                --disable-docs ${low_mem_mode} ${avx_support}
+                --disable-docs --disable-werror --disable-kvm ${low_mem_mode} ${avx_support}
 
         elif [ "$opt_level" = "3" ] ; then
             ../configure --target-list=i386-linux-user --enable-latx \
                 --enable-guest-base-zero  --enable-debug --optimize-O3 \
-                --disable-docs ${low_mem_mode} ${avx_support}
+                --disable-docs --disable-werror --disable-kvm ${low_mem_mode} ${avx_support}
         else
             echo "invalid options"
         fi

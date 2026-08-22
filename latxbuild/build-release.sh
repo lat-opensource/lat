@@ -9,6 +9,10 @@ pkgdir=$srcdir/pkg
 tarballs=$pkgname-$pkgver-$pkgdate.tar.xz
 package_root=$pkgdir/$pkgname-$pkgver
 
+if [ -n "${RUNNER_ARCH}" ] && [ -d "/opt/clang/bin" ]; then
+    export PATH=/opt/clang/bin:$PATH
+fi
+
 prepare() {
     [ -d $srcdir/build32 ] || mkdir -p $srcdir/build32
     [ -d $srcdir/build64 ] || mkdir -p $srcdir/build64

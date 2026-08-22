@@ -4455,7 +4455,9 @@ static void max_x86_cpu_initfn(Object *obj)
 {
     X86CPU *cpu = X86_CPU(obj);
     CPUX86State *env = &cpu->env;
+#ifdef CONFIG_KVM
     KVMState *s = kvm_state;
+#endif
 
     /* We can't fill the features array here because we don't know yet if
      * "migratable" is true or false.
@@ -4478,6 +4480,7 @@ static void max_x86_cpu_initfn(Object *obj)
         object_property_set_str(OBJECT(cpu), "model-id", model_id,
                                 &error_abort);
 
+#ifdef CONFIG_KVM
         if (kvm_enabled()) {
             env->cpuid_min_level =
                 kvm_arch_get_supported_cpuid(s, 0x0, 0, R_EAX);
@@ -4486,13 +4489,16 @@ static void max_x86_cpu_initfn(Object *obj)
             env->cpuid_min_xlevel2 =
                 kvm_arch_get_supported_cpuid(s, 0xC0000000, 0, R_EAX);
         } else {
+#endif
             env->cpuid_min_level =
                 hvf_get_supported_cpuid(0x0, 0, R_EAX);
             env->cpuid_min_xlevel =
                 hvf_get_supported_cpuid(0x80000000, 0, R_EAX);
             env->cpuid_min_xlevel2 =
                 hvf_get_supported_cpuid(0xC0000000, 0, R_EAX);
+#ifdef CONFIG_KVM
         }
+#endif
 
         if (lmce_supported()) {
             object_property_set_bool(OBJECT(cpu), "lmce", true, &error_abort);
@@ -5227,6 +5233,7 @@ static uint64_t x86_cpu_get_supported_feature_word(FeatureWord w,
     FeatureWordInfo *wi = &feature_word_info[w];
     uint64_t r = 0;
 
+#ifdef CONFIG_KVM
     if (kvm_enabled()) {
         switch (wi->type) {
         case CPUID_FEATURE_WORD:
@@ -5239,7 +5246,9 @@ static uint64_t x86_cpu_get_supported_feature_word(FeatureWord w,
                         wi->msr.index);
             break;
         }
-    } else if (hvf_enabled()) {
+    } else
+#endif
+    if (hvf_enabled()) {
         if (wi->type != CPUID_FEATURE_WORD) {
             return 0;
         }
@@ -5822,6 +5831,7 @@ void cpu_x86_cpuid(CPUX86State *env, uint32_t index, uint32_t count,
         break;
     case 0xA:
         /* Architectural Performance Monitoring Leaf */
+#ifdef CONFIG_KVM
         if (kvm_enabled() && cpu->enable_pmu) {
             KVMState *s = cs->kvm_state;
 
@@ -5829,7 +5839,9 @@ void cpu_x86_cpuid(CPUX86State *env, uint32_t index, uint32_t count,
             *ebx = kvm_arch_get_supported_cpuid(s, 0xA, count, R_EBX);
             *ecx = kvm_arch_get_supported_cpuid(s, 0xA, count, R_ECX);
             *edx = kvm_arch_get_supported_cpuid(s, 0xA, count, R_EDX);
-        } else if (hvf_enabled() && cpu->enable_pmu) {
+        } else
+#endif
+        if (hvf_enabled() && cpu->enable_pmu) {
             *eax = hvf_get_supported_cpuid(0xA, count, R_EAX);
             *ebx = hvf_get_supported_cpuid(0xA, count, R_EBX);
             *ecx = hvf_get_supported_cpuid(0xA, count, R_ECX);
@@ -6689,6 +6701,7 @@ static void x86_cpu_filter_features(X86CPU *cpu, bool verbose)
         mark_unavailable_features(cpu, w, unavailable_features, prefix);
     }
 
+#ifdef CONFIG_KVM
     if ((env->features[FEAT_7_0_EBX] & CPUID_7_0_EBX_INTEL_PT) &&
         kvm_enabled()) {
         KVMState *s = CPU(cpu)->kvm_state;
@@ -6716,6 +6729,7 @@ static void x86_cpu_filter_features(X86CPU *cpu, bool verbose)
             mark_unavailable_features(cpu, FEAT_7_0_EBX, CPUID_7_0_EBX_INTEL_PT, prefix);
         }
     }
+#endif
 }
 
 static void x86_cpu_hyperv_realize(X86CPU *cpu)
