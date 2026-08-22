@@ -1,4 +1,4 @@
-FROM ghcr.io/loong64/debian:trixie-slim
+FROM aosc/aosc-os:container
 ARG TARGETARCH
 
 ARG DEPENDENCIES="         \
@@ -10,19 +10,23 @@ ARG DEPENDENCIES="         \
         libc6              \
         libdrm-dev         \
         libglib2.0-dev     \
-        libkeyutils-dev    \
         libssl-dev         \
-        lsb-release        \
         make               \
         meson              \
-        ninja-build        \
+        ninja              \
         pkg-config         \
         python3-setuptools \
-        xz-utils"
+        xz"
+
+ENV OMA_NO_CHECK_DBUS=1
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    apt-get update \
-    && apt-get install -y ${DEPENDENCIES}
+    oma install -y systemd && \
+    oma install -y ${DEPENDENCIES}
+
+ARG RUNNER_ARCH
+RUN --mount=type=bind,source=install-static-clang.sh,target=/usr/local/bin/install-static-clang \
+    [ -n "${RUNNER_ARCH}" ] && install-static-clang
 
 RUN git config --global --add safe.directory /io
