@@ -12,6 +12,7 @@
 #include "fpu/softfloat.h"
 #include "profile.h"
 #include "translate.h"
+#include "latx-lock.h"
 #include "runtime-trace.h"
 #include "exec/translate-all.h"
 #include "ir2-relocate.h"
@@ -95,6 +96,18 @@ int XMM_USEDEF_TO_SAVE = 0xffff;
 #endif
 
 struct lat_lock lat_lock[16];
+
+/* Release the i386 global lock when a fault leaves a lowered LOCK TB. */
+void latx_i386_unlock_owned_lock(CPUState *cpu)
+{
+#ifndef TARGET_X86_64
+    int owner = cpu->cpu_index + 1;
+
+    qatomic_cmpxchg(&lat_lock[0].lock, owner, 0);
+#else
+    (void)cpu;
+#endif
+}
 
 void tr_init(void *tb)
 {
@@ -4315,10 +4328,21 @@ IR2_OPND tr_lat_spin_lock(IR2_OPND mem_addr, int imm)
     IR2_OPND lat_lock_addr = ra_alloc_itemp();
     IR2_OPND lat_lock_val= ra_alloc_itemp();
     IR2_OPND cpu_index = ra_alloc_itemp();
-    /*compute lat_lock offset by add (mem_addr+imm)[9:6]*/
+
+#ifdef TARGET_X86_64
+    /* Compute lat_lock offset from (mem_addr + imm)[9:6]. */
     la_addi_w(lat_lock_addr, mem_addr, imm);
     la_bstrpick_d(lat_lock_val, lat_lock_addr, 9, 6);
     la_slli_w(lat_lock_val, lat_lock_val, 6);
+#else
+    /*
+     * An i386 LOCK operand may overlap any adjacent 64-byte stripes.  A
+     * stripe-selected lock would let two overlapping operations take
+     * different locks, so use one process-wide LATX lock for i386.
+     */
+    (void)mem_addr;
+    (void)imm;
+#endif
 
     TranslationBlock *tb __attribute__((unused)) = NULL;
     if (option_aot) {
@@ -4326,7 +4350,9 @@ IR2_OPND tr_lat_spin_lock(IR2_OPND mem_addr, int imm)
     }
     aot_load_host_addr(lat_lock_addr, (ADDR)lat_lock,
         LOAD_HOST_LATLOCK, 0);
+#ifdef TARGET_X86_64
     la_add_d(lat_lock_addr, lat_lock_addr, lat_lock_val);
+#endif
 
     la_ld_w(cpu_index, env_ir2_opnd,
                       lsenv_offset_of_cpu_index(lsenv));

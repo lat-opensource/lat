@@ -22,6 +22,10 @@
 #include "sysemu/tcg.h"
 #include "exec/exec-all.h"
 
+#if defined(CONFIG_LATX) && !defined(TARGET_X86_64)
+#include "latx-lock.h"
+#endif
+
 bool tcg_allowed;
 
 /* exit the current TB, but without causing any exception to be raised */
@@ -65,6 +69,10 @@ void cpu_loop_exit(CPUState *cpu)
 {
     /* Undo the setting in cpu_tb_exec.  */
     cpu->can_do_io = 1;
+#if defined(CONFIG_LATX) && !defined(TARGET_X86_64)
+    /* A nonlocal CPU exit can leave a spinlock lowering via longjmp. */
+    latx_i386_unlock_owned_lock(cpu);
+#endif
 #ifdef CONFIG_LATX
     CPUArchState *env = cpu->env_ptr;
     env->fpu_clobber = true;

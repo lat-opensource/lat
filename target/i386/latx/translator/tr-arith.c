@@ -10,6 +10,7 @@
 #include "translate.h"
 #include "latx-options.h"
 #include "hbr.h"
+#include "latx-lock-lowering.h"
 
 bool translate_das(IR1_INST *pir1)
 {

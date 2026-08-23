@@ -12,6 +12,7 @@
 #include "translate.h"
 #include "hbr.h"
 #include "latx-smc.h"
+#include "latx-lock-lowering.h"
 bool translate_pop(IR1_INST *pir1)
 {
     IR2_OPND esp_opnd = ra_alloc_gpr(esp_index);
@@ -1455,6 +1456,9 @@ bool translate_xchg(IR1_INST *pir1)
     CPUState *cpu = env_cpu(env);
 
     opnd0_size = ir1_opnd_size(opnd0);
+#ifndef CONFIG_LATX_LLSC
+    (void)opnd0_size;
+#endif
 
     if ((ir1_opnd_is_gpr(opnd0) && ir1_opnd_is_gpr(opnd1))) {
         /* get src0 */
@@ -1713,9 +1717,6 @@ bool translate_cmpxchg(IR1_INST *pir1)
     return true;
 }
 
-/*
- * FIXME: This implementation is NOT thread safe.
- */
 bool translate_cmpxchg8b(IR1_INST *pir1)
 {
     IR1_OPND *reg_eax = &eax_ir1_opnd, *reg_edx = &edx_ir1_opnd;
@@ -1732,6 +1733,15 @@ bool translate_cmpxchg8b(IR1_INST *pir1)
         mem_opnd = convert_mem(opnd0, &imm);
     }
     ir2_set_opnd_type(&mem_opnd, IR2_OPND_GPR);
+
+    bool is_lock = ir1_is_prefix_lock(pir1);
+#ifndef CONFIG_LATX_LLSC
+    IR2_OPND lat_lock_addr;
+
+    if (is_lock) {
+        lat_lock_addr = tr_lat_spin_lock(mem_opnd, imm);
+    }
+#endif
 
     /*
      * There is only one parameter from IR1.
@@ -1765,10 +1775,11 @@ bool translate_cmpxchg8b(IR1_INST *pir1)
     la_slli_d(ecx_ebx_opnd, ecx_ebx_opnd, 32);
     la_bstrins_d(ecx_ebx_opnd, ebx_opnd, 31, 0);
 
-    IR2_OPND sc_opnd = ra_alloc_itemp();
-    IR2_OPND label_ll = ra_alloc_label();
+#ifdef CONFIG_LATX_LLSC
+    if (is_lock) {
+        IR2_OPND sc_opnd = ra_alloc_itemp();
+        IR2_OPND label_ll = ra_alloc_label();
 
-    if (ir1_is_prefix_lock(pir1)) {
         la_label(label_ll);
         la_or(sc_opnd, zero_ir2_opnd, ecx_ebx_opnd);
         la_ll_d(src_opnd_0, mem_opnd, imm);
@@ -1780,6 +1791,11 @@ bool translate_cmpxchg8b(IR1_INST *pir1)
         la_bne(src_opnd_0, edx_eax_opnd, label_unequal);
         la_st_d(ecx_ebx_opnd, mem_opnd, imm);
     }
+#else
+    la_ld_d(src_opnd_0, mem_opnd, imm);
+    la_bne(src_opnd_0, edx_eax_opnd, label_unequal);
+    la_st_d(ecx_ebx_opnd, mem_opnd, imm);
+#endif
     /* equal */
     generate_eflag_calculation(zero_ir2_opnd, zero_ir2_opnd, zero_ir2_opnd,
                                 pir1, true);
@@ -1796,6 +1812,11 @@ bool translate_cmpxchg8b(IR1_INST *pir1)
     store_ireg_to_ir1(src_opnd_0, reg_edx, false);
 
     la_label(label_exit);
+#ifndef CONFIG_LATX_LLSC
+    if (is_lock) {
+        tr_lat_spin_unlock(lat_lock_addr);
+    }
+#endif
     ra_free_temp(src_opnd_0);
 
     return true;

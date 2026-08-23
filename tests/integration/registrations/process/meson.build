@@ -40,3 +40,15 @@ if 'x86_64-linux-user' in target_dirs
     ],
   }]
 endif
+
+if 'i386-linux-user' in target_dirs
+  latx_integration_tests += [{
+    'name': 'test-futex-transient-wait-race-i386',
+    'runner': find_program('../../test-futex-transient-wait-race-i386.sh'),
+    'args': [
+      emulators['latx-i386'],
+      files('../../futex-transient-wait-race-i386.S'),
+    ],
+    'timeout': 90,
+  }]
+endif

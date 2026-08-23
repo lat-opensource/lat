@@ -11,6 +11,7 @@
 #include "hbr.h"
 #include "tr-vpaes.h"
 #include "pclmul.h"
+#include "latx-lock-lowering.h"
 
 bool translate_por(IR1_INST *pir1)
 {

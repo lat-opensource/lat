@@ -10,6 +10,7 @@
 #include "latx-options.h"
 #include "translate.h"
 #include "hbr.h"
+#include "latx-lock-lowering.h"
 
 static bool translate_shrd_imm(IR1_INST *pir1);
 static bool translate_shrd_cl(IR1_INST *pir1);

@@ -9,6 +9,7 @@
 #include "latx-options.h"
 #include "flag-lbt.h"
 #include "translate.h"
+#include "latx-lock-lowering.h"
 
 static void get_mem_bitbase(IR2_OPND mem_op, int *mem_off,
                             IR1_OPND *opnd0, IR1_OPND *opnd1,
