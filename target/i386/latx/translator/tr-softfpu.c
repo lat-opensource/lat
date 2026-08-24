@@ -350,6 +350,7 @@ static void la_update_fp_status(IR2_OPND cw_opnd)
     /* Rounding Control (11, 10)*/
     la_ori(itemp, cw_opnd, 0);
     update_fcsr_rm(itemp, tmp_fcsr);
+    la_movgr2fcsr(fcsr_ir2_opnd, tmp_fcsr);
     la_bstrpick_d(itemp, cw_opnd, 11, 10);
     la_st_b(itemp, env_ir2_opnd, round_mode_offset);
 
