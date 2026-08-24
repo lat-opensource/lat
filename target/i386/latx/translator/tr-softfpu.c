@@ -3089,12 +3089,12 @@ static bool translate_xgetbv_softfpu(IR1_INST *pir1)
 {
     IR2_OPND ecx_opnd = ra_alloc_gpr(ecx_index);
     gen_softfpu_helper2m_ptr((ADDR)helper_xgetbv, ecx_opnd);
-    IR2_OPND temp_low = ra_alloc_itemp();
-    IR2_OPND temp_high = ra_alloc_itemp();
-    la_bstrpick_d(temp_low, a0_ir2_opnd, 31, 0);
-    la_bstrpick_d(temp_high, a0_ir2_opnd, 63, 32);
-    la_st_d(temp_low, env_ir2_opnd, lsenv_offset_of_gpr(lsenv, R_EAX));
-    la_st_d(temp_high, env_ir2_opnd, lsenv_offset_of_gpr(lsenv, R_EDX));
+    
+    IR2_OPND eax_opnd = ra_alloc_gpr(eax_index);
+    IR2_OPND edx_opnd = ra_alloc_gpr(edx_index);
+
+    la_bstrpick_d(eax_opnd, a0_ir2_opnd, 31, 0);
+    la_bstrpick_d(edx_opnd, a0_ir2_opnd, 63, 32);
     return true;
 }
 
