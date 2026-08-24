@@ -2240,7 +2240,10 @@ int tr_ir2_generate(struct TranslationBlock *tb)
         }
 
         if (option_softfpu == 2 && reduce_proepo) {
-            if (i < ir1_nr - 1) {
+            if (i == ir1_nr - 1) {
+                reduce_proepo = false;
+                gen_softfpu_helper_epilogue(pir1);
+            } else {
                 IR1_INST *pir1_next = pir1 + 1;
                 tr_func_idx = ir1_opcode(pir1_next) - dt_X86_INS_INVALID;
                 if (tr_func_idx > dt_X86_INS_FYL2XP1) {
