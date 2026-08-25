@@ -250,13 +250,11 @@ __asm__(".macro parse_v var val\n\t"
 
 __asm__(".macro parse_r var r\n\t"
     "\\var = -1\n\t"
-    _IFC_REG(a0,4)   _IFC_REG(a1,5)   _IFC_REG(a2,6)   _IFC_REG(a3,7)
-    _IFC_REG(fp,22)
     _IFC_REG(r0,0) _IFC_REG(r1,1)  _IFC_REG(r2,2)  _IFC_REG(r3,3)
     _IFC_REG(r4,4)   _IFC_REG(r5,5)  _IFC_REG(r6,6)  _IFC_REG(r7,7)
     _IFC_REG(r8,8)   _IFC_REG(r9,9)  _IFC_REG(r10,10) _IFC_REG(r11,11)
     _IFC_REG(r12,12)  _IFC_REG(r13,13) _IFC_REG(r14,14) _IFC_REG(r15,15)
-    _IFC_REG(r16,16)  _IFC_REG(r17,17) _IFC_REG(r18,18) _IFC_REG(r19,19)
+    _IFC_REG(r16,16)  _IFC_REG(r17,17) _IFC_REG(r18,18) _IFC_REG(r17,19)
     _IFC_REG(r20,20)  _IFC_REG(r21,21)  _IFC_REG(r22,22) _IFC_REG(r23,23)
     _IFC_REG(r24,24)  _IFC_REG(r25,25) _IFC_REG(r26,26) _IFC_REG(r27,27)
     _IFC_REG(r28,28)  _IFC_REG(r29,29) _IFC_REG(r30,30) _IFC_REG(r31,31)

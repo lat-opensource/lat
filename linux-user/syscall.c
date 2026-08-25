@@ -9705,14 +9705,14 @@ static void QEMU_NORETURN seccomp_kill_thread(CPUArchState *env)
 }
 
 typedef struct ForkCloneContext {
-    jmp_buf jump_buffer;
+    void *jump_buffer[5];
 } ForkCloneContext;
 
 static int fork_clone_func(void *opaque)
 {
     ForkCloneContext *context = opaque;
 
-    longjmp(context->jump_buffer, 1);
+    __builtin_longjmp(context->jump_buffer, 1);
 }
 
 static int fork_with_flags(unsigned int flags)
@@ -9720,7 +9720,7 @@ static int fork_with_flags(unsigned int flags)
     char stack[PTHREAD_STACK_MIN] __attribute__((aligned(16)));
     ForkCloneContext context;
 
-    if (setjmp(context.jump_buffer) == 0) {
+    if (__builtin_setjmp(context.jump_buffer) == 0) {
         return clone(fork_clone_func, stack + sizeof(stack), flags, &context);
     }
     return 0;

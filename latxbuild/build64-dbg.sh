@@ -5,10 +5,6 @@ make_configure=0
 opt_level=1
 avx_support=""
 
-if [ -n "${RUNNER_ARCH}" ] && [ -d "/opt/clang/bin" ]; then
-    export PATH=/opt/clang/bin:$PATH
-fi
-
 help() {
     echo "Usage:"
     echo "  -c              configure"
@@ -70,20 +66,20 @@ make_cmd() {
     if [ $make_configure -eq 1 ] ; then
         if [ "$opt_level" = "0" ] ; then
             ../configure --target-list=x86_64-linux-user --enable-latx \
-                --enable-debug --optimize-O0 --extra-ldflags=-ldl \
-                --disable-docs --disable-werror --disable-kvm ${low_mem_mode} ${avx_support}
+                --enable-debug --optimize-O0 --static --extra-ldflags=-ldl \
+                --disable-docs ${low_mem_mode} ${avx_support}
         elif [ "$opt_level" = "1" ] ; then
             ../configure --target-list=x86_64-linux-user --enable-latx \
                 --enable-debug --optimize-O1 --extra-ldflags=-ldl --enable-kzt \
-                --disable-docs --disable-werror --disable-kvm ${low_mem_mode} ${avx_support}
+                --disable-docs ${low_mem_mode} ${avx_support}
         elif [ "$opt_level" = "2" ] ; then
             ../configure --target-list=x86_64-linux-user --enable-latx \
-                --enable-debug --optimize-O2 --extra-ldflags=-ldl \
-                --disable-docs --disable-werror --disable-kvm ${low_mem_mode} ${avx_support}
+                --enable-debug --optimize-O2 --static --extra-ldflags=-ldl \
+                --disable-docs ${low_mem_mode} ${avx_support}
         elif [ "$opt_level" = "3" ] ; then
             ../configure --target-list=x86_64-linux-user --enable-latx \
-                --enable-debug --optimize-O3 --extra-ldflags=-ldl \
-                --disable-docs --disable-werror --disable-kvm ${low_mem_mode} ${avx_support}
+                --enable-debug --optimize-O3 --static --extra-ldflags=-ldl \
+                --disable-docs ${low_mem_mode} ${avx_support}
         else
             echo "invalid options"
         fi
