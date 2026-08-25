@@ -1,0 +1,90 @@
+name: Clang Compile
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+    paths:
+      - "**/*.c"
+      - "**/*.h"
+      - "**/*.S"
+      - "**/*.inc"
+      - "**/*.py"
+      - "**/meson.build"
+      - "meson.options"
+      - "configure"
+      - "latxbuild/**"
+      - ".github/.ci/clang/**"
+      - ".github/workflows/build-docker-images.yml"
+      - ".github/workflows/clang.yml"
+  pull_request:
+    paths:
+      - "**/*.c"
+      - "**/*.h"
+      - "**/*.S"
+      - "**/*.inc"
+      - "**/*.py"
+      - "**/meson.build"
+      - "meson.options"
+      - "configure"
+      - "latxbuild/**"
+      - ".github/.ci/clang/**"
+      - ".github/workflows/build-docker-images.yml"
+      - ".github/workflows/clang.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  compile:
+    # Native LoongArch clang coverage.  The existing GCC release matrix stays
+    # in release.yml and is intentionally not part of this job.
+    name: "compile (Fedora, clang)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          submodules: true
+
+      - name: Setup QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build dedicated clang image
+        run: |
+          docker buildx build \
+            --platform linux/loong64 \
+            --load \
+            --tag lat-ci-clang:local \
+            .github/.ci/clang
+
+      - name: Compile with clang
+        run: |
+          docker run --rm \
+            --platform linux/loong64 \
+            --env CC=clang \
+            --env CXX=clang++ \
+            --volume "$(pwd):/io" \
+            --workdir /io \
+            lat-ci-clang:local \
+            sh -eux -c '
+              clang --version
+              clang++ --version
+              mkdir build-clang
+              cd build-clang
+              ../configure \
+                --target-list=x86_64-linux-user,i386-linux-user \
+                --enable-latx \
+                --disable-werror \
+                --optimize-O1 \
+                --extra-ldflags=-ldl \
+                --disable-docs \
+                --with-git-submodules=ignore
+              ninja -v
+            '
