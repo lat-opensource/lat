@@ -14,6 +14,7 @@
 #include "reg-alloc.h"
 #include "translate.h"
 #include "insts-pattern.h"
+#include "flag-reduction.h"
 
 #ifdef CONFIG_LATX_INSTS_PATTERN
 
@@ -184,6 +185,8 @@ static int inst_pattern(TranslationBlock *tb,
             pir1->instptn.opc  = INSTPTN_OPC_CMP_SBB;
             pir1->instptn.next = ir1;
             ir1->instptn.opc  = INSTPTN_OPC_NOP;
+            ir1->instptn.replaced_eflag_use =
+                    flag_reduction_get_arch_use(ir1);
             // ir1->instptn.next = NULL;
             return 1;
         }
@@ -212,6 +215,8 @@ static int inst_pattern(TranslationBlock *tb,
             pir1->instptn.opc  = INSTPTN_OPC_CMP_XXCC;
             pir1->instptn.next = ir1;
             ir1->instptn.opc  = INSTPTN_OPC_NOP;
+            ir1->instptn.replaced_eflag_use =
+                    flag_reduction_get_arch_use(ir1);
             // ir1->instptn.next = NULL;
             return 1;
         default:
@@ -256,6 +261,8 @@ static int inst_pattern(TranslationBlock *tb,
             pir1->instptn.opc  = INSTPTN_OPC_TEST_XXCC;
             pir1->instptn.next = ir1;
             ir1->instptn.opc  = INSTPTN_OPC_NOP;
+            ir1->instptn.replaced_eflag_use =
+                    flag_reduction_get_arch_use(ir1);
             // ir1->instptn.next = NULL;
             return 1;
         default:

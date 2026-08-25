@@ -8,6 +8,7 @@
 #include "ir1.h"
 #include "translate.h"
 #include "flag-reduction.h"
+#include "insts-pattern.h"
 
 /**
  * @brief ir1 opcode (x86) per instruction eflags using table
@@ -293,6 +294,19 @@ static const IR1_EFLAG_USEDEF *ir1_opcode_to_eflag_usedef(IR1_INST *ir1)
     return ir1_opcode_eflag_usedef + (ir1_opcode(ir1) - dt_X86_INS_INVALID);
 }
 
+uint8 flag_reduction_get_arch_use(IR1_INST *ir1)
+{
+    return ir1_opcode_to_eflag_usedef(ir1)->use & __ALL_EFLAGS;
+}
+
+static inline IR1_EFLAG_USEDEF ir1_effective_eflag_usedef(IR1_INST *ir1)
+{
+    IR1_EFLAG_USEDEF usedef = *ir1_opcode_to_eflag_usedef(ir1);
+
+    usedef.use &= ~instptn_replaced_eflag_use(ir1);
+    return usedef;
+}
+
 #ifdef CONFIG_LATX_FLAG_REDUCTION
 
 static inline uint32_t rotate_shift_get_masked_imm(IR1_OPND *d, IR1_OPND *s)
@@ -424,9 +438,9 @@ void flag_reduction_get_tb_summary(TranslationBlock *tb,
 
     for (int i = 0; i < tb_ir1_num(tb); i++) {
         IR1_INST *pir1 = tb_ir1_inst(tb, i);
-        const IR1_EFLAG_USEDEF *usedef = ir1_opcode_to_eflag_usedef(pir1);
-        uint8 curr_use = usedef->use & __ALL_EFLAGS;
-        uint8 curr_def = (usedef->def | usedef->undef) & __ALL_EFLAGS;
+        IR1_EFLAG_USEDEF usedef = ir1_effective_eflag_usedef(pir1);
+        uint8 curr_use = usedef.use & __ALL_EFLAGS;
+        uint8 curr_def = (usedef.def | usedef.undef) & __ALL_EFLAGS;
 
         if (cmp_scas_need_zf(pir1)) {
             curr_use |= __ZF;
@@ -464,16 +478,16 @@ static bool flag_reduction_pass1(void *tb)
     /* scanning if this insts will def ALL_EFLAGS */
     for (int i = tb_ir1_num(ptb) - 1; i >= 0; --i) {
         pir1 = tb_ir1_inst(ptb, i);
-        const IR1_EFLAG_USEDEF *usedef = ir1_opcode_to_eflag_usedef(pir1);
+        IR1_EFLAG_USEDEF usedef = ir1_effective_eflag_usedef(pir1);
 
         /*
          * NOTE: if you find some insts will use ALL_EFLAGS
          * you can add this case:
-         * if (usedef->use == __ALL_EFLAGS) return false;
+         * if (usedef.use == __ALL_EFLAGS) return false;
          */
-        if (usedef->use != __NONE) {
+        if (usedef.use != __NONE) {
             goto _false_path;
-        } else if (usedef->def == __NONE) {
+        } else if (usedef.def == __NONE) {
             /* curr_inst not def any flags */
             continue;
         } else {
@@ -523,7 +537,7 @@ void flag_reduction(IR1_INST *pir1, uint8 *pending_use)
      *   - flag use:     current inst will use flags
      *   - flag undef:   current inst mark undef flags
      */
-    IR1_EFLAG_USEDEF curr_usedef = *ir1_opcode_to_eflag_usedef(pir1);
+    IR1_EFLAG_USEDEF curr_usedef = ir1_effective_eflag_usedef(pir1);
 
 #ifndef CONFIG_LATX_RADICAL_EFLAGS
     current_def = curr_usedef.def;

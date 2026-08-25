@@ -40,6 +40,7 @@ typedef struct {
 #define __ALL_EFLAGS (__OF | __SF | __ZF | __AF | __PF | __CF)
 
 void flag_gen(IR1_INST *pir1);
+uint8 flag_reduction_get_arch_use(IR1_INST *pir1);
 
 #ifdef CONFIG_LATX_FLAG_REDUCTION
 uint8 pending_use_of_succ(void *tb, int indirect_depth, int max_depth);
