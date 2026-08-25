@@ -1,9 +1,10 @@
 #define _POSIX_C_SOURCE 200809L
 
-#include <assert.h>
 #include <pthread.h>
 #include <stdatomic.h>
+#include <stdio.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
@@ -11,6 +12,15 @@
 
 #define ASYNC_HANDLER(addr) \
     ((int (*)(void *, void *, char *, int, void *))(uintptr_t)(addr))
+
+#define TEST_CHECK(condition)                                          \
+    do {                                                               \
+        if (!(condition)) {                                            \
+            fprintf(stderr, "%s:%d: check failed: %s\n",            \
+                    __FILE__, __LINE__, #condition);                  \
+            abort();                                                   \
+        }                                                              \
+    } while (0)
 
 #define TEST_SLOT_COUNT 16
 
@@ -90,13 +100,13 @@ static void *bridge_handler(void *handler)
     if ((uintptr_t)handler == 0x2000) {
         return (void *)0xb000;
     }
-    assert(!"unexpected handler");
+    TEST_CHECK(0 && "unexpected handler");
     return NULL;
 }
 
 static void *reject_handler(void *handler)
 {
-    assert((uintptr_t)handler == 0x1000);
+    TEST_CHECK((uintptr_t)handler == 0x1000);
     return NULL;
 }
 
@@ -121,10 +131,10 @@ static void test_guest_handlers_are_bridged(void)
         latx_x11_bridge_async_handler_list(&state, &first, 0x8000,
                                            bridge_handler);
 
-    assert(result == LATX_X11_ASYNC_BRIDGE_OK);
-    assert((uintptr_t)first.handler == 0xa000);
-    assert((uintptr_t)second.handler == 0xb000);
-    assert((uintptr_t)third.handler == 0x9000);
+    TEST_CHECK(result == LATX_X11_ASYNC_BRIDGE_OK);
+    TEST_CHECK((uintptr_t)first.handler == 0xa000);
+    TEST_CHECK((uintptr_t)second.handler == 0xb000);
+    TEST_CHECK((uintptr_t)third.handler == 0x9000);
     pthread_mutex_destroy(&state.mutex);
 }
 
@@ -133,9 +143,9 @@ static void test_empty_handler_list_is_accepted(void)
     latx_x11_async_bridge_state state =
         LATX_X11_ASYNC_BRIDGE_STATE_INITIALIZER;
 
-    assert(latx_x11_bridge_async_handler_list(&state, NULL, 0x8000,
-                                              bridge_handler) ==
-           LATX_X11_ASYNC_BRIDGE_OK);
+    TEST_CHECK(latx_x11_bridge_async_handler_list(&state, NULL, 0x8000,
+                                                   bridge_handler) ==
+               LATX_X11_ASYNC_BRIDGE_OK);
     pthread_mutex_destroy(&state.mutex);
 }
 
@@ -152,8 +162,8 @@ static void test_failed_bridge_is_transactional(void)
         latx_x11_bridge_async_handler_list(&state, &async, 0x8000,
                                            reject_handler);
 
-    assert(result == LATX_X11_ASYNC_BRIDGE_HANDLER_UNAVAILABLE);
-    assert((uintptr_t)async.handler == 0x1000);
+    TEST_CHECK(result == LATX_X11_ASYNC_BRIDGE_HANDLER_UNAVAILABLE);
+    TEST_CHECK((uintptr_t)async.handler == 0x1000);
     pthread_mutex_destroy(&state.mutex);
 }
 
@@ -169,14 +179,14 @@ static void test_same_guest_handler_has_deterministic_dispatch(void)
     };
 
     reset_slot_pool(0);
-    assert(latx_x11_bridge_async_handler_list(&state, &first, 0x8000,
-                                              slot_bridge_handler) ==
-           LATX_X11_ASYNC_BRIDGE_OK);
-    assert(latx_x11_bridge_async_handler_list(&state, &second, 0x8000,
-                                              slot_bridge_handler) ==
-           LATX_X11_ASYNC_BRIDGE_OK);
-    assert(first.handler == second.handler);
-    assert(guest_for_native((uintptr_t)first.handler) == 0x1000);
+    TEST_CHECK(latx_x11_bridge_async_handler_list(&state, &first, 0x8000,
+                                                   slot_bridge_handler) ==
+               LATX_X11_ASYNC_BRIDGE_OK);
+    TEST_CHECK(latx_x11_bridge_async_handler_list(&state, &second, 0x8000,
+                                                   slot_bridge_handler) ==
+               LATX_X11_ASYNC_BRIDGE_OK);
+    TEST_CHECK(first.handler == second.handler);
+    TEST_CHECK(guest_for_native((uintptr_t)first.handler) == 0x1000);
     pthread_mutex_destroy(&state.mutex);
 }
 
@@ -198,11 +208,11 @@ static void test_seventeenth_guest_handler_fails_without_partial_publish(void)
         }
     }
 
-    assert(latx_x11_bridge_async_handler_list(&state, handlers, 0x8000,
-                                              slot_bridge_handler) ==
-           LATX_X11_ASYNC_BRIDGE_HANDLER_UNAVAILABLE);
+    TEST_CHECK(latx_x11_bridge_async_handler_list(&state, handlers, 0x8000,
+                                                   slot_bridge_handler) ==
+               LATX_X11_ASYNC_BRIDGE_HANDLER_UNAVAILABLE);
     for (index = 0; index < TEST_SLOT_COUNT + 1; index++) {
-        assert((uintptr_t)handlers[index].handler == original[index]);
+        TEST_CHECK((uintptr_t)handlers[index].handler == original[index]);
     }
     pthread_mutex_destroy(&state.mutex);
 }
@@ -282,8 +292,10 @@ static void test_two_displays_bridge_concurrently_without_cross_dispatch(void)
     reset_slot_pool(1);
     init_handler_chain(display_a, original_a, 0x1000);
     init_handler_chain(display_b, original_b, 0x2000);
-    assert(!pthread_create(&thread_a, NULL, bridge_display_thread, &work_a));
-    assert(!pthread_create(&thread_b, NULL, bridge_display_thread, &work_b));
+    TEST_CHECK(pthread_create(&thread_a, NULL, bridge_display_thread,
+                              &work_a) == 0);
+    TEST_CHECK(pthread_create(&thread_b, NULL, bridge_display_thread,
+                              &work_b) == 0);
 
     pthread_mutex_lock(&gate.mutex);
     while (gate.ready != 2) {
@@ -293,16 +305,16 @@ static void test_two_displays_bridge_concurrently_without_cross_dispatch(void)
     pthread_cond_broadcast(&gate.condition);
     pthread_mutex_unlock(&gate.mutex);
 
-    assert(!pthread_join(thread_a, NULL));
-    assert(!pthread_join(thread_b, NULL));
-    assert(work_a.result == LATX_X11_ASYNC_BRIDGE_OK);
-    assert(work_b.result == LATX_X11_ASYNC_BRIDGE_OK);
-    assert(!atomic_load(&slot_pool.callback_overlap));
+    TEST_CHECK(pthread_join(thread_a, NULL) == 0);
+    TEST_CHECK(pthread_join(thread_b, NULL) == 0);
+    TEST_CHECK(work_a.result == LATX_X11_ASYNC_BRIDGE_OK);
+    TEST_CHECK(work_b.result == LATX_X11_ASYNC_BRIDGE_OK);
+    TEST_CHECK(!atomic_load(&slot_pool.callback_overlap));
     for (index = 0; index < 8; index++) {
-        assert(guest_for_native((uintptr_t)display_a[index].handler) ==
-               original_a[index]);
-        assert(guest_for_native((uintptr_t)display_b[index].handler) ==
-               original_b[index]);
+        TEST_CHECK(guest_for_native((uintptr_t)display_a[index].handler) ==
+                   original_a[index]);
+        TEST_CHECK(guest_for_native((uintptr_t)display_b[index].handler) ==
+                   original_b[index]);
     }
 
     pthread_cond_destroy(&gate.condition);
