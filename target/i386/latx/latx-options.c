@@ -31,6 +31,7 @@ int option_avx_cpuid = 0;
 #ifdef CONFIG_LATX_FLAG_REDUCTION
 int option_flag_reduction = 1;
 #endif
+int option_eflags_cross;
 
 int option_lative = 0;
 #if defined(CONFIG_LATX_JRRA_STACK) && defined(CONFIG_LATX_LSFPU)
@@ -236,6 +237,7 @@ void options_init(void)
     option_latx_disassemble_trace_cmp = 0;
     option_enable_lasx = 1;
     option_vpaes = 0;
+    option_eflags_cross = 0;
 
     counter_tb_exec = 0;
     counter_tb_tr = 0;

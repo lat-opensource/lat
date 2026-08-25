@@ -659,6 +659,19 @@ static void handle_arg_latx_prlimit(const char *arg)
     option_prlimit = strtol(arg, NULL, 0);
 }
 
+static void handle_arg_latx_eflags_cross(const char *arg)
+{
+    int value;
+
+    if (qemu_strtoi(arg, NULL, 0, &value) || value < 0 || value > 1) {
+        fprintf(stderr,
+                "LATX_EFLAGS_CROSS must be exactly 0 or 1 (got '%s')\n",
+                arg);
+        exit(EXIT_FAILURE);
+    }
+    option_eflags_cross = value;
+}
+
 #ifdef CONFIG_LATX_AVX_OPT
 static void handle_arg_latx_avx_cpuid(const char *arg)
 {
@@ -920,6 +933,9 @@ static const struct qemu_argument arg_table[] = {
     "",           "enable rounding opt"},
     {"latx-cvt-opt",    "LATX_CVT_OPT",     true,  handle_arg_latx_cvt_opt,
     "",           "enable cvt opt"},
+    {"latx-eflags-cross", "LATX_EFLAGS_CROSS", true,
+    handle_arg_latx_eflags_cross, "0|1",
+    "enable TU EFLAGS analysis across direct CALL and RET"},
 #if defined(CONFIG_LATX_AVX_OPT)
     {"latx-avx-cpuid",    "LATX_AVX_CPUID",     true,  handle_arg_latx_avx_cpuid,
     "",           "enable avx cpuid"},
