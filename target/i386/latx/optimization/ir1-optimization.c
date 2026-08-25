@@ -28,6 +28,19 @@
  * **Also, this function only analysis the information and set IR1_INST!**
  */
 
+static void ir1_pattern_discovery(TranslationBlock *tb)
+{
+    if (!tb->icount) {
+        return;
+    }
+
+    DEF_INSTS_PTN(ptn);
+    for (int i = tb_ir1_num(tb) - 1; i >= 0; --i) {
+        IR1_INST *ir1 = tb_ir1_inst(tb, i);
+        OPT_INSTS_PTN(tb, ir1, i, ptn);
+    }
+}
+
 #ifdef CONFIG_LATX_TU
 /* static int opt, noopt; */
 static void ir1_optimization_over_tb(TranslationBlock *tb,
@@ -37,10 +50,11 @@ static void ir1_optimization_over_tb(TranslationBlock *tb,
     if (!tb->icount) {
         return;
     }
+    ir1_pattern_discovery(tb);
+
     IR1_INST *ir1 = NULL;
     /* cross scanning var defination */
     DEF_FLAG_RDTN(rdtn);
-    DEF_INSTS_PTN(ptn);
 #ifdef CONFIG_LATX_FLAG_REDUCTION
     if (use_calculated_live_out) {
         rdtn_pending_use = tb->s_data->eflag_out;
@@ -55,8 +69,6 @@ static void ir1_optimization_over_tb(TranslationBlock *tb,
         ir1 = tb_ir1_inst(tb, i);
         /* do core optimize */
         OPT_FLAG_RDTN(rdtn, ir1);
-        /* TODO: TU */
-        OPT_INSTS_PTN(tb, ir1, i, ptn);
     }
     SAVE_FLAG_TO_TB(rdtn, tb);
 }
@@ -380,7 +392,9 @@ void ir1_optimization(TranslationBlock *tb)
     IR1_INST *ir1 = NULL;
     /* cross scanning var defination */
     DEF_FLAG_RDTN(rdtn);
-    DEF_INSTS_PTN(ptn);
+
+    ir1_pattern_discovery(tb);
+
     /* check if need cross tb analyze */
     CHK_FLAG_RDTN(rdtn, tb);
     /* scanning instructions in reverse order */
@@ -388,8 +402,6 @@ void ir1_optimization(TranslationBlock *tb)
         ir1 = tb_ir1_inst(tb, i);
         /* do core optimize */
         OPT_FLAG_RDTN(rdtn, ir1);
-        /* TODO: TU */
-        OPT_INSTS_PTN(tb, ir1, i, ptn);
     }
     SAVE_FLAG_TO_TB(rdtn, tb);
 }
