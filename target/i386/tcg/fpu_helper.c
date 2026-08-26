@@ -3302,13 +3302,32 @@ void cpu_x86_sync_latx_fpu_mode(CPUX86State *env)
 }
 #endif
 
-void cpu_x86_init_user_x87(CPUX86State *env)
+void cpu_x86_init_user_fpstate(CPUX86State *env)
 {
     do_fninit(env);
+    set_float_exception_flags(0, &env->fp_status);
+    env->fpop = 0;
+    env->fpip = 0;
+    env->fpdp = 0;
+    memset(env->fpregs, 0, sizeof(env->fpregs));
+
+    cpu_set_mxcsr(env, 0x1f80);
+    memset(env->xmm_regs, 0, sizeof(env->xmm_regs));
+    memset(env->ymmh_regs, 0, sizeof(env->ymmh_regs));
+
+    /* Initialize the other user components supported by do_xrstor(). */
+    memset(env->bnd_regs, 0, sizeof(env->bnd_regs));
+    memset(&env->bndcs_regs, 0, sizeof(env->bndcs_regs));
+    env->hflags &= ~HF_MPX_IU_MASK;
+    cpu_sync_bndcs_hflags(env);
+    if (env->pkru) {
+        env->pkru = 0;
+        tlb_flush(env_cpu(env));
+    }
 
 #ifdef CONFIG_LATX
     env->fcsr = 0;
-    env->mode_fpu = 1;
+    env->mode_fpu = LATX_FPU_MODE_X87;
 #endif
 }
 #endif
