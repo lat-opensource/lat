@@ -21,7 +21,7 @@ else
 fi
 
 "$clang" --target=x86_64-linux-gnu -fuse-ld=lld -nostdlib -static \
-    -Wl,--build-id=none "$source_file" -o "$workdir/eflags-cross-boundary"
+    "$source_file" -o "$workdir/eflags-cross-boundary"
 
 run_guest()
 {

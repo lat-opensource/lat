@@ -5,6 +5,8 @@
 .type _start, @function
 _start:
     xor %r12d, %r12d
+    mov $10000, %r13d
+.Ltest_loop:
 
     /* CALL must preserve an input flag when a transparent callee returns. */
     clc
@@ -52,6 +54,25 @@ _start:
     or $16, %r12d
 .Lshared_zf_ok:
 
+    /* A dead producer in a predecessor TB can be reduced through CALL/RET. */
+    mov $1, %eax
+    cmp $0, %eax
+    jmp .Lpredecessor_dead_call
+.Lpredecessor_dead_call:
+    call direct_transparent
+    xor %eax, %eax
+
+    /* A live predecessor flag must still cross the transparent call. */
+    clc
+    mov $-1, %eax
+    add $1, %eax
+    jmp .Lpredecessor_live_call
+.Lpredecessor_live_call:
+    call direct_transparent
+    jc .Lpredecessor_live_ok
+    or $128, %r12d
+.Lpredecessor_live_ok:
+
     /* An indirect JMP is not necessarily an ABI function boundary. */
     clc
     mov $-1, %eax
@@ -62,6 +83,9 @@ _start:
     jc .Lindirect_jmp_ok
     or $64, %r12d
 .Lindirect_jmp_ok:
+
+    dec %r13d
+    jne .Ltest_loop
 
     mov %r12d, %edi
     mov $__NR_exit, %eax
