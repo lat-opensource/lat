@@ -836,6 +836,9 @@ restore_sigcontext(CPUX86State *env, struct target_sigcontext *sc)
 #endif
         unlock_user_struct(fpstate, fpstate_addr, 0);
 #ifdef CONFIG_LATX
+        if (!err) {
+            cpu_x86_sync_latx_fcsr(env);
+        }
         load_xmm_from_env(env);
 #endif
     } else {

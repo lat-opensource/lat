@@ -3222,6 +3222,33 @@ void cpu_x86_xrstor(CPUX86State *env, target_ulong ptr)
 {
     do_xrstor(env, ptr, -1, 0);
 }
+
+#ifdef CONFIG_LATX
+void cpu_x86_sync_latx_fcsr(CPUX86State *env)
+{
+    static const uint8_t rounding_map[4] = { 0, 3, 2, 1 };
+    static const uint8_t exception_map[5] = { 5, 4, 3, 2, 0 };
+    uint32_t fpuc = env->fpuc;
+    uint32_t fpus = env->fpus;
+    uint32_t rc = (fpuc & FPU_RC_MASK) >> FPU_RC_SHIFT;
+    uint32_t fcsr = rounding_map[rc] << 8;
+    int i;
+
+    /* Keep these exception mappings in sync with tr-fctrl.c. */
+    for (i = 0; i < 5; i++) {
+        uint32_t x87_mask = 1 << exception_map[i];
+
+        if ((!option_enable_fcsr_exc || i != 0) && !(fpuc & x87_mask)) {
+            fcsr |= 1 << i;
+        }
+        if (fpus & x87_mask) {
+            fcsr |= 1 << (16 + i);
+        }
+    }
+
+    env->fcsr = fcsr;
+}
+#endif
 #endif
 
 uint64_t helper_xgetbv(CPUX86State *env, uint32_t ecx)
