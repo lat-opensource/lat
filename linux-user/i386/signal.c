@@ -639,6 +639,8 @@ void setup_frame(int sig, struct target_sigaction *ka,
 
     unlock_user_struct(frame, frame_addr, 1);
 
+    cpu_x86_init_user_x87(env);
+
     return;
 
 give_sigsegv:
@@ -728,6 +730,8 @@ void setup_rt_frame(int sig, struct target_sigaction *ka,
     env->eflags &= ~TF_MASK;
 
     unlock_user_struct(frame, frame_addr, 1);
+
+    cpu_x86_init_user_x87(env);
 
     return;
 

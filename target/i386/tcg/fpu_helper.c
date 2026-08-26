@@ -3287,6 +3287,16 @@ void cpu_x86_sync_latx_fpu_mode(CPUX86State *env)
     env->mode_fpu = !latx_x87_state_is_mmx(env);
 }
 #endif
+
+void cpu_x86_init_user_x87(CPUX86State *env)
+{
+    do_fninit(env);
+
+#ifdef CONFIG_LATX
+    env->fcsr = 0;
+    env->mode_fpu = 1;
+#endif
+}
 #endif
 
 uint64_t helper_xgetbv(CPUX86State *env, uint32_t ecx)
