@@ -11,6 +11,7 @@
 #include "hbr.h"
 #include "tr-vpaes.h"
 #include "pclmul.h"
+#include "crypto/aes.h"
 
 bool translate_por(IR1_INST *pir1)
 {
@@ -3767,6 +3768,101 @@ bool translate_pclmulqdq(IR1_INST * pir1) {
     return true;
 }
 
+static void aes_load_te0(IR2_OPND value, IR2_OPND index,
+                         IR2_OPND table, IR2_OPND state,
+                         int byte_shift, int rotate)
+{
+    la_bstrpick_d(index, state, byte_shift + 7, byte_shift);
+    /* IR2 ALSL encodes shift-1, so 1 means index * sizeof(uint32_t). */
+    la_alsl_d(index, index, table, 1);
+    la_ld_wu(value, index, 0);
+    if (rotate) {
+        la_rotri_w(value, value, rotate);
+    }
+}
+
+static void gen_aesenc_ir2(IR2_OPND dest, IR2_OPND key)
+{
+    IR2_OPND state[4];
+    IR2_OPND table = ra_alloc_itemp();
+    IR2_OPND index = ra_alloc_itemp();
+    IR2_OPND result = ra_alloc_itemp();
+
+    for (int i = 0; i < 4; i++) {
+        state[i] = ra_alloc_itemp();
+        la_vpickve2gr_wu(state[i], dest, i);
+    }
+    aot_load_host_addr(table, (ADDR)AES_Te0, LOAD_HOST_AES_TE0, 0);
+
+    for (int word = 0; word < 4; word++) {
+        aes_load_te0(result, index, table, state[word], 0, 0);
+        for (int column = 1; column < 4; column++) {
+            aes_load_te0(index, index, table,
+                         state[(word + column) & 3], column * 8,
+                         column * 8);
+            la_xor(result, result, index);
+        }
+
+        /* bswap32 before XORing the round key, matching AESENC semantics. */
+        la_revb_2h(result, result);
+        la_rotri_w(result, result, 16);
+        la_vpickve2gr_wu(index, key, word);
+        la_xor(result, result, index);
+        la_vinsgr2vr_w(dest, result, word);
+    }
+
+    for (int i = 0; i < 4; i++) {
+        ra_free_temp(state[i]);
+    }
+    ra_free_temp(table);
+    ra_free_temp(index);
+    ra_free_temp(result);
+}
+
+static void aes_load_sbox(IR2_OPND value, IR2_OPND index,
+                          IR2_OPND table, IR2_OPND state,
+                          int byte_shift)
+{
+    la_bstrpick_d(index, state, byte_shift + 7, byte_shift);
+    la_add_d(index, index, table);
+    la_ld_bu(value, index, 0);
+}
+
+static void gen_aesenclast_ir2(IR2_OPND dest, IR2_OPND key)
+{
+    IR2_OPND state[4];
+    IR2_OPND table = ra_alloc_itemp();
+    IR2_OPND index = ra_alloc_itemp();
+    IR2_OPND result = ra_alloc_itemp();
+
+    for (int i = 0; i < 4; i++) {
+        state[i] = ra_alloc_itemp();
+        la_vpickve2gr_wu(state[i], dest, i);
+    }
+    aot_load_host_addr(table, (ADDR)AES_sbox, LOAD_HOST_AES_SBOX, 0);
+
+    for (int word = 0; word < 4; word++) {
+        aes_load_sbox(result, index, table, state[word], 0);
+        for (int byte = 1; byte < 4; byte++) {
+            aes_load_sbox(index, index, table,
+                          state[(word + byte) & 3], byte * 8);
+            la_slli_w(index, index, byte * 8);
+            la_or(result, result, index);
+        }
+
+        la_vpickve2gr_wu(index, key, word);
+        la_xor(result, result, index);
+        la_vinsgr2vr_w(dest, result, word);
+    }
+
+    for (int i = 0; i < 4; i++) {
+        ra_free_temp(state[i]);
+    }
+    ra_free_temp(table);
+    ra_free_temp(index);
+    ra_free_temp(result);
+}
+
 bool translate_aesdec(IR1_INST *pir1)
 {
     if (option_vpaes) {
@@ -3841,6 +3937,20 @@ bool translate_aesdeclast(IR1_INST *pir1)
     return true;
 }
 
+static void load_aes_key_from_mem(IR2_OPND key, IR1_OPND *mem)
+{
+    int offset;
+    IR2_OPND address;
+
+    assert(ir1_opnd_is_mem(mem));
+    assert(ir1_opnd_size(mem) == 128);
+    address = convert_mem(mem, &offset);
+    gen_test_page_flag(address, offset, PAGE_READ);
+    la_vld(key, address, offset);
+    /* AES needs every x86-64 itemp; the emitted load no longer needs this. */
+    ra_free_temp_auto(address);
+}
+
 bool translate_aesenc(IR1_INST *pir1)
 {
     if (option_vpaes) {
@@ -3850,31 +3960,30 @@ bool translate_aesenc(IR1_INST *pir1)
     IR1_OPND *opnd0 = ir1_get_opnd(pir1, 0);
     IR1_OPND *opnd1 = ir1_get_opnd(pir1, 1);
     int d = ir1_opnd_base_reg_num(opnd0);
-    if (!ir1_opnd_is_mem(opnd1)) {
-        int s1 = ir1_opnd_base_reg_num(opnd1);
-        tr_gen_call_to_helper_aes((ADDR)helper_aesenc_xmm, d, s1, 0,
-                LOAD_HELPER_AESENC_XMM);
-    } else {
-        int s1 = (d + 1) & 7;
-        IR2_OPND temp = ra_alloc_ftemp();
-        IR2_OPND src = ra_alloc_xmm(s1);
-        if (option_enable_lasx) {
-            la_xvor_v(temp, src, src);
-        } else {
-            la_vor_v(temp, src, src);
-        }
-        assert(ir1_opnd_size(opnd1) == 128);
-        load_freg128_from_ir1_mem(src, opnd1);
+    IR2_OPND dest = ra_alloc_xmm(d);
+    IR2_OPND key;
+    bool key_is_temp = false;
 
-        tr_gen_call_to_helper_aes((ADDR)helper_aesenc_xmm, d, s1, 0,
-                LOAD_HELPER_AESENC_XMM);
-        if (option_enable_lasx) {
-            la_xvor_v(src, temp, temp);
+    if (ir1_opnd_is_mem(opnd1)) {
+        key = ra_alloc_ftemp();
+        key_is_temp = true;
+        load_aes_key_from_mem(key, opnd1);
+    } else {
+        int s = ir1_opnd_base_reg_num(opnd1);
+        IR2_OPND src = ra_alloc_xmm(s);
+        if (s == d) {
+            key = ra_alloc_ftemp();
+            key_is_temp = true;
+            la_vor_v(key, src, src);
         } else {
-            la_vor_v(src, temp, temp);
+            key = src;
         }
     }
-    /* TODO: need to check */
+
+    gen_aesenc_ir2(dest, key);
+    if (key_is_temp) {
+        ra_free_temp(key);
+    }
     return true;
 }
 
@@ -3887,31 +3996,30 @@ bool translate_aesenclast(IR1_INST *pir1)
     IR1_OPND *opnd0 = ir1_get_opnd(pir1, 0);
     IR1_OPND *opnd1 = ir1_get_opnd(pir1, 1);
     int d = ir1_opnd_base_reg_num(opnd0);
-    if (!ir1_opnd_is_mem(opnd1)) {
-        int s1 = ir1_opnd_base_reg_num(opnd1);
-        tr_gen_call_to_helper_aes((ADDR)helper_aesenclast_xmm, d, s1, 0,
-                LOAD_HELPER_AESENCLAST_XMM);
-    } else {
-        int s1 = (d + 1) & 7;
-        IR2_OPND temp = ra_alloc_ftemp();
-        IR2_OPND src = ra_alloc_xmm(s1);
-        if (option_enable_lasx) {
-            la_xvor_v(temp, src, src);
-        } else {
-            la_vor_v(temp, src, src);
-        }
-        assert(ir1_opnd_size(opnd1) == 128);
-        load_freg128_from_ir1_mem(src, opnd1);
+    IR2_OPND dest = ra_alloc_xmm(d);
+    IR2_OPND key;
+    bool key_is_temp = false;
 
-        tr_gen_call_to_helper_aes((ADDR)helper_aesenclast_xmm, d, s1, 0,
-                LOAD_HELPER_AESENCLAST_XMM);
-        if (option_enable_lasx) {
-            la_xvor_v(src, temp, temp);
+    if (ir1_opnd_is_mem(opnd1)) {
+        key = ra_alloc_ftemp();
+        key_is_temp = true;
+        load_aes_key_from_mem(key, opnd1);
+    } else {
+        int s = ir1_opnd_base_reg_num(opnd1);
+        IR2_OPND src = ra_alloc_xmm(s);
+        if (s == d) {
+            key = ra_alloc_ftemp();
+            key_is_temp = true;
+            la_vor_v(key, src, src);
         } else {
-            la_vor_v(src, temp, temp);
+            key = src;
         }
     }
-    /* TODO: need to check */
+
+    gen_aesenclast_ir2(dest, key);
+    if (key_is_temp) {
+        ra_free_temp(key);
+    }
     return true;
 }
 
