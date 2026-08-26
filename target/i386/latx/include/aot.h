@@ -39,10 +39,13 @@ extern  const char *aot_left_file_minsize_optarg;
  * +--------------+
  */
 #ifdef CONFIG_LATX_DEBUG
-#define AOT_VERSION "Version: "LATX_VERSION"-debug"
+#define AOT_BUILD_FLAVOR "debug"
 #else
-#define AOT_VERSION "Version: "LATX_VERSION"-release"
+#define AOT_BUILD_FLAVOR "release"
 #endif
+#define LATX_STRINGIFY_INNER(value) #value
+#define LATX_STRINGIFY(value) LATX_STRINGIFY_INNER(value)
+#define AOT_VERSION "Version: " LATX_VERSION "-" AOT_BUILD_FLAVOR "-" LATX_STRINGIFY(LATX_BUILD_TIMESTAMP)
 typedef struct aot_header {
     uint32_t lib_size;
     struct timespec last_modify_time;
