@@ -1447,6 +1447,10 @@ TRANS_FUNC_DEF(aesenclast);
 TRANS_FUNC_DEF(aesimc);
 TRANS_FUNC_DEF(aeskeygenassist);
 
+void gen_aesenc_ir2(IR2_OPND dest, IR2_OPND key);
+void gen_aesenclast_ir2(IR2_OPND dest, IR2_OPND key);
+void load_aes_key_from_mem(IR2_OPND key, IR1_OPND *mem);
+
 #ifdef CONFIG_LATX_AVX_OPT
 TRANS_FUNC_DEF(vaesdec);
 TRANS_FUNC_DEF(vaesdeclast);

@@ -3791,7 +3791,7 @@ static void aes_load_table_once(IR2_OPND table, ADDR address,
     }
 }
 
-static void gen_aesenc_ir2(IR2_OPND dest, IR2_OPND key)
+void gen_aesenc_ir2(IR2_OPND dest, IR2_OPND key)
 {
     IR2_OPND state[2];
     IR2_OPND table = ra_alloc_itemp();
@@ -3840,7 +3840,7 @@ static void aes_load_sbox(IR2_OPND value, IR2_OPND index,
     la_ld_wu(value, index, column * sizeof(uint32_t));
 }
 
-static void gen_aesenclast_ir2(IR2_OPND dest, IR2_OPND key)
+void gen_aesenclast_ir2(IR2_OPND dest, IR2_OPND key)
 {
     IR2_OPND state[2];
     IR2_OPND table = ra_alloc_itemp();
@@ -3953,7 +3953,7 @@ bool translate_aesdeclast(IR1_INST *pir1)
     return true;
 }
 
-static void load_aes_key_from_mem(IR2_OPND key, IR1_OPND *mem)
+void load_aes_key_from_mem(IR2_OPND key, IR1_OPND *mem)
 {
     int offset;
     IR2_OPND address;

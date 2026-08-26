@@ -5900,6 +5900,54 @@ bool translate_vaesdeclast(IR1_INST *pir1)
     return true;
 }
 
+static bool translate_vaes_xmm_ir2(IR1_INST *pir1, bool is_last)
+{
+    IR1_OPND *opnd0 = ir1_get_opnd(pir1, 0);
+    IR1_OPND *opnd1 = ir1_get_opnd(pir1, 1);
+    IR1_OPND *opnd2 = ir1_get_opnd(pir1, 2);
+    int d = ir1_opnd_base_reg_num(opnd0);
+    int s1 = ir1_opnd_base_reg_num(opnd1);
+    IR2_OPND dest = ra_alloc_xmm(d);
+    IR2_OPND src1 = ra_alloc_xmm(s1);
+    IR2_OPND key;
+    bool key_is_temp = false;
+
+    lsassert(ir1_opnd_is_xmm(opnd0));
+    lsassert(ir1_opnd_is_xmm(opnd1));
+
+    if (ir1_opnd_is_mem(opnd2)) {
+        key = ra_alloc_ftemp();
+        key_is_temp = true;
+        load_aes_key_from_mem(key, opnd2);
+    } else {
+        int s2 = ir1_opnd_base_reg_num(opnd2);
+        IR2_OPND src2 = ra_alloc_xmm(s2);
+
+        if (s2 == d) {
+            key = ra_alloc_ftemp();
+            key_is_temp = true;
+            la_vor_v(key, src2, src2);
+        } else {
+            key = src2;
+        }
+    }
+
+    if (d != s1) {
+        la_vor_v(dest, src1, src1);
+    }
+    if (is_last) {
+        gen_aesenclast_ir2(dest, key);
+    } else {
+        gen_aesenc_ir2(dest, key);
+    }
+    set_high128_xreg_to_zero(dest);
+
+    if (key_is_temp) {
+        ra_free_temp(key);
+    }
+    return true;
+}
+
 bool translate_vaesenc(IR1_INST *pir1)
 {
     if (!option_enable_lasx) {
@@ -5916,16 +5964,15 @@ bool translate_vaesenc(IR1_INST *pir1)
     int d = ir1_opnd_base_reg_num(opnd0);
     int s1 = ir1_opnd_base_reg_num(opnd1);
 
+    if (!ir1_opnd_is_ymm(opnd0)) {
+        return translate_vaes_xmm_ir2(pir1, false);
+    }
+
     ADDR helper_func;
     int helper_kind;
 
-    if (ir1_opnd_is_ymm(opnd0)) {
-        helper_func = (ADDR)helper_vaesenc_ymm;
-        helper_kind = LOAD_HELPER_VAESENC_YMM;
-    } else {
-        helper_func = (ADDR)helper_vaesenc_xmm;
-        helper_kind = LOAD_HELPER_VAESENC_XMM;
-    }
+    helper_func = (ADDR)helper_vaesenc_ymm;
+    helper_kind = LOAD_HELPER_VAESENC_YMM;
 
     if (!ir1_opnd_is_mem(opnd2)) {
         int s2 = ir1_opnd_base_reg_num(opnd2);
@@ -5974,16 +6021,15 @@ bool translate_vaesenclast(IR1_INST *pir1)
     int d = ir1_opnd_base_reg_num(opnd0);
     int s1 = ir1_opnd_base_reg_num(opnd1);
 
+    if (!ir1_opnd_is_ymm(opnd0)) {
+        return translate_vaes_xmm_ir2(pir1, true);
+    }
+
     ADDR helper_func;
     int helper_kind;
 
-    if (ir1_opnd_is_ymm(opnd0)) {
-        helper_func = (ADDR)helper_vaesenclast_ymm;
-        helper_kind = LOAD_HELPER_VAESENCLAST_YMM;
-    } else {
-        helper_func = (ADDR)helper_vaesenclast_xmm;
-        helper_kind = LOAD_HELPER_VAESENCLAST_XMM;
-    }
+    helper_func = (ADDR)helper_vaesenclast_ymm;
+    helper_kind = LOAD_HELPER_VAESENCLAST_YMM;
 
     if (!ir1_opnd_is_mem(opnd2)) {
         int s2 = ir1_opnd_base_reg_num(opnd2);
