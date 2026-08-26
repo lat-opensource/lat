@@ -289,45 +289,90 @@ static void get_tu_eflags_summary(TranslationBlock **tb_list, int tb_num,
     }
 }
 
+static uint8 get_tu_live_out(TranslationBlock **tb_list, int tb_num,
+        int tb_id, uint8 *summary_use, uint8 *summary_preserve,
+        uint8 *live_in)
+{
+    TranslationBlock *tb = tb_list[tb_id];
+    int next_id = tb_index(tb_list, tb_num,
+            tb->s_data->next_tb[TU_TB_INDEX_NEXT]);
+    int target_id = tb_index(tb_list, tb_num,
+            tb->s_data->next_tb[TU_TB_INDEX_TARGET]);
+
+    switch (tb->s_data->last_ir1_type) {
+    case IR1_TYPE_BRANCH:
+        if (next_id < 0 || target_id < 0) {
+            return __ALL_EFLAGS;
+        }
+        return live_in[next_id] | live_in[target_id];
+    case IR1_TYPE_JUMP:
+        return target_id < 0 ? __ALL_EFLAGS : live_in[target_id];
+    case IR1_TYPE_CALL: {
+        if (!tb_is_near_call(tb)) {
+            return __ALL_EFLAGS;
+        }
+        int call_target_id = tb_pc_index(tb_list, tb_num, tb,
+                tb->s_data->target_pc);
+        if (call_target_id < 0 || next_id < 0) {
+            return __ALL_EFLAGS;
+        }
+        return summary_use[call_target_id] |
+               (summary_preserve[call_target_id] & live_in[next_id]);
+    }
+    case IR1_TYPE_NORMAL:
+        return next_id < 0 ? __ALL_EFLAGS : live_in[next_id];
+    case IR1_TYPE_SYSCALL:
+        return __NONE;
+    case IR1_TYPE_CALLIN:
+    case IR1_TYPE_JUMPIN:
+    case IR1_TYPE_RET:
+        return __ALL_EFLAGS;
+    default:
+        lsassert(0);
+        return __ALL_EFLAGS;
+    }
+}
+
 static void optimize_tu_calls(TranslationBlock **tb_list, int tb_num)
 {
     uint8 block_use[tb_num];
     uint8 block_must_def[tb_num];
     uint8 summary_use[tb_num];
     uint8 summary_preserve[tb_num];
-    uint8 baseline_live_in[tb_num];
+    uint8 live_in[tb_num];
+    uint8 live_out[tb_num];
 
     for (int i = 0; i < tb_num; i++) {
         flag_reduction_get_tb_summary(tb_list[i],
                 &block_use[i], &block_must_def[i]);
-        baseline_live_in[i] = tb_list[i]->eflag_use;
     }
 
     get_tu_eflags_summary(tb_list, tb_num,
             block_use, block_must_def, summary_use, summary_preserve);
 
+    memset(live_in, 0, sizeof(live_in));
+    memset(live_out, 0, sizeof(live_out));
+
+    bool unfinished = true;
+    while (unfinished) {
+        unfinished = false;
+        for (int i = tb_num - 1; i >= 0; i--) {
+            uint8 new_out = get_tu_live_out(tb_list, tb_num, i,
+                    summary_use, summary_preserve, live_in);
+            uint8 new_in = block_use[i] |
+                    (new_out & ~block_must_def[i]);
+
+            if ((new_out & ~live_out[i]) || (new_in & ~live_in[i])) {
+                live_out[i] |= new_out;
+                live_in[i] |= new_in;
+                unfinished = true;
+            }
+        }
+    }
+
     for (int i = 0; i < tb_num; i++) {
-        TranslationBlock *tb = tb_list[i];
-        int next_id;
-        int call_target_id;
-
-        if (tb->s_data->last_ir1_type != IR1_TYPE_CALL ||
-            !tb_is_near_call(tb)) {
-            continue;
-        }
-
-        next_id = tb_index(tb_list, tb_num,
-                tb->s_data->next_tb[TU_TB_INDEX_NEXT]);
-        call_target_id = tb_pc_index(tb_list, tb_num, tb,
-                tb->s_data->target_pc);
-        if (call_target_id < 0 || next_id < 0) {
-            continue;
-        }
-
-        tb->s_data->eflag_out = summary_use[call_target_id] |
-                (summary_preserve[call_target_id] &
-                 baseline_live_in[next_id]);
-        ir1_optimization_over_tb(tb, true);
+        tb_list[i]->s_data->eflag_out = live_out[i];
+        ir1_optimization_over_tb(tb_list[i], true);
     }
 }
 #endif
