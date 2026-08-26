@@ -20,6 +20,10 @@
     ".ifc \\r, $r" #n "\n\t"                 \
     "\\var = " #n "\n\t"                     \
     ".endif\n\t"
+#define PARSE_R_IFC_ABI_REG(name, n)            \
+    ".ifc \\r, $" #name "\n\t"               \
+    "\\var = " #n "\n\t"                     \
+    ".endif\n\t"
 /*
  * LTO may duplicate or reorder file-scope assembly.  Keep the assembler
  * macro with its users and give each extended asm statement a unique name.
@@ -43,6 +47,22 @@
     PARSE_R_IFC_REG(26) PARSE_R_IFC_REG(27) \
     PARSE_R_IFC_REG(28) PARSE_R_IFC_REG(29) \
     PARSE_R_IFC_REG(30) PARSE_R_IFC_REG(31) \
+    PARSE_R_IFC_ABI_REG(zero, 0) PARSE_R_IFC_ABI_REG(ra, 1) \
+    PARSE_R_IFC_ABI_REG(tp, 2) PARSE_R_IFC_ABI_REG(sp, 3) \
+    PARSE_R_IFC_ABI_REG(a0, 4) PARSE_R_IFC_ABI_REG(a1, 5) \
+    PARSE_R_IFC_ABI_REG(a2, 6) PARSE_R_IFC_ABI_REG(a3, 7) \
+    PARSE_R_IFC_ABI_REG(a4, 8) PARSE_R_IFC_ABI_REG(a5, 9) \
+    PARSE_R_IFC_ABI_REG(a6, 10) PARSE_R_IFC_ABI_REG(a7, 11) \
+    PARSE_R_IFC_ABI_REG(t0, 12) PARSE_R_IFC_ABI_REG(t1, 13) \
+    PARSE_R_IFC_ABI_REG(t2, 14) PARSE_R_IFC_ABI_REG(t3, 15) \
+    PARSE_R_IFC_ABI_REG(t4, 16) PARSE_R_IFC_ABI_REG(t5, 17) \
+    PARSE_R_IFC_ABI_REG(t6, 18) PARSE_R_IFC_ABI_REG(t7, 19) \
+    PARSE_R_IFC_ABI_REG(t8, 20) PARSE_R_IFC_ABI_REG(x, 21) \
+    PARSE_R_IFC_ABI_REG(fp, 22) PARSE_R_IFC_ABI_REG(s0, 23) \
+    PARSE_R_IFC_ABI_REG(s1, 24) PARSE_R_IFC_ABI_REG(s2, 25) \
+    PARSE_R_IFC_ABI_REG(s3, 26) PARSE_R_IFC_ABI_REG(s4, 27) \
+    PARSE_R_IFC_ABI_REG(s5, 28) PARSE_R_IFC_ABI_REG(s6, 29) \
+    PARSE_R_IFC_ABI_REG(s7, 30) PARSE_R_IFC_ABI_REG(s8, 31) \
     ".iflt \\var\n\t"                         \
     ".error \"Unable to parse register name \\r\"\n\t" \
     ".endif\n\t"                                \
