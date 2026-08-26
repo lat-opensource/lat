@@ -3224,6 +3224,39 @@ void cpu_x86_xrstor(CPUX86State *env, target_ulong ptr)
 }
 
 #ifdef CONFIG_LATX
+void cpu_x86_canonicalize_latx_mmx_state(CPUX86State *env)
+{
+    int i;
+
+    if (env->mode_fpu) {
+        return;
+    }
+
+    env->fpstt = 0;
+    memset(env->fptags, 0, sizeof(env->fptags));
+    for (i = 0; i < 8; i++) {
+        CPU_LDoubleU reg = { .d = env->fpregs[i].d };
+
+        reg.l.upper = 0xffff;
+        env->fpregs[i].d = reg.d;
+    }
+}
+
+static bool latx_x87_state_is_mmx(const CPUX86State *env)
+{
+    int i;
+
+    /* MMX sets every x87 tag valid and every physical exponent to 0xffff. */
+    for (i = 0; i < 8; i++) {
+        CPU_LDoubleU reg = { .d = env->fpregs[i].d };
+
+        if (env->fptags[i] || reg.l.upper != 0xffff) {
+            return false;
+        }
+    }
+    return true;
+}
+
 void cpu_x86_sync_latx_fcsr(CPUX86State *env)
 {
     static const uint8_t rounding_map[4] = { 0, 3, 2, 1 };
@@ -3247,6 +3280,11 @@ void cpu_x86_sync_latx_fcsr(CPUX86State *env)
     }
 
     env->fcsr = fcsr;
+}
+
+void cpu_x86_sync_latx_fpu_mode(CPUX86State *env)
+{
+    env->mode_fpu = !latx_x87_state_is_mmx(env);
 }
 #endif
 #endif
