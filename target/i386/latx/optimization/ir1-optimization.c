@@ -35,7 +35,7 @@ static void ir1_optimization_over_tb(TranslationBlock *tb)
     if (!tb->icount) {
         return;
     }
-    IR1_INST *ir1 = dt_X86_INS_INVALID;
+    IR1_INST *ir1 = NULL;
     /* cross scanning var defination */
     DEF_FLAG_RDTN(rdtn);
     DEF_INSTS_PTN(ptn);
@@ -105,7 +105,7 @@ void over_tb_rfd(TranslationBlock **tb_list, int tb_num)
 {
     TranslationBlock *tb;
     uint8_t  eflag_def[tb_num];
-    IR1_INST *ir1 = dt_X86_INS_INVALID;
+    IR1_INST *ir1 = NULL;
     for (int i = 0; i < tb_num; i++) {
         tb = tb_list[i];
         if (!tb->icount) {
@@ -152,7 +152,7 @@ void ir1_optimization(TranslationBlock *tb)
     if (!tb->icount) {
         return;
     }
-    IR1_INST *ir1 = dt_X86_INS_INVALID;
+    IR1_INST *ir1 = NULL;
     /* cross scanning var defination */
     DEF_FLAG_RDTN(rdtn);
     DEF_INSTS_PTN(ptn);

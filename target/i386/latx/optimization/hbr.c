@@ -754,7 +754,7 @@ static void tb_xmm_analyse(TranslationBlock *tb,
     tb->s_data->shbr_type = SHBR_NTYPE;
     tb->s_data->xmm_use = 0;
     tb->s_data->xmm_def = 0;
-    IR1_INST *ir1 = dt_X86_INS_INVALID;
+    IR1_INST *ir1 = NULL;
     for (int i = 0; i < tb_ir1_num(tb); ++i) {
         ir1 = tb_ir1_inst(tb, i);
         ir1->xmm_def = 0;
@@ -844,7 +844,7 @@ static void over_tb_shbr_opt(TranslationBlock **tb_list, int tb_num_in_tu,
     for (int i = 0; i < tb_num_in_tu; i++) {
         TranslationBlock *tb = tb_list[i];
         if (tb->s_data->shbr_type != SHBR_NTYPE) {
-            IR1_INST *ir1 = dt_X86_INS_INVALID;
+            IR1_INST *ir1 = NULL;
             uint32_t no_opt_xmm = tb->s_data->xmm_out & SHBR_XMM_MASK;
             for (int j = tb_ir1_num(tb) - 1; j >= 0; j--) {
                 /* fprintf(stderr, "%x\n", tb->s_data->xmm_out); */
@@ -923,7 +923,7 @@ static void clear_ir1_flag(TranslationBlock **tb_list, int tb_num_in_tu)
     for (int i = 0; i < tb_num_in_tu; i++) {
         TranslationBlock *tb = tb_list[i];
         if (tb->s_data->shbr_type != SHBR_NTYPE) {
-            IR1_INST *ir1 = dt_X86_INS_INVALID;
+            IR1_INST *ir1 = NULL;
             for (int j = 0; j < tb_ir1_num(tb); j++) {
                 ir1 = tb_ir1_inst(tb, j);
                 ir1->hbr_flag = 0;

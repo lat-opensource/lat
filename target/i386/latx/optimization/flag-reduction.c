@@ -378,7 +378,7 @@ static bool flag_reduction_pass1(void *tb)
     time_t ti = profile_getclock();
 #endif
     TranslationBlock *ptb = (TranslationBlock *)tb;
-    IR1_INST *pir1 = dt_X86_INS_INVALID;
+    IR1_INST *pir1 = NULL;
 
     /* scanning if this insts will def ALL_EFLAGS */
     for (int i = tb_ir1_num(ptb) - 1; i >= 0; --i) {
