@@ -28,6 +28,7 @@
  * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 #include "qemu/osdep.h"
+#include "qemu/bswap.h"
 #include "crypto/aes.h"
 
 typedef uint32_t u32;
@@ -660,6 +661,24 @@ const uint32_t AES_Te3[256] = {
     0x4141c382U, 0x9999b029U, 0x2d2d775aU, 0x0f0f111eU,
     0xb0b0cb7bU, 0x5454fca8U, 0xbbbbd66dU, 0x16163a2cU,
 };
+
+uint32_t AES_Te_latx[256][4];
+uint32_t AES_sbox_latx[256][4];
+
+static void __attribute__((constructor)) aes_init_latx_te(void)
+{
+    for (int i = 0; i < 256; i++) {
+        AES_Te_latx[i][0] = bswap32(AES_Te0[i]);
+        AES_Te_latx[i][1] = bswap32(AES_Te1[i]);
+        AES_Te_latx[i][2] = bswap32(AES_Te2[i]);
+        AES_Te_latx[i][3] = bswap32(AES_Te3[i]);
+        AES_sbox_latx[i][0] = (uint32_t)AES_sbox[i];
+        AES_sbox_latx[i][1] = (uint32_t)AES_sbox[i] << 8;
+        AES_sbox_latx[i][2] = (uint32_t)AES_sbox[i] << 16;
+        AES_sbox_latx[i][3] = (uint32_t)AES_sbox[i] << 24;
+    }
+}
+
 const uint32_t AES_Te4[256] = {
     0x63636363U, 0x7c7c7c7cU, 0x77777777U, 0x7b7b7b7bU,
     0xf2f2f2f2U, 0x6b6b6b6bU, 0x6f6f6f6fU, 0xc5c5c5c5U,

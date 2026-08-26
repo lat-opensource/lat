@@ -3770,48 +3770,60 @@ bool translate_pclmulqdq(IR1_INST * pir1) {
 
 static void aes_load_te0(IR2_OPND value, IR2_OPND index,
                          IR2_OPND table, IR2_OPND state,
-                         int byte_shift, int rotate)
+                         int byte_shift, int column)
 {
     la_bstrpick_d(index, state, byte_shift + 7, byte_shift);
-    /* IR2 ALSL encodes shift-1, so 1 means index * sizeof(uint32_t). */
-    la_alsl_d(index, index, table, 1);
-    la_ld_wu(value, index, 0);
-    if (rotate) {
-        la_rotri_w(value, value, rotate);
+    /* IR2 ALSL encodes shift-1, so 3 means a 16-byte table row. */
+    la_alsl_d(index, index, table, 3);
+    la_ld_wu(value, index, column * sizeof(uint32_t));
+}
+
+static void aes_load_table_once(IR2_OPND table, ADDR address,
+                                enum aot_rel_kind rel_kind, uint8_t kind)
+{
+    TRANSLATION_DATA *t = lsenv->tr_data;
+    int reg = ir2_opnd_base_reg_num(&table);
+
+    if (t->aes_table_kind != kind || t->aes_table_reg != reg) {
+        aot_load_host_addr(table, address, rel_kind, 0);
+        t->aes_table_reg = reg;
+        t->aes_table_kind = kind;
     }
 }
 
 static void gen_aesenc_ir2(IR2_OPND dest, IR2_OPND key)
 {
-    IR2_OPND state[4];
+    IR2_OPND state[2];
     IR2_OPND table = ra_alloc_itemp();
     IR2_OPND index = ra_alloc_itemp();
     IR2_OPND result = ra_alloc_itemp();
 
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < 2; i++) {
         state[i] = ra_alloc_itemp();
-        la_vpickve2gr_wu(state[i], dest, i);
+        la_vpickve2gr_du(state[i], dest, i);
     }
-    aot_load_host_addr(table, (ADDR)AES_Te0, LOAD_HOST_AES_TE0, 0);
+    aes_load_table_once(table, (ADDR)AES_Te_latx,
+                        LOAD_HOST_AES_TE_LATX, 1);
 
     for (int word = 0; word < 4; word++) {
-        aes_load_te0(result, index, table, state[word], 0, 0);
+        int src_word = word;
+
+        aes_load_te0(result, index, table, state[src_word >> 1],
+                     (src_word & 1) * 32, 0);
         for (int column = 1; column < 4; column++) {
+            src_word = (word + column) & 3;
             aes_load_te0(index, index, table,
-                         state[(word + column) & 3], column * 8,
-                         column * 8);
+                         state[src_word >> 1],
+                         (src_word & 1) * 32 + column * 8,
+                         column);
             la_xor(result, result, index);
         }
 
-        /* bswap32 before XORing the round key, matching AESENC semantics. */
-        la_revb_2h(result, result);
-        la_rotri_w(result, result, 16);
-        la_vpickve2gr_wu(index, key, word);
-        la_xor(result, result, index);
         la_vinsgr2vr_w(dest, result, word);
     }
+    la_vxor_v(dest, dest, key);
 
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < 2; i++) {
         ra_free_temp(state[i]);
     }
     ra_free_temp(table);
@@ -3821,41 +3833,45 @@ static void gen_aesenc_ir2(IR2_OPND dest, IR2_OPND key)
 
 static void aes_load_sbox(IR2_OPND value, IR2_OPND index,
                           IR2_OPND table, IR2_OPND state,
-                          int byte_shift)
+                          int byte_shift, int column)
 {
     la_bstrpick_d(index, state, byte_shift + 7, byte_shift);
-    la_add_d(index, index, table);
-    la_ld_bu(value, index, 0);
+    la_alsl_d(index, index, table, 3);
+    la_ld_wu(value, index, column * sizeof(uint32_t));
 }
 
 static void gen_aesenclast_ir2(IR2_OPND dest, IR2_OPND key)
 {
-    IR2_OPND state[4];
+    IR2_OPND state[2];
     IR2_OPND table = ra_alloc_itemp();
     IR2_OPND index = ra_alloc_itemp();
     IR2_OPND result = ra_alloc_itemp();
 
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < 2; i++) {
         state[i] = ra_alloc_itemp();
-        la_vpickve2gr_wu(state[i], dest, i);
+        la_vpickve2gr_du(state[i], dest, i);
     }
-    aot_load_host_addr(table, (ADDR)AES_sbox, LOAD_HOST_AES_SBOX, 0);
+    aes_load_table_once(table, (ADDR)AES_sbox_latx,
+                        LOAD_HOST_AES_SBOX_LATX, 2);
 
     for (int word = 0; word < 4; word++) {
-        aes_load_sbox(result, index, table, state[word], 0);
+        int src_word = word;
+
+        aes_load_sbox(result, index, table, state[src_word >> 1],
+                      (src_word & 1) * 32, 0);
         for (int byte = 1; byte < 4; byte++) {
+            src_word = (word + byte) & 3;
             aes_load_sbox(index, index, table,
-                          state[(word + byte) & 3], byte * 8);
-            la_slli_w(index, index, byte * 8);
+                          state[src_word >> 1],
+                          (src_word & 1) * 32 + byte * 8, byte);
             la_or(result, result, index);
         }
 
-        la_vpickve2gr_wu(index, key, word);
-        la_xor(result, result, index);
         la_vinsgr2vr_w(dest, result, word);
     }
+    la_vxor_v(dest, dest, key);
 
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < 2; i++) {
         ra_free_temp(state[i]);
     }
     ra_free_temp(table);
@@ -3949,6 +3965,8 @@ static void load_aes_key_from_mem(IR2_OPND key, IR1_OPND *mem)
     la_vld(key, address, offset);
     /* AES needs every x86-64 itemp; the emitted load no longer needs this. */
     ra_free_temp_auto(address);
+    /* convert_mem may reuse the GPR holding the cached AES table address. */
+    lsenv->tr_data->aes_table_kind = 0;
 }
 
 bool translate_aesenc(IR1_INST *pir1)
