@@ -1935,7 +1935,9 @@ void cpu_x86_fxrstor(CPUX86State *s, target_ulong ptr);
 void cpu_x86_xsave(CPUX86State *s, target_ulong ptr);
 void cpu_x86_xrstor(CPUX86State *s, target_ulong ptr);
 #ifdef CONFIG_LATX
+void cpu_x86_canonicalize_latx_mmx_state(CPUX86State *s);
 void cpu_x86_sync_latx_fcsr(CPUX86State *s);
+void cpu_x86_sync_latx_fpu_mode(CPUX86State *s);
 #endif
 
 /* you can call this signal handler from your SIGBUS and SIGSEGV
