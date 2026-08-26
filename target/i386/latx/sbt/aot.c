@@ -1269,6 +1269,7 @@ static void* relkind_to_fixup_addr[] = {
     [LOAD_HELPER_AESDECLAST_XMM] = helper_aesdeclast_xmm,
     [LOAD_HOST_AES_TE_LATX] = (void *)AES_Te_latx,
     [LOAD_HOST_AES_SBOX_LATX] = (void *)AES_sbox_latx,
+    [LOAD_HOST_AES_VPAES_LASX] = (void *)AES_vpaes_lasx,
     [LOAD_HELPER_SHA1NEXTE] = helper_sha1nexte,
     [LOAD_HELPER_SHA1MSG1] = helper_sha1msg1,
     [LOAD_HELPER_SHA1MSG2] = helper_sha1msg2,

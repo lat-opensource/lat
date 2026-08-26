@@ -5964,45 +5964,35 @@ bool translate_vaesenc(IR1_INST *pir1)
     int d = ir1_opnd_base_reg_num(opnd0);
     int s1 = ir1_opnd_base_reg_num(opnd1);
 
-    if (!ir1_opnd_is_ymm(opnd0)) {
-        return translate_vaes_xmm_ir2(pir1, false);
-    }
-
-    ADDR helper_func;
-    int helper_kind;
-
-    helper_func = (ADDR)helper_vaesenc_ymm;
-    helper_kind = LOAD_HELPER_VAESENC_YMM;
-
-    if (!ir1_opnd_is_mem(opnd2)) {
-        int s2 = ir1_opnd_base_reg_num(opnd2);
-        tr_gen_call_to_helper_aes((ADDR)helper_func, d, s1, s2,
-                helper_kind);
-    } else {
-        int s2 = 0;
-        while (s2 < 8) {
-            if (s2 != d && s2 != s1) {
-                break;
-            }
-            s2++;
-        }
-        IR2_OPND temp = ra_alloc_ftemp();
-        IR2_OPND src = ra_alloc_xmm(s2);
-        la_xvor_v(temp, src, src);
-        if (ir1_opnd_size(opnd2) == 128) {
-            load_freg128_from_ir1_mem(src, opnd2);
+    if (ir1_opnd_is_ymm(opnd0)) {
+        IR2_OPND dest = ra_alloc_xmm(d);
+        IR2_OPND src1 = load_freg256_from_ir1(opnd1);
+        IR2_OPND src2;
+        bool src2_is_temp = false;
+        if (ir1_opnd_is_mem(opnd2)) {
+            src2 = ra_alloc_ftemp();
+            load_freg256_from_ir1_mem(src2, opnd2);
+            src2_is_temp = true;
         } else {
-            load_freg256_from_ir1_mem(src, opnd2);
+            src2 = load_freg256_from_ir1(opnd2);
+            if (ir1_opnd_base_reg_num(opnd2) == d) {
+                IR2_OPND key = ra_alloc_ftemp();
+                la_xvor_v(key, src2, src2);
+                src2 = key;
+                src2_is_temp = true;
+            }
         }
-        tr_gen_call_to_helper_aes((ADDR)helper_func, d, s1, s2,
-                helper_kind);
-        la_xvor_v(src, temp, temp);
+        if (d != s1) {
+            la_xvor_v(dest, src1, src1);
+        }
+        gen_vaesenc_lasx_ir2(dest, src2, false);
+        if (src2_is_temp) {
+            ra_free_temp(src2);
+        }
+        return true;
     }
-    if (!ir1_opnd_is_ymm(opnd0)) {
-        set_high128_xreg_to_zero(ra_alloc_xmm(d));
-    }
-    /* TODO: need to check */
-    return true;
+
+    return translate_vaes_xmm_ir2(pir1, false);
 }
 
 bool translate_vaesenclast(IR1_INST *pir1)
@@ -6021,45 +6011,35 @@ bool translate_vaesenclast(IR1_INST *pir1)
     int d = ir1_opnd_base_reg_num(opnd0);
     int s1 = ir1_opnd_base_reg_num(opnd1);
 
-    if (!ir1_opnd_is_ymm(opnd0)) {
-        return translate_vaes_xmm_ir2(pir1, true);
-    }
-
-    ADDR helper_func;
-    int helper_kind;
-
-    helper_func = (ADDR)helper_vaesenclast_ymm;
-    helper_kind = LOAD_HELPER_VAESENCLAST_YMM;
-
-    if (!ir1_opnd_is_mem(opnd2)) {
-        int s2 = ir1_opnd_base_reg_num(opnd2);
-        tr_gen_call_to_helper_aes((ADDR)helper_func, d, s1, s2,
-                helper_kind);
-    } else {
-        int s2 = 0;
-        while (s2 < 8) {
-            if (s2 != d && s2 != s1) {
-                break;
-            }
-            s2++;
-        }
-        IR2_OPND temp = ra_alloc_ftemp();
-        IR2_OPND src = ra_alloc_xmm(s2);
-        la_xvor_v(temp, src, src);
-        if (ir1_opnd_size(opnd2) == 128) {
-            load_freg128_from_ir1_mem(src, opnd2);
+    if (ir1_opnd_is_ymm(opnd0)) {
+        IR2_OPND dest = ra_alloc_xmm(d);
+        IR2_OPND src1 = load_freg256_from_ir1(opnd1);
+        IR2_OPND src2;
+        bool src2_is_temp = false;
+        if (ir1_opnd_is_mem(opnd2)) {
+            src2 = ra_alloc_ftemp();
+            load_freg256_from_ir1_mem(src2, opnd2);
+            src2_is_temp = true;
         } else {
-            load_freg256_from_ir1_mem(src, opnd2);
+            src2 = load_freg256_from_ir1(opnd2);
+            if (ir1_opnd_base_reg_num(opnd2) == d) {
+                IR2_OPND key = ra_alloc_ftemp();
+                la_xvor_v(key, src2, src2);
+                src2 = key;
+                src2_is_temp = true;
+            }
         }
-        tr_gen_call_to_helper_aes((ADDR)helper_func, d, s1, s2,
-                helper_kind);
-        la_xvor_v(src, temp, temp);
+        if (d != s1) {
+            la_xvor_v(dest, src1, src1);
+        }
+        gen_vaesenc_lasx_ir2(dest, src2, true);
+        if (src2_is_temp) {
+            ra_free_temp(src2);
+        }
+        return true;
     }
-    if (!ir1_opnd_is_ymm(opnd0)) {
-        set_high128_xreg_to_zero(ra_alloc_xmm(d));
-    }
-    /* TODO: need to check */
-    return true;
+
+    return translate_vaes_xmm_ir2(pir1, true);
 }
 
 bool translate_vaesimc(IR1_INST *pir1)

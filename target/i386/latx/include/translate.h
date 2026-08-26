@@ -1449,6 +1449,9 @@ TRANS_FUNC_DEF(aeskeygenassist);
 
 void gen_aesenc_ir2(IR2_OPND dest, IR2_OPND key);
 void gen_aesenclast_ir2(IR2_OPND dest, IR2_OPND key);
+void gen_aesenc_ir2_no_key(IR2_OPND dest);
+void gen_aesenclast_ir2_no_key(IR2_OPND dest);
+void gen_vaesenc_lasx_ir2(IR2_OPND dest, IR2_OPND key, bool is_last);
 void load_aes_key_from_mem(IR2_OPND key, IR1_OPND *mem);
 
 #ifdef CONFIG_LATX_AVX_OPT

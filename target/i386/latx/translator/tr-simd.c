@@ -3791,7 +3791,7 @@ static void aes_load_table_once(IR2_OPND table, ADDR address,
     }
 }
 
-void gen_aesenc_ir2(IR2_OPND dest, IR2_OPND key)
+void gen_aesenc_ir2_no_key(IR2_OPND dest)
 {
     IR2_OPND state[2];
     IR2_OPND table = ra_alloc_itemp();
@@ -3821,14 +3821,18 @@ void gen_aesenc_ir2(IR2_OPND dest, IR2_OPND key)
 
         la_vinsgr2vr_w(dest, result, word);
     }
-    la_vxor_v(dest, dest, key);
-
     for (int i = 0; i < 2; i++) {
         ra_free_temp(state[i]);
     }
     ra_free_temp(table);
     ra_free_temp(index);
     ra_free_temp(result);
+}
+
+void gen_aesenc_ir2(IR2_OPND dest, IR2_OPND key)
+{
+    gen_aesenc_ir2_no_key(dest);
+    la_vxor_v(dest, dest, key);
 }
 
 static void aes_load_sbox(IR2_OPND value, IR2_OPND index,
@@ -3840,7 +3844,7 @@ static void aes_load_sbox(IR2_OPND value, IR2_OPND index,
     la_ld_wu(value, index, column * sizeof(uint32_t));
 }
 
-void gen_aesenclast_ir2(IR2_OPND dest, IR2_OPND key)
+void gen_aesenclast_ir2_no_key(IR2_OPND dest)
 {
     IR2_OPND state[2];
     IR2_OPND table = ra_alloc_itemp();
@@ -3869,14 +3873,123 @@ void gen_aesenclast_ir2(IR2_OPND dest, IR2_OPND key)
 
         la_vinsgr2vr_w(dest, result, word);
     }
-    la_vxor_v(dest, dest, key);
-
     for (int i = 0; i < 2; i++) {
         ra_free_temp(state[i]);
     }
     ra_free_temp(table);
     ra_free_temp(index);
     ra_free_temp(result);
+}
+
+void gen_aesenclast_ir2(IR2_OPND dest, IR2_OPND key)
+{
+    gen_aesenclast_ir2_no_key(dest);
+    la_vxor_v(dest, dest, key);
+}
+
+enum {
+    VPAES_INV,
+    VPAES_INVA,
+    VPAES_IPT_LO,
+    VPAES_IPT_HI,
+    VPAES_SBO_U,
+    VPAES_SBO_T,
+    VPAES_SR1,
+};
+
+static void vpaes_load_lasx_const(IR2_OPND dest, IR2_OPND base, int index)
+{
+    la_xvld(dest, base, index * 32);
+}
+
+static void vpaes_lasx_shuf(IR2_OPND dest, IR2_OPND table,
+                            IR2_OPND index, IR2_OPND zero)
+{
+    la_xvshuf_b(dest, zero, table, index);
+}
+
+void gen_vaesenc_lasx_ir2(IR2_OPND dest, IR2_OPND key, bool is_last)
+{
+    IR2_OPND base = ra_alloc_itemp();
+    IR2_OPND zero = ra_alloc_ftemp();
+    IR2_OPND mask = ra_alloc_ftemp();
+    IR2_OPND hi = ra_alloc_ftemp();
+    IR2_OPND lo = ra_alloc_ftemp();
+    IR2_OPND temp = ra_alloc_ftemp();
+    IR2_OPND aux = ra_alloc_ftemp();
+
+    aes_load_table_once(base, (ADDR)AES_vpaes_lasx,
+                        LOAD_HOST_AES_VPAES_LASX, 3);
+    la_xvxor_v(zero, zero, zero);
+    la_xvldi(mask, 0x0f);
+
+    la_xvsrli_b(hi, dest, 4);
+    la_xvand_v(lo, dest, mask);
+    vpaes_load_lasx_const(temp, base, VPAES_IPT_LO);
+    vpaes_lasx_shuf(temp, temp, lo, zero);
+    vpaes_load_lasx_const(aux, base, VPAES_IPT_HI);
+    vpaes_lasx_shuf(aux, aux, hi, zero);
+    la_xvxor_v(dest, temp, aux);
+
+    la_xvsrli_b(hi, dest, 4);
+    la_xvand_v(lo, dest, mask);
+
+    vpaes_load_lasx_const(temp, base, VPAES_INVA);
+    vpaes_lasx_shuf(dest, temp, lo, zero);
+    la_xvxor_v(mask, lo, hi);
+
+    vpaes_load_lasx_const(temp, base, VPAES_INV);
+    vpaes_lasx_shuf(temp, temp, hi, zero);
+    la_xvxor_v(temp, temp, dest);
+
+    vpaes_load_lasx_const(lo, base, VPAES_INV);
+    vpaes_lasx_shuf(lo, lo, mask, zero);
+    la_xvxor_v(lo, lo, dest);
+
+    vpaes_load_lasx_const(dest, base, VPAES_INV);
+    vpaes_lasx_shuf(dest, dest, temp, zero);
+    la_xvxor_v(dest, dest, mask);
+
+    vpaes_load_lasx_const(temp, base, VPAES_INV);
+    vpaes_lasx_shuf(temp, temp, lo, zero);
+    la_xvxor_v(temp, temp, hi);
+
+    vpaes_load_lasx_const(lo, base, VPAES_SBO_U);
+    vpaes_lasx_shuf(lo, lo, dest, zero);
+    vpaes_load_lasx_const(mask, base, VPAES_SBO_T);
+    vpaes_lasx_shuf(mask, mask, temp, zero);
+    la_xvxor_v(dest, lo, mask);
+    la_xvxori_b(dest, dest, 0x63);
+
+    vpaes_load_lasx_const(temp, base, VPAES_SR1);
+    vpaes_lasx_shuf(dest, dest, temp, zero);
+
+    if (!is_last) {
+        la_xvshuf4i_b(mask, dest, 0x39);
+        la_xvshuf4i_b(hi, dest, 0x4e);
+        la_xvshuf4i_b(lo, dest, 0x93);
+
+        la_xvxor_v(temp, dest, mask);
+        la_xvxor_v(temp, temp, hi);
+        la_xvxor_v(temp, temp, lo);
+        la_xvxor_v(mask, dest, mask);
+        la_xvslli_b(hi, mask, 1);
+        la_xvsrai_b(lo, mask, 7);
+        la_xvldi(mask, 0x1b);
+        la_xvand_v(lo, lo, mask);
+        la_xvxor_v(hi, hi, lo);
+        la_xvxor_v(dest, dest, temp);
+        la_xvxor_v(dest, dest, hi);
+    }
+    la_xvxor_v(dest, dest, key);
+
+    ra_free_temp(base);
+    ra_free_temp(zero);
+    ra_free_temp(mask);
+    ra_free_temp(hi);
+    ra_free_temp(lo);
+    ra_free_temp(temp);
+    ra_free_temp(aux);
 }
 
 bool translate_aesdec(IR1_INST *pir1)

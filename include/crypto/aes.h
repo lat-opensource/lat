@@ -63,5 +63,6 @@ extern const uint32_t AES_Td0[256], AES_Td1[256], AES_Td2[256],
 /* Pre-byte-swapped, interleaved encryption tables for LATX AES IR2. */
 extern uint32_t AES_Te_latx[256][4];
 extern uint32_t AES_sbox_latx[256][4];
+extern const uint8_t AES_vpaes_lasx[7][32];
 
 #endif
