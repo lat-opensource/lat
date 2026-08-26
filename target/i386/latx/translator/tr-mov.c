@@ -1390,11 +1390,14 @@ bool translate_lea(IR1_INST *pir1)
 {
     IR1_OPND *op0 = ir1_get_opnd(pir1, 0);
     IR1_OPND *op1 = ir1_get_opnd(pir1, 1);
+    IR1_OPND addr = *op1;
     int op0_size = ir1_opnd_size(op0);
     int op0_gpr_num = ir1_opnd_base_reg_num(op0);
     IR2_OPND dest_op = ra_alloc_gpr(op0_gpr_num);
 
-    convert_mem_to_specific_gpr(op1, dest_op, op0_size);
+    /* LEA computes only the effective offset; segment bases are ignored. */
+    addr.mem.segment = dt_X86_REG_INVALID;
+    convert_mem_to_specific_gpr(&addr, dest_op, op0_size);
 
     return true;
 }
