@@ -685,7 +685,10 @@ void setup_frame(int sig, struct target_sigaction *ka,
 
     unlock_user_struct(frame, frame_addr, 1);
 
-    cpu_x86_init_user_x87(env);
+    cpu_x86_init_user_fpstate(env);
+#ifdef CONFIG_LATX
+    load_xmm_from_env(env);
+#endif
 
     return;
 
@@ -788,7 +791,10 @@ void setup_rt_frame(int sig, struct target_sigaction *ka,
 
     unlock_user_struct(frame, frame_addr, 1);
 
-    cpu_x86_init_user_x87(env);
+    cpu_x86_init_user_fpstate(env);
+#ifdef CONFIG_LATX
+    load_xmm_from_env(env);
+#endif
 
     return;
 
