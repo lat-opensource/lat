@@ -57,7 +57,14 @@ typedef struct aot_header {
 #define CACHE_AOT_FILE      4
 #define HASH_AOT_FILE       8
     uint8_t aot_file_type;
+    uint8_t layout_line_log2;
+    uint8_t layout_set_log2;
+    uint8_t layout_ways;
+#define AOT_STATIC_LAYOUT_MAGIC 0x534c3149
+    uint32_t layout_magic;
 } aot_header;
+
+_Static_assert(sizeof(aot_header) == 56, "aot_header file format");
 
 typedef struct aot_file_info {
     void *p;
@@ -143,7 +150,13 @@ typedef struct aot_tb {
     uint16_t first_jmp_align;
     uint8_t last_ir1_type;
     uint8_t eflag_use;
-    int8_t canlink[2];
+    union {
+        int8_t canlink[2];
+        struct {
+            uint8_t layout_padding_lines;
+            uint8_t layout_reserved;
+        };
+    };
 } aot_tb;
 
 typedef enum aot_rel_kind {

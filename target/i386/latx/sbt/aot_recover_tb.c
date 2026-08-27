@@ -12,6 +12,7 @@
 #include "qemu/osdep.h"
 
 #include "aot_recover_tb.h"
+#include "aot_static_layout.h"
 #include "latx-options.h"
 #include "lsenv.h"
 #include "accel/tcg/internal.h"
@@ -25,6 +26,33 @@
 #endif
 
 #ifdef CONFIG_LATX_AOT
+
+#if defined(CONFIG_LATX_TU) && defined(CONFIG_LATX_TBMINI_ENABLE)
+static __thread bool aot_static_layout_stored;
+static __thread uint32_t aot_static_layout_line_size;
+
+static bool aot_static_layout_header_usable(const aot_header *header)
+{
+    uint32_t line_size;
+    uint32_t set_count;
+    uint32_t ways;
+
+    if (!aot_static_layout_get_l1i_geometry(&line_size, &set_count, &ways) ||
+        line_size != qemu_icache_linesize ||
+        !aot_static_layout_header_matches(header, line_size, set_count,
+                                          ways)) {
+        return false;
+    }
+    aot_static_layout_line_size = line_size;
+    return true;
+}
+
+static void aot_static_layout_destroy(void)
+{
+    aot_static_layout_stored = false;
+    aot_static_layout_line_size = 0;
+}
+#endif
 
 inline static void copy_code_to_buff(void *tb_buff, aot_tb *p_aot_tb) {
     assert(p_aot_tb->tu_size >= p_aot_tb->tb_cache_size);
@@ -211,6 +239,39 @@ static void recover_tb_range(target_ulong page, struct aot_tb *p_aot_tbs,
         }
 #if defined(CONFIG_LATX_TBMINI_ENABLE)
         int tb_num_in_tu = j - i;
+
+        if (aot_static_layout_stored) {
+            uintptr_t table = ROUND_UP((uintptr_t)tcg_ctx->code_gen_ptr,
+                                       CODE_GEN_ALIGN);
+            uintptr_t table_size = sizeof(struct TBMini) *
+                                   (tb_num_in_tu + 1);
+            uintptr_t code = ROUND_UP(table + table_size,
+                                      qemu_icache_linesize);
+            uintptr_t unpadded_end = ROUND_UP(code + p_aot_tbs[i].tu_size,
+                                              CODE_GEN_ALIGN);
+            size_t available = unpadded_end <
+                               (uintptr_t)tcg_ctx->code_gen_highwater ?
+                               (uintptr_t)tcg_ctx->code_gen_highwater -
+                               unpadded_end : 0;
+            uintptr_t padding;
+            uintptr_t planned_padding =
+                (uintptr_t)p_aot_tbs[i].layout_padding_lines *
+                aot_static_layout_line_size;
+
+            padding = aot_static_layout_stored_padding(
+                aot_buffer, &p_aot_tbs[i], aot_static_layout_line_size,
+                1U << ((aot_header *)aot_buffer)->layout_set_log2,
+                ((aot_header *)aot_buffer)->layout_ways, available);
+            if (planned_padding && !padding) {
+                aot_static_layout_stored = false;
+            }
+
+            assert((padding & (qemu_icache_linesize - 1)) == 0);
+            if (padding) {
+                qatomic_set(&tcg_ctx->code_gen_ptr,
+                            tcg_ctx->code_gen_ptr + padding);
+            }
+        }
         /* Reserve space for tu tbmin table. */
         TBMini *tbmini_ptr= (TBMini *)
             ROUND_UP((uintptr_t)tcg_ctx->code_gen_ptr, CODE_GEN_ALIGN);
@@ -317,12 +378,27 @@ inline int load_page_4(target_ulong pc, uint32_t cflags, seg_info *info)
 
 static int load_all_seg(uint32_t cflags, seg_info *info)
 {
+#if defined(CONFIG_LATX_TU) && defined(CONFIG_LATX_TBMINI_ENABLE)
+    bool static_layout = option_aot_static_layout;
+#endif
+
     info->seg_flag |= SEG_RUNNING;
+#if defined(CONFIG_LATX_TU) && defined(CONFIG_LATX_TBMINI_ENABLE)
+    if (static_layout) {
+        aot_static_layout_stored = aot_static_layout_header_usable(
+            info->buffer);
+    }
+#endif
     for (target_ulong addr = info->seg_begin; addr < info->seg_end;
             addr += TARGET_PAGE_SIZE) {
         load_page(addr, cflags, info);
     }
     try_aot_link();
+#if defined(CONFIG_LATX_TU) && defined(CONFIG_LATX_TBMINI_ENABLE)
+    if (static_layout) {
+        aot_static_layout_destroy();
+    }
+#endif
     return 1;
 }
 

@@ -25,6 +25,7 @@
 #include "aot_reader.h"
 #include "aot_merge.h"
 #include "aot_recover_tb.h"
+#include "aot_static_layout.h"
 #include "aot_smc.h"
 #include "aot_page.h"
 #include "../translator/tr-vpaes.h"
@@ -672,6 +673,11 @@ static long get_fileSize(FILE* file)
 
 static bool generated_aot_file;
 
+static bool fill_static_layout(aot_header *header, aot_segment *segments)
+{
+    return aot_static_layout_store_header(header, segments);
+}
+
 static int write_aot_file(int *lockfd, aot_header *p_header, uint32_t *p_insn, 
         uint32_t *insn_buffer, unsigned long total_code_cache_size,
         uint8_t *p_ir1, uint8_t *ir1_buffer, int ir1_size)
@@ -766,6 +772,10 @@ int do_generate_aot(int first_seg_in_lib, int end_seg_in_lib)
 
     p_header->aot_file_type =
         seg_info_vector[first_seg_in_lib]->aot_file_type;
+    p_header->layout_line_log2 = 0;
+    p_header->layout_set_log2 = 0;
+    p_header->layout_ways = 0;
+    p_header->layout_magic = 0;
 
     if (p_header->aot_file_type & (ELF_AOT_FILE | PE_AOT_FILE)) {
         struct stat statbuf;
@@ -802,6 +812,9 @@ int do_generate_aot(int first_seg_in_lib, int end_seg_in_lib)
     if(total_code_cache_size == 0) {
         free(p_header);
         return false;
+    }
+    if (option_aot_static_layout) {
+        fill_static_layout(p_header, p_segments);
     }
     /* fill relocation table */
     fill_rel_table(p_header);
