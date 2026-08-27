@@ -164,6 +164,8 @@ static void test_static_aot_store(void)
     g_assert(tbs[4].layout_padding_lines == 0);
     g_assert(tbs[5].layout_padding_lines > 0);
     g_assert(tbs[5].layout_padding_lines <= 4);
+    g_assert(tbs[5].layout_component != AOT_LAYOUT_COMPONENT_NONE);
+    g_assert(tbs[5].layout_flags & AOT_LAYOUT_MOVABLE);
 }
 
 static void test_static_stored_padding(void)
@@ -184,6 +186,46 @@ static void test_static_stored_padding(void)
                                               127) == 0);
 }
 
+static void test_static_lazy_placement(void)
+{
+    AOTStaticLazyLayout *layout = aot_static_lazy_layout_new(64, 8, 4, 640);
+
+    g_assert(layout);
+    g_assert(aot_static_lazy_layout_place(layout, 0, false, 0x1000,
+                                          0, 64, SIZE_MAX) == 0);
+    g_assert(aot_static_lazy_layout_place(layout, 0, false, 0x2000,
+                                          0, 64, SIZE_MAX) == 0);
+    g_assert(aot_static_lazy_layout_place(layout, 0, false, 0x3000,
+                                          0, 64, SIZE_MAX) == 0);
+    g_assert(aot_static_lazy_layout_place(layout, 0, false, 0x4000,
+                                          0, 64, SIZE_MAX) == 0);
+    g_assert(aot_static_lazy_layout_place(layout, 0, false, 0x5000,
+                                          0, 64, SIZE_MAX) == 0);
+    g_assert(aot_static_lazy_layout_place(layout, 0, true, 0x6000,
+                                          0, 64, SIZE_MAX) == 64);
+    g_assert(aot_static_lazy_layout_place(layout, 0, true, 0x6000,
+                                          0, 64, SIZE_MAX) == 0);
+    aot_static_lazy_layout_free(layout);
+}
+
+static void test_static_lazy_out_of_order(void)
+{
+    AOTStaticLazyLayout *layout = aot_static_lazy_layout_new(64, 8, 4, 640);
+
+    g_assert(layout);
+    g_assert(aot_static_lazy_layout_place(layout, 7, false, 0x4000,
+                                          0, 64, SIZE_MAX) == 0);
+    g_assert(aot_static_lazy_layout_place(layout, 7, false, 0x1000,
+                                          0, 64, SIZE_MAX) == 0);
+    g_assert(aot_static_lazy_layout_place(layout, 7, false, 0x3000,
+                                          0, 64, SIZE_MAX) == 0);
+    g_assert(aot_static_lazy_layout_place(layout, 7, false, 0x2000,
+                                          0, 64, SIZE_MAX) == 0);
+    g_assert(aot_static_lazy_layout_place(layout, 7, true, 0x5000,
+                                          0, 64, 0) == 0);
+    aot_static_lazy_layout_free(layout);
+}
+
 int main(int argc, char **argv)
 {
     g_test_init(&argc, &argv, NULL);
@@ -199,5 +241,9 @@ int main(int argc, char **argv)
                     test_static_aot_store);
     g_test_add_func("/latx/aot-static-layout/stored-padding",
                     test_static_stored_padding);
+    g_test_add_func("/latx/aot-static-layout/lazy-placement",
+                    test_static_lazy_placement);
+    g_test_add_func("/latx/aot-static-layout/lazy-out-of-order",
+                    test_static_lazy_out_of_order);
     return g_test_run();
 }
