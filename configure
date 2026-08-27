@@ -5685,6 +5685,9 @@ if test "$latx" = "yes" ; then
     echo "CONFIG_LATX_KZT=y" >> $config_host_mak
   fi
   echo "CONFIG_LATX=y" >> $config_host_mak
+  if test "$target_list" = "x86_64-linux-user" ; then
+    echo "CONFIG_LATX_X86_64=y" >> $config_host_mak
+  fi
   if test "$debug" = "yes" ; then
     echo "CONFIG_LATX_DEBUG=y" >> $config_host_mak
   else
