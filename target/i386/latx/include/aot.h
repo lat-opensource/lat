@@ -96,6 +96,7 @@ typedef struct aot_segment {
     uint32_t segment_tbs_num;
     /* Offset of page_table in AOT. */
     uint32_t page_table_offset;
+    uint32_t layout_padding_budget[2];
     uint8_t aot_file_type;
 } aot_segment;
 
@@ -150,13 +151,12 @@ typedef struct aot_tb {
     uint16_t first_jmp_align;
     uint8_t last_ir1_type;
     uint8_t eflag_use;
-    union {
-        int8_t canlink[2];
-        struct {
-            uint8_t layout_padding_lines;
-            uint8_t layout_reserved;
-        };
-    };
+    int8_t canlink[2];
+#define AOT_LAYOUT_COMPONENT_NONE UINT16_MAX
+    uint16_t layout_component;
+    uint8_t layout_padding_lines;
+#define AOT_LAYOUT_MOVABLE 0x1
+    uint8_t layout_flags;
 } aot_tb;
 
 typedef enum aot_rel_kind {

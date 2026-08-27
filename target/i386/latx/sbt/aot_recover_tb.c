@@ -30,6 +30,34 @@
 #if defined(CONFIG_LATX_TU) && defined(CONFIG_LATX_TBMINI_ENABLE)
 static __thread bool aot_static_layout_stored;
 static __thread uint32_t aot_static_layout_line_size;
+static __thread uint32_t aot_static_layout_set_count;
+static __thread uint32_t aot_static_layout_ways;
+static __thread AOTStaticLazyLayout *aot_static_lazy_current;
+static __thread GHashTable *aot_static_lazy_states[2];
+static __thread unsigned aot_static_lazy_flush_count;
+
+typedef struct AOTLazyState {
+    AOTStaticLazyLayout *layout;
+    const void *buffer;
+} AOTLazyState;
+
+static void aot_lazy_state_free(gpointer data)
+{
+    AOTLazyState *state = data;
+
+    aot_static_lazy_layout_free(state->layout);
+    g_free(state);
+}
+
+static void aot_static_lazy_reset(void)
+{
+    for (uint32_t i = 0; i < G_N_ELEMENTS(aot_static_lazy_states); i++) {
+        if (aot_static_lazy_states[i]) {
+            g_hash_table_remove_all(aot_static_lazy_states[i]);
+        }
+    }
+    aot_static_lazy_current = NULL;
+}
 
 static bool aot_static_layout_header_usable(const aot_header *header)
 {
@@ -44,13 +72,57 @@ static bool aot_static_layout_header_usable(const aot_header *header)
         return false;
     }
     aot_static_layout_line_size = line_size;
+    aot_static_layout_set_count = set_count;
+    aot_static_layout_ways = ways;
     return true;
+}
+
+static AOTStaticLazyLayout *aot_static_lazy_get(seg_info *info,
+                                                uint32_t cflags)
+{
+    aot_segment *segment = info->p_segment;
+    aot_header *header = info->buffer;
+    uint32_t parallel = cflags & CF_PARALLEL ? 1 : 0;
+    unsigned flush_count = qatomic_read(&tb_ctx.tb_flush_count);
+    GHashTable *states;
+    AOTLazyState *state;
+
+    if (!aot_static_layout_header_usable(header)) {
+        return NULL;
+    }
+    if (aot_static_lazy_flush_count != flush_count) {
+        aot_static_lazy_reset();
+        aot_static_lazy_flush_count = flush_count;
+    }
+    states = aot_static_lazy_states[parallel];
+    if (!states) {
+        states = g_hash_table_new_full(g_direct_hash, g_direct_equal, NULL,
+                                       aot_lazy_state_free);
+        aot_static_lazy_states[parallel] = states;
+    }
+    state = g_hash_table_lookup(states, segment);
+    if (state && state->buffer != info->buffer) {
+        g_hash_table_remove(states, segment);
+        state = NULL;
+    }
+    if (!state) {
+        state = g_new0(AOTLazyState, 1);
+        state->layout = aot_static_lazy_layout_new(
+            aot_static_layout_line_size, aot_static_layout_set_count,
+            aot_static_layout_ways,
+            segment->layout_padding_budget[parallel]);
+        state->buffer = info->buffer;
+        g_hash_table_insert(states, segment, state);
+    }
+    return state->layout;
 }
 
 static void aot_static_layout_destroy(void)
 {
     aot_static_layout_stored = false;
     aot_static_layout_line_size = 0;
+    aot_static_layout_set_count = 0;
+    aot_static_layout_ways = 0;
 }
 #endif
 
@@ -239,8 +311,9 @@ static void recover_tb_range(target_ulong page, struct aot_tb *p_aot_tbs,
         }
 #if defined(CONFIG_LATX_TBMINI_ENABLE)
         int tb_num_in_tu = j - i;
+        target_ulong tu_guest = start + p_aot_tbs[i].offset_in_segment;
 
-        if (aot_static_layout_stored) {
+        if (aot_static_layout_stored || aot_static_lazy_current) {
             uintptr_t table = ROUND_UP((uintptr_t)tcg_ctx->code_gen_ptr,
                                        CODE_GEN_ALIGN);
             uintptr_t table_size = sizeof(struct TBMini) *
@@ -254,16 +327,24 @@ static void recover_tb_range(target_ulong page, struct aot_tb *p_aot_tbs,
                                (uintptr_t)tcg_ctx->code_gen_highwater -
                                unpadded_end : 0;
             uintptr_t padding;
-            uintptr_t planned_padding =
-                (uintptr_t)p_aot_tbs[i].layout_padding_lines *
-                aot_static_layout_line_size;
+            if (aot_static_layout_stored) {
+                uintptr_t planned_padding =
+                    (uintptr_t)p_aot_tbs[i].layout_padding_lines *
+                    aot_static_layout_line_size;
 
-            padding = aot_static_layout_stored_padding(
-                aot_buffer, &p_aot_tbs[i], aot_static_layout_line_size,
-                1U << ((aot_header *)aot_buffer)->layout_set_log2,
-                ((aot_header *)aot_buffer)->layout_ways, available);
-            if (planned_padding && !padding) {
-                aot_static_layout_stored = false;
+                padding = aot_static_layout_stored_padding(
+                    aot_buffer, &p_aot_tbs[i], aot_static_layout_line_size,
+                    aot_static_layout_set_count, aot_static_layout_ways,
+                    available);
+                if (planned_padding && !padding) {
+                    aot_static_layout_stored = false;
+                }
+            } else {
+                padding = aot_static_lazy_layout_place(
+                    aot_static_lazy_current,
+                    p_aot_tbs[i].layout_component,
+                    p_aot_tbs[i].layout_flags & AOT_LAYOUT_MOVABLE,
+                    tu_guest, code, p_aot_tbs[i].tu_size, available);
             }
 
             assert((padding & (qemu_icache_linesize - 1)) == 0);
@@ -466,7 +547,13 @@ inline int load_page(target_ulong pc, uint32_t cflags, seg_info *info)
 
     tcg_ctx->tb_cflags = cflags;
 
-    recover_tb_range(p1, p_aot_tbs, tb_num_in_page, info->seg_begin, info->seg_end);
+    AOTStaticLazyLayout *previous_layout = aot_static_lazy_current;
+
+    aot_static_lazy_current = option_aot == 1 && option_aot_static_layout ?
+        aot_static_lazy_get(info, cflags) : NULL;
+    recover_tb_range(p1, p_aot_tbs, tb_num_in_page, info->seg_begin,
+                     info->seg_end);
+    aot_static_lazy_current = previous_layout;
     return 1;
 }
 

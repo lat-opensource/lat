@@ -495,6 +495,8 @@ static bool merge_aot_generate(void)
         p_segments[i].lib_name_offset =
             (uintptr_t)last_name - (uintptr_t)p_header;
         p_segments[i].segment_tbs_num = 0;
+        p_segments[i].layout_padding_budget[0] = 0;
+        p_segments[i].layout_padding_budget[1] = 0;
         p_segments[i].page_table_offset = 
             (uintptr_t)(aot_page_table + page_index) - (uintptr_t)p_header;
         page_index += (curr_seg_info->seg_end - curr_seg_info->seg_begin

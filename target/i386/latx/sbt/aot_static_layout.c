@@ -25,6 +25,17 @@ struct AOTStaticLayout {
     size_t padding_used;
 };
 
+struct AOTStaticLazyLayout {
+    GHashTable *pressure;
+    GHashTable *placed;
+    uint32_t *scratch;
+    uint32_t line_size;
+    uint32_t set_count;
+    uint32_t ways;
+    size_t padding_budget;
+    size_t padding_used;
+};
+
 static bool read_uint_file(const char *path, uint32_t *value)
 {
     g_autofree char *text = NULL;
@@ -456,6 +467,133 @@ void aot_static_layout_free(AOTStaticLayout *layout)
     g_free(layout);
 }
 
+static uint32_t *lazy_component_pressure(AOTStaticLazyLayout *layout,
+                                         uint16_t component)
+{
+    gpointer key = (gpointer)(uintptr_t)(component + 1);
+    uint32_t *pressure = g_hash_table_lookup(layout->pressure, key);
+
+    if (!pressure) {
+        pressure = g_new0(uint32_t, layout->set_count);
+        g_hash_table_insert(layout->pressure, key, pressure);
+    }
+    return pressure;
+}
+
+static void lazy_add_footprint(const AOTStaticLazyLayout *layout,
+                               uint32_t *pressure, uintptr_t host_code,
+                               uint32_t code_size)
+{
+    uint32_t lines = DIV_ROUND_UP(code_size, layout->line_size);
+    uint32_t first_set = host_code / layout->line_size % layout->set_count;
+
+    for (uint32_t i = 0; i < lines; i++) {
+        pressure[(first_set + i) % layout->set_count]++;
+    }
+}
+
+static uint64_t lazy_pressure_cost(const AOTStaticLazyLayout *layout,
+                                   const uint32_t *pressure)
+{
+    uint64_t cost = 0;
+
+    for (uint32_t i = 0; i < layout->set_count; i++) {
+        if (pressure[i] > layout->ways) {
+            uint64_t overflow = pressure[i] - layout->ways;
+
+            cost += overflow * overflow;
+        }
+    }
+    return cost;
+}
+
+static uint64_t lazy_candidate_cost(AOTStaticLazyLayout *layout,
+                                    const uint32_t *pressure,
+                                    uintptr_t host_code, uint32_t code_size)
+{
+    memcpy(layout->scratch, pressure,
+           sizeof(*layout->scratch) * layout->set_count);
+    lazy_add_footprint(layout, layout->scratch, host_code, code_size);
+    return lazy_pressure_cost(layout, layout->scratch);
+}
+
+AOTStaticLazyLayout *aot_static_lazy_layout_new(uint32_t line_size,
+                                                uint32_t set_count,
+                                                uint32_t ways,
+                                                size_t padding_budget)
+{
+    AOTStaticLazyLayout *layout;
+
+    if (!line_size || !set_count || !ways) {
+        return NULL;
+    }
+    layout = g_new0(AOTStaticLazyLayout, 1);
+    layout->pressure = g_hash_table_new_full(g_direct_hash, g_direct_equal,
+                                             NULL, g_free);
+    layout->placed = g_hash_table_new(g_direct_hash, g_direct_equal);
+    layout->scratch = g_new(uint32_t, set_count);
+    layout->line_size = line_size;
+    layout->set_count = set_count;
+    layout->ways = ways;
+    layout->padding_budget = ROUND_DOWN(padding_budget, line_size);
+    return layout;
+}
+
+uintptr_t aot_static_lazy_layout_place(AOTStaticLazyLayout *layout,
+                                       uint16_t component, bool movable,
+                                       target_ulong guest_pc,
+                                       uintptr_t host_code,
+                                       uint32_t code_size,
+                                       size_t available_padding)
+{
+    gpointer guest_key = (gpointer)(uintptr_t)guest_pc;
+    uint32_t *pressure;
+    uintptr_t best_padding = 0;
+    uintptr_t max_padding;
+    uint64_t best_cost;
+
+    if (!layout || component == AOT_LAYOUT_COMPONENT_NONE ||
+        g_hash_table_contains(layout->placed, guest_key)) {
+        return 0;
+    }
+    g_hash_table_add(layout->placed, guest_key);
+    pressure = lazy_component_pressure(layout, component);
+    if (!movable) {
+        lazy_add_footprint(layout, pressure, host_code, code_size);
+        return 0;
+    }
+
+    best_cost = lazy_candidate_cost(layout, pressure, host_code, code_size);
+    max_padding = MIN((uintptr_t)layout->line_size * layout->ways,
+                      layout->padding_budget - layout->padding_used);
+    max_padding = MIN(max_padding, available_padding);
+    for (uintptr_t padding = layout->line_size;
+         padding <= max_padding; padding += layout->line_size) {
+        uint64_t cost = lazy_candidate_cost(layout, pressure,
+                                            host_code + padding, code_size);
+        uint64_t score = cost + padding / layout->line_size;
+
+        if (score < best_cost) {
+            best_cost = score;
+            best_padding = padding;
+        }
+    }
+    lazy_add_footprint(layout, pressure, host_code + best_padding, code_size);
+    layout->padding_used += best_padding;
+    return best_padding;
+}
+
+void aot_static_lazy_layout_free(AOTStaticLazyLayout *layout)
+{
+    if (!layout) {
+        return;
+    }
+    g_hash_table_destroy(layout->placed);
+    g_hash_table_destroy(layout->pressure);
+    g_free(layout->scratch);
+    g_free(layout);
+}
+
 static bool stored_matching_cflags(const aot_tb *tb, uint32_t cflags)
 {
     return (tb->cflags & CF_PARALLEL) == (cflags & CF_PARALLEL);
@@ -477,7 +615,7 @@ static void stored_add_edge(AOTStaticLayoutEdge *edges, uint32_t *edge_count,
     (*edge_count)++;
 }
 
-bool aot_static_layout_store(const aot_segment *segment, aot_tb *tbs,
+bool aot_static_layout_store(aot_segment *segment, aot_tb *tbs,
                              uint32_t cflags, target_ulong segment_base,
                              uint32_t line_size, uint32_t set_count,
                              uint32_t ways)
@@ -495,6 +633,8 @@ bool aot_static_layout_store(const aot_segment *segment, aot_tb *tbs,
     uint32_t component_count;
     uint32_t current_node = AOT_STATIC_LAYOUT_NO_COMPONENT;
     uintptr_t cursor = 0;
+    size_t total_code_size = 0;
+    uint32_t parallel = cflags & CF_PARALLEL ? 1 : 0;
 
     if (!line_size || !set_count || !ways) {
         return false;
@@ -532,7 +672,8 @@ bool aot_static_layout_store(const aot_segment *segment, aot_tb *tbs,
             nodes[current_node].code_size = tb->tu_size;
             nodes[current_node].component = AOT_STATIC_LAYOUT_NO_COMPONENT;
             tb->layout_padding_lines = 0;
-            tb->layout_reserved = 0;
+            tb->layout_component = AOT_LAYOUT_COMPONENT_NONE;
+            tb->layout_flags = 0;
         }
         if (current_node == AOT_STATIC_LAYOUT_NO_COMPONENT ||
             tb->tu_id != (uint32_t)nodes[current_node].guest_pc) {
@@ -600,6 +741,9 @@ bool aot_static_layout_store(const aot_segment *segment, aot_tb *tbs,
             nodes[edges[i].to].can_pad = true;
         }
     }
+    if (component_count >= AOT_LAYOUT_COMPONENT_NONE) {
+        component_count = 0;
+    }
     if (component_count) {
         layout = aot_static_layout_new(nodes, node_count, component_count,
                                        line_size, set_count, ways);
@@ -609,6 +753,15 @@ bool aot_static_layout_store(const aot_segment *segment, aot_tb *tbs,
         uintptr_t table;
         uintptr_t code;
         uintptr_t padding = 0;
+
+        total_code_size += nodes[i].code_size;
+        if (layout &&
+            nodes[i].component != AOT_STATIC_LAYOUT_NO_COMPONENT) {
+            tbs[first_tb[i]].layout_component = nodes[i].component;
+            if (nodes[i].can_pad) {
+                tbs[first_tb[i]].layout_flags |= AOT_LAYOUT_MOVABLE;
+            }
+        }
 
         cursor = ROUND_UP(cursor, line_size);
         cursor += (uintptr_t)ROUND_UP(sizeof(TranslationBlock), line_size) *
@@ -625,6 +778,8 @@ bool aot_static_layout_store(const aot_segment *segment, aot_tb *tbs,
         cursor = ROUND_UP(code + padding + nodes[i].code_size,
                           CODE_GEN_ALIGN);
     }
+    segment->layout_padding_budget[parallel] = ROUND_DOWN(
+        total_code_size / 100, line_size);
 
     aot_static_layout_free(layout);
     g_hash_table_destroy(tb_nodes);

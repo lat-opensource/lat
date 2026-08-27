@@ -31,6 +31,7 @@ typedef struct AOTStaticLayoutEdge {
 } AOTStaticLayoutEdge;
 
 typedef struct AOTStaticLayout AOTStaticLayout;
+typedef struct AOTStaticLazyLayout AOTStaticLazyLayout;
 struct aot_segment;
 struct aot_tb;
 struct aot_header;
@@ -56,7 +57,7 @@ bool aot_static_layout_get_l1i_geometry(uint32_t *line_size,
                                         uint32_t *set_count,
                                         uint32_t *ways);
 
-bool aot_static_layout_store(const struct aot_segment *segment,
+bool aot_static_layout_store(struct aot_segment *segment,
                              struct aot_tb *tbs, uint32_t cflags,
                              target_ulong segment_base,
                              uint32_t line_size, uint32_t set_count,
@@ -81,5 +82,19 @@ uint64_t aot_static_layout_cost(const AOTStaticLayout *layout,
 size_t aot_static_layout_padding_used(const AOTStaticLayout *layout);
 
 void aot_static_layout_free(AOTStaticLayout *layout);
+
+AOTStaticLazyLayout *aot_static_lazy_layout_new(uint32_t line_size,
+                                                uint32_t set_count,
+                                                uint32_t ways,
+                                                size_t padding_budget);
+
+uintptr_t aot_static_lazy_layout_place(AOTStaticLazyLayout *layout,
+                                       uint16_t component, bool movable,
+                                       target_ulong guest_pc,
+                                       uintptr_t host_code,
+                                       uint32_t code_size,
+                                       size_t available_padding);
+
+void aot_static_lazy_layout_free(AOTStaticLazyLayout *layout);
 
 #endif
