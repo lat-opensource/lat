@@ -3,6 +3,7 @@
 #include <fcntl.h>
 
 #include "aot.h"
+#include "aot_static_layout.h"
 #include "aot_reader.h"
 #include "aot_lib.h"
 #include "file_ctx.h"
@@ -124,6 +125,23 @@ static void remove_cache(const char *name)
     }
 }
 
+static void write_layout_cache(const char *name, char *path)
+{
+    g_autofree char *contents = NULL;
+    gsize size;
+    aot_header *header;
+
+    write_cache(name, true, true, path);
+    g_assert(g_file_get_contents(path, &contents, &size, NULL));
+    g_assert(size >= sizeof(*header));
+    header = (aot_header *)contents;
+    header->layout_line_log2 = 6;
+    header->layout_set_log2 = 8;
+    header->layout_ways = 4;
+    header->layout_magic = AOT_STATIC_LAYOUT_MAGIC;
+    g_assert(g_file_set_contents(path, contents, size, NULL));
+}
+
 int main(void)
 {
     g_autofree char *cache_dir = NULL;
@@ -134,6 +152,7 @@ int main(void)
     char bad_footer_name[] = "bad-footer";
     char truncated_name[] = "truncated";
     char complete_name[] = "complete";
+    char layout_complete_name[] = "layout-complete";
     char fdopen_failure_name[] = "fdopen-failure";
     char cache_path[PATH_MAX];
     void *buffer;
@@ -172,6 +191,16 @@ int main(void)
     g_assert(lib_tree_remove(complete_name));
 
     reset_stream_counts();
+    buffer = NULL;
+    write_layout_cache(layout_complete_name, cache_path);
+    lib = aot_load(lib_name, layout_complete_name, &buffer);
+    g_assert(lib != NULL);
+    g_assert(buffer != NULL);
+    g_assert(aot_static_layout_header_matches(buffer, 64, 256, 4));
+    assert_stream_closed();
+    g_assert(lib_tree_remove(layout_complete_name));
+
+    reset_stream_counts();
     fail_fdopen = true;
     buffer = NULL;
     write_cache(fdopen_failure_name, true, true, cache_path);
@@ -184,6 +213,7 @@ int main(void)
     remove_cache(bad_footer_name);
     remove_cache(truncated_name);
     remove_cache(complete_name);
+    remove_cache(layout_complete_name);
     remove_cache(fdopen_failure_name);
     cache_dir = g_build_filename(test_dir, ".cache", "latx", NULL);
     g_assert(g_rmdir(cache_dir) == 0);

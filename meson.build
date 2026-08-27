@@ -701,6 +701,7 @@ foreach target : target_dirs
       files(
         'target/i386/latx/sbt/tests/aot-cache-reader-test.c',
         'target/i386/latx/sbt/aot_reader.c',
+        'target/i386/latx/sbt/aot_static_layout.c',
         'target/i386/latx/sbt/aot_lib.c',
         'target/i386/latx/sbt/file_ctx.c'
       ) + genh + tcg_trace_genh + [syscall_nr_generated],
@@ -715,6 +716,25 @@ foreach target : target_dirs
     test(
       'latx-aot-cache-reader',
       aot_cache_reader_test,
+      suite: 'lat-pr-fast',
+    )
+
+    aot_static_layout_test = executable(
+      'test-latx-aot-static-layout',
+      files(
+        'target/i386/latx/sbt/tests/aot-static-layout-test.c',
+        'target/i386/latx/sbt/aot_static_layout.c'
+      ) +
+      genh + tcg_trace_genh + [syscall_nr_generated],
+      build_by_default: false,
+      c_args: smc_reload_test_c_args,
+      dependencies: [glib],
+      include_directories: target_inc,
+      link_args: smc_reload_test_link_args
+    )
+    test(
+      'latx-aot-static-layout',
+      aot_static_layout_test,
       suite: 'lat-pr-fast',
     )
 
