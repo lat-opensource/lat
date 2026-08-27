@@ -445,6 +445,12 @@ static bool check_ir1(target_ulong seg_begin, struct aot_tb *p_aot_tbs, int num,
 
 inline int load_page_4(target_ulong pc, uint32_t cflags, seg_info *info)
 {
+#if defined(CONFIG_LATX_TU) && defined(CONFIG_LATX_TBMINI_ENABLE)
+    AOTStaticLazyLayout *previous_layout = aot_static_lazy_current;
+
+    aot_static_lazy_current = option_aot == 1 && option_aot_static_layout ?
+        aot_static_lazy_get(info, cflags) : NULL;
+#endif
     int ret = load_page(pc, cflags, info);
     pc += TARGET_PAGE_SIZE;
     load_page(pc, cflags, info);
@@ -453,6 +459,9 @@ inline int load_page_4(target_ulong pc, uint32_t cflags, seg_info *info)
     pc += TARGET_PAGE_SIZE;
     load_page(pc, cflags, info);
     try_aot_link();
+#if defined(CONFIG_LATX_TU) && defined(CONFIG_LATX_TBMINI_ENABLE)
+    aot_static_lazy_current = previous_layout;
+#endif
     return ret;
 }
 
@@ -547,13 +556,8 @@ inline int load_page(target_ulong pc, uint32_t cflags, seg_info *info)
 
     tcg_ctx->tb_cflags = cflags;
 
-    AOTStaticLazyLayout *previous_layout = aot_static_lazy_current;
-
-    aot_static_lazy_current = option_aot == 1 && option_aot_static_layout ?
-        aot_static_lazy_get(info, cflags) : NULL;
     recover_tb_range(p1, p_aot_tbs, tb_num_in_page, info->seg_begin,
                      info->seg_end);
-    aot_static_lazy_current = previous_layout;
     return 1;
 }
 
