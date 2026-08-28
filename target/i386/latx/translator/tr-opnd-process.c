@@ -1345,6 +1345,7 @@ void store_freg256_to_ir1_mem(IR2_OPND opnd2, IR1_OPND * opnd1) {
     int little_disp;
     lsassert(ir1_opnd_is_mem(opnd1));
     lsassert(ir2_opnd_is_freg( & opnd2));
+    materialize_deferred_ymmh_zero(opnd2);
     IR2_OPND mem_opnd = convert_mem(opnd1, & little_disp);
     gen_test_page_flag(mem_opnd, little_disp, PAGE_WRITE | PAGE_WRITE_ORG);
     la_xvst(opnd2, mem_opnd, little_disp);
@@ -1362,7 +1363,9 @@ void load_freg256_from_ir1_mem(IR2_OPND opnd2, IR1_OPND * opnd1) {
 
 IR2_OPND load_freg256_from_ir1(IR1_OPND * opnd1) {
     if (ir1_opnd_is_ymm(opnd1)) {
-        return ra_alloc_xmm(ir1_opnd_base_reg_num(opnd1));
+        IR2_OPND ret_opnd = ra_alloc_xmm(ir1_opnd_base_reg_num(opnd1));
+        materialize_deferred_ymmh_zero(ret_opnd);
+        return ret_opnd;
     } else if (ir1_opnd_is_mem(opnd1) || ir1_opnd_is_xmm(opnd1)) {
         IR2_OPND ret_opnd;
         if (ir1_opnd_size(opnd1) == 256) {
@@ -1376,12 +1379,103 @@ IR2_OPND load_freg256_from_ir1(IR1_OPND * opnd1) {
     g_assert_not_reached();
 }
 
-void set_high128_xreg_to_zero(IR2_OPND opnd2) {
-    lsassert(ir2_opnd_is_freg( & opnd2));
-    if (option_enable_lasx) {
-        la_xvinsgr2vr_d(opnd2, zero_ir2_opnd, 2);
-        la_xvinsgr2vr_d(opnd2, zero_ir2_opnd, 3);
+static int mapped_ymm_index(IR2_OPND opnd)
+{
+    int reg = ir2_opnd_base_reg_num(&opnd);
+
+    if (reg >= XMM0_MAPS && reg <= XMM15_MAPS) {
+        return reg - XMM0_MAPS;
     }
+    return -1;
+}
+
+static void clear_high128_xreg_now(IR2_OPND opnd)
+{
+    la_xvinsgr2vr_d(opnd, zero_ir2_opnd, 2);
+    la_xvinsgr2vr_d(opnd, zero_ir2_opnd, 3);
+}
+
+void materialize_deferred_ymmh_zero(IR2_OPND opnd)
+{
+    int index;
+
+    if (!option_enable_lasx) {
+        return;
+    }
+    index = mapped_ymm_index(opnd);
+    if (index >= 0 &&
+        (lsenv->tr_data->ymmh_zero_pending & (UINT16_C(1) << index))) {
+        clear_high128_xreg_now(opnd);
+    }
+}
+
+static void emit_deferred_ymmh_zeros(void)
+{
+    uint16_t pending;
+
+    if (!option_enable_lasx) {
+        return;
+    }
+
+    pending = lsenv->tr_data->ymmh_zero_pending;
+    for (int index = 0; index < CPU_NB_REGS; ++index) {
+        IR2_OPND opnd;
+
+        if (!(pending & (UINT16_C(1) << index))) {
+            continue;
+        }
+        ir2_opnd_build(&opnd, IR2_OPND_FPR, reg_xmm_map[index]);
+        clear_high128_xreg_now(opnd);
+    }
+}
+
+void materialize_deferred_ymmh_zeros_for_exit(void)
+{
+    /*
+     * Do not consume the translation-time mask here.  Conditional branches
+     * emit two separate exit paths, and both paths must perform the clears.
+     */
+    emit_deferred_ymmh_zeros();
+}
+
+void materialize_deferred_ymmh_zeros_now(void)
+{
+    emit_deferred_ymmh_zeros();
+    lsenv->tr_data->ymmh_zero_pending = 0;
+}
+
+void disable_deferred_ymmh_zero_for_tb(void)
+{
+    if (!option_enable_lasx || lsenv->tr_data->ymmh_zero_defer_disabled) {
+        return;
+    }
+
+    materialize_deferred_ymmh_zeros_now();
+    lsenv->tr_data->ymmh_zero_defer_disabled = 1;
+}
+
+void set_high128_xreg_to_zero(IR2_OPND opnd)
+{
+    int index;
+
+    lsassert(ir2_opnd_is_freg(&opnd));
+    if (!option_enable_lasx) {
+        return;
+    }
+
+    if (lsenv->tr_data->ymmh_zero_defer_disabled) {
+        clear_high128_xreg_now(opnd);
+        return;
+    }
+
+    index = mapped_ymm_index(opnd);
+    if (index >= 0) {
+        lsenv->tr_data->ymmh_zero_pending |= UINT16_C(1) << index;
+        return;
+    }
+
+    /* Floating-point temporaries can be consumed as 256-bit values now. */
+    clear_high128_xreg_now(opnd);
 }
 
 static IR2_OPND get_ymm_high128_shadow_addr(int index)
