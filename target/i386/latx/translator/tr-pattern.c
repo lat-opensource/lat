@@ -2391,6 +2391,65 @@ static bool translate_ucomiss_xx_jcc(IR1_INST *pir1)
 #endif
 
 
+static void translate_avx_sum3_pair(IR2_OPND out, IR2_OPND first,
+                                    IR2_OPND second, IR2_OPND save_low,
+                                    bool save)
+{
+    IR2_OPND low = ra_alloc_ftemp();
+    IR2_OPND high = ra_alloc_ftemp();
+
+    /* Keep the x86 order: (lane 0 + lane 1) + lane 2. */
+    la_vilvl_w(low, second, first);
+    la_vshuf4i_w(high, low, 0x4e);
+    la_vfadd_s(low, low, high);
+    if (save) {
+        la_vori_b(save_low, low, 0);
+        la_vinsgr2vr_d(save_low, zero_ir2_opnd, 1);
+    }
+    la_vilvh_w(high, second, first);
+    la_vfadd_s(out, low, high);
+    la_vinsgr2vr_d(out, zero_ir2_opnd, 1);
+    ra_free_temp(high);
+    ra_free_temp(low);
+}
+
+static bool translate_avx_sum3(IR1_INST *pir1)
+{
+    static const int product_offset[] = {-22, -18, -13, -9, -5, -1};
+    IR2_OPND product[6];
+    IR2_OPND zero_src = ra_alloc_xmm(
+        ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 2)));
+    IR2_OPND save_low = ra_alloc_xmm(
+        ir1_opnd_base_reg_num(ir1_get_opnd(pir1 + 3, 0)));
+    IR2_OPND temp = ra_alloc_ftemp();
+
+    for (int i = 0; i < 6; ++i) {
+        product[i] = ra_alloc_xmm(ir1_opnd_base_reg_num(
+            ir1_get_opnd(pir1 + product_offset[i], 0)));
+    }
+
+    translate_avx_sum3_pair(product[3], product[1], product[3],
+                            save_low, true);
+    translate_avx_sum3_pair(product[4], product[0], product[4],
+                            zero_ir2_opnd, false);
+    la_vfadd_s(product[3], product[3], product[4]);
+    translate_avx_sum3_pair(product[0], product[2], product[5],
+                            zero_ir2_opnd, false);
+    la_vfsub_s(product[3], product[3], product[0]);
+
+    /* VBLENDPS/VINSERTPS leave product[5] as [p0+p1, 2*p1, p2, z3]. */
+    la_vshuf4i_w(temp, product[5], 0xe5);
+    la_vfadd_s(product[5], product[5], temp);
+    la_vextrins_w(temp, zero_src, VEXTRINS_IMM_4_0(3, 3));
+    la_vextrins_d(product[5], temp, VEXTRINS_IMM_4_0(1, 1));
+    ra_free_temp(temp);
+
+    set_high128_xreg_to_zero(product[3]);
+    set_high128_xreg_to_zero(product[5]);
+    set_high128_xreg_to_zero(save_low);
+    return true;
+}
+
 static bool translate_repeat_add(IR1_INST *pir1)
 {
     IR2_OPND dest = load_ireg_from_ir1(ir1_get_opnd(pir1, 0),
@@ -2492,6 +2551,8 @@ bool try_translate_instptn(IR1_INST *pir1)
         return translate_and_jcc(pir1);
     case INSTPTN_OPC_REPEAT_ADD:
         return translate_repeat_add(pir1);
+    case INSTPTN_OPC_AVX_SUM3:
+        return translate_avx_sum3(pir1);
     default:
         lsassert(0);
         break;

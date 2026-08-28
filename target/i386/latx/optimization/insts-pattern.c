@@ -796,6 +796,252 @@ static bool repeat_add_same_operands(IR1_INST *first, IR1_INST *next)
                ir1_opnd_base_reg_num(first_src);
 }
 
+static int avx_sum3_xmm(IR1_INST *ir1, int opnd_index)
+{
+    if (opnd_index >= ir1_get_opnd_num(ir1) ||
+        !ir1_opnd_is_xmm(ir1_get_opnd(ir1, opnd_index))) {
+        return -1;
+    }
+    return ir1_opnd_base_reg_num(ir1_get_opnd(ir1, opnd_index));
+}
+
+static bool avx_sum3_imm(IR1_INST *ir1, int opnd_index, ulongx value)
+{
+    return opnd_index < ir1_get_opnd_num(ir1) &&
+           ir1_opnd_is_imm(ir1_get_opnd(ir1, opnd_index)) &&
+           ir1_opnd_uimm(ir1_get_opnd(ir1, opnd_index)) == value;
+}
+
+static bool avx_sum3_match_group(TranslationBlock *tb, int pos,
+                                 int *product, int *zero)
+{
+    IR1_INST *mul = tb_ir1_inst(tb, pos);
+    IR1_INST *blend = tb_ir1_inst(tb, pos + 1);
+    IR1_INST *insert = tb_ir1_inst(tb, pos + 2);
+    IR1_INST *add = tb_ir1_inst(tb, pos + 3);
+    int temp;
+
+    if (ir1_opcode(mul) != WRAP(VMULPS) ||
+        ir1_opcode(blend) != WRAP(VBLENDPS) ||
+        ir1_opcode(insert) != WRAP(VINSERTPS) ||
+        ir1_opcode(add) != WRAP(VADDPS)) {
+        return false;
+    }
+    *product = avx_sum3_xmm(mul, 0);
+    temp = avx_sum3_xmm(blend, 0);
+    if (*product < 0 || temp < 0 || temp == *product ||
+        avx_sum3_xmm(blend, 1) != *product ||
+        avx_sum3_xmm(blend, 2) < 0 ||
+        !avx_sum3_imm(blend, 3, 0x08) ||
+        avx_sum3_xmm(insert, 0) != *product ||
+        avx_sum3_xmm(insert, 1) != *product ||
+        avx_sum3_xmm(insert, 2) != *product ||
+        !avx_sum3_imm(insert, 3, 0x4c) ||
+        avx_sum3_xmm(add, 0) != *product ||
+        avx_sum3_xmm(add, 1) != temp ||
+        avx_sum3_xmm(add, 2) != *product) {
+        return false;
+    }
+    if (*zero < 0) {
+        *zero = avx_sum3_xmm(blend, 2);
+    }
+    return avx_sum3_xmm(blend, 2) == *zero;
+}
+
+static bool avx_sum3_match_insert(IR1_INST *ir1, int dest, int src1,
+                                  int src2, ulongx imm)
+{
+    return ir1_opcode(ir1) == WRAP(VINSERTPS) &&
+           avx_sum3_xmm(ir1, 0) == dest &&
+           avx_sum3_xmm(ir1, 1) == src1 &&
+           avx_sum3_xmm(ir1, 2) == src2 &&
+           avx_sum3_imm(ir1, 3, imm);
+}
+
+static bool avx_sum3_match_add(IR1_INST *ir1, IR1_OPCODE opcode,
+                               int dest, int src1, int src2)
+{
+    return ir1_opcode(ir1) == opcode &&
+           avx_sum3_xmm(ir1, 0) == dest &&
+           avx_sum3_xmm(ir1, 1) == src1 &&
+           avx_sum3_xmm(ir1, 2) == src2;
+}
+
+static bool avx_sum3_match_shuffle(IR1_INST *ir1, int dest, int src)
+{
+    return ir1_opcode(ir1) == WRAP(VSHUFPD) &&
+           avx_sum3_xmm(ir1, 0) == dest &&
+           avx_sum3_xmm(ir1, 1) == src &&
+           avx_sum3_xmm(ir1, 2) == src &&
+           avx_sum3_imm(ir1, 3, 1);
+}
+
+static bool avx_sum3_safe_overwrite(IR1_INST *ir1, int reg)
+{
+    if (avx_sum3_xmm(ir1, 0) != reg) {
+        return false;
+    }
+    for (int i = 1; i < ir1_get_opnd_num(ir1); ++i) {
+        if (avx_sum3_xmm(ir1, i) == reg) {
+            return false;
+        }
+    }
+    switch (ir1_opcode(ir1)) {
+    case WRAP(VMOVSD):
+        return ir1_opnd_is_mem(ir1_get_opnd(ir1, 1));
+    case WRAP(VINSERTPS):
+    case WRAP(VSQRTSS):
+        return true;
+    default:
+        return false;
+    }
+}
+
+static bool avx_sum3_overwritten_before_use(TranslationBlock *tb, int pos,
+                                            int reg)
+{
+    for (int i = pos; i < tb_ir1_num(tb); ++i) {
+        IR1_INST *ir1 = tb_ir1_inst(tb, i);
+
+        if (avx_sum3_safe_overwrite(ir1, reg)) {
+            return true;
+        }
+        for (int j = 0; j < ir1_get_opnd_num(ir1); ++j) {
+            if (avx_sum3_xmm(ir1, j) == reg) {
+                return false;
+            }
+        }
+    }
+    return false;
+}
+
+void insts_pattern_avx_sum3(TranslationBlock *tb)
+{
+    static const int group_offset[] = {0, 4, 9, 13, 17, 21};
+    static const int skipped_offset[] = {
+        1, 2, 3, 5, 6, 7, 10, 11, 12, 14, 15, 16,
+        18, 19, 20, 23, 24, 25, 26, 27, 28, 29, 30,
+        31, 32, 33, 34, 35, 36, 37, 38,
+    };
+    int count = tb_ir1_num(tb);
+
+    for (int start = 0; start + 39 <= count; ++start) {
+        int product[6];
+        int group_temp[6];
+        int zero = -1;
+        int temp1;
+        int temp2;
+        int temp3;
+        bool match = true;
+
+        for (int i = 0; i < 39; ++i) {
+            if (tb_ir1_inst(tb, start + i)->instptn.opc !=
+                INSTPTN_OPC_NONE) {
+                match = false;
+            }
+        }
+        if (!match) {
+            continue;
+        }
+        for (int i = 0; i < 6; ++i) {
+            if (!avx_sum3_match_group(tb, start + group_offset[i],
+                                      &product[i], &zero)) {
+                match = false;
+                break;
+            }
+            group_temp[i] = avx_sum3_xmm(
+                tb_ir1_inst(tb, start + group_offset[i] + 1), 0);
+            for (int j = 0; j < i; ++j) {
+                if (product[i] == product[j] ||
+                    group_temp[i] == product[j]) {
+                    match = false;
+                }
+            }
+        }
+        if (!match || zero < 0 ||
+            ir1_opcode(tb_ir1_inst(tb, start + 8)) != WRAP(VMOVAPS) ||
+            !ir1_opnd_is_mem(ir1_get_opnd(tb_ir1_inst(tb, start + 8), 1)) ||
+            avx_sum3_xmm(tb_ir1_inst(tb, start + 8), 0) == product[0] ||
+            avx_sum3_xmm(tb_ir1_inst(tb, start + 8), 0) == product[1]) {
+            continue;
+        }
+        for (int i = 0; i < 6; ++i) {
+            if (zero == product[i]) {
+                match = false;
+            }
+            for (int opnd = 1;
+                 opnd < ir1_get_opnd_num(
+                     tb_ir1_inst(tb, start + group_offset[i])); ++opnd) {
+                int src = avx_sum3_xmm(
+                    tb_ir1_inst(tb, start + group_offset[i]), opnd);
+
+                for (int previous = 0; previous < i; ++previous) {
+                    if (src == product[previous]) {
+                        match = false;
+                    }
+                }
+            }
+        }
+        if (!match) {
+            continue;
+        }
+        temp1 = avx_sum3_xmm(tb_ir1_inst(tb, start + 25), 0);
+        temp2 = avx_sum3_xmm(tb_ir1_inst(tb, start + 29), 0);
+        temp3 = avx_sum3_xmm(tb_ir1_inst(tb, start + 34), 0);
+        if (temp1 < 0 || temp2 < 0 || temp3 < 0 ||
+            group_temp[0] != product[1] ||
+            group_temp[1] != avx_sum3_xmm(
+                tb_ir1_inst(tb, start + 8), 0) ||
+            group_temp[2] != temp1 || group_temp[3] != temp1 ||
+            group_temp[4] != temp1 || group_temp[5] != temp1 ||
+            temp2 != product[1] || temp3 != product[4] ||
+            zero == temp1 || zero == group_temp[1] ||
+            !avx_sum3_match_insert(tb_ir1_inst(tb, start + 25),
+                                   temp1, product[1], product[3], 0x1c) ||
+            !avx_sum3_match_shuffle(tb_ir1_inst(tb, start + 26),
+                                    product[1], product[1]) ||
+            !avx_sum3_match_insert(tb_ir1_inst(tb, start + 27),
+                                   product[3], product[1], product[3], 0x9c) ||
+            !avx_sum3_match_add(tb_ir1_inst(tb, start + 28), WRAP(VADDPS),
+                                product[3], temp1, product[3]) ||
+            !avx_sum3_match_insert(tb_ir1_inst(tb, start + 29),
+                                   temp2, product[0], product[4], 0x1c) ||
+            !avx_sum3_match_shuffle(tb_ir1_inst(tb, start + 30),
+                                    product[0], product[0]) ||
+            !avx_sum3_match_insert(tb_ir1_inst(tb, start + 31),
+                                   product[4], product[0], product[4], 0x9c) ||
+            !avx_sum3_match_add(tb_ir1_inst(tb, start + 32), WRAP(VADDPS),
+                                product[4], temp2, product[4]) ||
+            !avx_sum3_match_add(tb_ir1_inst(tb, start + 33), WRAP(VADDPS),
+                                product[3], product[4], product[3]) ||
+            !avx_sum3_match_insert(tb_ir1_inst(tb, start + 34),
+                                   temp3, product[2], product[5], 0x1c) ||
+            !avx_sum3_match_shuffle(tb_ir1_inst(tb, start + 35),
+                                    product[0], product[2]) ||
+            !avx_sum3_match_insert(tb_ir1_inst(tb, start + 36),
+                                   product[0], product[0], product[5], 0x9c) ||
+            !avx_sum3_match_add(tb_ir1_inst(tb, start + 37), WRAP(VADDPS),
+                                product[4], temp3, product[0]) ||
+            !avx_sum3_match_add(tb_ir1_inst(tb, start + 38), WRAP(VSUBPS),
+                                product[3], product[3], product[4])) {
+            continue;
+        }
+        if (!avx_sum3_overwritten_before_use(tb, start + 39, product[0]) ||
+            !avx_sum3_overwritten_before_use(tb, start + 39, product[1]) ||
+            !avx_sum3_overwritten_before_use(tb, start + 39, product[2]) ||
+            !avx_sum3_overwritten_before_use(tb, start + 39, product[4])) {
+            continue;
+        }
+
+        for (size_t i = 0; i < ARRAY_SIZE(skipped_offset); ++i) {
+            tb_ir1_inst(tb, start + skipped_offset[i])->instptn.opc =
+                INSTPTN_OPC_NOP;
+        }
+        tb_ir1_inst(tb, start + 22)->instptn.opc = INSTPTN_OPC_AVX_SUM3;
+        start += 38;
+    }
+}
+
 void insts_pattern_repeat_add(TranslationBlock *tb)
 {
     int count = tb_ir1_num(tb);

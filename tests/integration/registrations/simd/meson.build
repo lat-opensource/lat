@@ -14,6 +14,7 @@ if 'x86_64-linux-user' in target_dirs
     'args': [
       emulators['latx-x86_64'],
       files('../../avx128-shuffle.S'),
+      files('../../avx-sum3-pattern.S'),
       files('../../repeat-add.S'),
       files('../../vcomis-jcc.S'),
     ],

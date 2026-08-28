@@ -68,6 +68,35 @@ _start:
 
     mov edi, 4
     vmovaps ymm3, ymmword ptr [rip + .Lsrc1]
+    vmovss xmm3, dword ptr [rip + .Lsrc2]
+    vmovups ymmword ptr [rip + .Lout], ymm3
+    cmp dword ptr [rip + .Lout], 5
+    jne .Lfail
+    cmp qword ptr [rip + .Lout + 4], 0
+    jne .Lfail
+    cmp dword ptr [rip + .Lout + 12], 0
+    jne .Lfail
+    cmp qword ptr [rip + .Lout + 16], 0
+    jne .Lfail
+    cmp qword ptr [rip + .Lout + 24], 0
+    jne .Lfail
+
+    mov edi, 5
+    vmovaps ymm3, ymmword ptr [rip + .Lsrc1]
+    vmovsd xmm3, qword ptr [rip + .Lqwords]
+    vmovups ymmword ptr [rip + .Lout], ymm3
+    mov rax, qword ptr [rip + .Lqwords]
+    cmp qword ptr [rip + .Lout], rax
+    jne .Lfail
+    cmp qword ptr [rip + .Lout + 8], 0
+    jne .Lfail
+    cmp qword ptr [rip + .Lout + 16], 0
+    jne .Lfail
+    cmp qword ptr [rip + .Lout + 24], 0
+    jne .Lfail
+
+    mov edi, 6
+    vmovaps ymm3, ymmword ptr [rip + .Lsrc1]
     vmovapd xmm1, xmmword ptr [rip + .Lqwords]
     vshufpd xmm3, xmm1, xmm1, 1
     vmovups ymmword ptr [rip + .Lout], ymm3

@@ -55,6 +55,7 @@ static void ir1_optimization_over_tb(TranslationBlock *tb)
     SAVE_FLAG_TO_TB(rdtn, tb);
 #ifdef CONFIG_LATX_INSTS_PATTERN
     if (option_instptn) {
+        insts_pattern_avx_sum3(tb);
         insts_pattern_repeat_add(tb);
     }
 #endif
@@ -174,6 +175,7 @@ void ir1_optimization(TranslationBlock *tb)
     SAVE_FLAG_TO_TB(rdtn, tb);
 #ifdef CONFIG_LATX_INSTS_PATTERN
     if (option_instptn) {
+        insts_pattern_avx_sum3(tb);
         insts_pattern_repeat_add(tb);
     }
 #endif
