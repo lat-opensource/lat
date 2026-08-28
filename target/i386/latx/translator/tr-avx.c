@@ -37,8 +37,8 @@ bool translate_vaddpd(IR1_INST * pir1) {
 
         src2 = load_freg128_from_ir1(opnd2);
         la_vfadd_d(temp, src1, src2);
-        set_high128_xreg_to_zero(temp);
         la_xvori_b(dest, temp, 0);
+        set_high128_xreg_to_zero(dest);
     }
     return true;
 }
@@ -67,8 +67,8 @@ bool translate_vaddps(IR1_INST * pir1) {
 
         src2 = load_freg128_from_ir1(opnd2);
         la_vfadd_s(temp, src1, src2);
-        set_high128_xreg_to_zero(temp);
         la_xvori_b(dest, temp, 0);
+        set_high128_xreg_to_zero(dest);
     }
     return true;
 }
@@ -87,8 +87,8 @@ bool translate_vaddsd(IR1_INST * pir1) {
 
     la_fadd_d(temp, src1, src2);
     la_vshuf4i_d(temp, src1, 0xc);
-    set_high128_xreg_to_zero(temp);
     la_xvori_b(dest, temp, 0);
+    set_high128_xreg_to_zero(dest);
     return true;
 }
 
@@ -138,8 +138,8 @@ bool translate_vsubpd(IR1_INST * pir1) {
 
         src2 = load_freg128_from_ir1(opnd2);
         la_vfsub_d(temp, src1, src2);
-        set_high128_xreg_to_zero(temp);
         la_xvori_b(dest, temp, 0);
+        set_high128_xreg_to_zero(dest);
     }
     return true;
 }
@@ -168,8 +168,8 @@ bool translate_vsubps(IR1_INST * pir1) {
 
         src2 = load_freg128_from_ir1(opnd2);
         la_vfsub_s(temp, src1, src2);
-        set_high128_xreg_to_zero(temp);
         la_xvori_b(dest, temp, 0);
+        set_high128_xreg_to_zero(dest);
     }
     return true;
 }
@@ -240,8 +240,8 @@ bool translate_vmulpd(IR1_INST * pir1) {
 
         src2 = load_freg128_from_ir1(opnd2);
         la_vfmul_d(temp, src1, src2);
-        set_high128_xreg_to_zero(temp);
         la_xvori_b(dest, temp, 0);
+        set_high128_xreg_to_zero(dest);
     }
     return true;
 }
@@ -270,8 +270,8 @@ bool translate_vmulps(IR1_INST * pir1) {
 
         src2 = load_freg128_from_ir1(opnd2);
         la_vfmul_s(temp, src1, src2);
-        set_high128_xreg_to_zero(temp);
         la_xvori_b(dest, temp, 0);
+        set_high128_xreg_to_zero(dest);
     }
     return true;
 }
@@ -289,8 +289,8 @@ bool translate_vmulsd(IR1_INST * pir1) {
 
     la_fmul_d(temp, src1, src2);
     la_vshuf4i_d(temp, src1, 0xc);
-    set_high128_xreg_to_zero(temp);
     la_xvori_b(dest, temp, 0);
+    set_high128_xreg_to_zero(dest);
     return true;
 }
 
@@ -340,8 +340,8 @@ bool translate_vdivpd(IR1_INST * pir1) {
 
         src2 = load_freg128_from_ir1(opnd2);
         la_vfdiv_d(temp, src1, src2);
-        set_high128_xreg_to_zero(temp);
         la_xvori_b(dest, temp, 0);
+        set_high128_xreg_to_zero(dest);
     }
     return true;
 }
@@ -370,8 +370,8 @@ bool translate_vdivps(IR1_INST * pir1) {
 
         src2 = load_freg128_from_ir1(opnd2);
         la_vfdiv_s(temp, src1, src2);
-        set_high128_xreg_to_zero(temp);
         la_xvori_b(dest, temp, 0);
+        set_high128_xreg_to_zero(dest);
     }
     return true;
 }
@@ -388,8 +388,8 @@ bool translate_vdivsd(IR1_INST * pir1) {
     IR2_OPND temp = ra_alloc_ftemp();
     la_fdiv_d(temp, src1, src2);
     la_vshuf4i_d(temp, src1, 0xc);
-    set_high128_xreg_to_zero(temp);
     la_xvori_b(dest, temp, 0);
+    set_high128_xreg_to_zero(dest);
     return true;
 }
 
@@ -434,8 +434,8 @@ bool translate_vsqrtpd(IR1_INST * pir1) {
         IR2_OPND temp = ra_alloc_ftemp();
 
         la_vfsqrt_d(temp, src);
-        set_high128_xreg_to_zero(temp);
         la_xvori_b(dest, temp, 0);
+        set_high128_xreg_to_zero(dest);
     }
     return true;
 }
@@ -459,8 +459,8 @@ bool translate_vsqrtps(IR1_INST * pir1) {
         IR2_OPND temp = ra_alloc_ftemp();
 
         la_vfsqrt_s(temp, src);
-        set_high128_xreg_to_zero(temp);
         la_xvori_b(dest, temp, 0);
+        set_high128_xreg_to_zero(dest);
     }
     return true;
 }
@@ -614,8 +614,8 @@ bool translate_vhaddpd(IR1_INST * pir1) {
         la_vpickev_d(temp1, src2, src1);
         la_vpickod_d(temp2, src2, src1);
         la_vfadd_d(temp, temp1, temp2);
-        set_high128_xreg_to_zero(temp);
         la_xvori_b(dest, temp, 0);
+        set_high128_xreg_to_zero(dest);
     }
     return true;
 }
@@ -652,8 +652,8 @@ bool translate_vhaddps(IR1_INST * pir1) {
         la_vpickev_w(temp1, src2, src1);
         la_vpickod_w(temp2, src2, src1);
         la_vfadd_s(temp, temp1, temp2);
-        set_high128_xreg_to_zero(temp);
         la_xvori_b(dest, temp, 0);
+        set_high128_xreg_to_zero(dest);
     }
     return true;
 }
@@ -690,8 +690,8 @@ bool translate_vhsubpd(IR1_INST * pir1) {
         la_vpickev_d(temp1, src2, src1);
         la_vpickod_d(temp2, src2, src1);
         la_vfsub_d(temp, temp1, temp2);
-        set_high128_xreg_to_zero(temp);
         la_xvori_b(dest, temp, 0);
+        set_high128_xreg_to_zero(dest);
     }
     return true;
 }
@@ -728,8 +728,8 @@ bool translate_vhsubps(IR1_INST * pir1) {
         la_vpickev_w(temp1, src2, src1);
         la_vpickod_w(temp2, src2, src1);
         la_vfsub_s(temp, temp1, temp2);
-        set_high128_xreg_to_zero(temp);
         la_xvori_b(dest, temp, 0);
+        set_high128_xreg_to_zero(dest);
     }
     return true;
 }
@@ -757,8 +757,8 @@ bool translate_vandnpd(IR1_INST * pir1) {
         IR2_OPND temp = ra_alloc_ftemp();
 
         la_vandn_v(temp, src1, src2);
-        set_high128_xreg_to_zero(temp);
         la_xvori_b(dest, temp, 0);
+        set_high128_xreg_to_zero(dest);
     }
     return true;
 }
@@ -795,8 +795,8 @@ bool translate_vandpd(IR1_INST * pir1) {
         IR2_OPND temp = ra_alloc_ftemp();
 
         la_vand_v(temp, src1, src2);
-        set_high128_xreg_to_zero(temp);
         la_xvori_b(dest, temp, 0);
+        set_high128_xreg_to_zero(dest);
     }
     return true;
 }
@@ -833,8 +833,8 @@ bool translate_vorps(IR1_INST * pir1) {
         IR2_OPND temp = ra_alloc_ftemp();
 
         la_vor_v(temp, src1, src2);
-        set_high128_xreg_to_zero(temp);
         la_xvori_b(dest, temp, 0);
+        set_high128_xreg_to_zero(dest);
     }
     return true;
 }
@@ -871,8 +871,8 @@ bool translate_vxorps(IR1_INST * pir1) {
         IR2_OPND temp = ra_alloc_ftemp();
 
         la_vxor_v(temp, src1, src2);
-        set_high128_xreg_to_zero(temp);
         la_xvori_b(dest, temp, 0);
+        set_high128_xreg_to_zero(dest);
     }
     return true;
 }
@@ -1090,8 +1090,8 @@ bool translate_vblendvpd(IR1_INST * pir1) {
         IR2_OPND temp = ra_alloc_ftemp();
         la_vslti_d(temp, src3, 0);
         la_vbitsel_v(temp, src1, src2, temp);
-        set_high128_xreg_to_zero(temp);
         la_xvori_b(dest, temp, 0);
+        set_high128_xreg_to_zero(dest);
     }
     return true;
 }
@@ -1229,8 +1229,8 @@ bool translate_vbroadcastss(IR1_INST * pir1) {
         IR2_OPND src = load_freg128_from_ir1(ir1_get_opnd(pir1, 1));
         IR2_OPND temp = ra_alloc_ftemp();
         la_xvreplve0_w(temp, src);
-        set_high128_xreg_to_zero(temp);
         la_xvori_b(dest, temp, 0);
+        set_high128_xreg_to_zero(dest);
     }
     return true;
 }
@@ -1278,8 +1278,8 @@ bool translate_vextractf128(IR1_INST * pir1) {
         } else {
             la_xvpermi_q(temp, src, VEXTRINS_IMM_4_0(3, 1));
         }
-        set_high128_xreg_to_zero(temp);
         la_xvori_b(dest, temp, 0);
+        set_high128_xreg_to_zero(dest);
     } else {
         if (!imm) {
             store_freg128_to_ir1_mem(src, ir1_get_opnd(pir1, 0));
@@ -1478,8 +1478,8 @@ bool translate_vshufpd(IR1_INST * pir1) {
         }
         la_xvori_b(temp, src1, 0);
         la_vshuf4i_d(temp, src2, imm8);
-        set_high128_xreg_to_zero(temp);
         la_xvori_b(dest, temp, 0);
+        set_high128_xreg_to_zero(dest);
     }
     return true;
 }
@@ -1513,8 +1513,8 @@ bool translate_vshufps(IR1_INST * pir1) {
         la_vshuf4i_w(temp1, src1, imm8);
         la_vshuf4i_w(temp2, src2, imm8 >> 4);
         la_vpickev_d(temp1, temp2, temp1);
-        set_high128_xreg_to_zero(temp1);
         la_xvori_b(dest, temp1, 0);
+        set_high128_xreg_to_zero(dest);
     }
     return true;
 }
@@ -1546,8 +1546,8 @@ bool translate_vunpckhpd(IR1_INST * pir1) {
 
         la_vori_b(temp, src1, 0);
         la_vshuf4i_d(temp, src2, 0xd);
-        set_high128_xreg_to_zero(temp);
         la_xvori_b(dest, temp, 0);
+        set_high128_xreg_to_zero(dest);
     }
     return true;
 }
@@ -1575,8 +1575,8 @@ bool translate_vunpckhps(IR1_INST * pir1) {
         IR2_OPND temp = ra_alloc_ftemp();
 
         la_vilvh_w(temp, src2, src1);
-        set_high128_xreg_to_zero(temp);
         la_xvori_b(dest, temp, 0);
+        set_high128_xreg_to_zero(dest);
     }
     return true;
 }
@@ -1608,8 +1608,8 @@ bool translate_vunpcklpd(IR1_INST * pir1) {
 
         la_vori_b(temp, src1, 0);
         la_vshuf4i_d(temp, src2, 0x8);
-        set_high128_xreg_to_zero(temp);
         la_xvori_b(dest, temp, 0);
+        set_high128_xreg_to_zero(dest);
     }
     return true;
 }
@@ -1637,8 +1637,8 @@ bool translate_vunpcklps(IR1_INST * pir1) {
         IR2_OPND temp = ra_alloc_ftemp();
 
         la_vilvl_w(temp, src2, src1);
-        set_high128_xreg_to_zero(temp);
         la_xvori_b(dest, temp, 0);
+        set_high128_xreg_to_zero(dest);
     }
     return true;
 }
@@ -1821,8 +1821,8 @@ bool translate_vpand(IR1_INST * pir1) {
     }
     IR2_OPND temp = ra_alloc_ftemp();
     la_xvand_v(temp, src1, src2);
-    set_high128_xreg_to_zero(temp);
     la_xvori_b(dest, temp, 0);
+    set_high128_xreg_to_zero(dest);
     return true;
 }
 
@@ -1846,8 +1846,8 @@ bool translate_vpandn(IR1_INST * pir1) {
     }
     IR2_OPND temp = ra_alloc_ftemp();
     la_xvandn_v(temp, src1, src2);
-    set_high128_xreg_to_zero(temp);
     la_xvori_b(dest, temp, 0);
+    set_high128_xreg_to_zero(dest);
     return true;
 }
 
@@ -1936,8 +1936,8 @@ bool translate_vpblendvb(IR1_INST * pir1) {
     la_xvslti_b(temp, src3, 0);
     la_xvbitsel_v(temp, src1, src2, temp);
     if (ir1_opnd_is_xmm(opnd0))
-        set_high128_xreg_to_zero(temp);
-    la_xvori_b(dest, temp, 0);
+        la_xvori_b(dest, temp, 0);
+    set_high128_xreg_to_zero(dest);
     return true;
 }
 
@@ -2017,8 +2017,8 @@ bool translate_vpblendw(IR1_INST * pir1) {
         la_xvextrins_h(temp, src2, VEXTRINS_IMM_4_0(7, 7));
 
     if (ir1_opnd_is_xmm(opnd0))
-        set_high128_xreg_to_zero(temp);
-    la_xvori_b(dest, temp, 0);
+        la_xvori_b(dest, temp, 0);
+    set_high128_xreg_to_zero(dest);
     return true;
 }
 
@@ -5075,8 +5075,8 @@ bool translate_vmpsadbw(IR1_INST *pir1)
     la_vhaddw_wu_hu(temp_dest, temp3, temp3);
     la_vsrlni_h_w(temp_dest, temp2, 0);
     if(ir1_opnd_is_xmm(opnd0)){
-        set_high128_xreg_to_zero(temp_dest);
         la_xvori_b(dest, temp_dest, 0);
+        set_high128_xreg_to_zero(dest);
         return true;
     }
     imm = imm>>3;
@@ -5743,8 +5743,8 @@ bool translate_vpclmulqdq(IR1_INST * pir1) {
         la_vxor_v(temp, temp, temp);
         la_vinsgr2vr_d(temp, res_lo, 0);
         la_vinsgr2vr_d(temp, res_hi, 1);
-        set_high128_xreg_to_zero(temp);
         la_xvori_b(dest, temp, 0);
+        set_high128_xreg_to_zero(dest);
         ra_free_temp_auto(src2);
         ra_free_temp(temp);
         ra_free_temp(ftemp);
