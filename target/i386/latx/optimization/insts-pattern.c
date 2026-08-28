@@ -604,6 +604,7 @@ bool insts_pattern_scan_jcc_end(TranslationBlock *tb, IR1_INST *pir1, int pir1_i
         }
 #ifdef CONFIG_LATX_XCOMISX_OPT
     case WRAP(COMISD):
+    case WRAP(VCOMISD):
         SCAN_CHECK(scan, 0);
         ir1_jcc = SCAN_IR1(tb, scan, 0);
         switch (ir1_opcode(ir1_jcc)) {
@@ -623,7 +624,7 @@ bool insts_pattern_scan_jcc_end(TranslationBlock *tb, IR1_INST *pir1, int pir1_i
                 pir1->instptn.next = ir1_jcc;
                 ir1_jcc->instptn.opc  = INSTPTN_OPC_NOP;
                 // ir1_jcc->instptn.next = NULL;
-            } else {
+            } else if (ir1_opcode(pir1) == WRAP(COMISD)) {
                 instptn_check_comisd_xx_jcc_0();
                 pir1->instptn.opc  = INSTPTN_OPC_COMISD_XX_JCC;
                 pir1->instptn.next = ir1_jcc;
@@ -636,6 +637,7 @@ bool insts_pattern_scan_jcc_end(TranslationBlock *tb, IR1_INST *pir1, int pir1_i
             return false;
         }
     case WRAP(COMISS):
+    case WRAP(VCOMISS):
         SCAN_CHECK(scan, 0);
         ir1_jcc = SCAN_IR1(tb, scan, 0);
         switch (ir1_opcode(ir1_jcc)) {
@@ -655,7 +657,7 @@ bool insts_pattern_scan_jcc_end(TranslationBlock *tb, IR1_INST *pir1, int pir1_i
                 pir1->instptn.next = ir1_jcc;
                 ir1_jcc->instptn.opc  = INSTPTN_OPC_NOP;
                 // ir1_jcc->instptn.next = NULL;
-            } else {
+            } else if (ir1_opcode(pir1) == WRAP(COMISS)) {
                 instptn_check_comiss_xx_jcc_0();
                 pir1->instptn.opc  = INSTPTN_OPC_COMISS_XX_JCC;
                 pir1->instptn.next = ir1_jcc;
@@ -668,6 +670,7 @@ bool insts_pattern_scan_jcc_end(TranslationBlock *tb, IR1_INST *pir1, int pir1_i
             return false;
         }
     case WRAP(UCOMISD):
+    case WRAP(VUCOMISD):
         SCAN_CHECK(scan, 0);
         ir1_jcc = SCAN_IR1(tb, scan, 0);
         switch (ir1_opcode(ir1_jcc)) {
@@ -687,7 +690,7 @@ bool insts_pattern_scan_jcc_end(TranslationBlock *tb, IR1_INST *pir1, int pir1_i
                 pir1->instptn.next = ir1_jcc;
                 ir1_jcc->instptn.opc  = INSTPTN_OPC_NOP;
                 // ir1_jcc->instptn.next = NULL;
-            } else {
+            } else if (ir1_opcode(pir1) == WRAP(UCOMISD)) {
                 instptn_check_ucomisd_xx_jcc_0();
                 pir1->instptn.opc  = INSTPTN_OPC_UCOMISD_XX_JCC;
                 pir1->instptn.next = ir1_jcc;
@@ -700,6 +703,7 @@ bool insts_pattern_scan_jcc_end(TranslationBlock *tb, IR1_INST *pir1, int pir1_i
             return false;
         }
     case WRAP(UCOMISS):
+    case WRAP(VUCOMISS):
         SCAN_CHECK(scan, 0);
         ir1_jcc = SCAN_IR1(tb, scan, 0);
         switch (ir1_opcode(ir1_jcc)) {
@@ -719,7 +723,7 @@ bool insts_pattern_scan_jcc_end(TranslationBlock *tb, IR1_INST *pir1, int pir1_i
                 pir1->instptn.next = ir1_jcc;
                 ir1_jcc->instptn.opc  = INSTPTN_OPC_NOP;
                 ir1_jcc->instptn.next = NULL;
-            } else {
+            } else if (ir1_opcode(pir1) == WRAP(UCOMISS)) {
                 instptn_check_ucomiss_xx_jcc_0();
                 pir1->instptn.opc  = INSTPTN_OPC_UCOMISS_XX_JCC;
                 pir1->instptn.next = ir1_jcc;
@@ -762,6 +766,74 @@ bool insts_pattern_scan_jcc_end(TranslationBlock *tb, IR1_INST *pir1, int pir1_i
         return true;
     default:
         return false;
+    }
+}
+
+static bool repeat_add_same_operands(IR1_INST *first, IR1_INST *next)
+{
+    IR1_OPND *first_dest;
+    IR1_OPND *first_src;
+    IR1_OPND *next_dest;
+    IR1_OPND *next_src;
+
+    if (ir1_opcode(next) != WRAP(ADD) || ir1_get_opnd_num(next) != 2 ||
+        next->instptn.opc != INSTPTN_OPC_NONE ||
+        ir1_get_eflag_def(next) != 0 || ir1_is_prefix_lock(next)) {
+        return false;
+    }
+    first_dest = ir1_get_opnd(first, 0);
+    first_src = ir1_get_opnd(first, 1);
+    next_dest = ir1_get_opnd(next, 0);
+    next_src = ir1_get_opnd(next, 1);
+
+    return
+           ir1_opnd_is_gpr(next_dest) && ir1_opnd_is_gpr(next_src) &&
+           ir1_opnd_size(next_dest) == 64 &&
+           ir1_opnd_size(next_src) == 64 &&
+           ir1_opnd_base_reg_num(next_dest) ==
+               ir1_opnd_base_reg_num(first_dest) &&
+           ir1_opnd_base_reg_num(next_src) ==
+               ir1_opnd_base_reg_num(first_src);
+}
+
+void insts_pattern_repeat_add(TranslationBlock *tb)
+{
+    int count = tb_ir1_num(tb);
+
+    for (int i = 0; i < count; ++i) {
+        IR1_INST *first = tb_ir1_inst(tb, i);
+        IR1_OPND *dest;
+        IR1_OPND *src;
+        int end;
+
+        if (ir1_opcode(first) != WRAP(ADD) || ir1_get_opnd_num(first) != 2 ||
+            first->instptn.opc != INSTPTN_OPC_NONE ||
+            ir1_get_eflag_def(first) != 0 || ir1_is_prefix_lock(first)) {
+            continue;
+        }
+        dest = ir1_get_opnd(first, 0);
+        src = ir1_get_opnd(first, 1);
+        if (!ir1_opnd_is_gpr(dest) || !ir1_opnd_is_gpr(src) ||
+            ir1_opnd_size(dest) != 64 || ir1_opnd_size(src) != 64 ||
+            ir1_opnd_base_reg_num(dest) == ir1_opnd_base_reg_num(src)) {
+            continue;
+        }
+
+        for (end = i + 1; end < count; ++end) {
+            if (!repeat_add_same_operands(first, tb_ir1_inst(tb, end))) {
+                break;
+            }
+        }
+        if (end - i < 3) {
+            continue;
+        }
+
+        first->instptn.opc = INSTPTN_OPC_REPEAT_ADD;
+        first->instptn.next = tb_ir1_inst(tb, end - 1);
+        for (int j = i + 1; j < end; ++j) {
+            tb_ir1_inst(tb, j)->instptn.opc = INSTPTN_OPC_NOP;
+        }
+        i = end - 1;
     }
 }
 

@@ -449,6 +449,7 @@ static inline bool xcomisx_jcc(IR1_INST *ir1, bool is_double, bool qnan_exp)
     IR2_OPND dest = load_freg128_from_ir1(ir1_get_opnd(ir1, 0));
     IR2_OPND src = load_freg128_from_ir1(ir1_get_opnd(ir1, 1));
     IR2_OPND target_label_opnd = ra_alloc_label();
+    IR2_OPND condition = ra_alloc_itemp();
 #ifdef CONFIG_LATX_TU
     TranslationBlock *tb = lsenv->tr_data->curr_tb;
 #endif
@@ -493,6 +494,7 @@ static inline bool xcomisx_jcc(IR1_INST *ir1, bool is_double, bool qnan_exp)
         lsassert(0);
         break;
     }
+    la_movcf2gr(condition, fcc7_ir2_opnd);
 
 #ifdef CONFIG_LATX_TU
     if (judge_tu_eflag_gen(tb)) {
@@ -507,7 +509,7 @@ static inline bool xcomisx_jcc(IR1_INST *ir1, bool is_double, bool qnan_exp)
         la_label(tu_reset_label_opnd);
         tb->tu_jmp[TU_TB_INDEX_TARGET] = tu_reset_label_opnd._label_id;
         if (ir1_opcode(next) != WRAP(JL)) {
-            la_bcnez(fcc7_ir2_opnd, target_label_opnd);
+            la_bne(condition, zero_ir2_opnd, target_label_opnd);
             tu_jcc_nop_gen(tb);
         } else {
             /* For unlink. */
@@ -535,7 +537,7 @@ static inline bool xcomisx_jcc(IR1_INST *ir1, bool is_double, bool qnan_exp)
 #endif
 
     if (ir1_opcode(next) != WRAP(JL))
-        la_bcnez(fcc7_ir2_opnd, target_label_opnd);
+        la_bne(condition, zero_ir2_opnd, target_label_opnd);
 
     /* not taken */
     tr_generate_exit_stub_tb(next, 0, trans, curr);
@@ -544,6 +546,7 @@ static inline bool xcomisx_jcc(IR1_INST *ir1, bool is_double, bool qnan_exp)
     /* taken */
     tr_generate_exit_stub_tb(next, 1, trans, curr);
 
+    ra_free_temp(condition);
     return true;
 }
 
@@ -2211,27 +2214,27 @@ static inline bool xcomisx_xx_jcc(IR1_INST *pir1, bool is_jcc, bool is_double, b
 
         switch (ir1_opcode(next)) {
         case WRAP(JA):
-            la_fcmp(fcc0_ir2_opnd, src, dest, FCMP_COND_CLT + qnan_exp);
+            la_fcmp(fcc7_ir2_opnd, src, dest, FCMP_COND_CLT + qnan_exp);
             break;
         case WRAP(JAE):
-            la_fcmp(fcc0_ir2_opnd, src, dest, FCMP_COND_CLE + qnan_exp);
+            la_fcmp(fcc7_ir2_opnd, src, dest, FCMP_COND_CLE + qnan_exp);
             break;
         case WRAP(JB):
-            la_fcmp(fcc0_ir2_opnd, dest, src, FCMP_COND_CULT + qnan_exp);
+            la_fcmp(fcc7_ir2_opnd, dest, src, FCMP_COND_CULT + qnan_exp);
         /* below or NAN, x86 special define */
             break;
         case WRAP(JBE):
         /* below or equal or NAN, x86 special define */
-            la_fcmp(fcc0_ir2_opnd, dest, src, FCMP_COND_CULE + qnan_exp);
+            la_fcmp(fcc7_ir2_opnd, dest, src, FCMP_COND_CULE + qnan_exp);
             break;
         case WRAP(JE):
         case WRAP(JLE):
-            la_fcmp(fcc0_ir2_opnd, dest, src, FCMP_COND_CUEQ + qnan_exp);
+            la_fcmp(fcc7_ir2_opnd, dest, src, FCMP_COND_CUEQ + qnan_exp);
         /* equal or NAN, x86 special define */
             break;
         case WRAP(JNE):
         case WRAP(JG):
-            la_fcmp(fcc0_ir2_opnd, dest, src, FCMP_COND_CNE + qnan_exp);
+            la_fcmp(fcc7_ir2_opnd, dest, src, FCMP_COND_CNE + qnan_exp);
             break;
         case WRAP(JL):
         case WRAP(JGE):
@@ -2243,6 +2246,9 @@ static inline bool xcomisx_xx_jcc(IR1_INST *pir1, bool is_jcc, bool is_double, b
     } else {
 
         IR2_OPND target_label_opnd = ra_alloc_label();
+        IR2_OPND condition = ra_alloc_itemp();
+
+        la_movcf2gr(condition, fcc7_ir2_opnd);
 
 #ifdef CONFIG_LATX_TU
         TranslationBlock *tb = lsenv->tr_data->curr_tb;
@@ -2263,7 +2269,7 @@ static inline bool xcomisx_xx_jcc(IR1_INST *pir1, bool is_jcc, bool is_double, b
                 /* Just for unlink. */
                 la_nop();
             } else {
-                la_bcnez(fcc0_ir2_opnd, target_label_opnd);
+                la_bne(condition, zero_ir2_opnd, target_label_opnd);
             }
             tu_jcc_nop_gen(tb);
 
@@ -2291,7 +2297,7 @@ static inline bool xcomisx_xx_jcc(IR1_INST *pir1, bool is_jcc, bool is_double, b
             la_b(target_label_opnd);
         } else if (ir1_opcode(curr) == WRAP(JL)) {
         } else {
-            la_bcnez(fcc0_ir2_opnd, target_label_opnd);
+            la_bne(condition, zero_ir2_opnd, target_label_opnd);
         }
 
         /* not taken */
@@ -2302,6 +2308,7 @@ static inline bool xcomisx_xx_jcc(IR1_INST *pir1, bool is_jcc, bool is_double, b
         /* taken */
         tr_generate_exit_tb(curr, 1);
 
+        ra_free_temp(condition);
     }
     return true;
 }
@@ -2384,6 +2391,25 @@ static bool translate_ucomiss_xx_jcc(IR1_INST *pir1)
 #endif
 
 
+static bool translate_repeat_add(IR1_INST *pir1)
+{
+    IR2_OPND dest = load_ireg_from_ir1(ir1_get_opnd(pir1, 0),
+                                        UNKNOWN_EXTENSION, false);
+    IR2_OPND src = load_ireg_from_ir1(ir1_get_opnd(pir1, 1),
+                                       UNKNOWN_EXTENSION, false);
+    IR2_OPND count = ra_alloc_itemp();
+    IR2_OPND product = ra_alloc_itemp();
+    int repeats = pir1->instptn.next - pir1 + 1;
+
+    lsassert(repeats >= 3);
+    li_d(count, repeats);
+    la_mul_d(product, src, count);
+    la_add_d(dest, dest, product);
+    ra_free_temp(product);
+    ra_free_temp(count);
+    return true;
+}
+
 bool try_translate_instptn(IR1_INST *pir1)
 {
     instptn_check_false();
@@ -2464,6 +2490,8 @@ bool try_translate_instptn(IR1_INST *pir1)
         return translate_shr_jcc(pir1);
     case INSTPTN_OPC_AND_JCC:
         return translate_and_jcc(pir1);
+    case INSTPTN_OPC_REPEAT_ADD:
+        return translate_repeat_add(pir1);
     default:
         lsassert(0);
         break;
