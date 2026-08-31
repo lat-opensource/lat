@@ -432,18 +432,8 @@ static inline bool xcomisx_jcc(IR1_INST *ir1, bool is_double, bool qnan_exp)
 
     if (is_double) {
         la_fcmp = la_fcmp_cond_d;
-        if (qnan_exp) {
-            curr->info->id = WRAP(COMISD);
-        } else {
-            curr->info->id = WRAP(UCOMISD);
-        }
     } else {
         la_fcmp = la_fcmp_cond_s;
-        if (qnan_exp) {
-            curr->info->id = WRAP(COMISS);
-        } else {
-            curr->info->id = WRAP(UCOMISS);
-        }
     }
 
     IR2_OPND dest = load_freg128_from_ir1(ir1_get_opnd(ir1, 0));
@@ -453,6 +443,8 @@ static inline bool xcomisx_jcc(IR1_INST *ir1, bool is_double, bool qnan_exp)
 #ifdef CONFIG_LATX_TU
     TranslationBlock *tb = lsenv->tr_data->curr_tb;
 #endif
+    /* Direct BCC linking would bypass the successor flag-recovery stub. */
+    ((TranslationBlock *)lsenv->tr_data->curr_tb)->bool_flags &= ~OPT_BCC;
 
     switch (ir1_opcode(next)) {
     case WRAP(JA):
