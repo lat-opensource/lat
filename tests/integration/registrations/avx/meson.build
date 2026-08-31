@@ -1,4 +1,13 @@
 if 'x86_64-linux-user' in target_dirs
+  foreach cvt_option : ['0', '1']
+    latx_integration_tests += [{
+      'name': 'test-avx-conversion-alias-' + cvt_option,
+      'runner': find_program('../../test-avx-conversion-alias.py'),
+      'args': [emulators['latx-x86_64'], files('../../vcvtpd-register-alias.asm')],
+      'env': {'LATX_SOFTFPU': '0', 'LATX_CVT_OPT': cvt_option},
+      'timeout': 120,
+    }]
+  endforeach
   if 'CONFIG_LATX_AVX_OPT' in config_host
     latx_integration_tests += [{
       'name': 'test-f16c-memory-boundary',
@@ -78,6 +87,7 @@ if 'x86_64-linux-user' in target_dirs
       files('../../avx-ymm-writeback.S'),
       files('../../vpshufd-distinct-regs.S'),
       files('../../vroundps-imm0b.S'),
+      files('../../vcvtdq2pd-ymm-alias.asm'),
       files('../../avx-regression-extract-alias.S'),
       files('../../avx-regression-narrow-state.S'),
       files('../../avx-regression-fma-alias.S'),
