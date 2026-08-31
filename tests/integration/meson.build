@@ -1,5 +1,7 @@
 latx_integration_tests = []
 
+subdir('registrations/cpu')
+
 if host_machine.cpu_family() == 'loongarch64'
   subdir('registrations/x11-kzt')
   subdir('registrations/sandbox')

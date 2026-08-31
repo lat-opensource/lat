@@ -1915,7 +1915,8 @@ static X86CPUDefinition builtin_x86_defs[] = {
             CPUID_PSE36,
         .features[FEAT_1_ECX] =
 #ifdef CONFIG_LATX_AVX_OPT
-            CPUID_EXT_AVX | CPUID_EXT_FMA | CPUID_EXT_XSAVE |
+            CPUID_EXT_AVX | CPUID_EXT_FMA | CPUID_EXT_F16C |
+            CPUID_EXT_XSAVE |
 #endif/*CONFIG_LATX_AVX_OPT*/
 #ifdef CONFIG_LATX_SSSE3_SSE4
             CPUID_EXT_AES | CPUID_EXT_POPCNT | CPUID_EXT_SSE42 |
@@ -1926,7 +1927,7 @@ static X86CPUDefinition builtin_x86_defs[] = {
         .features[FEAT_8000_0001_EDX] =
             CPUID_EXT2_LM | CPUID_EXT2_SYSCALL | CPUID_EXT2_NX,
         .features[FEAT_8000_0001_ECX] =
-            CPUID_EXT3_LAHF_LM | CPUID_EXT3_SVM,
+            CPUID_EXT3_LAHF_LM | CPUID_EXT3_SVM | CPUID_EXT3_ABM,
 #ifdef CONFIG_LATX_AVX_OPT
         .features[FEAT_7_0_EBX] =
         CPUID_7_0_EBX_HLE |
@@ -2065,7 +2066,8 @@ static X86CPUDefinition builtin_x86_defs[] = {
             PPRO_FEATURES,
         .features[FEAT_1_ECX] =
 #ifdef CONFIG_LATX_AVX_OPT
-            CPUID_EXT_AVX | CPUID_EXT_FMA | CPUID_EXT_XSAVE |
+            CPUID_EXT_AVX | CPUID_EXT_FMA | CPUID_EXT_F16C |
+            CPUID_EXT_XSAVE |
 #endif/*CONFIG_LATX_AVX_OPT*/
 #ifdef CONFIG_LATX_SSSE3_SSE4
             CPUID_EXT_AES | CPUID_EXT_POPCNT | CPUID_EXT_SSE42 |
@@ -2074,7 +2076,7 @@ static X86CPUDefinition builtin_x86_defs[] = {
 #endif
             CPUID_EXT_SSE3,
         .features[FEAT_8000_0001_ECX] =
-            CPUID_EXT3_LAHF_LM | CPUID_EXT3_SVM,
+            CPUID_EXT3_LAHF_LM | CPUID_EXT3_SVM | CPUID_EXT3_ABM,
 #ifdef CONFIG_LATX_AVX_OPT
         .features[FEAT_7_0_EBX] =
         CPUID_7_0_EBX_HLE |
