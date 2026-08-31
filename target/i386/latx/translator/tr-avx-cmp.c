@@ -1120,9 +1120,7 @@ bool translate_vcmpeqps(IR1_INST * pir1) {
         IR2_OPND dest = load_freg128_from_ir1(ir1_get_opnd(pir1, 0));
         IR2_OPND src1 = load_freg128_from_ir1(ir1_get_opnd(pir1, 1));
         IR2_OPND src2 = load_freg128_from_ir1(ir1_get_opnd(pir1, 2));
-        IR2_OPND temp = ra_alloc_ftemp();
-        la_vfcmp_cond_s(temp, src1, src2, X86_FCMP_COND_EQ);
-        la_xvori_b(dest, temp, 0);
+        la_vfcmp_cond_s(dest, src1, src2, X86_FCMP_COND_EQ);
         set_high128_xreg_to_zero(dest);
     }
     return true;
@@ -1146,9 +1144,7 @@ bool translate_vcmpltps(IR1_INST * pir1) {
         IR2_OPND dest = load_freg128_from_ir1(ir1_get_opnd(pir1, 0));
         IR2_OPND src1 = load_freg128_from_ir1(ir1_get_opnd(pir1, 1));
         IR2_OPND src2 = load_freg128_from_ir1(ir1_get_opnd(pir1, 2));
-        IR2_OPND temp = ra_alloc_ftemp();
-        la_vfcmp_cond_s(temp, src1, src2, X86_FCMP_COND_LT);
-        la_xvori_b(dest, temp, 0);
+        la_vfcmp_cond_s(dest, src1, src2, X86_FCMP_COND_LT);
         set_high128_xreg_to_zero(dest);
     }
     return true;

@@ -125,6 +125,21 @@ static bool deal_xmm_common(TranslationBlock *tb, IR1_INST *ir1, uint32_t *xmm)
     }
 
     switch (ir1_opcode(ir1)) {
+    /* VEX scalar arithmetic copies bits 127:32 from its first source. */
+    case WRAP(VADDSS):
+    case WRAP(VSUBSS):
+    case WRAP(VMULSS):
+    case WRAP(VDIVSS):
+        src_update_des(ir1, xmm);
+        return true;
+    /* Scalar FMA leaves bits 127:32 of the old destination unchanged. */
+    case WRAP(VFMADD132SS):
+    case WRAP(VFMADD213SS):
+    case WRAP(VFMADD231SS):
+    case WRAP(VFMSUB132SS):
+    case WRAP(VFMSUB213SS):
+    case WRAP(VFMSUB231SS):
+        return true;
     case WRAP(ADDPD):
     case WRAP(ADDPS):
     case WRAP(ADDSUBPD):
@@ -204,6 +219,12 @@ static bool deal_xmm_common(TranslationBlock *tb, IR1_INST *ir1, uint32_t *xmm)
     case WRAP(MOVDQU):
     case WRAP(MOVNTPS):
     case WRAP(MOVNTPD):
+    case WRAP(VMOVUPS):
+    case WRAP(VMOVUPD):
+    case WRAP(VMOVAPS):
+    case WRAP(VMOVAPD):
+    case WRAP(VMOVDQA):
+    case WRAP(VMOVDQU):
         if (!ir1_opnd_is_xmm(des_opnd)) {
             /* src will write to mm. */
             src_no_opt(ir1, xmm);
@@ -223,6 +244,17 @@ static bool deal_xmm_common(TranslationBlock *tb, IR1_INST *ir1, uint32_t *xmm)
     case WRAP(MOVSS):
         if (ir1_opnd_is_mem(src_opnd)) {
             zero_update_des(ir1, xmm);
+        }
+        return true;
+    /* VMOVSS xmm, m32 clears bits 127:32; stores only read bits 31:0. */
+    case WRAP(VMOVSS):
+        if (!ir1_opnd_is_xmm(des_opnd)) {
+            return true;
+        }
+        if (ir1_opnd_is_mem(src_opnd)) {
+            zero_update_des(ir1, xmm);
+        } else {
+            src_update_des(ir1, xmm);
         }
         return true;
     /* need 0 ~ 127 every high bit. */
