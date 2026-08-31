@@ -7583,6 +7583,7 @@ static void x86_cpu_register_types(void)
     if(!option_avx_cpuid){
         uint64_t feat_1_ecx_mask = ~(CPUID_EXT_AVX |
                 CPUID_EXT_FMA |
+                CPUID_EXT_F16C |
                 CPUID_EXT_XSAVE);
         uint64_t feat_7_0_ebx_mask = ~(CPUID_7_0_EBX_HLE |
                 CPUID_7_0_EBX_BMI1 |
