@@ -59,9 +59,49 @@ _start:
     jne .Laot_loop
     CHECK_YMM_HIGH_ZERO ymm0, 16
 
+    # HBR only models XMM values.  Keep a full YMM value live across the TB
+    # boundary created by DIV, then mix XMM and YMM operations in the next TB.
+    # The four qwords must survive unchanged on every TU-internal entry.
+    vmovdqu ymm10, YMMWORD PTR [rip + live_ymm]
+    vpxor ymm11, ymm11, ymm11
+    mov r15d, 200000
+    mov r14d, 7
+.Lmixed_width_loop:
+    mov eax, 123
+    xor edx, edx
+    div r14d
+    vmovd xmm0, r9d
+    vpxor xmm13, xmm13, xmm13
+    vpcmpeqd ymm14, ymm11, ymm11
+    vextracti128 xmm15, ymm14, 1
+    vmovq rax, xmm10
+    vpextrq rcx, xmm10, 1
+    vextracti128 xmm0, ymm10, 1
+    vmovq rdx, xmm0
+    vpextrq rsi, xmm0, 1
+    cmp rax, 1
+    jne .Lmixed_width_fail
+    cmp rcx, 2
+    jne .Lmixed_width_fail
+    cmp rdx, 3
+    jne .Lmixed_width_fail
+    cmp rsi, 4
+    jne .Lmixed_width_fail
+    dec r15d
+    jne .Lmixed_width_loop
+    jmp .Lmixed_width_done
+.Lmixed_width_fail:
+    or DWORD PTR [rip + fail_count], 32
+.Lmixed_width_done:
+
     vzeroupper
     mov edi, DWORD PTR [rip + fail_count]
     mov eax, 60
     syscall
+
+.section .rodata
+.balign 32
+live_ymm:
+    .quad 1, 2, 3, 4
 
 .section .note.GNU-stack,"",@progbits
