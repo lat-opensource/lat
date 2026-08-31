@@ -4205,12 +4205,14 @@ bool translate_vpshufd(IR1_INST * pir1) {
         IR2_OPND dest = load_freg128_from_ir1(opnd0);
         IR2_OPND src1 = load_freg128_from_ir1(opnd1);
         uint8_t imm = ir1_opnd_uimm(opnd2);
+        la_xvori_b(dest, src1, 0x00);
         la_vpermi_w(dest, src1, imm);
         set_high128_xreg_to_zero(dest);
     } else {
         IR2_OPND dest = load_freg256_from_ir1(opnd0);
         IR2_OPND src1 = load_freg256_from_ir1(opnd1);
         uint8_t imm = ir1_opnd_uimm(opnd2);
+        la_xvori_b(dest, src1, 0x00);
         la_xvpermi_w(dest, src1, imm);
     }
     return true;

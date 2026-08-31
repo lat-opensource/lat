@@ -26,6 +26,7 @@ if 'x86_64-linux-user' in target_dirs
     'args': [
       emulators['latx-x86_64'],
       files('../../scalar-fma-forward.S'),
+      files('../../vpshufd-distinct-regs.S'),
     ],
     'timeout': 120,
   }]
