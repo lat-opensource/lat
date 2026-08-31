@@ -25,34 +25,11 @@
 
 /* return highest utsname machine name for emulated instruction set
  *
- * NB: the default emulated CPU ("any") might not match any existing CPU, e.g.
- * on ARM it has all features turned on, so there is no perfect arch string to
- * return here */
+ * Note: Steam's i386 launcher selects its webhelper class from uname.machine
+ * and Steam webhelper is 64-bit program */
 const char *cpu_to_uname_machine(void *cpu_env)
 {
-#if defined(TARGET_ARM) && !defined(TARGET_AARCH64)
-
-    /* utsname machine name on linux arm is CPU arch name + endianness, e.g.
-     * armv7l; to get a list of CPU arch names from the linux source, use:
-     *     grep arch_name: -A1 linux/arch/arm/mm/proc-*.S
-     * see arch/arm/kernel/setup.c: setup_processor()
-     */
-
-    /* in theory, endianness is configurable on some ARM CPUs, but this isn't
-     * used in user mode emulation */
-#ifdef TARGET_WORDS_BIGENDIAN
-#define utsname_suffix "b"
-#else
-#define utsname_suffix "l"
-#endif
-    if (arm_feature(cpu_env, ARM_FEATURE_V7))
-        return "armv7" utsname_suffix;
-    if (arm_feature(cpu_env, ARM_FEATURE_V6))
-        return "armv6" utsname_suffix;
-    /* earliest emulated CPU is ARMv5TE; qemu can emulate the 1026, but not its
-     * Jazelle support */
-    return "armv5te" utsname_suffix;
-#elif defined(TARGET_I386) && !defined(TARGET_X86_64)
+#if defined(TARGET_I386) && !defined(TARGET_X86_64)
     /* see arch/x86/kernel/cpu/bugs.c: check_bugs(), 386, 486, 586, 686 */
     CPUState *cpu = env_cpu((CPUX86State *)cpu_env);
     int family = object_property_get_int(OBJECT(cpu), "family", NULL);
@@ -61,6 +38,9 @@ const char *cpu_to_uname_machine(void *cpu_env)
     }
     if (family == 5) {
         return "i586";
+    }
+    if (strstr(exec_path, "ubuntu12_32/steam")) {
+      return "x86_64";
     }
     return "i686";
 #else
