@@ -5300,6 +5300,74 @@ bool translate_vpsadbw(IR1_INST *pir1)
     return true;
 }
 
+static void translate_vroundps_trunc_sae(IR2_OPND dest, IR2_OPND src,
+                                         bool is_xmm)
+{
+    IR2_OPND nan_mask = ra_alloc_ftemp();
+    IR2_OPND exponent = ra_alloc_ftemp();
+    IR2_OPND shift = ra_alloc_ftemp();
+    IR2_OPND bits_mask = ra_alloc_ftemp();
+    IR2_OPND sign = ra_alloc_ftemp();
+    IR2_OPND select_mask = ra_alloc_ftemp();
+    IR2_OPND quiet_nan = ra_alloc_ftemp();
+
+    if (is_xmm) {
+        la_vfcmp_cond_s(nan_mask, src, src, FCMP_COND_CUN);
+        la_vslli_w(exponent, src, 1);
+        la_vsrli_w(exponent, exponent, 24);
+        la_vldi(shift, VLDI_IMM_TYPE0(2, 150));
+        la_vsub_w(shift, shift, exponent);
+        la_vseq_w(bits_mask, exponent, exponent);
+        la_vsll_w(bits_mask, bits_mask, shift);
+        la_vand_v(dest, src, bits_mask);
+
+        la_vldi(sign, 0b1001110000000);
+        la_vsrli_w(quiet_nan, sign, 9);
+        la_vand_v(sign, src, sign);
+        la_vldi(bits_mask, VLDI_IMM_TYPE0(2, 127));
+        la_vslt_wu(select_mask, exponent, bits_mask);
+        la_vbitsel_v(dest, dest, sign, select_mask);
+
+        la_vldi(bits_mask, VLDI_IMM_TYPE0(2, 150));
+        la_vslt_wu(select_mask, exponent, bits_mask);
+        la_vbitsel_v(dest, src, dest, select_mask);
+
+        la_vor_v(quiet_nan, src, quiet_nan);
+        la_vbitsel_v(dest, dest, quiet_nan, nan_mask);
+    } else {
+        la_xvfcmp_cond_s(nan_mask, src, src, FCMP_COND_CUN);
+        la_xvslli_w(exponent, src, 1);
+        la_xvsrli_w(exponent, exponent, 24);
+        la_xvldi(shift, VLDI_IMM_TYPE0(2, 150));
+        la_xvsub_w(shift, shift, exponent);
+        la_xvseq_w(bits_mask, exponent, exponent);
+        la_xvsll_w(bits_mask, bits_mask, shift);
+        la_xvand_v(dest, src, bits_mask);
+
+        la_xvldi(sign, 0b1001110000000);
+        la_xvsrli_w(quiet_nan, sign, 9);
+        la_xvand_v(sign, src, sign);
+        la_xvldi(bits_mask, VLDI_IMM_TYPE0(2, 127));
+        la_xvslt_wu(select_mask, exponent, bits_mask);
+        la_xvbitsel_v(dest, dest, sign, select_mask);
+
+        la_xvldi(bits_mask, VLDI_IMM_TYPE0(2, 150));
+        la_xvslt_wu(select_mask, exponent, bits_mask);
+        la_xvbitsel_v(dest, src, dest, select_mask);
+
+        la_xvor_v(quiet_nan, src, quiet_nan);
+        la_xvbitsel_v(dest, dest, quiet_nan, nan_mask);
+    }
+
+    ra_free_temp(quiet_nan);
+    ra_free_temp(select_mask);
+    ra_free_temp(sign);
+    ra_free_temp(bits_mask);
+    ra_free_temp(shift);
+    ra_free_temp(exponent);
+    ra_free_temp(nan_mask);
+}
+
 bool translate_vroundps(IR1_INST *pir1)
 {
     if (!option_enable_lasx) {
@@ -5314,11 +5382,25 @@ bool translate_vroundps(IR1_INST *pir1)
     IR2_OPND src = load_freg256_from_ir1(opnd1);
     uint8_t imm = ir1_opnd_uimm(opnd2);
 
+    bool is_xmm = ir1_opnd_is_xmm(opnd0);
+
+    if (imm == 0xb) {
+        /*
+         * Integer masking avoids both FCSR serialization and the precision
+         * flag that imm[3] suppresses.  CUN still raises invalid for SNaN.
+         */
+        translate_vroundps_trunc_sae(dest, src, is_xmm);
+        if (is_xmm) {
+            set_high128_xreg_to_zero(dest);
+        }
+        return true;
+    }
+
     IR2_OPND temp = ra_alloc_ftemp();
     IR2_OPND fcsr = ra_alloc_itemp();
     IR2_OPND fcsr_save = ra_alloc_itemp();
     IR2_OPND mxcsr = ra_alloc_itemp();
-    bool is_xmm = ir1_opnd_is_xmm(opnd0);
+
     if(imm & 0x8){
         IR2_INST * ( * tr_inst)(IR2_OPND, IR2_OPND, IR2_OPND, int);
         tr_inst = is_xmm ? la_vfcmp_cond_s : la_xvfcmp_cond_s;

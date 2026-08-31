@@ -30,4 +30,14 @@ if 'x86_64-linux-user' in target_dirs
     ],
     'timeout': 120,
   }]
+  latx_integration_tests += [{
+    'name': 'test-gb403-hdr',
+    'runner': find_program('../../test-gb603-patterns.sh'),
+    'args': [
+      emulators['latx-x86_64'],
+      files('../../scalar-hdr-pattern.S'),
+      files('../../vroundps-imm0b.S'),
+    ],
+    'timeout': 120,
+  }]
 endif

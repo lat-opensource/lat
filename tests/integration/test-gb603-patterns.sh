@@ -43,4 +43,4 @@ for source_file in "$@"; do
         "$emulator" "$workdir/$name"
 done
 
-echo "PASS: GB603 AVX patterns JIT/cold-AOT/hot-AOT"
+echo "PASS: LATX AVX integration JIT/cold-AOT/hot-AOT"
