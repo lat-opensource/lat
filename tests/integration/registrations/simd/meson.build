@@ -20,4 +20,13 @@ if 'x86_64-linux-user' in target_dirs
     ],
     'timeout': 120,
   }]
+  latx_integration_tests += [{
+    'name': 'test-gb702-fma-forward',
+    'runner': find_program('../../test-gb603-patterns.sh'),
+    'args': [
+      emulators['latx-x86_64'],
+      files('../../scalar-fma-forward.S'),
+    ],
+    'timeout': 120,
+  }]
 endif
