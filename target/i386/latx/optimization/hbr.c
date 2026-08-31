@@ -778,6 +778,20 @@ static void init_xmm_state(uint32_t xmm[XMM_NUM])
 #include "tu.h"
 typedef bool (*xmm_analyse_func)(TranslationBlock *, IR1_INST *, uint32_t *);
 
+static bool tb_has_ymm_operand(TranslationBlock *tb)
+{
+    for (int i = 0; i < tb_ir1_num(tb); ++i) {
+        IR1_INST *ir1 = tb_ir1_inst(tb, i);
+
+        for (int j = 0; j < ir1_get_opnd_num(ir1); ++j) {
+            if (ir1_opnd_is_ymm(ir1_get_opnd(ir1, j))) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 /* static int xcount, scount, ncount; */
 static void tb_xmm_analyse(TranslationBlock *tb,
         xmm_analyse_func analyse_func, uint32_t *xmm)
@@ -787,6 +801,23 @@ static void tb_xmm_analyse(TranslationBlock *tb,
     tb->s_data->xmm_use = 0;
     tb->s_data->xmm_def = 0;
     IR1_INST *ir1 = NULL;
+
+    /*
+     * SHBR models the low 128-bit XMM value only.  Optimizing an XMM
+     * instruction in a TB that also uses YMM can leave the upper half in a
+     * different physical register state across TU-internal entries.  Keep all
+     * vector registers live and skip SHBR for these mixed-width TBs.
+     */
+    if (tb_has_ymm_operand(tb)) {
+        tb->s_data->xmm_use = SHBR_XMM_ALL;
+        for (int i = 0; i < tb_ir1_num(tb); ++i) {
+            ir1 = tb_ir1_inst(tb, i);
+            ir1->xmm_def = 0;
+            ir1->xmm_use = 0;
+        }
+        return;
+    }
+
     for (int i = 0; i < tb_ir1_num(tb); ++i) {
         ir1 = tb_ir1_inst(tb, i);
         ir1->xmm_def = 0;
