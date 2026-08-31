@@ -1107,8 +1107,12 @@ bool translate_cvtss2sd(IR1_INST *pir1)
     lsassert(ir1_opnd_is_xmm(ir1_get_opnd(pir1, 0)));
     IR2_OPND dest = load_freg128_from_ir1(ir1_get_opnd(pir1, 0));
     IR2_OPND src = load_freg128_from_ir1(ir1_get_opnd(pir1, 1));
-    if (SHBR_ON_64(pir1)) {
+    bool restore_zero = SHBR_RESTORE_64(pir1);
+    if (SHBR_ON_64(pir1) || restore_zero) {
         la_fcvt_d_s(dest, src);
+        if (restore_zero) {
+            clear_xmm_high64(dest);
+        }
     } else {
         IR2_OPND temp = ra_alloc_ftemp();
         la_fcvt_d_s(temp, src);

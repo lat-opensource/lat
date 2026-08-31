@@ -1376,6 +1376,16 @@ IR2_OPND load_freg256_from_ir1(IR1_OPND * opnd1) {
     g_assert_not_reached();
 }
 
+void clear_xmm_high64(IR2_OPND opnd)
+{
+    lsassert(ir2_opnd_is_freg(&opnd));
+    if (option_enable_lasx) {
+        la_xvinsgr2vr_d(opnd, zero_ir2_opnd, 1);
+    } else {
+        la_vinsgr2vr_d(opnd, zero_ir2_opnd, 1);
+    }
+}
+
 void set_high128_xreg_to_zero(IR2_OPND opnd2) {
     lsassert(ir2_opnd_is_freg( & opnd2));
     if (option_enable_lasx) {

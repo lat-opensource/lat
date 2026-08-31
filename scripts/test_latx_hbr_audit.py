@@ -356,6 +356,87 @@ class HbrAuditTest(unittest.TestCase):
             common.count("external_update_des(ir1, xmm)"), 8,
         )
 
+    def test_known_zero_high64_is_restored_before_observation(self):
+        source = (
+            REPO_ROOT / "target/i386/latx/optimization/hbr.c"
+        ).read_text(encoding="utf-8")
+        helper = source.split(
+            "static bool shbr_can_defer_known_zero_high64", 1,
+        )[1].split('#include "tu.h"', 1)[0]
+        for opcode in (
+            "ADDSD", "DIVSD", "MAXSD", "MINSD", "MULSD",
+            "SQRTSD", "SUBSD", "CVTSS2SD", "MOVSD",
+        ):
+            self.assertIn(f"WRAP({opcode})", helper)
+        self.assertNotIn("WRAP(ROUNDSD)", helper)
+        self.assertIn("#ifdef CONFIG_LATX_AVX_OPT", helper)
+        self.assertIn("return false;", helper)
+        self.assertIn("ir1_opnd_is_mem(ir1_get_opnd(ir1, 1))", helper)
+        self.assertIn("ir1_opnd_base_reg_num(dest)", helper)
+
+        analysis = source.split("static void tb_xmm_analyse", 1)[1]
+        analysis = analysis.split("static void get_xmm_in", 1)[0]
+        self.assertIn("analyse_func == xmm_analyse_64", analysis)
+        self.assertIn("== SHBR_XMM_ZERO", analysis)
+        self.assertIn("ir1->hbr_flag |= SHBR_KNOWN_ZERO64;", analysis)
+        self.assertNotIn("ir1->hbr_flag |= SHBR_CAN_OPT64;", analysis)
+
+        chain = source.split("static void shbr_optimize_known_zero_runs", 1)[1]
+        chain = chain.split("static void over_tb_shbr_opt", 1)[0]
+        self.assertIn("ir1->shbr_read | ir1->shbr_dep", chain)
+        self.assertIn("dirty & ir1->shbr_def", chain)
+        self.assertIn("dirty & tb->s_data->xmm_out", chain)
+        self.assertIn("ir1->hbr_flag & SHBR_CAN_OPT64", chain)
+        self.assertGreaterEqual(chain.count("ctz32("), 3)
+        self.assertNotIn("reg < XMM_NUM", chain)
+        self.assertIn("SHBR_RESTORE_ZERO64", source)
+        self.assertIn("SHBR_HAS_KNOWN_ZERO64", analysis)
+        self.assertIn(
+            "tb->s_data->shbr_type & SHBR_HAS_KNOWN_ZERO64", source,
+        )
+
+        header = (
+            REPO_ROOT / "target/i386/latx/include/hbr.h"
+        ).read_text(encoding="utf-8")
+        self.assertIn("#define SHBR_RESTORE_64", header)
+
+        translators = {
+            "target/i386/latx/translator/tr-simd.c": (
+                "addsd", "divsd", "maxsd", "minsd", "mulsd",
+                "sqrtsd", "subsd",
+            ),
+            "target/i386/latx/translator/tr-simd-cvt.c": ("cvtss2sd",),
+        }
+        for path, functions in translators.items():
+            translator = (REPO_ROOT / path).read_text(encoding="utf-8")
+            for index, name in enumerate(functions):
+                block = translator.split(f"bool translate_{name}", 1)[1]
+                next_function = block.find("\nbool translate_")
+                if next_function >= 0:
+                    block = block[:next_function]
+                self.assertIn("SHBR_RESTORE_64(pir1)", block)
+                self.assertIn("clear_xmm_high64(dest);", block)
+
+        operand_process = (
+            REPO_ROOT / "target/i386/latx/translator/tr-opnd-process.c"
+        ).read_text(encoding="utf-8")
+        clear = operand_process.split("void clear_xmm_high64", 1)[1]
+        clear = clear.split("void set_high128_xreg_to_zero", 1)[0]
+        self.assertIn("la_xvinsgr2vr_d(opnd, zero_ir2_opnd, 1);", clear)
+        self.assertIn("la_vinsgr2vr_d(opnd, zero_ir2_opnd, 1);", clear)
+
+        excluded = {
+            "target/i386/latx/translator/tr-simd-mov.c": "movsd",
+            "target/i386/latx/translator/tr-simd.c": "roundsd",
+        }
+        for path, name in excluded.items():
+            translator = (REPO_ROOT / path).read_text(encoding="utf-8")
+            block = translator.split(f"bool translate_{name}", 1)[1]
+            next_function = block.find("\nbool translate_")
+            if next_function >= 0:
+                block = block[:next_function]
+            self.assertNotIn("SHBR_RESTORE_64", block)
+
     def test_special_dispatch_is_supported(self):
         names = latx_hbr_audit.parse_translator_mnemonics(
             "TRANS_FUNC_GEN(ADDSS, addss),\n"
