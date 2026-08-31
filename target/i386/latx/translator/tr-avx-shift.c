@@ -150,8 +150,6 @@ bool translate_vpsrlx(IR1_INST * pir1) {
     IR2_INST * ( * rep_inst)(IR2_OPND, IR2_OPND);
     IR2_INST * ( * tr_inst_i)(IR2_OPND, IR2_OPND, int);
     IR2_INST * ( * tr_inst_r)(IR2_OPND, IR2_OPND, IR2_OPND);
-    IR2_OPND label_exit = ra_alloc_label();
-    IR2_OPND label_shift = ra_alloc_label();
     int max_count;
     switch (ir1_opcode(pir1)) {
         case dt_X86_INS_VPSRLW:
@@ -192,18 +190,6 @@ bool translate_vpsrlx(IR1_INST * pir1) {
         IR2_OPND mask = ra_alloc_ftemp();
         IR2_OPND temp = ra_alloc_ftemp();
 
-        IR2_OPND count = ra_alloc_itemp();
-        IR2_OPND max = ra_alloc_itemp();
-        /* The low 64 bits of the count operand are one scalar shift count;
-         * a count equal to max_count still shifts, only a larger count
-         * yields zero.  Compare against max_count + 1 to keep "==" valid. */
-        la_addi_d(max, zero_ir2_opnd, max_count + 1);
-        la_vpickve2gr_d(count, src2, 0);
-        la_blt(count, max, label_shift);
-        la_xvxor_v(dest, dest, dest);
-        la_b(label_exit);
-
-        la_label(label_shift);
         if (max_count == 63) {
             la_xvreplve0_d(mask, src2);
             la_xvldi(temp, VLDI_IMM_TYPE0(3, 63));
@@ -219,7 +205,6 @@ bool translate_vpsrlx(IR1_INST * pir1) {
     if (ir1_opnd_is_xmm(opnd0)) {
         set_high128_xreg_to_zero(dest);
     }
-    la_label(label_exit);
     return true;
 }
 
@@ -267,21 +252,11 @@ bool translate_vpsrax(IR1_INST * pir1) {
         tr_inst_i(dest, src, imm);
     } else {
         IR2_OPND src2 = load_freg256_from_ir1(opnd2);
-        IR2_OPND mask = ra_alloc_ftemp();
         IR2_OPND temp = ra_alloc_ftemp();
-        IR2_OPND temp_sign = ra_alloc_ftemp();
-        if (max_count == 63) {
-            la_xvreplve0_d(mask, src2);
-            la_vldi(temp, VLDI_IMM_TYPE0(3, 63));
-            la_xvsle_du(mask, mask, temp);
-        } else {
-            la_xvreplve0_d(mask, src2);
-            la_xvslei_du(mask, mask, max_count);
-        }
-        tr_inst_i(temp_sign, src, max_count);
-        rep_inst(temp, src2);
-        tr_inst_r(temp, src, temp);
-        la_xvbitsel_v(dest, temp_sign, temp, mask);
+
+        la_xvmini_du(temp, src2, max_count);
+        rep_inst(temp, temp);
+        tr_inst_r(dest, src, temp);
     }
     if (ir1_opnd_is_xmm(opnd0)) {
         set_high128_xreg_to_zero(dest);
