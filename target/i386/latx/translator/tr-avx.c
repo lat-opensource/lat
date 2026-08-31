@@ -1096,8 +1096,7 @@ bool translate_vblendvpd(IR1_INST * pir1) {
         IR2_OPND src3 = load_freg128_from_ir1(opnd3);
         IR2_OPND temp = ra_alloc_ftemp();
         la_vslti_d(temp, src3, 0);
-        la_vbitsel_v(temp, src1, src2, temp);
-        la_xvori_b(dest, temp, 0);
+        la_vbitsel_v(dest, src1, src2, temp);
         set_high128_xreg_to_zero(dest);
     }
     return true;
@@ -1118,24 +1117,63 @@ bool translate_vblendpd(IR1_INST * pir1) {
     IR2_OPND src1 = load_freg256_from_ir1(ir1_get_opnd(pir1, 1));
     IR2_OPND src2 = load_freg256_from_ir1(ir1_get_opnd(pir1, 2));
     uint8 imm = ir1_opnd_uimm(ir1_get_opnd(pir1, 3));
-    IR2_OPND temp = ra_alloc_ftemp();
-    la_xvori_b(temp, src1, 0);
-    if (imm & 0x1)
-        la_vextrins_d(temp, src2, VEXTRINS_IMM_4_0(0, 0));
-    if (imm & 0x2)
-        la_vextrins_d(temp, src2, VEXTRINS_IMM_4_0(1, 1));
-    if (ir1_opnd_is_ymm(ir1_get_opnd(pir1, 0))) {
-        IR2_OPND temp2 = ra_alloc_ftemp();
-        la_xvori_b(temp2, src1, 0);
-        if (imm & 0x4)
-            la_xvextrins_d(temp2, src2, VEXTRINS_IMM_4_0(0, 0));
-        if (imm & 0x8)
-            la_xvextrins_d(temp2, src2, VEXTRINS_IMM_4_0(1, 1));
-        la_xvpermi_q(temp, temp2, VEXTRINS_IMM_4_0(1, 2));
+    uint8 lane_mask = ir1_opnd_is_ymm(ir1_get_opnd(pir1, 0)) ?
+                      0xf : 0x3;
+
+    if ((imm & lane_mask) == 0) {
+        if (!ir2_opnd_cmp(&dest, &src1))
+            la_xvori_b(dest, src1, 0);
+        if (ir1_opnd_is_xmm(ir1_get_opnd(pir1, 0)))
+            set_high128_xreg_to_zero(dest);
+        return true;
     }
-    la_xvori_b(dest, temp, 0);
-    if (ir1_opnd_is_xmm(ir1_get_opnd(pir1, 0)))
+    if ((imm & lane_mask) == lane_mask) {
+        if (!ir2_opnd_cmp(&dest, &src2))
+            la_xvori_b(dest, src2, 0);
+        if (ir1_opnd_is_xmm(ir1_get_opnd(pir1, 0)))
+            set_high128_xreg_to_zero(dest);
+        return true;
+    }
+
+    if (ir1_opnd_is_xmm(ir1_get_opnd(pir1, 0))) {
+        IR2_OPND result = ir2_opnd_cmp(&dest, &src2) ?
+                          ra_alloc_ftemp() : dest;
+
+        if (!ir2_opnd_cmp(&result, &src1))
+            la_vori_b(result, src1, 0);
+        if (imm & 0x1)
+            la_vextrins_d(result, src2, VEXTRINS_IMM_4_0(0, 0));
+        if (imm & 0x2)
+            la_vextrins_d(result, src2, VEXTRINS_IMM_4_0(1, 1));
+        if (!ir2_opnd_cmp(&result, &dest))
+            la_xvori_b(dest, result, 0);
         set_high128_xreg_to_zero(dest);
+        return true;
+    }
+
+    bool use_src2_base = __builtin_popcount(imm & lane_mask) > 2;
+    uint8 insert_mask = use_src2_base ? (~imm & lane_mask) :
+                                        (imm & lane_mask);
+    IR2_OPND base = use_src2_base ? src2 : src1;
+    IR2_OPND insert_src = use_src2_base ? src1 : src2;
+    IR2_OPND result = (!ir2_opnd_cmp(&dest, &src1) &&
+                       !ir2_opnd_cmp(&dest, &src2)) ?
+                      dest : ra_alloc_ftemp();
+
+    la_xvori_b(result, base, 0);
+    if (insert_mask & 0x1)
+        la_vextrins_d(result, insert_src, VEXTRINS_IMM_4_0(0, 0));
+    if (insert_mask & 0x2)
+        la_vextrins_d(result, insert_src, VEXTRINS_IMM_4_0(1, 1));
+    IR2_OPND high = ra_alloc_ftemp();
+    la_xvori_b(high, base, 0);
+    if (insert_mask & 0x4)
+        la_xvextrins_d(high, insert_src, VEXTRINS_IMM_4_0(0, 0));
+    if (insert_mask & 0x8)
+        la_xvextrins_d(high, insert_src, VEXTRINS_IMM_4_0(1, 1));
+    la_xvpermi_q(result, high, VEXTRINS_IMM_4_0(1, 2));
+    if (!ir2_opnd_cmp(&result, &dest))
+        la_xvori_b(dest, result, 0);
     return true;
 }
 
@@ -1144,48 +1182,62 @@ bool translate_vblendps(IR1_INST * pir1) {
         return translate_vblendps_lsx(pir1);
     }
 
+    IR1_OPND * opnd0 = ir1_get_opnd(pir1, 0);
+    IR1_OPND * opnd1 = ir1_get_opnd(pir1, 1);
+    IR1_OPND * opnd2 = ir1_get_opnd(pir1, 2);
     lsassert(ir1_opnd_num(pir1) == 4 &&
         ir1_opnd_is_imm(ir1_get_opnd(pir1, 3)));
-    lsassert((ir1_opnd_is_xmm(ir1_get_opnd(pir1, 0)) &&
-            ir1_opnd_is_xmm(ir1_get_opnd(pir1, 1))) ||
-        (ir1_opnd_is_ymm(ir1_get_opnd(pir1, 0)) &&
-            ir1_opnd_is_ymm(ir1_get_opnd(pir1, 1))));
-    IR2_OPND dest = load_freg256_from_ir1(ir1_get_opnd(pir1, 0));
-    IR2_OPND src1 = load_freg256_from_ir1(ir1_get_opnd(pir1, 1));
-    IR2_OPND src2 = load_freg256_from_ir1(ir1_get_opnd(pir1, 2));
+    lsassert((ir1_opnd_is_xmm(opnd0) && ir1_opnd_is_xmm(opnd1)) ||
+        (ir1_opnd_is_ymm(opnd0) && ir1_opnd_is_ymm(opnd1)));
+    IR2_OPND dest = load_freg256_from_ir1(opnd0);
+    IR2_OPND src1 = load_freg256_from_ir1(opnd1);
+    IR2_OPND src2 = load_freg256_from_ir1(opnd2);
     uint8 imm = ir1_opnd_uimm(ir1_get_opnd(pir1, 3));
+    int lane_count = ir1_opnd_is_ymm(opnd0) ? 8 : 4;
+    uint8_t all_lanes_mask = (1u << lane_count) - 1;
+    uint8_t lane_mask = imm & all_lanes_mask;
+    bool dest_is_src2 = ir1_opnd_is_same_reg(opnd0, opnd2);
+    bool dest_is_src1 = ir1_opnd_is_same_reg(opnd0, opnd1);
+    uint8_t insert_mask = dest_is_src2 ? ~lane_mask : lane_mask;
+    int insert_count = __builtin_popcount(insert_mask &
+                                          all_lanes_mask);
 
-    if (ir1_opnd_is_xmm(ir1_get_opnd(pir1, 0)) &&
-        ir1_opnd_is_xmm(ir1_get_opnd(pir1, 2)) &&
-        ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 0)) !=
-            ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 2))) {
-        if (ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 0)) !=
-            ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 1))) {
-            la_vori_b(dest, src1, 0);
+    /* Both sources are loaded before these copies, including a memory src2. */
+    if (lane_mask == 0) {
+        if (!dest_is_src1)
+            la_xvori_b(dest, src1, 0);
+    } else if (lane_mask == all_lanes_mask) {
+        if (!dest_is_src2)
+            la_xvori_b(dest, src2, 0);
+    } else if (ir1_opnd_is_xmm(opnd0) &&
+        insert_count + (!dest_is_src2 && !dest_is_src1) <= 3) {
+        IR2_OPND insert_src = dest_is_src2 ? src1 : src2;
+
+        if (!dest_is_src2 && !dest_is_src1) {
+            la_xvori_b(dest, src1, 0);
         }
-        for (int i = 0; i < 4; ++i) {
-            if (imm & (1 << i)) {
-                la_vextrins_w(dest, src2, VEXTRINS_IMM_4_0(i, i));
+        for (int i = 0; i < lane_count; i++) {
+            if (insert_mask & (1u << i)) {
+                la_vextrins_w(dest, insert_src,
+                               VEXTRINS_IMM_4_0(i, i));
             }
         }
-        set_high128_xreg_to_zero(dest);
-        return true;
-    }
+    } else {
+        IR2_OPND temp = ra_alloc_ftemp();
+        IR2_OPND rmask = ra_alloc_itemp();
+        uint64_t mask = 0;
 
-    IR2_OPND temp = ra_alloc_ftemp();
-    IR2_OPND rmask = ra_alloc_itemp();
-
-    uint64_t mask = 0;
-    for (int i = 0; i < 8; i++) {
-        if (imm & (1 << i)) {
-            mask |= (0xFFULL) << (i * 8);
+        for (int i = 0; i < 8; i++) {
+            if (imm & (1 << i)) {
+                mask |= (0xFFULL) << (i * 8);
+            }
         }
-    }
 
-    li_d(rmask, mask);
-    la_movgr2fr_d(temp, rmask);
-    la_vext2xv_w_b(temp, temp);
-    la_xvbitsel_v(dest, src1, src2, temp);
+        li_d(rmask, mask);
+        la_movgr2fr_d(temp, rmask);
+        la_vext2xv_w_b(temp, temp);
+        la_xvbitsel_v(dest, src1, src2, temp);
+    }
 
     if (ir1_opnd_is_xmm(ir1_get_opnd(pir1, 0)))
         set_high128_xreg_to_zero(dest);
