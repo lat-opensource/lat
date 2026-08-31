@@ -2461,6 +2461,123 @@ static bool translate_repeat_add(IR1_INST *pir1)
     return true;
 }
 
+static bool translate_scalar_hdr(IR1_INST *pir1)
+{
+    IR1_OPND *input_mem = ir1_get_opnd(pir1, 1);
+    IR1_OPND *factor_mem = ir1_get_opnd(pir1 + 10, 1);
+    IR1_OPND *acc_mem = ir1_get_opnd(pir1 + 12, 2);
+    IR1_OPND *sub_mem = ir1_get_opnd(pir1 + 17, 2);
+    IR1_OPND *output_mem = ir1_get_opnd(pir1 + 18, 2);
+    IR2_OPND weighted0 = ra_alloc_gpr(
+        ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 0)));
+    IR2_OPND weighted1 = ra_alloc_gpr(
+        ir1_opnd_base_reg_num(ir1_get_opnd(pir1 + 2, 0)));
+    IR2_OPND index = ra_alloc_gpr(
+        ir1_opnd_base_reg_num(ir1_get_opnd(pir1 + 6, 0)));
+    IR2_OPND acc_index = ra_alloc_gpr(
+        ir1_opnd_base_reg_num(ir1_get_opnd(pir1 + 11, 0)));
+    IR2_OPND factor_xmm = ra_alloc_xmm(
+        ir1_opnd_base_reg_num(ir1_get_opnd(pir1 + 10, 0)));
+    IR2_OPND value_xmm = ra_alloc_xmm(
+        ir1_opnd_base_reg_num(ir1_get_opnd(pir1 + 12, 0)));
+    IR2_OPND multiplier = ra_alloc_itemp();
+    IR2_OPND factor = ra_alloc_ftemp();
+    IR2_OPND acc = ra_alloc_ftemp();
+    IR2_OPND table = ra_alloc_ftemp();
+    IR2_OPND sub = ra_alloc_ftemp();
+    IR2_OPND old = ra_alloc_ftemp();
+    IR2_OPND result = ra_alloc_ftemp();
+    int input_disp;
+    int factor_disp;
+    int acc_disp;
+    int sub_disp;
+    int output_disp;
+    IR2_OPND input_addr = convert_mem(input_mem, &input_disp);
+    IR2_OPND factor_addr;
+    IR2_OPND acc_addr;
+    IR2_OPND sub_addr;
+    IR2_OPND output_addr;
+
+    gen_test_page_flag(input_addr, input_disp, PAGE_READ);
+    la_ld_bu(weighted0, input_addr, input_disp);
+    li_d(multiplier, 0x36);
+    la_mul_w(weighted0, weighted0, multiplier);
+
+    gen_test_page_flag(input_addr, input_disp + 1, PAGE_READ);
+    la_ld_bu(weighted1, input_addr, input_disp + 1);
+    li_d(multiplier, 0xb7);
+    la_mul_w(weighted1, weighted1, multiplier);
+    la_add_d(weighted1, weighted1, weighted0);
+
+    gen_test_page_flag(input_addr, input_disp + 2, PAGE_READ);
+    la_ld_bu(weighted0, input_addr, input_disp + 2);
+    /* ALSL shifts by sa + 1: 8*x + x, then 2*(9*x) + x. */
+    la_alsl_d(index, weighted0, weighted0, 2);
+    la_alsl_d(index, index, weighted0, 0);
+    la_add_d(index, index, weighted1);
+    la_srli_w(index, index, 8);
+
+    factor_addr = convert_mem(factor_mem, &factor_disp);
+    gen_test_page_flag(factor_addr, factor_disp, PAGE_READ);
+    la_fld_s(factor, factor_addr, factor_disp);
+    la_xvpickve_w(factor_xmm, factor, 0);
+    mark_high128_xreg_zeroed(factor_xmm);
+
+    la_slli_w(acc_index, acc_index, 0);
+    acc_addr = convert_mem(acc_mem, &acc_disp);
+    gen_test_page_flag(acc_addr, acc_disp, PAGE_READ);
+    la_fld_s(acc, acc_addr, acc_disp);
+    la_fadd_s(acc, factor, acc);
+    la_xvpickve_w(value_xmm, acc, 0);
+    mark_high128_xreg_zeroed(value_xmm);
+    gen_test_page_flag(acc_addr, acc_disp, PAGE_WRITE | PAGE_WRITE_ORG);
+    la_fst_s(acc, acc_addr, acc_disp);
+
+    sub_addr = convert_mem(sub_mem, &sub_disp);
+    output_addr = convert_mem(output_mem, &output_disp);
+    for (int channel = 0; channel < 3; ++channel) {
+        IR1_OPND *table_mem = ir1_get_opnd(pir1 + 16 + channel * 6, 1);
+        IR2_OPND table_addr;
+        int table_disp;
+
+        gen_test_page_flag(input_addr, input_disp + channel, PAGE_READ);
+        la_ld_bu(index, input_addr, input_disp + channel);
+        /* 2*x + x = 3*x. */
+        la_alsl_d(index, index, index, 0);
+
+        table_addr = convert_mem(table_mem, &table_disp);
+        gen_test_page_flag(table_addr, table_disp, PAGE_READ);
+        la_fld_s(table, table_addr, table_disp);
+        gen_test_page_flag(sub_addr, sub_disp, PAGE_READ);
+        la_fld_s(sub, sub_addr, sub_disp);
+        la_fsub_s(result, table, sub);
+        gen_test_page_flag(output_addr, output_disp + channel * 4,
+                           PAGE_READ);
+        la_fld_s(old, output_addr, output_disp + channel * 4);
+        la_fmadd_s(result, factor, result, old);
+        la_xvpickve_w(value_xmm, result, 0);
+        mark_high128_xreg_zeroed(value_xmm);
+        gen_test_page_flag(output_addr, output_disp + channel * 4,
+                           PAGE_WRITE | PAGE_WRITE_ORG);
+        la_fst_s(result, output_addr, output_disp + channel * 4);
+        ra_free_temp_auto(table_addr);
+    }
+
+    ra_free_temp_auto(output_addr);
+    ra_free_temp_auto(sub_addr);
+    ra_free_temp_auto(acc_addr);
+    ra_free_temp_auto(factor_addr);
+    ra_free_temp_auto(input_addr);
+    ra_free_temp(result);
+    ra_free_temp(old);
+    ra_free_temp(sub);
+    ra_free_temp(table);
+    ra_free_temp(acc);
+    ra_free_temp(factor);
+    ra_free_temp(multiplier);
+    return true;
+}
+
 bool try_translate_instptn(IR1_INST *pir1)
 {
     instptn_check_false();
@@ -2545,6 +2662,8 @@ bool try_translate_instptn(IR1_INST *pir1)
         return translate_repeat_add(pir1);
     case INSTPTN_OPC_AVX_SUM3:
         return translate_avx_sum3(pir1);
+    case INSTPTN_OPC_SCALAR_HDR:
+        return translate_scalar_hdr(pir1);
     default:
         lsassert(0);
         break;

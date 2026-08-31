@@ -57,6 +57,7 @@ static void ir1_optimization_over_tb(TranslationBlock *tb)
     if (option_instptn) {
         insts_pattern_avx_sum3(tb);
         insts_pattern_repeat_add(tb);
+        insts_pattern_scalar_hdr(tb);
     }
 #endif
 }
@@ -177,6 +178,7 @@ void ir1_optimization(TranslationBlock *tb)
     if (option_instptn) {
         insts_pattern_avx_sum3(tb);
         insts_pattern_repeat_add(tb);
+        insts_pattern_scalar_hdr(tb);
     }
 #endif
 }

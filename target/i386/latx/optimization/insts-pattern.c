@@ -1083,6 +1083,274 @@ void insts_pattern_repeat_add(TranslationBlock *tb)
     }
 }
 
+static bool scalar_hdr_same_reg(IR1_OPND *a, IR1_OPND *b)
+{
+    return ir1_opnd_is_gpr(a) && ir1_opnd_is_gpr(b) &&
+           ir1_opnd_base_reg_num(a) == ir1_opnd_base_reg_num(b);
+}
+
+static bool scalar_hdr_same_xmm(IR1_OPND *a, IR1_OPND *b)
+{
+    return ir1_opnd_is_xmm(a) && ir1_opnd_is_xmm(b) &&
+           ir1_opnd_base_reg_num(a) == ir1_opnd_base_reg_num(b);
+}
+
+static bool scalar_hdr_same_mem(IR1_OPND *a, IR1_OPND *b, int64_t delta)
+{
+    return ir1_opnd_is_mem(a) && ir1_opnd_is_mem(b) &&
+           a->mem.segment == b->mem.segment &&
+           a->mem.default_segment == b->mem.default_segment &&
+           a->mem.base == b->mem.base && a->mem.index == b->mem.index &&
+           a->mem.scale == b->mem.scale &&
+           b->mem.disp == a->mem.disp + delta;
+}
+
+static bool scalar_hdr_mem_uses_reg(IR1_OPND *mem, int reg)
+{
+    return (ir1_opnd_has_base(mem) && ir1_opnd_base_reg_num(mem) == reg) ||
+           (ir1_opnd_has_index(mem) && ir1_opnd_index_reg_num(mem) == reg);
+}
+
+static bool scalar_hdr_match_channel(TranslationBlock *tb, int pos,
+                                     IR1_OPND *first_input,
+                                     IR1_OPND *first_table,
+                                     IR1_OPND *first_sub,
+                                     IR1_OPND *first_output,
+                                     IR1_OPND *index_reg,
+                                     IR1_OPND *value_xmm,
+                                     IR1_OPND *factor_xmm,
+                                     int channel)
+{
+    IR1_INST *movzx = tb_ir1_inst(tb, pos);
+    IR1_INST *lea = tb_ir1_inst(tb, pos + 1);
+    IR1_INST *load = tb_ir1_inst(tb, pos + 2);
+    IR1_INST *sub = tb_ir1_inst(tb, pos + 3);
+    IR1_INST *fma = tb_ir1_inst(tb, pos + 4);
+    IR1_INST *store = tb_ir1_inst(tb, pos + 5);
+    IR1_OPND *input;
+    IR1_OPND *lea_mem;
+    IR1_OPND *table;
+    IR1_OPND *sub_mem;
+    IR1_OPND *output;
+
+    if (ir1_opcode(movzx) != WRAP(MOVZX) ||
+        ir1_opcode(lea) != WRAP(LEA) ||
+        ir1_opcode(load) != WRAP(VMOVSS) ||
+        ir1_opcode(sub) != WRAP(VSUBSS) ||
+        ir1_opcode(fma) != WRAP(VFMADD213SS) ||
+        ir1_opcode(store) != WRAP(VMOVSS) ||
+        ir1_get_opnd_num(movzx) != 2 || ir1_get_opnd_num(lea) != 2 ||
+        ir1_get_opnd_num(load) != 2 || ir1_get_opnd_num(sub) != 3 ||
+        ir1_get_opnd_num(fma) != 3 || ir1_get_opnd_num(store) != 2) {
+        return false;
+    }
+
+    input = ir1_get_opnd(movzx, 1);
+    lea_mem = ir1_get_opnd(lea, 1);
+    table = ir1_get_opnd(load, 1);
+    sub_mem = ir1_get_opnd(sub, 2);
+    output = ir1_get_opnd(fma, 2);
+    if (!scalar_hdr_same_reg(ir1_get_opnd(movzx, 0), index_reg) ||
+        !scalar_hdr_same_reg(ir1_get_opnd(lea, 0), index_reg) ||
+        !ir1_opnd_is_mem(input) || ir1_opnd_size(input) != 8 ||
+        !scalar_hdr_same_mem(first_input, input, channel) ||
+        !ir1_opnd_is_mem(lea_mem) || lea_mem->mem.disp != 0 ||
+        lea_mem->mem.scale != 2 ||
+        ir1_opnd_base_reg_num(lea_mem) !=
+            ir1_opnd_base_reg_num(index_reg) ||
+        ir1_opnd_index_reg_num(lea_mem) !=
+            ir1_opnd_base_reg_num(index_reg) ||
+        !scalar_hdr_same_xmm(ir1_get_opnd(load, 0), value_xmm) ||
+        !scalar_hdr_same_mem(first_table, table, channel * 4) ||
+        !scalar_hdr_mem_uses_reg(table,
+                                 ir1_opnd_base_reg_num(index_reg)) ||
+        table->mem.scale != 4 ||
+        ir1_opnd_size(table) != 32 ||
+        !scalar_hdr_same_xmm(ir1_get_opnd(sub, 0), value_xmm) ||
+        !scalar_hdr_same_xmm(ir1_get_opnd(sub, 1), value_xmm) ||
+        !scalar_hdr_same_mem(first_sub, sub_mem, 0) ||
+        !scalar_hdr_same_xmm(ir1_get_opnd(fma, 0), value_xmm) ||
+        !scalar_hdr_same_xmm(ir1_get_opnd(fma, 1), factor_xmm) ||
+        !scalar_hdr_same_mem(first_output, output, channel * 4) ||
+        !scalar_hdr_same_mem(output, ir1_get_opnd(store, 0), 0) ||
+        !scalar_hdr_same_xmm(ir1_get_opnd(store, 1), value_xmm)) {
+        return false;
+    }
+    return true;
+}
+
+void insts_pattern_scalar_hdr(TranslationBlock *tb)
+{
+    int count = tb_ir1_num(tb);
+
+    if (!option_enable_lasx) {
+        return;
+    }
+    for (int start = 0; start + 36 <= count; ++start) {
+        IR1_INST *first = tb_ir1_inst(tb, start);
+        IR1_INST *factor_load = tb_ir1_inst(tb, start + 10);
+        IR1_INST *sign_extend = tb_ir1_inst(tb, start + 11);
+        IR1_INST *accumulate = tb_ir1_inst(tb, start + 12);
+        IR1_INST *acc_store = tb_ir1_inst(tb, start + 13);
+        IR1_OPND *weighted0;
+        IR1_OPND *weighted1;
+        IR1_OPND *weighted_index;
+        IR1_OPND *factor_xmm;
+        IR1_OPND *value_xmm;
+        IR1_OPND *first_input;
+        IR1_OPND *first_table;
+        IR1_OPND *first_sub;
+        IR1_OPND *first_output;
+        IR1_INST *imul0 = tb_ir1_inst(tb, start + 1);
+        IR1_INST *movzx1 = tb_ir1_inst(tb, start + 2);
+        IR1_INST *imul1 = tb_ir1_inst(tb, start + 3);
+        IR1_INST *add_weights = tb_ir1_inst(tb, start + 4);
+        IR1_INST *movzx2 = tb_ir1_inst(tb, start + 5);
+        IR1_INST *lea9 = tb_ir1_inst(tb, start + 6);
+        IR1_INST *lea19 = tb_ir1_inst(tb, start + 7);
+        IR1_INST *add_index = tb_ir1_inst(tb, start + 8);
+        IR1_INST *shift_index = tb_ir1_inst(tb, start + 9);
+        int modified[3];
+        bool match = true;
+
+        for (int i = 0; i < 36; ++i) {
+            if (tb_ir1_inst(tb, start + i)->instptn.opc !=
+                INSTPTN_OPC_NONE) {
+                match = false;
+                break;
+            }
+        }
+        if (!match || ir1_opcode(first) != WRAP(MOVZX) ||
+            ir1_opcode(imul0) != WRAP(IMUL) ||
+            ir1_opcode(movzx1) != WRAP(MOVZX) ||
+            ir1_opcode(imul1) != WRAP(IMUL) ||
+            ir1_opcode(add_weights) != WRAP(ADD) ||
+            ir1_opcode(movzx2) != WRAP(MOVZX) ||
+            ir1_opcode(lea9) != WRAP(LEA) ||
+            ir1_opcode(lea19) != WRAP(LEA) ||
+            ir1_opcode(add_index) != WRAP(ADD) ||
+            ir1_opcode(shift_index) != WRAP(SHR) ||
+            ir1_opcode(factor_load) != WRAP(VMOVSS) ||
+            ir1_opcode(sign_extend) != WRAP(MOVSXD) ||
+            ir1_opcode(accumulate) != WRAP(VADDSS) ||
+            ir1_opcode(acc_store) != WRAP(VMOVSS) ||
+            ir1_opcode(tb_ir1_inst(tb, start + 32)) != WRAP(INC) ||
+            ir1_opcode(tb_ir1_inst(tb, start + 33)) != WRAP(ADD) ||
+            ir1_opcode(tb_ir1_inst(tb, start + 34)) != WRAP(DEC) ||
+            ir1_opcode(tb_ir1_inst(tb, start + 35)) != WRAP(JNE)) {
+            continue;
+        }
+
+        weighted0 = ir1_get_opnd(first, 0);
+        weighted1 = ir1_get_opnd(movzx1, 0);
+        weighted_index = ir1_get_opnd(lea9, 0);
+        factor_xmm = ir1_get_opnd(factor_load, 0);
+        value_xmm = ir1_get_opnd(accumulate, 0);
+        first_input = ir1_get_opnd(first, 1);
+        first_table = ir1_get_opnd(tb_ir1_inst(tb, start + 16), 1);
+        first_sub = ir1_get_opnd(tb_ir1_inst(tb, start + 17), 2);
+        first_output = ir1_get_opnd(tb_ir1_inst(tb, start + 18), 2);
+        modified[0] = ir1_opnd_base_reg_num(weighted0);
+        modified[1] = ir1_opnd_base_reg_num(weighted1);
+        modified[2] = ir1_opnd_base_reg_num(weighted_index);
+
+        if (!ir1_opnd_is_gpr(weighted0) || !ir1_opnd_is_gpr(weighted1) ||
+            !ir1_opnd_is_gpr(weighted_index) ||
+            modified[0] == modified[1] || modified[0] == modified[2] ||
+            modified[1] == modified[2] ||
+            !ir1_opnd_is_xmm(factor_xmm) || !ir1_opnd_is_xmm(value_xmm) ||
+            scalar_hdr_same_xmm(factor_xmm, value_xmm) ||
+            ir1_addr_size(first) != 64 ||
+            ir1_get_opnd_num(first) != 2 || ir1_get_opnd_num(imul0) != 3 ||
+            ir1_get_opnd_num(movzx1) != 2 ||
+            ir1_get_opnd_num(imul1) != 3 ||
+            ir1_get_opnd_num(add_weights) != 2 ||
+            ir1_get_opnd_num(movzx2) != 2 ||
+            ir1_get_opnd_num(lea9) != 2 || ir1_get_opnd_num(lea19) != 2 ||
+            ir1_get_opnd_num(add_index) != 2 ||
+            ir1_get_opnd_num(shift_index) != 2 ||
+            !scalar_hdr_same_reg(ir1_get_opnd(imul0, 0), weighted0) ||
+            !scalar_hdr_same_reg(ir1_get_opnd(imul0, 1), weighted0) ||
+            !ir1_opnd_is_imm(ir1_get_opnd(imul0, 2)) ||
+            ir1_get_opnd(imul0, 2)->imm != 0x36 ||
+            !scalar_hdr_same_mem(first_input, ir1_get_opnd(movzx1, 1), 1) ||
+            !scalar_hdr_same_reg(ir1_get_opnd(imul1, 0), weighted1) ||
+            !scalar_hdr_same_reg(ir1_get_opnd(imul1, 1), weighted1) ||
+            !ir1_opnd_is_imm(ir1_get_opnd(imul1, 2)) ||
+            ir1_get_opnd(imul1, 2)->imm != 0xb7 ||
+            !scalar_hdr_same_reg(ir1_get_opnd(add_weights, 0), weighted1) ||
+            !scalar_hdr_same_reg(ir1_get_opnd(add_weights, 1), weighted0) ||
+            !scalar_hdr_same_reg(ir1_get_opnd(movzx2, 0), weighted0) ||
+            !scalar_hdr_same_mem(first_input, ir1_get_opnd(movzx2, 1), 2) ||
+            !ir1_opnd_is_mem(ir1_get_opnd(lea9, 1)) ||
+            ir1_get_opnd(lea9, 1)->mem.disp != 0 ||
+            ir1_get_opnd(lea9, 1)->mem.scale != 8 ||
+            ir1_opnd_base_reg_num(ir1_get_opnd(lea9, 1)) != modified[0] ||
+            ir1_opnd_index_reg_num(ir1_get_opnd(lea9, 1)) != modified[0] ||
+            !scalar_hdr_same_reg(ir1_get_opnd(lea19, 0), weighted_index) ||
+            !ir1_opnd_is_mem(ir1_get_opnd(lea19, 1)) ||
+            ir1_get_opnd(lea19, 1)->mem.disp != 0 ||
+            ir1_get_opnd(lea19, 1)->mem.scale != 2 ||
+            ir1_opnd_base_reg_num(ir1_get_opnd(lea19, 1)) != modified[0] ||
+            ir1_opnd_index_reg_num(ir1_get_opnd(lea19, 1)) != modified[2] ||
+            !scalar_hdr_same_reg(ir1_get_opnd(add_index, 0), weighted_index) ||
+            !scalar_hdr_same_reg(ir1_get_opnd(add_index, 1), weighted1) ||
+            !scalar_hdr_same_reg(ir1_get_opnd(shift_index, 0), weighted_index) ||
+            !ir1_opnd_is_imm(ir1_get_opnd(shift_index, 1)) ||
+            ir1_get_opnd(shift_index, 1)->imm != 8) {
+            continue;
+        }
+
+        if (ir1_get_opnd_num(factor_load) != 2 ||
+            !ir1_opnd_is_mem(ir1_get_opnd(factor_load, 1)) ||
+            ir1_opnd_size(ir1_get_opnd(factor_load, 1)) != 32 ||
+            ir1_opnd_index_reg_num(ir1_get_opnd(factor_load, 1)) !=
+                modified[2] ||
+            ir1_get_opnd(factor_load, 1)->mem.scale != 4 ||
+            ir1_get_opnd_num(sign_extend) != 2 ||
+            !scalar_hdr_same_reg(ir1_get_opnd(sign_extend, 0),
+                                 ir1_get_opnd(sign_extend, 1)) ||
+            ir1_get_opnd_num(accumulate) != 3 ||
+            !scalar_hdr_same_xmm(ir1_get_opnd(accumulate, 1), factor_xmm) ||
+            !ir1_opnd_is_mem(ir1_get_opnd(accumulate, 2)) ||
+            ir1_get_opnd_num(acc_store) != 2 ||
+            !scalar_hdr_same_mem(ir1_get_opnd(accumulate, 2),
+                                 ir1_get_opnd(acc_store, 0), 0) ||
+            !scalar_hdr_same_xmm(ir1_get_opnd(acc_store, 1), value_xmm) ||
+            !ir1_opnd_is_gpr(ir1_get_opnd(tb_ir1_inst(tb, start + 32), 0)) ||
+            !ir1_opnd_is_gpr(ir1_get_opnd(tb_ir1_inst(tb, start + 33), 0)) ||
+            !ir1_opnd_is_gpr(ir1_get_opnd(tb_ir1_inst(tb, start + 34), 0))) {
+            continue;
+        }
+
+        for (int i = 0; i < 3 && match; ++i) {
+            if (scalar_hdr_mem_uses_reg(first_input, modified[i]) ||
+                scalar_hdr_mem_uses_reg(first_sub, modified[i]) ||
+                scalar_hdr_mem_uses_reg(first_output, modified[i])) {
+                match = false;
+            }
+        }
+        if (!match ||
+            !scalar_hdr_match_channel(tb, start + 14, first_input,
+                                      first_table, first_sub, first_output,
+                                      weighted_index, value_xmm, factor_xmm, 0) ||
+            !scalar_hdr_match_channel(tb, start + 20, first_input,
+                                      first_table, first_sub, first_output,
+                                      weighted_index, value_xmm, factor_xmm, 1) ||
+            !scalar_hdr_match_channel(tb, start + 26, first_input,
+                                      first_table, first_sub, first_output,
+                                      weighted_index, value_xmm, factor_xmm, 2)) {
+            continue;
+        }
+
+        first->instptn.opc = INSTPTN_OPC_SCALAR_HDR;
+        for (int i = 1; i < 32; ++i) {
+            tb_ir1_inst(tb, start + i)->instptn.opc = INSTPTN_OPC_NOP;
+        }
+        start += 31;
+    }
+}
+
 #undef WRAP
 
 #endif
