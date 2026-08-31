@@ -16,6 +16,7 @@
 #include "translate.h"
 #include "reg-alloc.h"
 #include "latx-options.h"
+#include "qemu/host-utils.h"
 
 #if defined(CONFIG_LATX_HBR) && defined(CONFIG_LATX_TU)
 
@@ -1287,19 +1288,6 @@ static bool deal_xmm_common(TranslationBlock *tb, IR1_INST *ir1, uint32_t *xmm)
             external_update_des(ir1, xmm);
         }
         return true;
-    case WRAP(ADDSUBPS):
-    case WRAP(ADDSUBPD):
-    case WRAP(DIVPS):
-    case WRAP(DIVPD):
-    case WRAP(SUBPS):
-    case WRAP(SUBPD):
-        shbr_record_vector_reads(ir1, xmm);
-        if (ir1_opnd_is_xmm(src_opnd)) {
-            src_des_update_des(ir1, xmm);
-        } else if (ir1_opnd_is_mem(src_opnd)) {
-            external_update_des(ir1, xmm);
-        }
-        return true;
     /* Integer subtraction is self-zeroing when dest == src. */
     case WRAP(PSUBB):
     case WRAP(PSUBW):
@@ -1329,6 +1317,7 @@ static bool deal_xmm_common(TranslationBlock *tb, IR1_INST *ir1, uint32_t *xmm)
     case WRAP(DIVPD):
     case WRAP(SUBPS):
     case WRAP(SUBPD):
+        shbr_record_vector_reads(ir1, xmm);
         if (ir1_opnd_is_xmm(src_opnd)) {
             src_des_update_des(ir1, xmm);
             if (xmm[des_num] == SHBR_XMM_ZERO) {
@@ -1403,20 +1392,6 @@ static bool deal_xmm_common(TranslationBlock *tb, IR1_INST *ir1, uint32_t *xmm)
     case WRAP(PMOVSXWQ):
         other_update_des(ir1, xmm);
         return true;
-    case WRAP(CMPPD):
-    case WRAP(CMPPS):
-        /* The immediate predicate and NaN inputs determine the result even
-         * when both encoded register operands alias. */
-        shbr_record_vector_reads(ir1, xmm);
-        if (ir1_opnd_is_xmm(src_opnd)) {
-            src_des_update_des(ir1, xmm);
-            if (xmm[des_num] == SHBR_XMM_ZERO) {
-                xmm[des_num] = SHBR_XMM_OTHER;
-            }
-        } else if (ir1_opnd_is_mem(src_opnd)) {
-            external_update_des(ir1, xmm);
-        }
-        return true;
     case WRAP(PCMPEQB):
     case WRAP(PCMPEQW):
     case WRAP(PCMPEQD):
@@ -1427,6 +1402,20 @@ static bool deal_xmm_common(TranslationBlock *tb, IR1_INST *ir1, uint32_t *xmm)
         if (src_num == des_num) {
             other_update_des(ir1, xmm);
         } else if (ir1_opnd_is_xmm(src_opnd)) {
+            src_des_update_des(ir1, xmm);
+            if (xmm[des_num] == SHBR_XMM_ZERO) {
+                xmm[des_num] = SHBR_XMM_OTHER;
+            }
+        } else if (ir1_opnd_is_mem(src_opnd)) {
+            external_update_des(ir1, xmm);
+        }
+        return true;
+    case WRAP(CMPPD):
+    case WRAP(CMPPS):
+        /* The immediate predicate and NaN inputs determine the result even
+         * when both encoded register operands alias. */
+        shbr_record_vector_reads(ir1, xmm);
+        if (ir1_opnd_is_xmm(src_opnd)) {
             src_des_update_des(ir1, xmm);
             if (xmm[des_num] == SHBR_XMM_ZERO) {
                 xmm[des_num] = SHBR_XMM_OTHER;
@@ -1959,6 +1948,51 @@ static bool has_implicit_semantic(IR1_INST *ir1)
     }
 }
 
+static bool shbr_can_defer_known_zero_high64(IR1_INST *ir1)
+{
+#ifdef CONFIG_LATX_AVX_OPT
+    /*
+     * Host scalar writes do not preserve the native LASX upper 128 bits.
+     * Legacy scalar x86 instructions must preserve that YMM state, so this
+     * deferred-write optimization is limited to the non-AVX build.
+     */
+    return false;
+#else
+    switch (ir1_opcode(ir1)) {
+    case WRAP(ADDSD):
+    case WRAP(DIVSD):
+    case WRAP(MULSD):
+    case WRAP(SQRTSD):
+    case WRAP(SUBSD):
+    case WRAP(CVTSS2SD):
+        return true;
+    case WRAP(MAXSD):
+    case WRAP(MINSD): {
+        IR1_OPND *dest = ir1_get_opnd(ir1, 0);
+        IR1_OPND *src = ir1_get_opnd(ir1, 1);
+
+        /*
+         * The translators return before emitting a pending zero restore for
+         * MAXSD/MINSD xmm, xmm when both operands alias.
+         */
+        return !(ir1_opnd_is_xmm(src) &&
+                 ir1_opnd_base_reg_num(dest) ==
+                 ir1_opnd_base_reg_num(src));
+    }
+    case WRAP(MOVSD):
+        /*
+         * MOVSD xmm, m64 establishes a fresh known-zero high lane.  It can
+         * start a scalar run without needing restore handling of its own.
+         */
+        return ir1_get_opnd_num(ir1) == 2 &&
+               ir1_opnd_is_xmm(ir1_get_opnd(ir1, 0)) &&
+               ir1_opnd_is_mem(ir1_get_opnd(ir1, 1));
+    default:
+        return false;
+    }
+#endif
+}
+
 #include "tu.h"
 typedef bool (*xmm_analyse_func)(TranslationBlock *, IR1_INST *, uint32_t *);
 
@@ -1992,6 +2026,17 @@ static void tb_xmm_analyse(TranslationBlock *tb,
         if (!handled && curr != SHBR_NTYPE) {
             conservative_explicit_semantic(ir1, xmm);
         }
+        if (analyse_func == xmm_analyse_64 &&
+            shbr_can_defer_known_zero_high64(ir1)) {
+            IR1_OPND *dest = shbr_vector_dest(ir1);
+            if (dest && xmm[ir1_opnd_base_reg_num(dest)] == SHBR_XMM_ZERO) {
+                /* The x86 high 64 bits are proven zero.  A later pass may
+                 * defer maintaining that value across a scalar run, then
+                 * restore it explicitly before it can be observed. */
+                ir1->hbr_flag |= SHBR_KNOWN_ZERO64;
+                tb->s_data->shbr_type |= SHBR_HAS_KNOWN_ZERO64;
+            }
+        }
         /* tb->s_data->xmm_def |= ir1->xmm_def; */
         tb->s_data->xmm_use |= ir1->xmm_use;
     }
@@ -2019,6 +2064,72 @@ static TranslationBlock *hbr_in_tu_successor(TranslationBlock **tb_list,
         }
     }
     return NULL;
+}
+
+static void shbr_finish_zero_run(IR1_INST **last, uint16_t *length, int reg)
+{
+    if (length[reg] == 1) {
+        last[reg]->hbr_flag &= ~SHBR_CAN_OPT64;
+    } else if (length[reg] > 1) {
+        last[reg]->hbr_flag &= ~SHBR_CAN_OPT64;
+        last[reg]->hbr_flag |= SHBR_RESTORE_ZERO64;
+    }
+    last[reg] = NULL;
+    length[reg] = 0;
+}
+
+static void shbr_optimize_known_zero_runs(TranslationBlock *tb)
+{
+    uint16_t dirty = 0;
+    IR1_INST *last[XMM_NUM] = { 0 };
+    uint16_t length[XMM_NUM] = { 0 };
+
+    for (int i = 0; i < tb_ir1_num(tb); i++) {
+        IR1_INST *ir1 = tb_ir1_inst(tb, i);
+        uint16_t consumed = dirty & (ir1->shbr_read | ir1->shbr_dep);
+        dirty &= ~consumed;
+        while (consumed) {
+            int reg = ctz32(consumed);
+            consumed &= consumed - 1;
+            shbr_finish_zero_run(last, length, reg);
+        }
+
+        uint16_t overwritten = dirty & ir1->shbr_def;
+        dirty &= ~overwritten;
+        while (overwritten) {
+            int reg = ctz32(overwritten);
+            overwritten &= overwritten - 1;
+            last[reg] = NULL;
+            length[reg] = 0;
+        }
+
+        if (ir1->hbr_flag & SHBR_KNOWN_ZERO64) {
+            IR1_OPND *dest = shbr_vector_dest(ir1);
+            lsassert(dest);
+            int reg = ir1_opnd_base_reg_num(dest);
+            uint16_t mask = 1U << reg;
+            if (ir1->hbr_flag & SHBR_CAN_OPT64) {
+                /* Backward liveness already proves this result's high lane
+                 * dead.  Keep that stronger optimization and discard any
+                 * deferred-zero state reaching the same destination. */
+                dirty &= ~mask;
+                last[reg] = NULL;
+                length[reg] = 0;
+                continue;
+            }
+            ir1->hbr_flag |= SHBR_CAN_OPT64;
+            dirty |= mask;
+            last[reg] = ir1;
+            length[reg]++;
+        }
+    }
+
+    uint16_t live_dirty = dirty & tb->s_data->xmm_out;
+    while (live_dirty) {
+        int reg = ctz32(live_dirty);
+        live_dirty &= live_dirty - 1;
+        shbr_finish_zero_run(last, length, reg);
+    }
 }
 
 static void over_tb_shbr_opt(TranslationBlock **tb_list, int tb_num_in_tu,
@@ -2110,6 +2221,10 @@ static void over_tb_shbr_opt(TranslationBlock **tb_list, int tb_num_in_tu,
                 }
                 no_opt_xmm = shbr_live_before(live_after, ir1->shbr_def,
                         ir1->shbr_dep, ir1->shbr_read);
+            }
+            if (opt_flag == SHBR_CAN_OPT64 &&
+                (tb->s_data->shbr_type & SHBR_HAS_KNOWN_ZERO64)) {
+                shbr_optimize_known_zero_runs(tb);
             }
         }
 
@@ -2536,6 +2651,12 @@ bool can_shbr_opt64(IR1_INST *ir1)
         return true;
     }
     return false;
+}
+
+bool need_shbr_restore_zero64(IR1_INST *ir1)
+{
+    return in_pre_translate &&
+           (ir1->hbr_flag & SHBR_RESTORE_ZERO64);
 }
 
 bool can_shbr_opt32(IR1_INST *ir1)
