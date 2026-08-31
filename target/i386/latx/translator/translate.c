@@ -2095,6 +2095,80 @@ static void tr_check_x86ins_change(struct TranslationBlock *tb)
 }
 #endif
 
+/*
+ * Keep this list explicit: x87 opcodes are not contiguous in dt_x86_insn.
+ * Include every mode 2 softfpu translation that may call a helper, including
+ * instructions with a conditional slow path and 64-bit opcode aliases.
+ */
+static bool is_softfpu_region_insn(IR1_OPCODE opcode)
+{
+    switch (opcode) {
+    case dt_X86_INS_F2XM1:
+    case dt_X86_INS_WAIT:
+    case dt_X86_INS_FADD:
+    case dt_X86_INS_FADDP:
+    case dt_X86_INS_FBLD:
+    case dt_X86_INS_FBSTP:
+    case dt_X86_INS_FCOM:
+    case dt_X86_INS_FCOMI:
+    case dt_X86_INS_FCOMIP:
+    case dt_X86_INS_FCOMP:
+    case dt_X86_INS_FCOMPP:
+    case dt_X86_INS_FCOS:
+    case dt_X86_INS_FDIV:
+    case dt_X86_INS_FDIVP:
+    case dt_X86_INS_FDIVR:
+    case dt_X86_INS_FDIVRP:
+    case dt_X86_INS_FIADD:
+    case dt_X86_INS_FICOM:
+    case dt_X86_INS_FICOMP:
+    case dt_X86_INS_FIDIV:
+    case dt_X86_INS_FIDIVR:
+    case dt_X86_INS_FIMUL:
+    case dt_X86_INS_FISTTP:
+    case dt_X86_INS_FISUB:
+    case dt_X86_INS_FISUBR:
+    case dt_X86_INS_FMUL:
+    case dt_X86_INS_FMULP:
+    case dt_X86_INS_FNOP:
+    case dt_X86_INS_FPATAN:
+    case dt_X86_INS_FPREM1:
+    case dt_X86_INS_FPREM:
+    case dt_X86_INS_FPTAN:
+    case dt_X86_INS_FRNDINT:
+    case dt_X86_INS_FSCALE:
+    case dt_X86_INS_FSETPM:
+    case dt_X86_INS_FSIN:
+    case dt_X86_INS_FSINCOS:
+    case dt_X86_INS_FSQRT:
+    case dt_X86_INS_FSUB:
+    case dt_X86_INS_FSUBP:
+    case dt_X86_INS_FSUBR:
+    case dt_X86_INS_FSUBRP:
+    case dt_X86_INS_FTST:
+    case dt_X86_INS_FUCOM:
+    case dt_X86_INS_FUCOMI:
+    case dt_X86_INS_FUCOMIP:
+    case dt_X86_INS_FUCOMP:
+    case dt_X86_INS_FUCOMPP:
+    case dt_X86_INS_FXRSTOR:
+    case dt_X86_INS_FXSAVE:
+    case dt_X86_INS_FXTRACT:
+    case dt_X86_INS_FYL2X:
+    case dt_X86_INS_FYL2XP1:
+    case dt_X86_INS_FILD:
+    case dt_X86_INS_FIST:
+    case dt_X86_INS_FISTP:
+    case dt_X86_INS_FST:
+    case dt_X86_INS_FSTP:
+    case dt_X86_INS_FXRSTOR64:
+    case dt_X86_INS_FXSAVE64:
+        return true;
+    default:
+        return false;
+    }
+}
+
 int tr_ir2_generate(struct TranslationBlock *tb)
 {
     int i;
@@ -2115,7 +2189,6 @@ int tr_ir2_generate(struct TranslationBlock *tb)
     IR1_INST *pir1 = tb_ir1_inst(tb, 0);
 
     bool reduce_proepo = false;
-    int tr_func_idx;
 
 #ifdef CONFIG_LATX_MONITOR_SHARED_MEM
     if (option_monitor_shared_mem && tb->checksum) {
@@ -2222,12 +2295,10 @@ int tr_ir2_generate(struct TranslationBlock *tb)
         }
 #endif
 
-        if (option_softfpu == 2 && !reduce_proepo) {
-            tr_func_idx = ir1_opcode(pir1) - dt_X86_INS_INVALID;
-            if (tr_func_idx <= dt_X86_INS_FYL2XP1) {
-                reduce_proepo = true;
-                gen_softfpu_helper_prologue(pir1);
-            }
+        if (option_softfpu == 2 && !reduce_proepo &&
+            is_softfpu_region_insn(ir1_opcode(pir1))) {
+            reduce_proepo = true;
+            gen_softfpu_helper_prologue(pir1);
         }
 
         bool translation_success = ir1_translate(pir1);
@@ -2245,8 +2316,7 @@ int tr_ir2_generate(struct TranslationBlock *tb)
                 gen_softfpu_helper_epilogue(pir1);
             } else {
                 IR1_INST *pir1_next = pir1 + 1;
-                tr_func_idx = ir1_opcode(pir1_next) - dt_X86_INS_INVALID;
-                if (tr_func_idx > dt_X86_INS_FYL2XP1) {
+                if (!is_softfpu_region_insn(ir1_opcode(pir1_next))) {
                     reduce_proepo = false;
                     gen_softfpu_helper_epilogue(pir1);
                 }
