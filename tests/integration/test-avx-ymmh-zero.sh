@@ -37,5 +37,7 @@ if [ -z "$aot_file" ]; then
     exit 1
 fi
 
-HOME="$aot_home" LATX_AOT=1 LATX_TU=1 "$emulator" "$guest"
-echo "PASS: VEX.128 YMM-high zeroing JIT/cold-AOT/hot-AOT"
+for _ in $(seq 1 10); do
+    HOME="$aot_home" LATX_AOT=1 LATX_TU=1 "$emulator" "$guest"
+done
+echo "PASS: VEX.128 YMM-high zeroing and mixed-width HBR JIT/cold-AOT/hot-AOT"
