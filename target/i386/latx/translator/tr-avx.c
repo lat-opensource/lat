@@ -1801,41 +1801,42 @@ bool translate_vpackusxx(IR1_INST * pir1) {
     IR2_OPND dest = load_freg256_from_ir1(opnd0);
     IR2_OPND src1 = load_freg256_from_ir1(opnd1);
     IR2_OPND src2 = load_freg256_from_ir1(opnd2);
-    IR2_OPND temp1 = ra_alloc_ftemp();
     IR2_OPND temp2;
+    bool dest_is_src2 = (ir1_opnd_is_xmm(opnd2) ||
+                         ir1_opnd_is_ymm(opnd2)) &&
+                        ir1_opnd_base_reg_num(opnd0) ==
+                        ir1_opnd_base_reg_num(opnd2);
     IR1_OPCODE op = ir1_opcode(pir1);
-    IR2_INST * ( * cmp_inst)(IR2_OPND, IR2_OPND, int);
     IR2_INST * ( * cvt_inst)(IR2_OPND, IR2_OPND, int);
     switch (op) {
         case dt_X86_INS_VPACKUSDW:
-            cmp_inst = la_xvslti_w;
             cvt_inst = la_xvssrani_hu_w;
             break;
         case dt_X86_INS_VPACKUSWB:
-            cmp_inst = la_xvslti_h;
             cvt_inst = la_xvssrani_bu_h;
             break;
         default:
-            cmp_inst = NULL;
             cvt_inst = NULL;
             lsassert(0);
             break;
     }
-    cmp_inst(temp1, src1, 0);
-    la_xvandn_v(temp1, temp1, src1);
-    if ((ir1_opnd_is_xmm(opnd2) || ir1_opnd_is_ymm(opnd2)) &&
+    if (dest_is_src2) {
+        temp2 = dest;
+    } else if ((ir1_opnd_is_xmm(opnd2) || ir1_opnd_is_ymm(opnd2)) &&
         ir1_opnd_base_reg_num(opnd1) == ir1_opnd_base_reg_num(opnd2)) {
-        temp2 = temp1;
+        temp2 = ra_alloc_ftemp();
+        la_xvori_b(temp2, src2, 0);
     } else {
         temp2 = ra_alloc_ftemp();
-        cmp_inst(temp2, src2, 0);
-        la_xvandn_v(temp2, temp2, src2);
+        la_xvori_b(temp2, src2, 0);
     }
-    cvt_inst(temp2, temp1, 0);
+    cvt_inst(temp2, src1, 0);
     if (ir1_opnd_is_xmm(opnd0)) {
         set_high128_xreg_to_zero(temp2);
     }
-    la_xvori_b(dest, temp2, 0);
+    if (!dest_is_src2) {
+        la_xvori_b(dest, temp2, 0);
+    }
     return true;
 }
 
@@ -4709,22 +4710,10 @@ bool translate_vpmulhrsw(IR1_INST * pir1) {
         IR2_OPND src2 = load_freg128_from_ir1(opnd2);
         IR2_OPND temp1 = ra_alloc_ftemp();
         IR2_OPND temp2 = ra_alloc_ftemp();
-        IR2_OPND temp3 = ra_alloc_ftemp();
         la_vmulwev_w_h(temp1, src1, src2);
         la_vmulwod_w_h(temp2, src1, src2);
-
-        la_vsrai_w(temp1, temp1, 0xe);
-        la_vsrai_w(temp2, temp2, 0xe);
-
-        la_vandi_b(temp3, temp3, 0x0);
-        la_vbitseti_w(temp3, temp3, 0);
-
-        la_vadd_w(temp1, temp1, temp3);
-        la_vadd_w(temp2, temp2, temp3);
-
-        la_vsrai_w(temp1, temp1, 0x1);
-        la_vsrai_w(temp2, temp2, 0x1);
-
+        la_vsrari_w(temp1, temp1, 15);
+        la_vsrari_w(temp2, temp2, 15);
         la_vpackev_h(dest, temp2, temp1);
 
         set_high128_xreg_to_zero(dest);
@@ -4735,22 +4724,10 @@ bool translate_vpmulhrsw(IR1_INST * pir1) {
         IR2_OPND src2 = load_freg256_from_ir1(opnd2);
         IR2_OPND temp1 = ra_alloc_ftemp();
         IR2_OPND temp2 = ra_alloc_ftemp();
-        IR2_OPND temp3 = ra_alloc_ftemp();
         la_xvmulwev_w_h(temp1, src1, src2);
         la_xvmulwod_w_h(temp2, src1, src2);
-
-        la_xvsrai_w(temp1, temp1, 0xe);
-        la_xvsrai_w(temp2, temp2, 0xe);
-
-        la_xvandi_b(temp3, temp3, 0x0);
-        la_xvbitseti_w(temp3, temp3, 0);
-
-        la_xvadd_w(temp1, temp1, temp3);
-        la_xvadd_w(temp2, temp2, temp3);
-
-        la_xvsrai_w(temp1, temp1, 0x1);
-        la_xvsrai_w(temp2, temp2, 0x1);
-
+        la_xvsrari_w(temp1, temp1, 15);
+        la_xvsrari_w(temp2, temp2, 15);
         la_xvpackev_h(dest, temp2, temp1);
     }
 
@@ -4908,6 +4885,12 @@ bool translate_vpackssxx(IR1_INST * pir1) {
     IR2_OPND src1 = load_freg256_from_ir1(opnd1);
     IR2_OPND src2 = load_freg256_from_ir1(opnd2);
     IR2_OPND temp;
+    bool dest_is_src1 = ir1_opnd_base_reg_num(opnd0) ==
+                        ir1_opnd_base_reg_num(opnd1);
+    bool dest_is_src2 = (ir1_opnd_is_xmm(opnd2) ||
+                         ir1_opnd_is_ymm(opnd2)) &&
+                        ir1_opnd_base_reg_num(opnd0) ==
+                        ir1_opnd_base_reg_num(opnd2);
     IR2_INST * ( * cvt_inst)(IR2_OPND, IR2_OPND, int);
     switch (ir1_opcode(pir1)) {
         case dt_X86_INS_VPACKSSDW:
@@ -4921,8 +4904,14 @@ bool translate_vpackssxx(IR1_INST * pir1) {
             lsassert(0);
             break;
     }
-    if (ir1_opnd_is_xmm(opnd2) || ir1_opnd_is_ymm(opnd2)) {
+    if (dest_is_src2) {
+        temp = dest;
+    } else if ((ir1_opnd_is_xmm(opnd2) || ir1_opnd_is_ymm(opnd2)) &&
+               dest_is_src1) {
         temp = ra_alloc_ftemp();
+        la_xvori_b(temp, src2, 0);
+    } else if (ir1_opnd_is_xmm(opnd2) || ir1_opnd_is_ymm(opnd2)) {
+        temp = dest;
         la_xvori_b(temp, src2, 0);
     } else {
         temp = src2;
@@ -4931,7 +4920,9 @@ bool translate_vpackssxx(IR1_INST * pir1) {
     if (ir1_opnd_is_xmm(opnd0)) {
         set_high128_xreg_to_zero(temp);
     }
-    la_xvori_b(dest, temp, 0);
+    if (temp._reg_num != dest._reg_num) {
+        la_xvori_b(dest, temp, 0);
+    }
     return true;
 }
 
