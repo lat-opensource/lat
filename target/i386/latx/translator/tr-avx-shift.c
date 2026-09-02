@@ -21,7 +21,7 @@ bool translate_vpslldq(IR1_INST * pir1) {
     lsassert((ir1_opnd_is_xmm(opnd0) && ir1_opnd_is_xmm(opnd1)) ||
         (ir1_opnd_is_ymm(opnd0) && ir1_opnd_is_ymm(opnd1)));
     lsassert(ir1_opnd_is_imm(opnd2));
-    IR2_OPND dest = load_freg256_from_ir1(opnd0);
+    IR2_OPND dest = ra_alloc_xmm(ir1_opnd_base_reg_num(opnd0));
     IR2_OPND src = load_freg256_from_ir1(opnd1);
     uint8_t imm = ir1_opnd_uimm(opnd2);
     if (imm > 15) {
@@ -118,7 +118,7 @@ bool translate_vpsrldq(IR1_INST * pir1) {
     lsassert((ir1_opnd_is_xmm(opnd0) && ir1_opnd_is_xmm(opnd1)) ||
         (ir1_opnd_is_ymm(opnd0) && ir1_opnd_is_ymm(opnd1)));
     lsassert(ir1_opnd_is_imm(opnd2));
-    IR2_OPND dest = load_freg256_from_ir1(opnd0);
+    IR2_OPND dest = ra_alloc_xmm(ir1_opnd_base_reg_num(opnd0));
     IR2_OPND src = load_freg256_from_ir1(opnd1);
     uint8_t imm = ir1_opnd_uimm(opnd2);
     if (imm > 15) {

@@ -4196,15 +4196,13 @@ bool translate_vpshufd(IR1_INST * pir1) {
         IR2_OPND dest = load_freg128_from_ir1(opnd0);
         IR2_OPND src1 = load_freg128_from_ir1(opnd1);
         uint8_t imm = ir1_opnd_uimm(opnd2);
-        la_xvori_b(dest, src1, 0x00);
-        la_vpermi_w(dest, src1, imm);
+        la_xvshuf4i_w(dest, src1, imm);
         set_high128_xreg_to_zero(dest);
     } else {
         IR2_OPND dest = load_freg256_from_ir1(opnd0);
         IR2_OPND src1 = load_freg256_from_ir1(opnd1);
         uint8_t imm = ir1_opnd_uimm(opnd2);
-        la_xvori_b(dest, src1, 0x00);
-        la_xvpermi_w(dest, src1, imm);
+        la_xvshuf4i_w(dest, src1, imm);
     }
     return true;
 }
@@ -4923,13 +4921,18 @@ bool translate_vpshufhw(IR1_INST *pir1)
     IR1_OPND *opnd1 = ir1_get_opnd(pir1, 1);
     IR1_OPND *opnd2 = ir1_get_opnd(pir1, 2);
 
+    uint64_t imm8 = ir1_opnd_uimm(opnd2);
     IR2_OPND dest = load_freg256_from_ir1(opnd0);
     IR2_OPND src = load_freg256_from_ir1(opnd1);
-    IR2_OPND temp = ra_alloc_ftemp();
-    uint64_t imm8 = ir1_opnd_uimm(opnd2);
-    la_xvshuf4i_h(temp, src, imm8);
-    la_xvshuf4i_d(temp, src, 0x66);
-    la_xvori_b(dest, temp, 0);
+    if (dest._reg_num != src._reg_num) {
+        la_xvshuf4i_h(dest, src, imm8);
+        la_xvshuf4i_d(dest, src, 0x66);
+    } else {
+        IR2_OPND temp = ra_alloc_ftemp();
+        la_xvshuf4i_h(temp, src, imm8);
+        la_xvshuf4i_d(temp, src, 0x66);
+        la_xvori_b(dest, temp, 0);
+    }
     if(ir1_opnd_is_xmm(opnd0)){
         set_high128_xreg_to_zero(dest);
     }
@@ -4948,13 +4951,18 @@ bool translate_vpshuflw(IR1_INST *pir1)
     IR1_OPND *opnd1 = ir1_get_opnd(pir1, 1);
     IR1_OPND *opnd2 = ir1_get_opnd(pir1, 2);
 
+    uint64_t imm8 = ir1_opnd_uimm(opnd2);
     IR2_OPND dest = load_freg256_from_ir1(opnd0);
     IR2_OPND src = load_freg256_from_ir1(opnd1);
-    IR2_OPND temp = ra_alloc_ftemp();
-    uint64_t imm8 = ir1_opnd_uimm(opnd2);
-    la_xvshuf4i_h(temp, src, imm8);
-    la_xvshuf4i_d(temp, src, 0xcc);
-    la_xvori_b(dest, temp, 0);
+    if (dest._reg_num != src._reg_num) {
+        la_xvshuf4i_h(dest, src, imm8);
+        la_xvshuf4i_d(dest, src, 0xcc);
+    } else {
+        IR2_OPND temp = ra_alloc_ftemp();
+        la_xvshuf4i_h(temp, src, imm8);
+        la_xvshuf4i_d(temp, src, 0xcc);
+        la_xvori_b(dest, temp, 0);
+    }
     if(ir1_opnd_is_xmm(opnd0)){
         set_high128_xreg_to_zero(dest);
     }
