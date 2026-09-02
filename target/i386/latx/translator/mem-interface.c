@@ -289,11 +289,24 @@ static IR2_OPND convert_mem_helper(IR1_OPND *opnd1, IR2_OPND *arg_dest_op,
             }
         }
 #endif
+        longx load_offset = 0;
+        target_ulong base_offset = offset;
+
+#ifdef CONFIG_LATX_AOT
+        bool aot_reloc = option_aot && in_pre_translate;
+#else
+        bool aot_reloc = false;
+#endif
+        if (host_off && !aot_reloc) {
+            load_offset = sextract64(offset, 0, 12);
+            base_offset -= load_offset;
+        }
         target_ulong call_offset __attribute__((unused)) =
-                aot_get_call_offset(offset);
-        aot_load_guest_addr(dest_op, offset, LOAD_CALL_TARGET, call_offset);
+                aot_get_call_offset(base_offset);
+        aot_load_guest_addr(dest_op, base_offset, LOAD_CALL_TARGET,
+                            call_offset);
         if (host_off) {
-            *host_off = 0;
+            *host_off = load_offset;
         }
         return dest_op;
     }
