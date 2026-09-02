@@ -1292,13 +1292,11 @@ bool translate_vextractf128(IR1_INST * pir1) {
     uint8 imm = ir1_opnd_uimm(ir1_get_opnd(pir1, 2)) & 0x1;
     if (ir1_opnd_is_xmm(ir1_get_opnd(pir1, 0))) {
         IR2_OPND dest = load_freg128_from_ir1(ir1_get_opnd(pir1, 0));
-        IR2_OPND temp = ra_alloc_ftemp();
         if (!imm) {
-            la_xvpermi_q(temp, src, VEXTRINS_IMM_4_0(3, 0));
+            la_xvpermi_q(dest, src, VEXTRINS_IMM_4_0(3, 0));
         } else {
-            la_xvpermi_q(temp, src, VEXTRINS_IMM_4_0(3, 1));
+            la_xvpermi_q(dest, src, VEXTRINS_IMM_4_0(3, 1));
         }
-        la_xvori_b(dest, temp, 0);
         set_high128_xreg_to_zero(dest);
     } else {
         if (!imm) {
@@ -1438,14 +1436,25 @@ bool translate_vinserti128(IR1_INST * pir1) {
     IR2_OPND src1 = load_freg256_from_ir1(ir1_get_opnd(pir1, 1));
     IR2_OPND src2 = load_freg128_from_ir1(ir1_get_opnd(pir1, 2));
     uint8 imm = ir1_opnd_uimm(ir1_get_opnd(pir1, 3)) & 0x1;
-    IR2_OPND temp = ra_alloc_ftemp();
-    la_xvori_b(temp, src1, 0);
-    if (!imm) {
-        la_xvpermi_q(temp, src2, VEXTRINS_IMM_4_0(3, 0));
-    } else {
-        la_xvpermi_q(temp, src2, VEXTRINS_IMM_4_0(0, 2));
+    bool dest_is_src1 = ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 0)) ==
+                        ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 1));
+    bool dest_is_src2 = ir1_opnd_is_xmm(ir1_get_opnd(pir1, 2)) &&
+                        ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 0)) ==
+                        ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 2));
+    IR2_OPND result = dest_is_src2 && !dest_is_src1 ?
+                      ra_alloc_ftemp() : dest;
+
+    if (!dest_is_src1) {
+        la_xvori_b(result, src1, 0);
     }
-    la_xvori_b(dest, temp, 0);
+    if (!imm) {
+        la_xvpermi_q(result, src2, VEXTRINS_IMM_4_0(3, 0));
+    } else {
+        la_xvpermi_q(result, src2, VEXTRINS_IMM_4_0(0, 2));
+    }
+    if (dest_is_src2 && !dest_is_src1) {
+        la_xvori_b(dest, result, 0);
+    }
     return true;
 }
 
@@ -3599,8 +3608,6 @@ bool translate_vpbroadcastd(IR1_INST *pir1)
         la_vreplvei_w(dest, src, 0);
     } else if (ir1_opnd_is_ymm(opnd0)) {
         la_xvreplve0_w(dest, src);
-        la_xvinsve0_d(dest, dest, 2);
-        la_xvinsve0_d(dest, dest, 3);
     } else {
         lsassert(0);
     }
@@ -6643,8 +6650,6 @@ bool translate_vpbroadcastb(IR1_INST *pir1)
         la_xvreplve0_b(dest, src);
     } else if (ir1_opnd_is_ymm(opnd0)) {
         la_xvreplve0_b(dest, src);
-        la_xvinsve0_d(dest, dest, 2);
-        la_xvinsve0_d(dest, dest, 3);
     } else {
         lsassert(0);
     }
@@ -6679,8 +6684,6 @@ bool translate_vpbroadcastw(IR1_INST *pir1)
         la_xvreplve0_h(dest, src);
     } else if (ir1_opnd_is_ymm(opnd0)) {
         la_xvreplve0_h(dest, src);
-        la_xvinsve0_d(dest, dest, 2);
-        la_xvinsve0_d(dest, dest, 3);
     } else {
         lsassert(0);
     }
