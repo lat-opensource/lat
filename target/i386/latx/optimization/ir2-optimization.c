@@ -215,6 +215,118 @@ void tri_avoid_leading_label(void)
 #endif
 }
 
+static bool ir2_is_self_zext32(const IR2_INST *ir2, int *reg)
+{
+    if (ir2_opcode(ir2) != LISA_BSTRPICK_D || ir2->op_count != 4 ||
+        !ir2_opnd_cmp(&ir2->_opnd[0], &ir2->_opnd[1]) ||
+        ir2->_opnd[2]._imm32 != 31 || ir2->_opnd[3]._imm32 != 0) {
+        return false;
+    }
+
+    *reg = ir2->_opnd[0]._reg_num;
+    return true;
+}
+
+/*
+ * The low 32 bits of these operations do not depend on the source's upper
+ * bits.  If the operation overwrites the same register and is immediately
+ * followed by another zero extension, the extension before it is redundant.
+ */
+static bool ir2_is_low32_rmw(const IR2_INST *ir2, int reg)
+{
+    IR2_OPCODE opc = ir2_opcode(ir2);
+
+    if (ir2->op_count < 2 || ir2->_opnd[0]._reg_num != reg) {
+        return false;
+    }
+
+    switch (opc) {
+    case LISA_ADDI_D:
+    case LISA_ADDI_W:
+        return ir2->_opnd[1]._reg_num == reg;
+    case LISA_ADD_D:
+    case LISA_ADD_W:
+    case LISA_SUB_D:
+    case LISA_SUB_W:
+    case LISA_AND:
+    case LISA_OR:
+    case LISA_XOR:
+    case LISA_NOR:
+    case LISA_SLL_W:
+    case LISA_SRL_W:
+    case LISA_SRA_W:
+        return ir2->op_count >= 3 &&
+               (ir2->_opnd[1]._reg_num == reg ||
+                ir2->_opnd[2]._reg_num == reg);
+    case LISA_SLLI_W:
+    case LISA_SRLI_W:
+    case LISA_SRAI_W:
+        return ir2->_opnd[1]._reg_num == reg;
+    default:
+        return false;
+    }
+}
+
+static bool ir2_touches_gpr(const IR2_INST *ir2, int reg)
+{
+    for (int i = 0; i < ir2->op_count; i++) {
+        if (ir2_opnd_is_ireg(&ir2->_opnd[i]) &&
+            ir2->_opnd[i]._reg_num == reg) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool ir2_zext32_overwritten_before_wide_use(IR2_INST *zext, int reg)
+{
+    IR2_INST *ir2 = ir2_next(zext);
+
+    while (ir2) {
+        IR2_OPCODE opc = ir2_opcode(ir2);
+        int final_reg;
+
+        if (opc == LISA_X86_INST) {
+            ir2 = ir2_next(ir2);
+            continue;
+        }
+        /* Keep architectural state exact at control-flow and fault points. */
+        if (ir2_opcode_is_branch(opc) || ir2_opcode_is_jirl(opc) ||
+            la_ir2_opcode_is_label(opc) || la_ir2_opcode_is_load(opc) ||
+            la_ir2_opcode_is_store(opc)) {
+            return false;
+        }
+        if (ir2_is_self_zext32(ir2, &final_reg) && final_reg == reg) {
+            return true;
+        }
+        if (ir2_touches_gpr(ir2, reg) && !ir2_is_low32_rmw(ir2, reg)) {
+            return false;
+        }
+        ir2 = ir2_next(ir2);
+    }
+    return false;
+}
+
+static void ir2_opt_intermediate_zext32(void)
+{
+    IR2_INST *zext = lsenv->tr_data->first_ir2;
+
+    while (zext) {
+        IR2_INST *next = ir2_next(zext);
+        int reg;
+
+        if (!ir2_is_self_zext32(zext, &reg)) {
+            zext = next;
+            continue;
+        }
+
+        if (ir2_zext32_overwritten_before_wide_use(zext, reg)) {
+            ir2_remove(ir2_get_id(zext));
+        }
+        zext = next;
+    }
+}
+
 static int ir2_get_addi_rsp_offs(IR2_INST *ir2)
 {
     int rsp = reg_gpr_map[esp_index];
@@ -528,6 +640,7 @@ static void ir2_opt_push_pop(TranslationBlock *tb)
 
 void tr_ir2_optimize(TranslationBlock *tb)
 {
+    ir2_opt_intermediate_zext32();
 #ifdef CONFIG_LATX_OPT_PUSH_POP
     CPUX86State *env = (CPUX86State*)lsenv->cpu_state;
     CPUState *cpu = env_cpu(env);
