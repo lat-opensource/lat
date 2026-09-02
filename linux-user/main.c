@@ -51,6 +51,9 @@
 #include "target_elf.h"
 #include "cpu_loop-common.h"
 #include "crypto/init.h"
+#ifdef CONFIG_LATX
+#include "pressure-vessel.h"
+#endif
 int mydebug = 1;
 
 #ifdef CONFIG_LATX
@@ -1460,6 +1463,13 @@ int main(int argc, char **argv, char **envp)
         return EXIT_SUCCESS;
     }
 
+    /* Scan interp_prefix dir for replacement files. */
+    init_paths(interp_prefix);
+
+#ifdef CONFIG_LATX
+    latx_pressure_vessel_prepare(exec_path, target_argv, envlist);
+#endif
+
     error_init(argv[0]);
     module_call_init(MODULE_INIT_TRACE);
     qemu_init_cpu_list();
@@ -1503,9 +1513,6 @@ int main(int argc, char **argv, char **envp)
     memset(info, 0, sizeof(struct image_info));
 
     memset(&bprm, 0, sizeof (bprm));
-
-    /* Scan interp_prefix dir for replacement files. */
-    init_paths(interp_prefix);
 
     init_qemu_uname_release();
 
@@ -1604,6 +1611,10 @@ int main(int argc, char **argv, char **envp)
 
     target_environ = envlist_to_environ(envlist, NULL);
     envlist_free(envlist);
+
+#ifdef CONFIG_LATX
+    latx_pressure_vessel_exec_payload(target_environ);
+#endif
 
 #define KERNEL_CONFIG_LSM_MMAP_MIN_ADDR 65536
     /*
