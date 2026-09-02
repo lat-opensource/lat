@@ -2036,13 +2036,12 @@ bool translate_vpblendvb(IR1_INST * pir1) {
         (ir1_opnd_is_ymm(opnd0) && ir1_opnd_is_ymm(opnd1)));
     IR2_OPND dest, src1, src2, src3;
     IR2_OPND temp = ra_alloc_ftemp();
-    dest = load_freg256_from_ir1(opnd0);
+    dest = ra_alloc_xmm(ir1_opnd_base_reg_num(opnd0));
     src1 = load_freg256_from_ir1(opnd1);
     src2 = load_freg256_from_ir1(opnd2);
     src3 = load_freg256_from_ir1(opnd3);
     la_xvslti_b(temp, src3, 0);
-    la_xvbitsel_v(temp, src1, src2, temp);
-    la_xvori_b(dest, temp, 0);
+    la_xvbitsel_v(dest, src1, src2, temp);
     if (ir1_opnd_is_xmm(opnd0)) {
         set_high128_xreg_to_zero(dest);
     }
