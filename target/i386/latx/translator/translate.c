@@ -2169,6 +2169,24 @@ static bool is_softfpu_region_insn(IR1_OPCODE opcode)
     }
 }
 
+/*
+ * These helpers update the x86 condition flags through env->eflags.  Keep
+ * them in a one-instruction region so the prologue reads the incoming flags
+ * and the matching epilogue writes the helper result back to LBT flags.
+ */
+static bool is_softfpu_eflags_insn(IR1_OPCODE opcode)
+{
+    switch (opcode) {
+    case dt_X86_INS_FCOMI:
+    case dt_X86_INS_FCOMIP:
+    case dt_X86_INS_FUCOMI:
+    case dt_X86_INS_FUCOMIP:
+        return true;
+    default:
+        return false;
+    }
+}
+
 int tr_ir2_generate(struct TranslationBlock *tb)
 {
     int i;
@@ -2311,15 +2329,19 @@ int tr_ir2_generate(struct TranslationBlock *tb)
         }
 
         if (option_softfpu == 2 && reduce_proepo) {
-            if (i == ir1_nr - 1) {
+            bool end_region = i == ir1_nr - 1 ||
+                              is_softfpu_eflags_insn(ir1_opcode(pir1));
+
+            if (!end_region) {
+                IR1_INST *pir1_next = pir1 + 1;
+
+                end_region =
+                    !is_softfpu_region_insn(ir1_opcode(pir1_next)) ||
+                    is_softfpu_eflags_insn(ir1_opcode(pir1_next));
+            }
+            if (end_region) {
                 reduce_proepo = false;
                 gen_softfpu_helper_epilogue(pir1);
-            } else {
-                IR1_INST *pir1_next = pir1 + 1;
-                if (!is_softfpu_region_insn(ir1_opcode(pir1_next))) {
-                    reduce_proepo = false;
-                    gen_softfpu_helper_epilogue(pir1);
-                }
             }
         }
 
