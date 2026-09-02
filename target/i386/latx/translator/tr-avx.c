@@ -3762,23 +3762,35 @@ bool translate_vpmaddwd(IR1_INST * pir1) {
         IR2_OPND dest = load_freg128_from_ir1(opnd0);
         IR2_OPND src1 = load_freg128_from_ir1(opnd1);
         IR2_OPND src2 = load_freg128_from_ir1(opnd2);
-        IR2_OPND temp = ra_alloc_ftemp();
+        if (dest._reg_num != src1._reg_num &&
+            dest._reg_num != src2._reg_num) {
+            la_vmulwev_w_h(dest, src1, src2);
+            la_vmaddwod_w_h(dest, src1, src2);
+        } else {
+            IR2_OPND even = ra_alloc_ftemp();
+            IR2_OPND odd = ra_alloc_ftemp();
 
-        la_vxor_v(temp, temp, temp);
-        la_vmaddwev_w_h(temp, src1, src2);
-        la_vmaddwod_w_h(temp, src1, src2);
-        la_vbsll_v(dest, temp, 0);
+            la_vmulwev_w_h(even, src1, src2);
+            la_vmulwod_w_h(odd, src1, src2);
+            la_vadd_w(dest, even, odd);
+        }
         set_high128_xreg_to_zero(dest);
     } else {
         IR2_OPND dest = load_freg256_from_ir1(opnd0);
         IR2_OPND src1 = load_freg256_from_ir1(opnd1);
         IR2_OPND src2 = load_freg256_from_ir1(opnd2);
-        IR2_OPND temp = ra_alloc_ftemp();
+        if (dest._reg_num != src1._reg_num &&
+            dest._reg_num != src2._reg_num) {
+            la_xvmulwev_w_h(dest, src1, src2);
+            la_xvmaddwod_w_h(dest, src1, src2);
+        } else {
+            IR2_OPND even = ra_alloc_ftemp();
+            IR2_OPND odd = ra_alloc_ftemp();
 
-        la_xvxor_v(temp, temp, temp);
-        la_xvmaddwev_w_h(temp, src1, src2);
-        la_xvmaddwod_w_h(temp, src1, src2);
-        la_xvbsll_v(dest, temp, 0);
+            la_xvmulwev_w_h(even, src1, src2);
+            la_xvmulwod_w_h(odd, src1, src2);
+            la_xvadd_w(dest, even, odd);
+        }
     }
     return true;
 }
@@ -3796,29 +3808,13 @@ bool translate_vpmaddubsw(IR1_INST * pir1) {
         IR2_OPND src1 = load_freg128_from_ir1(opnd1);
         IR2_OPND src2 = load_freg128_from_ir1(opnd2);
 
-        IR2_OPND temp1 = ra_alloc_ftemp();
-        IR2_OPND temp2 = ra_alloc_ftemp();
-        IR2_OPND temp3 = ra_alloc_ftemp();
-        IR2_OPND temp4 = ra_alloc_ftemp();
-        IR2_OPND temp5 = ra_alloc_ftemp();
-        IR2_OPND itmp = ra_alloc_itemp();
-        /* unsigned src1 * signed src2 */
-        la_vreplgr2vr_d(temp1, zero_ir2_opnd);
-        la_vabsd_b(temp3, src2, temp1);
-        la_vmaddwev_h_bu(temp1, src1, temp3);
-        la_vreplgr2vr_d(temp2, zero_ir2_opnd);
-        la_vmaddwod_h_bu(temp2, src1, temp3);
+        IR2_OPND even = ra_alloc_ftemp();
+        IR2_OPND odd = ra_alloc_ftemp();
 
-        la_ori(itmp, zero_ir2_opnd, 0x1);
-        la_vreplgr2vr_b(temp3, itmp);
-        la_vsigncov_b(temp4, src2, temp3);
-
-        la_vmulwev_h_b(temp5, temp4, temp3);
-        la_vmulwod_h_b(temp3, temp4, temp3);
-
-        la_vmul_h(temp1, temp1, temp5);
-        la_vmul_h(temp2, temp2, temp3);
-        la_vsadd_h(dest, temp2, temp1);
+        /* Unsigned src1 bytes times signed src2 bytes, pairwise saturated. */
+        la_vmulwev_h_bu_b(even, src1, src2);
+        la_vmulwod_h_bu_b(odd, src1, src2);
+        la_vsadd_h(dest, even, odd);
 
         set_high128_xreg_to_zero(dest);
 
@@ -3826,29 +3822,12 @@ bool translate_vpmaddubsw(IR1_INST * pir1) {
         IR2_OPND dest = load_freg256_from_ir1(opnd0);
         IR2_OPND src1 = load_freg256_from_ir1(opnd1);
         IR2_OPND src2 = load_freg256_from_ir1(opnd2);
-        IR2_OPND temp1 = ra_alloc_ftemp();
-        IR2_OPND temp2 = ra_alloc_ftemp();
-        IR2_OPND temp3 = ra_alloc_ftemp();
-        IR2_OPND temp4 = ra_alloc_ftemp();
-        IR2_OPND temp5 = ra_alloc_ftemp();
-        IR2_OPND itmp = ra_alloc_itemp();
-        /* unsigned src1 * signed src2 */
-        la_xvreplgr2vr_d(temp1, zero_ir2_opnd);
-        la_xvabsd_b(temp3, src2, temp1);
-        la_xvmaddwev_h_bu(temp1, src1, temp3);
-        la_xvreplgr2vr_d(temp2, zero_ir2_opnd);
-        la_xvmaddwod_h_bu(temp2, src1, temp3);
+        IR2_OPND even = ra_alloc_ftemp();
+        IR2_OPND odd = ra_alloc_ftemp();
 
-        la_ori(itmp, zero_ir2_opnd, 0x1);
-        la_xvreplgr2vr_b(temp3, itmp);
-        la_xvsigncov_b(temp4, src2, temp3);
-
-        la_xvmulwev_h_b(temp5, temp4, temp3);
-        la_xvmulwod_h_b(temp3, temp4, temp3);
-
-        la_xvmul_h(temp1, temp1, temp5);
-        la_xvmul_h(temp2, temp2, temp3);
-        la_xvsadd_h(dest, temp2, temp1);
+        la_xvmulwev_h_bu_b(even, src1, src2);
+        la_xvmulwod_h_bu_b(odd, src1, src2);
+        la_xvsadd_h(dest, even, odd);
     }
     return true;
 }
