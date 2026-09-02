@@ -215,6 +215,54 @@ void tri_avoid_leading_label(void)
 #endif
 }
 
+/*
+ * Temporary vector registers are released at each x86 instruction boundary.
+ * Consecutive translations can therefore allocate the same physical register
+ * and reload the same LASX immediate even though the earlier value is still
+ * live in that register.  Keep the value across the boundary until an actual
+ * write or a control-flow join invalidates it.
+ */
+static void ir2_opt_redundant_xvldi(void)
+{
+    bool valid[32] = { false };
+    int imm[32] = { 0 };
+    IR2_INST *ir2 = lsenv->tr_data->first_ir2;
+
+    while (ir2) {
+        IR2_INST *next = ir2_next(ir2);
+        IR2_OPCODE opc = ir2_opcode(ir2);
+
+        if (opc == LISA_XVLDI) {
+            int reg = ir2->_opnd[0]._reg_num;
+            int value = ir2->_opnd[1]._imm32;
+
+            if (reg >= 0 && reg < ARRAY_SIZE(valid)) {
+                if (valid[reg] && imm[reg] == value) {
+                    ir2_remove(ir2_get_id(ir2));
+                    ir2 = next;
+                    continue;
+                }
+                valid[reg] = true;
+                imm[reg] = value;
+            }
+        } else {
+            if (ir2_opcode_is_branch(opc) || ir2_opcode_is_jirl(opc) ||
+                la_ir2_opcode_is_label(opc)) {
+                memset(valid, 0, sizeof(valid));
+            }
+            if (!la_ir2_opcode_is_store(opc) && ir2->op_count > 0 &&
+                ir2_opnd_is_freg(&ir2->_opnd[0])) {
+                int reg = ir2->_opnd[0]._reg_num;
+
+                if (reg >= 0 && reg < ARRAY_SIZE(valid)) {
+                    valid[reg] = false;
+                }
+            }
+        }
+        ir2 = next;
+    }
+}
+
 static int ir2_get_addi_rsp_offs(IR2_INST *ir2)
 {
     int rsp = reg_gpr_map[esp_index];
@@ -528,6 +576,7 @@ static void ir2_opt_push_pop(TranslationBlock *tb)
 
 void tr_ir2_optimize(TranslationBlock *tb)
 {
+    ir2_opt_redundant_xvldi();
 #ifdef CONFIG_LATX_OPT_PUSH_POP
     CPUX86State *env = (CPUX86State*)lsenv->cpu_state;
     CPUState *cpu = env_cpu(env);
