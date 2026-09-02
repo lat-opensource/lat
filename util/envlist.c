@@ -201,6 +201,27 @@ envlist_unsetenv(envlist_t *envlist, const char *env)
 	return (0);
 }
 
+const char *
+envlist_getenv(const envlist_t *envlist, const char *name)
+{
+	struct envlist_entry *entry;
+	size_t name_len;
+
+	if (envlist == NULL || name == NULL || name[0] == '\0') {
+		return NULL;
+	}
+
+	name_len = strlen(name);
+	for (entry = envlist->el_entries.lh_first; entry != NULL;
+	     entry = entry->ev_link.le_next) {
+		if (!strncmp(entry->ev_var, name, name_len) &&
+		    entry->ev_var[name_len] == '=') {
+			return entry->ev_var + name_len + 1;
+		}
+	}
+	return NULL;
+}
+
 /*
  * Returns given envlist as array of strings (in same form that
  * global variable environ is).  Caller must free returned memory
