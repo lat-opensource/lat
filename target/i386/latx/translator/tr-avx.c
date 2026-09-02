@@ -519,7 +519,10 @@ bool translate_vaddsubpd(IR1_INST * pir1) {
     IR1_OPND * opnd2 = ir1_get_opnd(pir1, 2);
     lsassert((ir1_opnd_is_xmm(opnd0) && ir1_opnd_is_xmm(opnd1)) ||
         (ir1_opnd_is_ymm(opnd0) && ir1_opnd_is_ymm(opnd1)));
-    IR2_OPND dest = load_freg256_from_ir1(opnd0);
+    /* VPMOVSX* overwrites its destination.  Loading a YMM destination here
+     * needlessly materializes its previous high half before the full result
+     * replaces it. */
+    IR2_OPND dest = ra_alloc_xmm(ir1_opnd_base_reg_num(opnd0));
     IR2_OPND src1 = load_freg256_from_ir1(opnd1);
     IR2_OPND src2 = load_freg256_from_ir1(opnd2);
     IR2_OPND add_src1 = ra_alloc_ftemp();
