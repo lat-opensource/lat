@@ -32,6 +32,7 @@
 #include "symbols.h"
 #include "lsenv.h"
 #include "qemu.h"
+#include "qemu/pressure-vessel.h"
 #include "kzt-groups.h"
 #include "kzt_relocation_transaction.h"
 
@@ -529,7 +530,9 @@ static char* find_elf_rpath(char* rfilename, bool* elf_err)
     fclose(f);
     return NULL;
 }
-static void for_needed_check(elfheader_t* h, int needlibcnt, path_collection_t *lib_path)
+static void for_needed_check(elfheader_t* h, int needlibcnt,
+                             path_collection_t *lib_path,
+                             path_collection_t *private_lib_path)
 {
     //for needed
     const char* rpaths[needlibcnt];
@@ -588,6 +591,10 @@ static void for_needed_check(elfheader_t* h, int needlibcnt, path_collection_t *
                 }
                 if (!not_found) {
                     AddPath(tmp_path.paths[i], lib_path, 1);
+                    if (!latx_pressure_vessel_runtime_is_library_path(
+                            tmp_path.paths[i])) {
+                        AddPath(tmp_path.paths[i], private_lib_path, 1);
+                    }
                     //fprintf(stderr, "latx debug add %s\n", tmp_path.paths[i]);
                 }
                 hadinsert = tmp_path.paths[i];
@@ -668,23 +675,46 @@ static bool kzt_soname_matches_filename(const char *soname,
             filename[prefix_length] == '.');
 }
 
+static void kzt_append_application_library_paths(path_collection_t *paths,
+                                                 const char *library_path)
+{
+    g_auto(GStrv) directories = NULL;
+
+    if (!library_path) {
+        return;
+    }
+    directories = g_strsplit(library_path, ":", -1);
+    for (char **directory = directories; *directory; directory++) {
+        if (!(*directory)[0] ||
+            latx_pressure_vessel_runtime_is_library_path(*directory)) {
+            continue;
+        }
+        AppendListExistAndNotSys(paths, *directory, 1);
+    }
+}
+
 void CheckEnableKZT(elfheader_t *h, char **target_argv, int target_argc)
 {
     path_collection_t   lib_path = {0,0,0};
+    path_collection_t   private_lib_path = {0, 0, 0};
+    const char *library_path;
     char *rpathref;
     char *rpath;
 
     int needlibcnt = 0;
-    /* get paths from RPATH/RUNPATH/LD_LIBRARY_PATH,
-     * exclude system paths and non-exist paths */
+    /*
+     * Resolve dependencies through RPATH/RUNPATH/LD_LIBRARY_PATH, but only
+     * treat paths embedded in the ELF as application-private libraries.
+     */
     for (size_t i=0; i<h->numDynamic; ++i) {
         switch(h->Dynamic[i].d_tag) {
             case DT_RPATH:
             case DT_RUNPATH:
                 rpathref = h->DynStrTab+h->Dynamic[i].d_un.d_val + h->delta;
-                    printf_log(LOG_INFO, "RPATH : %s\n", rpathref);
+                printf_log(LOG_INFO, "RPATH : %s\n", rpathref);
                 rpath = GenPathList(rpathref, h->path);
                 AppendListExistAndNotSys(&lib_path, rpath, 1);
+                kzt_append_application_library_paths(&private_lib_path, rpath);
                 if (rpath != rpathref) {
                     box_free(rpath);
                 }
@@ -694,22 +724,29 @@ void CheckEnableKZT(elfheader_t *h, char **target_argv, int target_argc)
                 break;
         }
     }
-    if (getenv("LD_LIBRARY_PATH"))
-        AppendListExistAndNotSys(&lib_path, getenv("LD_LIBRARY_PATH"), 1);   // in case some of the path are for x86 world
+    library_path = latx_pressure_vessel_runtime_library_path();
+    if (!library_path) {
+        library_path = getenv("LD_LIBRARY_PATH");
+    }
+    if (library_path) {
+        AppendListExistAndNotSys(&lib_path, library_path, 1);
+        kzt_append_application_library_paths(&private_lib_path, library_path);
+    }
 
     for (int i=0; i<lib_path.size; ++i)
         printf_log(LOG_INFO, "%s\n", lib_path.paths[i]);
-    for_needed_check(h, needlibcnt, &lib_path);
+    for_needed_check(h, needlibcnt, &lib_path, &private_lib_path);
     /* check KZT libs in paths */
     int nb = sizeof(wrappedlibs_name) / sizeof(char*);
     for (int i=0; i<nb; ++i) {
         if (!kzt_library_is_enabled(wrappedlibs_name[i])) {
             continue;
         }
-        for (int j=0; j<lib_path.size; ++j) {
-            DIR *dir = opendir(lib_path.paths[j]);
+        for (int j = 0; j < private_lib_path.size; ++j) {
+            DIR *dir = opendir(private_lib_path.paths[j]);
             if (dir == NULL) {
-                printf_log(LOG_INFO, "dir %s not exist\n", lib_path.paths[j]);
+                printf_log(LOG_INFO, "dir %s not exist\n",
+                           private_lib_path.paths[j]);
                 continue;
             }
 
@@ -725,8 +762,10 @@ void CheckEnableKZT(elfheader_t *h, char **target_argv, int target_argc)
                     continue;
                 }
                 candidate_length = snprintf(
-                    candidate, sizeof(candidate), "%s%s%s", lib_path.paths[j],
-                    lib_path.paths[j][strlen(lib_path.paths[j]) - 1] == '/'
+                    candidate, sizeof(candidate), "%s%s%s",
+                    private_lib_path.paths[j],
+                    private_lib_path.paths[j][
+                        strlen(private_lib_path.paths[j]) - 1] == '/'
                         ? "" : "/",
                     entry->d_name);
                 if (candidate_length < 0 ||
@@ -740,7 +779,7 @@ void CheckEnableKZT(elfheader_t *h, char **target_argv, int target_argc)
                 group = kzt_group_for_library(wrappedlibs_name[i]);
                 snprintf(reason, sizeof(reason),
                          "guest %s resolved from application path %s",
-                         entry->d_name, lib_path.paths[j]);
+                         entry->d_name, private_lib_path.paths[j]);
                 kzt_group_disable(group, reason);
                 break;
             }
@@ -751,6 +790,7 @@ void CheckEnableKZT(elfheader_t *h, char **target_argv, int target_argc)
         }
     }
     FreeCollection(&lib_path);
+    FreeCollection(&private_lib_path);
     //disable kzt chrome app
     for(int i = 0; i < target_argc; i++) {
         if (!strcmp(target_argv[i], "--no-sandbox")) {

@@ -7,6 +7,7 @@
  */
 
 #include "config-host.h"
+#include "qemu/path.h"
 #include "lsenv.h"
 #include "myalign.h"
 #include "elfloader.h"
@@ -2222,9 +2223,16 @@ static int findx86pthread_setcanceltype(elfheader_t* h)
 }
 static char* kzt_find_realsofilepath(char * filepath, char *filetmp)
 {
+    const char *resolved;
+
     snprintf(filetmp , PATH_MAX, "%s%s", interp_prefix, filepath);
     if (FileExist(filetmp, IS_FILE)) {
         printf_log(LOG_DEBUG, "%s filename change to \"%s\"\n", __func__, filepath);
+        return filetmp;
+    }
+    resolved = path(filepath);
+    if (resolved != filepath && FileExist(resolved, IS_FILE)) {
+        snprintf(filetmp, PATH_MAX, "%s", resolved);
         return filetmp;
     }
     /* Keep the guest path when no matching prefixed file exists. */
