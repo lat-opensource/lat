@@ -2319,6 +2319,39 @@ bool translate_vpor(IR1_INST * pir1) {
     return true;
 }
 
+static bool vpshufb_control_never_zeros(IR1_INST *pir1, IR1_OPND *control)
+{
+#ifdef TARGET_X86_64
+    if (!CODEIS64 || !ir1_opnd_is_mem(control) ||
+        ir1_opnd_base_reg(control) != dt_X86_REG_RIP ||
+        ir1_opnd_has_index(control)) {
+        return false;
+    }
+
+    target_ulong addr = ir1_addr_next(pir1) + ir1_opnd_simm(control);
+    size_t size = ir1_opnd_size(control) / 8;
+    int flags = page_get_flags(addr);
+    int end_flags = page_get_flags(addr + size - 1);
+    int immutable = PAGE_VALID | PAGE_READ;
+
+    if ((flags & immutable) != immutable ||
+        (end_flags & immutable) != immutable ||
+        ((flags | end_flags) & (PAGE_WRITE | PAGE_WRITE_ORG))) {
+        return false;
+    }
+
+    const uint8_t *bytes = g2h_untagged(addr);
+    for (size_t i = 0; i < size; ++i) {
+        if (bytes[i] & 0x80) {
+            return false;
+        }
+    }
+    return true;
+#else
+    return false;
+#endif
+}
+
 bool translate_vpshufb(IR1_INST * pir1) {
     if (!option_enable_lasx) {
         return translate_vpshufb_lsx(pir1);
@@ -2333,11 +2366,20 @@ bool translate_vpshufb(IR1_INST * pir1) {
     IR2_OPND src1 = load_freg256_from_ir1(opnd1);
     IR2_OPND src2 = load_freg256_from_ir1(opnd2);
 
-    IR2_OPND index = ra_alloc_ftemp();
+    if (vpshufb_control_never_zeros(pir1, opnd2)) {
+        la_xvshuf_b(dest, src1, src1, src2);
+        if (ir1_opnd_is_xmm(opnd0)) {
+            set_high128_xreg_to_zero(dest);
+        }
+        return true;
+    }
+
     IR2_OPND mask = ra_alloc_ftemp();
-    la_xvandi_b(index, src2, 0xf);
     la_xvslti_b(mask, src2, 0);
-    la_xvshuf_b(dest, src1, src1, index);
+    /* XVSHUF.B ignores bits 7:5.  Bit 4 only selects between its two
+     * identical source operands, so the original PSHUFB control can be
+     * used directly; the sign-bit zeroing remains explicit below. */
+    la_xvshuf_b(dest, src1, src1, src2);
     la_xvandn_v(dest, mask, dest);
     if (ir1_opnd_is_xmm(opnd0)) {
         set_high128_xreg_to_zero(dest);
