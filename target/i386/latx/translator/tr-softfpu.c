@@ -1617,7 +1617,8 @@ static bool translate_fist_softfpu(IR1_INST *pir1)
 
 static bool translate_fistp_softfpu(IR1_INST *pir1)
 {
-    if (option_softfpu == 2 && option_softfpu_fast & 0x400000) {
+    if (option_softfpu == 2 &&
+        option_softfpu_fast & LATX_SOFTFPU_FAST_FISTP) {
         IR1_OPND *opnd0 = ir1_get_opnd(pir1, 0);
         int opnd_size = ir1_opnd_size(opnd0);
 
@@ -1677,6 +1678,8 @@ static bool translate_fistp_softfpu(IR1_INST *pir1)
         la_b(label_exit);
 
         la_label(label_softfpu);
+        /* The fast FISTP path is outside a shared helper region. */
+        gen_softfpu_helper_prologue(pir1);
         if (opnd_size == 16) {
             gen_softfpu_helper1((ADDR)helper_fist_ST0);
         } else if (opnd_size == 32) {
@@ -1688,6 +1691,7 @@ static bool translate_fistp_softfpu(IR1_INST *pir1)
         /* v0 */
         store_ireg_to_ir1(a0_ir2_opnd, opnd0, false);
         la_fpu_pop();
+        gen_softfpu_helper_epilogue(pir1);
 
         la_label(label_exit);
 
@@ -2639,7 +2643,8 @@ static bool translate_fsqrt_softfpu(IR1_INST *pir1)
 
 static bool translate_fst_softfpu(IR1_INST *pir1)
 {
-    if (option_softfpu == 2 && option_softfpu_fast & 0x800000) {
+    if (option_softfpu == 2 &&
+        option_softfpu_fast & LATX_SOFTFPU_FAST_FST) {
         IR1_OPND *opnd0 = ir1_get_opnd(pir1, 0);
         int opnd_size = ir1_opnd_size(opnd0);
 
@@ -2712,7 +2717,8 @@ static bool translate_fst_softfpu(IR1_INST *pir1)
 
 static bool translate_fstp_softfpu(IR1_INST *pir1)
 {
-    if (option_softfpu == 2 && option_softfpu_fast & 0x800000) {
+    if (option_softfpu == 2 &&
+        option_softfpu_fast & LATX_SOFTFPU_FAST_FST) {
         translate_fst_softfpu(pir1);
         la_fpu_pop();
 
