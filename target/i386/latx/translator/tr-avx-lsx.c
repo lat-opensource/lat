@@ -605,46 +605,35 @@ static bool translate_avx_integer_3op_custom_lsx(
 static void translate_vpmaddwd_lane_lsx(IR2_OPND dest, IR2_OPND src1,
                                         IR2_OPND src2)
 {
-    IR2_OPND temp = ra_alloc_ftemp();
+    if (dest._reg_num != src1._reg_num &&
+        dest._reg_num != src2._reg_num) {
+        la_vmulwev_w_h(dest, src1, src2);
+        la_vmaddwod_w_h(dest, src1, src2);
+        return;
+    }
 
-    la_vxor_v(temp, temp, temp);
-    la_vmaddwev_w_h(temp, src1, src2);
-    la_vmaddwod_w_h(temp, src1, src2);
-    la_vbsll_v(dest, temp, 0);
-    ra_free_temp(temp);
+    IR2_OPND even = ra_alloc_ftemp();
+    IR2_OPND odd = ra_alloc_ftemp();
+
+    la_vmulwev_w_h(even, src1, src2);
+    la_vmulwod_w_h(odd, src1, src2);
+    la_vadd_w(dest, even, odd);
+    ra_free_temp(odd);
+    ra_free_temp(even);
 }
 
 static void translate_vpmaddubsw_lane_lsx(IR2_OPND dest, IR2_OPND src1,
                                           IR2_OPND src2)
 {
-    IR2_OPND temp1 = ra_alloc_ftemp();
-    IR2_OPND temp2 = ra_alloc_ftemp();
-    IR2_OPND temp3 = ra_alloc_ftemp();
-    IR2_OPND temp4 = ra_alloc_ftemp();
-    IR2_OPND temp5 = ra_alloc_ftemp();
-    IR2_OPND one = ra_alloc_itemp();
+    IR2_OPND even = ra_alloc_ftemp();
+    IR2_OPND odd = ra_alloc_ftemp();
 
     /* Unsigned src1 multiplied by signed src2, then saturated to halfwords. */
-    la_vreplgr2vr_d(temp1, zero_ir2_opnd);
-    la_vabsd_b(temp3, src2, temp1);
-    la_vmaddwev_h_bu(temp1, src1, temp3);
-    la_vreplgr2vr_d(temp2, zero_ir2_opnd);
-    la_vmaddwod_h_bu(temp2, src1, temp3);
-
-    la_ori(one, zero_ir2_opnd, 1);
-    la_vreplgr2vr_b(temp3, one);
-    la_vsigncov_b(temp4, src2, temp3);
-    la_vmulwev_h_b(temp5, temp4, temp3);
-    la_vmulwod_h_b(temp3, temp4, temp3);
-    la_vmul_h(temp1, temp1, temp5);
-    la_vmul_h(temp2, temp2, temp3);
-    la_vsadd_h(dest, temp2, temp1);
-    ra_free_temp(one);
-    ra_free_temp(temp5);
-    ra_free_temp(temp4);
-    ra_free_temp(temp3);
-    ra_free_temp(temp2);
-    ra_free_temp(temp1);
+    la_vmulwev_h_bu_b(even, src1, src2);
+    la_vmulwod_h_bu_b(odd, src1, src2);
+    la_vsadd_h(dest, even, odd);
+    ra_free_temp(odd);
+    ra_free_temp(even);
 }
 
 static void translate_vpmulhrsw_lane_lsx(IR2_OPND dest, IR2_OPND src1,
