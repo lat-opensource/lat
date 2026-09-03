@@ -30,4 +30,13 @@ if 'x86_64-linux-user' in target_dirs
     ],
     'timeout': 120,
   }]
+  latx_integration_tests += [{
+    'name': 'test-avx-ymm-writeback',
+    'runner': find_program('../../test-avx-ymm-writeback.sh'),
+    'args': [
+      emulators['latx-x86_64'],
+      files('../../avx-ymm-writeback.S'),
+    ],
+    'timeout': 120,
+  }]
 endif
