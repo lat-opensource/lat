@@ -12,6 +12,38 @@
 
 static char **pressure_vessel_payload;
 
+/*
+ * This is a lineage marker, not a Runtime discovery input.  It is written
+ * only after the current executable has been verified as the Runtime's
+ * pressure-vessel wrapper, then checked against the canonical Runtime path
+ * in children that the wrapper launches.
+ */
+#define LATX_PRESSURE_VESSEL_RUNTIME_FILES_ENV \
+    "LATX_PRESSURE_VESSEL_RUNTIME_FILES"
+
+static bool latx_pressure_vessel_runtime_is_inherited(const envlist_t *envlist)
+{
+    const char *files = latx_pressure_vessel_runtime_files();
+    const char *inherited = envlist_getenv(
+        envlist, LATX_PRESSURE_VESSEL_RUNTIME_FILES_ENV);
+
+    return files && inherited && !strcmp(inherited, files);
+}
+
+static bool latx_pressure_vessel_runtime_mark(envlist_t *envlist)
+{
+    const char *files = latx_pressure_vessel_runtime_files();
+    g_autofree char *assignment = NULL;
+
+    if (!files) {
+        return false;
+    }
+    assignment = g_strdup_printf("%s=%s",
+                                 LATX_PRESSURE_VESSEL_RUNTIME_FILES_ENV,
+                                 files);
+    return envlist_setenv(envlist, assignment) == 0;
+}
+
 #if defined(TARGET_X86_64)
 static bool latx_pressure_vessel_webhelper(const char *pathname)
 {
@@ -396,8 +428,19 @@ static void latx_pressure_vessel_append_i386_sysroot(envlist_t *envlist)
 void latx_pressure_vessel_prepare(const char *program, char **target_argv,
                                   envlist_t *envlist)
 {
+    bool wrapper;
+
     pressure_vessel_payload = NULL;
+
+    /* Discovery alone must not override generic guest path resolution. */
     latx_pressure_vessel_runtime_configure(envlist);
+    wrapper = latx_pressure_vessel_runtime_is_wrapper(program);
+    if (wrapper && !latx_pressure_vessel_runtime_mark(envlist)) {
+        return;
+    }
+    if (!wrapper && !latx_pressure_vessel_runtime_is_inherited(envlist)) {
+        return;
+    }
 
 #if defined(TARGET_X86_64)
     pressure_vessel_payload = latx_pressure_vessel_direct_payload(
@@ -405,10 +448,17 @@ void latx_pressure_vessel_prepare(const char *program, char **target_argv,
 #endif
 
     latx_pressure_vessel_runtime_configure(envlist);
+    if (!latx_pressure_vessel_runtime_is_inherited(envlist)) {
+        return;
+    }
+    latx_pressure_vessel_runtime_activate();
 
 #if defined(TARGET_I386) && !defined(TARGET_X86_64)
     latx_pressure_vessel_append_i386_sysroot(envlist);
     latx_pressure_vessel_runtime_configure(envlist);
+    if (latx_pressure_vessel_runtime_is_inherited(envlist)) {
+        latx_pressure_vessel_runtime_activate();
+    }
 #endif
 }
 

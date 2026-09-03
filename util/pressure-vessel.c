@@ -8,6 +8,7 @@
 static char *runtime_base;
 static char *runtime_files;
 static char *runtime_library_path;
+static bool runtime_active;
 static bool runtime_library_path_active;
 
 static const char *const runtime_x86_64_dirs[] = {
@@ -202,6 +203,7 @@ void latx_pressure_vessel_runtime_configure(const envlist_t *envlist)
     g_clear_pointer(&runtime_base, g_free);
     g_clear_pointer(&runtime_files, g_free);
     g_clear_pointer(&runtime_library_path, g_free);
+    runtime_active = false;
     runtime_library_path_active = false;
 
     if (!envlist) {
@@ -230,9 +232,14 @@ void latx_pressure_vessel_runtime_configure(const envlist_t *envlist)
         runtime_files, runtime_library_path);
 }
 
+void latx_pressure_vessel_runtime_activate(void)
+{
+    runtime_active = runtime_files != NULL;
+}
+
 bool latx_pressure_vessel_runtime_is_active(void)
 {
-    return runtime_files != NULL;
+    return runtime_active;
 }
 
 const char *latx_pressure_vessel_runtime_files(void)
@@ -242,7 +249,7 @@ const char *latx_pressure_vessel_runtime_files(void)
 
 const char *latx_pressure_vessel_runtime_library_path(void)
 {
-    return runtime_library_path;
+    return runtime_active ? runtime_library_path : NULL;
 }
 
 char *latx_pressure_vessel_runtime_make_library_path(const char *suffix)
@@ -285,7 +292,7 @@ bool latx_pressure_vessel_runtime_is_library_path(const char *path)
 {
     g_autofree char *normalized = NULL;
 
-    if (!runtime_files || !path || path[0] != '/') {
+    if (!runtime_active || !runtime_files || !path || path[0] != '/') {
         return false;
     }
     normalized = pressure_vessel_canonical_path(path);
@@ -300,7 +307,7 @@ bool latx_pressure_vessel_runtime_is_i386_library_path(const char *path)
     g_autofree char *normalized = NULL;
     size_t i;
 
-    if (!runtime_files || !path || path[0] != '/') {
+    if (!runtime_active || !runtime_files || !path || path[0] != '/') {
         return false;
     }
     normalized = pressure_vessel_canonical_path(path);
@@ -511,7 +518,8 @@ char *latx_pressure_vessel_runtime_resolve_path(const char *name)
     };
     size_t i;
 
-    if (!runtime_files || !name || !runtime_library_path_active) {
+    if (!runtime_active || !runtime_files || !name ||
+        !runtime_library_path_active) {
         return NULL;
     }
 
