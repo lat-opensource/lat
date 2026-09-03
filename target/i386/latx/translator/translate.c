@@ -2668,16 +2668,14 @@ static void generate_indirect_goto(void *code_buf)
     IR2_OPND next_tb = V0_RENAME_OPND;
     /*
      * lookup HASH_JMP_CACHE
-     * Step 1: calculate HASH = x86_addr ^ (x86_addr >> hash_shift)
+     * Step 1: calculate HASH from the low address bits
      * Step 2: load &HASH_JMP_CACHE[0]
      * Step 3: load tb = HASH_JMP_CACHE[HASH]
      * Step 4: if (tb == 0) {goto labal_miss}
      * Step 5: if (tb.pc == x86_addr) {goto fpu_rotate}
      *         else {goto labal_miss}
      */
-    la_srli_d(next_tb, next_x86_addr, TB_JMP_CACHE_HASH_SHIFT);
-    la_xor(next_tb, next_x86_addr, next_tb);
-    la_bstrpick_d(next_tb, next_tb, TB_JMP_CACHE_BITS - 1, 0);
+    la_bstrpick_d(next_tb, next_x86_addr, TB_JMP_CACHE_BITS - 1, 0);
 
 #ifdef CONFIG_LATX_FAST_JMPCACHE
 #ifdef CONFIG_LATX_GLUE_MASK
