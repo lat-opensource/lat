@@ -1840,11 +1840,11 @@ bool translate_vpackusxx(IR1_INST * pir1) {
         la_xvori_b(temp2, src2, 0);
     }
     cvt_inst(temp2, src1, 0);
-    if (ir1_opnd_is_xmm(opnd0)) {
-        set_high128_xreg_to_zero(temp2);
-    }
     if (!dest_is_src2) {
         la_xvori_b(dest, temp2, 0);
+    }
+    if (ir1_opnd_is_xmm(opnd0)) {
+        set_high128_xreg_to_zero(dest);
     }
     return true;
 }
@@ -2443,11 +2443,14 @@ bool translate_vpshufb(IR1_INST * pir1) {
     IR2_OPND src1 = load_freg256_from_ir1(opnd1);
     IR2_OPND src2 = load_freg256_from_ir1(opnd2);
 
-    IR2_OPND index = ra_alloc_ftemp();
     IR2_OPND mask = ra_alloc_ftemp();
-    la_xvandi_b(index, src2, 0xf);
     la_xvslti_b(mask, src2, 0);
-    la_xvshuf_b(dest, src1, src1, index);
+    /*
+     * XVSHUF.B ignores control bits 7:5.  Bit 4 only selects between its
+     * two identical data operands, so the original PSHUFB control is a
+     * valid index.  Keep the explicit sign-bit mask for x86 zeroing.
+     */
+    la_xvshuf_b(dest, src1, src1, src2);
     la_xvandn_v(dest, mask, dest);
     if (ir1_opnd_is_xmm(opnd0)) {
         set_high128_xreg_to_zero(dest);
@@ -4900,11 +4903,11 @@ bool translate_vpackssxx(IR1_INST * pir1) {
         temp = src2;
     }
     cvt_inst(temp, src1, 0);
-    if (ir1_opnd_is_xmm(opnd0)) {
-        set_high128_xreg_to_zero(temp);
-    }
     if (temp._reg_num != dest._reg_num) {
         la_xvori_b(dest, temp, 0);
+    }
+    if (ir1_opnd_is_xmm(opnd0)) {
+        set_high128_xreg_to_zero(dest);
     }
     return true;
 }

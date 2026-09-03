@@ -1869,30 +1869,46 @@ static bool (*translate_functions[])(IR1_INST *) = {
 
 bool ir1_translate(IR1_INST *ir1)
 {
-    TRANSLATION_DATA *t = lsenv->tr_data;
+    bool instptn_owns_ymmh = false;
+
+#ifdef CONFIG_LATX_INSTS_PATTERN
+    instptn_owns_ymmh = ir1->instptn.opc == INSTPTN_OPC_NOP ||
+                       ir1->instptn.opc == INSTPTN_OPC_NOP_DIV;
+#endif
 
     /* Keep the clear in the TB body; TU/AOT may replace generated exits. */
     if (ir1_is_tb_ending(ir1)) {
         materialize_deferred_ymmh_zeros_now();
     }
 
-    if (option_enable_lasx && !t->ymmh_zero_defer_disabled) {
+    if (option_enable_lasx && !instptn_owns_ymmh) {
         int opnd_num = ir1_get_opnd_num(ir1);
 
-        for (int i = 0; i < opnd_num; ++i) {
-            if (ir1_opnd_size(ir1_get_opnd(ir1, i)) == 256) {
-                /*
-                 * A 256-bit operation can observe or replace a physical
-                 * high half.  Keep mixed XMM/YMM TBs conservative.
-                 */
-                disable_deferred_ymmh_zero_for_tb();
-                break;
+        /* Materialize only YMM registers that this instruction reads. */
+        for (int i = 1; i < opnd_num; ++i) {
+            IR1_OPND *opnd = ir1_get_opnd(ir1, i);
+
+            if (ir1_opnd_is_ymm(opnd)) {
+                materialize_deferred_ymmh_zero(
+                    ra_alloc_xmm(ir1_opnd_base_reg_num(opnd)));
             }
         }
     }
 
 #ifdef CONFIG_LATX_INSTS_PATTERN
     if (try_translate_instptn(ir1)) {
+        if (option_enable_lasx && !instptn_owns_ymmh) {
+            int opnd_num = ir1_get_opnd_num(ir1);
+
+            for (int i = 0; i < opnd_num; ++i) {
+                IR1_OPND *opnd = ir1_get_opnd(ir1, i);
+
+                if (ir1_opnd_is_ymm(opnd)) {
+                    mark_high128_xreg_zeroed(
+                        ra_alloc_xmm(ir1_opnd_base_reg_num(opnd)));
+                }
+            }
+        }
         ra_free_all();
         return true;
     }
@@ -1980,6 +1996,20 @@ bool ir1_translate(IR1_INST *ir1)
     /*restore h128 bit of ymm after translating sse instructions*/
     if (option_lative && option_enable_lasx && temp._type != IR2_OPND_NONE) {
         restore_h128_of_ymm(ir1, temp);
+    }
+
+    if (option_enable_lasx) {
+        int opnd_num = ir1_get_opnd_num(ir1);
+
+        /* A translated 256-bit operand no longer carries a deferred clear. */
+        for (int i = 0; i < opnd_num; ++i) {
+            IR1_OPND *opnd = ir1_get_opnd(ir1, i);
+
+            if (ir1_opnd_is_ymm(opnd)) {
+                mark_high128_xreg_zeroed(
+                    ra_alloc_xmm(ir1_opnd_base_reg_num(opnd)));
+            }
+        }
     }
 
 #ifdef CONFIG_LATX_DEBUG
