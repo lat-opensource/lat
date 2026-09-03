@@ -465,78 +465,10 @@ static __thread TRANSLATION_DATA tr_data_real;
 __thread ENV *lsenv;
 
 #ifdef CONFIG_LATX_FAST_JMPCACHE
-LatxShadowJmpEntry latx_shadow_jmp_entries[LATX_SHADOW_JMP_SIZE];
-
 typedef struct LatxFastJmpCache {
     struct rcu_head rcu;
     FastTB entries[TB_JMP_CACHE_SIZE];
 } LatxFastJmpCache;
-
-static inline unsigned int latx_shadow_jmp_hash(target_ulong pc)
-{
-    return (pc * LATX_SHADOW_JMP_HASH_MULT) >>
-           (64 - LATX_SHADOW_JMP_BITS);
-}
-
-void latx_shadow_jmp_cache_add(TranslationBlock *tb)
-{
-    unsigned int h = latx_shadow_jmp_hash(tb->pc);
-    LatxShadowJmpEntry *first_tombstone = NULL;
-
-    for (unsigned int i = 0; i < LATX_SHADOW_JMP_SIZE; i++) {
-        LatxShadowJmpEntry *entry =
-            &latx_shadow_jmp_entries[(h + i) &
-                                     (LATX_SHADOW_JMP_SIZE - 1)];
-        const void *ptr = qatomic_read(&entry->ptr);
-
-        if (ptr == LATX_SHADOW_JMP_TOMBSTONE) {
-            if (!first_tombstone) {
-                first_tombstone = entry;
-            }
-            continue;
-        }
-        if (!ptr) {
-            entry = first_tombstone ? first_tombstone : entry;
-            entry->pc = tb->pc;
-            qatomic_set(&entry->ptr, tb->tc.ptr);
-            return;
-        }
-        if (entry->pc == tb->pc) {
-            qatomic_set(&entry->ptr, tb->tc.ptr);
-            return;
-        }
-    }
-
-    if (first_tombstone) {
-        first_tombstone->pc = tb->pc;
-        qatomic_set(&first_tombstone->ptr, tb->tc.ptr);
-    }
-}
-
-void latx_shadow_jmp_cache_remove(TranslationBlock *tb)
-{
-    unsigned int h = latx_shadow_jmp_hash(tb->pc);
-
-    for (unsigned int i = 0; i < LATX_SHADOW_JMP_SIZE; i++) {
-        LatxShadowJmpEntry *entry =
-            &latx_shadow_jmp_entries[(h + i) &
-                                     (LATX_SHADOW_JMP_SIZE - 1)];
-        const void *ptr = qatomic_read(&entry->ptr);
-
-        if (!ptr) {
-            return;
-        }
-        if (ptr == tb->tc.ptr && entry->pc == tb->pc) {
-            qatomic_set(&entry->ptr, LATX_SHADOW_JMP_TOMBSTONE);
-            return;
-        }
-    }
-}
-
-void latx_shadow_jmp_cache_clear_all(void)
-{
-    memset(latx_shadow_jmp_entries, 0, sizeof(latx_shadow_jmp_entries));
-}
 
 static void latx_fast_jmp_cache_free(LatxFastJmpCache *cache)
 {

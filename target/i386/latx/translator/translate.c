@@ -2651,7 +2651,8 @@ int tr_translate_tb(struct TranslationBlock *tb)
  */
 
 static void generate_indirect_goto(void *code_buf, ADDR miss_target,
-                                   enum aot_rel_kind miss_rel_kind)
+                                   enum aot_rel_kind miss_rel_kind,
+                                   TranslationBlock *source_tb)
 {
     /*
      * WARNING!!!
@@ -2752,6 +2753,9 @@ static void generate_indirect_goto(void *code_buf, ADDR miss_target,
         la_label(label_skip);
     }
 #endif
+    if (source_tb) {
+        aot_load_host_addr(V0_RENAME_OPND, (ADDR)source_tb, LOAD_TB_ADDR, 0);
+    }
     la_data_li(target, miss_target);
     aot_la_append_ir2_jmp_far(target, base, miss_rel_kind, 0);
 
@@ -3013,7 +3017,7 @@ indirect_jmp:
             la_label(old_jmp_label);
             tb->jmp_indirect = ir2_opnd_label_id(&old_jmp_label);
             generate_indirect_goto((void *)tb->tc.ptr, shadow_jmp_glue,
-                                   B_SHADOW_JMP_GLUE);
+                                   B_SHADOW_JMP_GLUE, tb);
         } else {
             la_data_li(target, context_switch_native_to_bt_ret_0);
             aot_la_append_ir2_jmp_far(target, base, B_EPILOGUE_RET_0, 0);
@@ -3163,7 +3167,7 @@ static int generate_indirect_jmp_glue(void *code_buf)
     tr_init(NULL);
 
     generate_indirect_goto(code_buf, context_switch_native_to_bt_ret_0,
-                           B_EPILOGUE_RET_0);
+                           B_EPILOGUE_RET_0, NULL);
 
     TRANSLATION_DATA *lat_ctx = lsenv->tr_data;
     label_dispose(NULL, lat_ctx);
@@ -3177,6 +3181,7 @@ static int generate_shadow_jmp_glue(void *code_buf)
 {
     int ins_num;
     tr_init(NULL);
+    IR2_OPND current_tb = V0_RENAME_OPND;
     IR2_OPND next_x86_addr = ra_alloc_dbt_arg2();
     IR2_OPND jmp_cache_addr = ra_alloc_static0();
     IR2_OPND index = ra_alloc_itemp();
@@ -3184,6 +3189,7 @@ static int generate_shadow_jmp_glue(void *code_buf)
     IR2_OPND base = ra_alloc_itemp();
     IR2_OPND entry = ra_alloc_itemp();
     IR2_OPND native_target = ra_alloc_itemp();
+    IR2_OPND desired = ra_alloc_itemp();
     IR2_OPND exit_target = ra_alloc_data();
     IR2_OPND code_base = ra_alloc_data();
     IR2_OPND label_loop = ra_alloc_label();
@@ -3197,14 +3203,26 @@ static int generate_shadow_jmp_glue(void *code_buf)
     la_or(first_index, index, zero_ir2_opnd);
 
     la_label(label_loop);
-    la_alsl_d(entry, index, base, 3);
-    la_ld_d(native_target, entry, offsetof(LatxShadowJmpEntry, ptr));
+    la_alsl_d(entry, index, base, 2);
+    la_ld_d(native_target, entry, offsetof(LatxShadowJmpEntry, tb));
     la_beq(native_target, zero_ir2_opnd, label_miss);
     la_addi_d(entry, native_target, -1);
     la_beq(entry, zero_ir2_opnd, label_next);
-    la_alsl_d(entry, index, base, 3);
-    la_ld_d(entry, entry, offsetof(LatxShadowJmpEntry, pc));
+    la_ld_d(entry, native_target, offsetof(TranslationBlock, pc));
     la_bne(entry, next_x86_addr, label_next);
+    /*
+     * An indirect branch normally preserves the translation mode.  If it
+     * changes flags or cflags, rejecting the candidate is conservative and
+     * lets the regular dispatcher calculate the exact next-TB key.
+     */
+    la_ld_wu(desired, current_tb, offsetof(TranslationBlock, flags));
+    la_ld_wu(entry, native_target, offsetof(TranslationBlock, flags));
+    la_bne(entry, desired, label_next);
+    la_ld_wu(desired, current_tb, offsetof(TranslationBlock, cflags));
+    la_ld_wu(entry, native_target, offsetof(TranslationBlock, cflags));
+    la_bne(entry, desired, label_next);
+    la_ld_d(native_target, native_target,
+            offsetof(TranslationBlock, tc) + offsetof(struct tb_tc, ptr));
     /* Promote an FSHT hit so repeated jumps use the primary FastTB path. */
     la_bstrpick_d(entry, next_x86_addr, TB_JMP_CACHE_BITS - 1, 0);
     la_alsl_d(entry, entry, jmp_cache_addr, 3);
