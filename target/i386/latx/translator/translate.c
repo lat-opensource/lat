@@ -2158,7 +2158,6 @@ static bool is_softfpu_region_insn(IR1_OPCODE opcode)
     case dt_X86_INS_FYL2X:
     case dt_X86_INS_FYL2XP1:
     case dt_X86_INS_FILD:
-    case dt_X86_INS_FIST:
     case dt_X86_INS_FXRSTOR64:
     case dt_X86_INS_FXSAVE64:
 #ifdef CONFIG_LATX_AVX_OPT
@@ -2169,6 +2168,9 @@ static bool is_softfpu_region_insn(IR1_OPCODE opcode)
     case dt_X86_INS_XRSTOR:
 #endif
         return true;
+    case dt_X86_INS_FIST:
+        /* Only the conditional slow path calls a locally wrapped helper. */
+        return !(option_softfpu_fast & LATX_SOFTFPU_FAST_FIST);
     case dt_X86_INS_FISTP:
         /* Only the conditional slow path calls a locally wrapped helper. */
         return !(option_softfpu_fast & LATX_SOFTFPU_FAST_FISTP);

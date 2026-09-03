@@ -82,6 +82,7 @@ extern uint64_t latx_trace_mem;
 extern uint64_t latx_break_insn;
 extern uint64_t latx_unlink_count;
 extern uint32_t latx_unlink_cpu;
+#define LATX_SOFTFPU_FAST_FIST (1U << 21)
 #define LATX_SOFTFPU_FAST_FISTP (1U << 22)
 #define LATX_SOFTFPU_FAST_FST (1U << 23)
 extern int option_softfpu;
