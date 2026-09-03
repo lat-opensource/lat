@@ -51,6 +51,26 @@ _start:
     jne .Lfail_fst
     fstp %st(0)
 
+    /* FISTTP writes its helper result before the following FPOP helper. */
+    movabs $0x3ff8000000000000, %rax
+    mov %rax, 0(%rsp)
+    movl $0x12345678, 40(%rsp)
+    fldl 0(%rsp)
+    lea 40(%rsp), %r8
+    fisttpl (%r8)
+    cmpl $1, 40(%rsp)
+    jne .Lfail_fisttp
+
+    /* FSTP also writes through the restored address before FPOP. */
+    movq $0, 48(%rsp)
+    fldl 0(%rsp)
+    lea 48(%rsp), %r8
+    fstpl (%r8)
+    mov 48(%rsp), %rax
+    movabs $0x3ff8000000000000, %rbx
+    cmp %rbx, %rax
+    jne .Lfail_fstp
+
     xor %edi, %edi
     jmp .Lexit
 
@@ -65,6 +85,12 @@ _start:
     jmp .Lexit
 .Lfail_fst:
     mov $4, %edi
+    jmp .Lexit
+.Lfail_fisttp:
+    mov $5, %edi
+    jmp .Lexit
+.Lfail_fstp:
+    mov $6, %edi
 
 .Lexit:
     mov $__NR_exit, %eax

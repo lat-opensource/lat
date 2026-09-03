@@ -1611,9 +1611,7 @@ static bool translate_fist_softfpu(IR1_INST *pir1)
         }
 
         /* v0 */
-        restore_gpr();
         store_ireg_to_ir1(a0_ir2_opnd, opnd0, false);
-        save_gpr();
         if (local_region) {
             gen_softfpu_helper_epilogue(pir1);
         }
@@ -1634,13 +1632,7 @@ static bool translate_fist_softfpu(IR1_INST *pir1)
         }
 
         /* v0 */
-        if (option_softfpu == 2) {
-            restore_gpr();
-        }
         store_ireg_to_ir1(a0_ir2_opnd, opnd0, false);
-        if (option_softfpu == 2) {
-            save_gpr();
-        }
     }
     return true;
 }
@@ -1721,9 +1713,7 @@ static bool translate_fistp_softfpu(IR1_INST *pir1)
         }
 
         /* v0 */
-        restore_gpr();
         store_ireg_to_ir1(a0_ir2_opnd, opnd0, false);
-        save_gpr();
         la_fpu_pop();
         if (local_region) {
             gen_softfpu_helper_epilogue(pir1);
@@ -1746,10 +1736,11 @@ static bool translate_fistp_softfpu(IR1_INST *pir1)
             gen_softfpu_helper1((ADDR)helper_fistll_ST0);
         }
 
-        /* v0 */
-        restore_gpr();
+        /* Mode 2 restores R8-R15 after every helper call. */
+        if (option_softfpu == 1) {
+            restore_gpr();
+        }
         store_ireg_to_ir1(a0_ir2_opnd, opnd0, false);
-        save_gpr();
 
         gen_softfpu_helper1((ADDR)helper_fpop);
         if (option_softfpu == 1) {
@@ -1775,10 +1766,11 @@ static bool translate_fisttp_softfpu(IR1_INST *pir1)
         gen_softfpu_helper1((ADDR)helper_fisttll_ST0);
     }
 
-    /* v0 */
-    restore_gpr();
+    /* Mode 2 restores R8-R15 after every helper call. */
+    if (option_softfpu == 1) {
+        restore_gpr();
+    }
     store_ireg_to_ir1(a0_ir2_opnd, opnd0, false);
-    save_gpr();
 
     gen_softfpu_helper1((ADDR)helper_fpop);
     if (option_softfpu == 1) {
@@ -2754,13 +2746,7 @@ static bool translate_fst_softfpu(IR1_INST *pir1)
         }
 
         /* v0 */
-        if (option_softfpu == 2) {
-            restore_gpr();
-        }
         store_ireg_to_ir1(a0_ir2_opnd, opnd0, false);
-        if (option_softfpu == 2) {
-            save_gpr();
-        }
     }
     return true;
 }
@@ -2806,9 +2792,11 @@ static bool translate_fstp_softfpu(IR1_INST *pir1)
         } else if (opnd_size == 64) {
             gen_softfpu_helper1((ADDR)helper_fstl_ST0);
         }
-        restore_gpr();
+        /* Mode 2 restores R8-R15 after every helper call. */
+        if (option_softfpu == 1) {
+            restore_gpr();
+        }
         store_ireg_to_ir1(a0_ir2_opnd, opnd0, false);
-        save_gpr();
         gen_softfpu_helper1((ADDR)helper_fpop);
         if (option_softfpu == 1) {
             gen_softfpu_helper_epilogue(pir1);
