@@ -2162,6 +2162,7 @@ static bool is_softfpu_region_insn(IR1_OPCODE opcode)
     case dt_X86_INS_FXRSTOR64:
     case dt_X86_INS_FXSAVE64:
 #ifdef CONFIG_LATX_AVX_OPT
+    case dt_X86_INS_XGETBV:
     case dt_X86_INS_XSETBV:
     case dt_X86_INS_XSAVE:
     case dt_X86_INS_XSAVEOPT:

@@ -39,6 +39,16 @@ if 'x86_64-linux-user' in target_dirs
       files('../../guest-fatal-signal-status.S'),
     ],
   }]
+  if 'CONFIG_LATX_AVX_OPT' in config_host
+    latx_integration_tests += [{
+      'name': 'test-softfpu-xgetbv-gpr-x86_64',
+      'runner': find_program('../../test-softfpu-xgetbv-gpr-x86_64.sh'),
+      'args': [
+        emulators['latx-x86_64'],
+        files('../../softfpu-xgetbv-gpr-x86_64.S'),
+      ],
+    }]
+  endif
   if 'CONFIG_LATX_KZT' in config_host
     latx_integration_tests += [{
       'name': 'test-int3-sigtrap-rip',
