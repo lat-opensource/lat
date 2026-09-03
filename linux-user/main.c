@@ -635,6 +635,31 @@ static void handle_arg_latx_vpaes(const char *arg)
     option_vpaes = strtol(arg, NULL, 0);
 }
 
+static void handle_arg_latx_static_helper(const char *arg)
+{
+    int value;
+
+    if (qemu_strtoi(arg, NULL, 0, &value) || value < 0 || value > 1) {
+        error_report("LATX_STATIC_HELPER must be exactly 0 or 1 (got '%s')",
+                     arg);
+        exit(EXIT_FAILURE);
+    }
+    option_static_helper = value;
+}
+
+static void handle_arg_latx_static_helper_stats(const char *arg)
+{
+    int value;
+
+    if (qemu_strtoi(arg, NULL, 0, &value) || value < 0 || value > 1) {
+        error_report(
+            "LATX_STATIC_HELPER_STATS must be exactly 0 or 1 (got '%s')",
+            arg);
+        exit(EXIT_FAILURE);
+    }
+    option_static_helper_stats = value;
+}
+
 static void handle_arg_latx_parallel(const char *arg)
 {
     close_latx_parallel = strtol(arg, NULL, 0);
@@ -906,6 +931,12 @@ static const struct qemu_argument arg_table[] = {
     "",           "specify enabled optimize type"},
     {"latx-vpaes",      "LATX_VPAES",         true,  handle_arg_latx_vpaes,
     "",           "enable vpaes AES translation"},
+    {"latx-static-helper", "LATX_STATIC_HELPER", true,
+    handle_arg_latx_static_helper, "0|1",
+    "use a shared save/call/restore stub for selected helpers"},
+    {"latx-static-helper-stats", "LATX_STATIC_HELPER_STATS", true,
+    handle_arg_latx_static_helper_stats, "0|1",
+    "report translated callsites for static helper stubs"},
     {"latx-smc",        "LATX_SMC",         true,   handle_arg_latx_smc,
     "",           "smc strategy: 0 (page) 1 (tb) 2(+shmm) 6(+helper,default)"},
     {"latx-close-parallel",    "LATX_CLOSE_PARALLEL",     true,  handle_arg_latx_parallel,

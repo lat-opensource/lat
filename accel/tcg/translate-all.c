@@ -474,6 +474,18 @@ static int cpu_restore_state_from_tb(CPUState *cpu, TranslationBlock *tb,
         cpu_neg(cpu)->icount_decr.u16.low += num_insns - i;
     }
     restore_state_to_opc(env, tb, data);
+#ifdef CONFIG_LATX_OPT_PUSH_POP_TRANS
+    target_long sp_delta = (target_long)data[1];
+#ifdef TARGET_X86_64
+    if (tb->bool_flags & IS_CODE64) {
+        env->regs[R_ESP] += sp_delta;
+    } else {
+        env->regs[R_ESP] = (uint32_t)(env->regs[R_ESP] + sp_delta);
+    }
+#else
+    env->regs[R_ESP] += sp_delta;
+#endif
+#endif
 #ifdef CONFIG_LATX_OPT_PUSH_POP
     uint32_t parallel = cpu->tcg_cflags & CF_PARALLEL;
     if (!parallel) {

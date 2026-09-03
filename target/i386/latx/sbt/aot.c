@@ -766,6 +766,7 @@ int do_generate_aot(int first_seg_in_lib, int end_seg_in_lib)
 
     p_header->aot_file_type =
         seg_info_vector[first_seg_in_lib]->aot_file_type;
+    p_header->static_helper = !!option_static_helper;
 
     if (p_header->aot_file_type & (ELF_AOT_FILE | PE_AOT_FILE)) {
         struct stat statbuf;
@@ -1298,8 +1299,6 @@ static void* relkind_to_fixup_addr[] = {
     [LOAD_HELPER_CVTPS2PH_YMM] = helper_cvtps2ph_ymm,
     [LOAD_HELPER_CVTPS2PH_XMM] = helper_cvtps2ph_xmm,
 #endif
-
-
 };
 
 void aot_do_tb_reloc(TranslationBlock *tb, struct aot_tb *stb,
@@ -1418,7 +1417,21 @@ void aot_do_tb_reloc(TranslationBlock *tb, struct aot_tb *stb,
             }
             break;
         case LOAD_HELPER_BEGIN ... LOAD_HELPER_END:
-            helper_address = (uintptr_t)relkind_to_fixup_addr[aot_rel_table[i].kind];
+            if (aot_rel_table[i].kind == LOAD_STATIC_HELPER_PROLOGUE) {
+                helper_address = static_helper_prologue;
+            } else if (aot_rel_table[i].kind ==
+                       LOAD_STATIC_HELPER_EPILOGUE) {
+                helper_address = static_helper_epilogue;
+            } else if (aot_rel_table[i].kind ==
+                       LOAD_STATIC_HELPER_NOFP_PROLOGUE) {
+                helper_address = static_helper_nofp_prologue;
+            } else if (aot_rel_table[i].kind ==
+                       LOAD_STATIC_HELPER_NOFP_EPILOGUE) {
+                helper_address = static_helper_nofp_epilogue;
+            } else {
+                helper_address = (uintptr_t)
+                    relkind_to_fixup_addr[aot_rel_table[i].kind];
+            }
             lsassert(helper_address);
             lsassert((*pinsn & 0xfe000000) == 0x14000000); /* lu12i.w */
             *pinsn &= 0xfe00001f;

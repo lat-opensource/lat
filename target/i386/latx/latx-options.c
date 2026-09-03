@@ -97,6 +97,8 @@ int option_fputag;
 int option_save_xmm;
 int option_enable_lasx;
 int option_vpaes;
+int option_static_helper;
+int option_static_helper_stats;
 int option_split_tb;
 int option_anonym;
 int option_mem_test;
@@ -236,6 +238,8 @@ void options_init(void)
     option_latx_disassemble_trace_cmp = 0;
     option_enable_lasx = 1;
     option_vpaes = 0;
+    option_static_helper = 1;
+    option_static_helper_stats = 0;
 
     counter_tb_exec = 0;
     counter_tb_tr = 0;

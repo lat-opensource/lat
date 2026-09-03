@@ -26,6 +26,9 @@ typedef struct TRANSLATION_DATA {
     /* ir1 */
     IR1_INST *curr_ir1_inst;
     int curr_ir1_count;
+#ifdef CONFIG_LATX_OPT_PUSH_POP_TRANS
+    int sp_delta;
+#endif
     /* uint8       ir1_dump_threshold[MAX_IR1_NUM_PER_TB]; */
 
     /* ir2 */

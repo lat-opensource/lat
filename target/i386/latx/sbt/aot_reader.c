@@ -8,6 +8,7 @@
 #include "aot.h"
 #include "aot_reader.h"
 #include "file_ctx.h"
+#include "latx-options.h"
 #include "qemu.h"
 
 #ifdef CONFIG_LATX_AOT
@@ -64,6 +65,14 @@ int aot_get_tb_num(char *lib_name, char *aot_file_name, CPUState *cpu)
     assert(buffer);
     aot_header *p_header = (aot_header *)buffer;
     struct stat statbuf;
+
+    if (p_header->static_helper != !!option_static_helper) {
+        qemu_log_mask(LAT_LOG_AOT,
+                      "static helper mode changed, remove aot %s\n",
+                      aot_file_path);
+        remove(aot_file_path);
+        goto out;
+    }
 
     if ((p_header->aot_file_type & (ELF_AOT_FILE | PE_AOT_FILE))
             && (stat(lib_name, &statbuf)
@@ -156,6 +165,14 @@ lib_info *aot_load(char *lib_name, char *aot_file_name,
     }
     assert(buffer);
     aot_header *p_header = (aot_header *)buffer;
+
+    if (p_header->static_helper != !!option_static_helper) {
+        qemu_log_mask(LAT_LOG_AOT,
+                      "static helper mode changed, remove aot %s\n",
+                      aot_file_path);
+        remove_curr_aot_file(fd);
+        goto out;
+    }
 
     if (p_header->aot_file_type & (ELF_AOT_FILE | PE_AOT_FILE)) {
         if (stat(lib_name, &statbuf)

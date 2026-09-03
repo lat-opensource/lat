@@ -464,6 +464,7 @@ static bool merge_aot_generate(void)
     char *curr_name = aot_x86_lib_names;
     uint8_t aot_file_type = get_file_type(merge_seg_info_vector[0]->file_name);
     p_header->aot_file_type = aot_file_type;
+    p_header->static_helper = !!option_static_helper;
     int page_index = 0;
     for (int i = 0; i < seg_info_num; i++) {
         seg_info *curr_seg_info = merge_seg_info_vector[i]->s_info;
@@ -744,7 +745,8 @@ static AOTLoadResult aot_load_no_lock(char *lib_name)
             fclose(pf);
             goto load_error;
         }
-        if ((size_t)file_end < strlen(AOT_VERSION)) {
+        if ((size_t)file_end < sizeof(aot_header) ||
+            (size_t)file_end < strlen(AOT_VERSION)) {
             fclose(pf);
             if (i == 0) {
                 goto invalid_base;
@@ -786,6 +788,18 @@ static AOTLoadResult aot_load_no_lock(char *lib_name)
             qemu_log_mask(LAT_LOG_AOT, "fread error %s.\n", strerror(errno));
             free(buffer);
             fclose(pf);
+            goto load_error;
+        }
+        if (((aot_header *)buffer)->static_helper !=
+            !!option_static_helper) {
+            qemu_log_mask(LAT_LOG_AOT,
+                          "static helper mode changed, reject aot %s\n",
+                          path);
+            free(buffer);
+            fclose(pf);
+            if (i == 0) {
+                goto invalid_base;
+            }
             goto load_error;
         }
         fclose(pf);

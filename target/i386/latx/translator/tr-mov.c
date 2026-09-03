@@ -12,6 +12,44 @@
 #include "translate.h"
 #include "hbr.h"
 #include "latx-smc.h"
+
+#ifdef CONFIG_LATX_OPT_PUSH_POP_TRANS
+bool latx_sp_merge_can_delay(IR1_INST *pir1)
+{
+    IR1_OPCODE opc = ir1_opcode(pir1);
+    IR1_OPND *opnd0;
+
+    if (opc != dt_X86_INS_PUSH && opc != dt_X86_INS_POP) {
+        return false;
+    }
+    opnd0 = ir1_get_opnd(pir1, 0);
+
+    if (ir1_opnd_is_gpr_used(opnd0, esp_index)) {
+        return false;
+    }
+    if (opc == dt_X86_INS_PUSH) {
+        return ir1_opnd_is_gpr(opnd0) || ir1_opnd_is_imm(opnd0);
+    }
+    return opc == dt_X86_INS_POP && ir1_opnd_is_gpr(opnd0);
+}
+
+void latx_sp_merge_flush(void)
+{
+    TRANSLATION_DATA *td = lsenv->tr_data;
+
+    if (td->sp_delta) {
+        IR2_OPND esp_opnd = ra_alloc_gpr(esp_index);
+
+        la_addi_addrx(esp_opnd, esp_opnd, td->sp_delta);
+#ifdef CONFIG_LATX_DEBUG
+        qemu_log_mask(LAT_IR2_SCHED,
+                      "[LAT_PUSH_TRANS] flush delta=%d\n", td->sp_delta);
+#endif
+        td->sp_delta = 0;
+    }
+}
+#endif
+
 bool translate_pop(IR1_INST *pir1)
 {
     IR2_OPND esp_opnd = ra_alloc_gpr(esp_index);
@@ -19,6 +57,13 @@ bool translate_pop(IR1_INST *pir1)
     int has_esp = ir1_opnd_is_gpr_used(ir1_get_opnd(pir1, 0), esp_index);
     int pop_size = ir1_opnd_size(ir1_get_opnd(pir1, 0));
     int esp_increment = pop_size >> 3;
+#ifdef CONFIG_LATX_OPT_PUSH_POP_TRANS
+    bool delay_sp = latx_sp_merge_can_delay(pir1);
+    int sp_delta = delay_sp ? lsenv->tr_data->sp_delta : 0;
+#else
+    bool delay_sp = false;
+    int sp_delta = 0;
+#endif
 
     if (pop_size == 16 && ir1_opnd_is_seg(ir1_get_opnd(pir1, 0))) {
 #ifdef TARGET_X86_64
@@ -36,13 +81,13 @@ bool translate_pop(IR1_INST *pir1)
 #ifdef TARGET_X86_64
     if (CODEIS64) {
         if (pop_size == 64) {/* 64 bits */
-            ir1_opnd_build_mem(&mem_ir1_opnd, 64, dt_X86_REG_RSP, 0);
+            ir1_opnd_build_mem(&mem_ir1_opnd, 64, dt_X86_REG_RSP, sp_delta);
             if (ir1_opnd_is_gpr(ir1_get_opnd(pir1, 0))) {
                 /* when dest is gpr, load into gpr directly */
                 IR2_OPND dest_opnd
                         = load_ireg_from_ir1(ir1_get_opnd(pir1, 0), UNKNOWN_EXTENSION, false);
                 load_ireg_from_ir1_2(dest_opnd, &mem_ir1_opnd, UNKNOWN_EXTENSION, false);
-                if (!has_esp) {
+                if (!has_esp && !delay_sp) {
                     la_addi_addrx(esp_opnd, esp_opnd,
                                             esp_increment);
                 }
@@ -59,7 +104,8 @@ bool translate_pop(IR1_INST *pir1)
                                         esp_increment);
             }
         } else if (pop_size == 16) {
-                ir1_opnd_build_mem(&mem_ir1_opnd, 16, dt_X86_REG_ESP, 0);
+                ir1_opnd_build_mem(&mem_ir1_opnd, 16, dt_X86_REG_ESP,
+                                   sp_delta);
                 /* load value */
                 IR2_OPND value_opnd =
                     load_ireg_from_ir1(&mem_ir1_opnd, ZERO_EXTENSION, false);
@@ -68,10 +114,11 @@ bool translate_pop(IR1_INST *pir1)
                     dest_ir1_opnd->mem.disp += esp_increment;
                 }
                 store_ireg_to_ir1(value_opnd, dest_ir1_opnd, false);
-                la_addi_addrx(esp_opnd, esp_opnd,
-                                        esp_increment);
+                if (!delay_sp) {
+                    la_addi_addrx(esp_opnd, esp_opnd, esp_increment);
+                }
         } else {
-            ir1_opnd_build_mem(&mem_ir1_opnd, 32, dt_X86_REG_ESP, 0);
+            ir1_opnd_build_mem(&mem_ir1_opnd, 32, dt_X86_REG_ESP, sp_delta);
             if (ir1_opnd_is_gpr(ir1_get_opnd(pir1, 0))) {
                 IR2_OPND dest_opnd =
                     load_ireg_from_ir1(ir1_get_opnd(pir1, 0), UNKNOWN_EXTENSION, false);
@@ -80,7 +127,7 @@ bool translate_pop(IR1_INST *pir1)
                 //     dest_em = ZERO_EXTENSION;
 
                 load_ireg_from_ir1_2(dest_opnd, &mem_ir1_opnd, dest_em, false);
-                if (!has_esp) {
+                if (!has_esp && !delay_sp) {
                     la_addi_addrx(esp_opnd, esp_opnd,
                                                                 esp_increment);
                 }
@@ -99,7 +146,7 @@ bool translate_pop(IR1_INST *pir1)
         }
      } else {
         if (pop_size == 16) {
-            ir1_opnd_build_mem(&mem_ir1_opnd, 16, dt_X86_REG_ESP, 0);
+            ir1_opnd_build_mem(&mem_ir1_opnd, 16, dt_X86_REG_ESP, sp_delta);
             /* load value */
             IR2_OPND value_opnd =
                 load_ireg_from_ir1(&mem_ir1_opnd, ZERO_EXTENSION, false);
@@ -108,10 +155,11 @@ bool translate_pop(IR1_INST *pir1)
                 dest_ir1_opnd->mem.disp += esp_increment;
             }
             store_ireg_to_ir1(value_opnd, dest_ir1_opnd, false);
-            la_addi_addrx(esp_opnd, esp_opnd,
-                                    esp_increment);
+            if (!delay_sp) {
+                la_addi_addrx(esp_opnd, esp_opnd, esp_increment);
+            }
         } else {
-            ir1_opnd_build_mem(&mem_ir1_opnd, 32, dt_X86_REG_ESP, 0);
+            ir1_opnd_build_mem(&mem_ir1_opnd, 32, dt_X86_REG_ESP, sp_delta);
             if (ir1_opnd_is_gpr(ir1_get_opnd(pir1, 0))) {
                 IR2_OPND dest_opnd =
                     load_ireg_from_ir1(ir1_get_opnd(pir1, 0), UNKNOWN_EXTENSION, false);
@@ -120,7 +168,7 @@ bool translate_pop(IR1_INST *pir1)
                 //     dest_em = ZERO_EXTENSION;
         
                 load_ireg_from_ir1_2(dest_opnd, &mem_ir1_opnd, dest_em, false);
-                if (!has_esp) {
+                if (!has_esp && !delay_sp) {
                     la_addi_addrx(esp_opnd, esp_opnd,
                                                                 esp_increment);
                 }
@@ -133,14 +181,15 @@ bool translate_pop(IR1_INST *pir1)
                     dest_ir1_opnd->mem.disp += esp_increment;
                 }
                 store_ireg_to_ir1(value_opnd, dest_ir1_opnd, false);
-                la_addi_addrx(esp_opnd, esp_opnd,
-                                        esp_increment);
+                if (!delay_sp) {
+                    la_addi_addrx(esp_opnd, esp_opnd, esp_increment);
+                }
             }
         }
     }
 #else
     if (pop_size == 16) {
-        ir1_opnd_build_mem(&mem_ir1_opnd, 16, dt_X86_REG_ESP, 0);
+        ir1_opnd_build_mem(&mem_ir1_opnd, 16, dt_X86_REG_ESP, sp_delta);
         /* load value */
         IR2_OPND value_opnd =
             load_ireg_from_ir1(&mem_ir1_opnd, ZERO_EXTENSION, false);
@@ -149,10 +198,11 @@ bool translate_pop(IR1_INST *pir1)
             dest_ir1_opnd->mem.disp += esp_increment;
         }
         store_ireg_to_ir1(value_opnd, dest_ir1_opnd, false);
-        la_addi_addrx(esp_opnd, esp_opnd,
-                                esp_increment);
+        if (!delay_sp) {
+            la_addi_addrx(esp_opnd, esp_opnd, esp_increment);
+        }
     } else {
-        ir1_opnd_build_mem(&mem_ir1_opnd, 32, dt_X86_REG_ESP, 0);
+        ir1_opnd_build_mem(&mem_ir1_opnd, 32, dt_X86_REG_ESP, sp_delta);
         if (ir1_opnd_is_gpr(ir1_get_opnd(pir1, 0))) {
             IR2_OPND dest_opnd =
                 load_ireg_from_ir1(ir1_get_opnd(pir1, 0), UNKNOWN_EXTENSION, false);
@@ -161,7 +211,7 @@ bool translate_pop(IR1_INST *pir1)
             //     dest_em = ZERO_EXTENSION;
 
             load_ireg_from_ir1_2(dest_opnd, &mem_ir1_opnd, dest_em, false);
-            if (!has_esp) {
+            if (!has_esp && !delay_sp) {
                 la_addi_addrx(esp_opnd, esp_opnd,
                                                             esp_increment);
             }
@@ -179,6 +229,16 @@ bool translate_pop(IR1_INST *pir1)
         }
     }
 #endif
+#ifdef CONFIG_LATX_OPT_PUSH_POP_TRANS
+    if (delay_sp) {
+        lsenv->tr_data->sp_delta += esp_increment;
+#ifdef CONFIG_LATX_DEBUG
+        qemu_log_mask(LAT_IR2_SCHED,
+                      "[LAT_PUSH_TRANS] pop delta=%d\n",
+                      lsenv->tr_data->sp_delta);
+#endif
+    }
+#endif
     return true;
 }
 
@@ -187,6 +247,12 @@ bool translate_push(IR1_INST *pir1)
     IR2_OPND esp_opnd = ra_alloc_gpr(esp_index);
     int push_size = ir1_opnd_size(ir1_get_opnd(pir1, 0));
     int esp_decrement = push_size >> 3;
+#ifdef CONFIG_LATX_OPT_PUSH_POP_TRANS
+    bool delay_sp = latx_sp_merge_can_delay(pir1);
+    int sp_delta = delay_sp ? lsenv->tr_data->sp_delta : 0;
+#else
+    int sp_delta = 0;
+#endif
 
     if (push_size == 16 && ir1_opnd_is_seg(ir1_get_opnd(pir1, 0))) {
 #ifdef TARGET_X86_64
@@ -205,22 +271,33 @@ bool translate_push(IR1_INST *pir1)
 
 #ifndef TARGET_X86_64
     ir1_opnd_build_mem(&mem_ir1_opnd, esp_decrement << 3,
-        dt_X86_REG_ESP, -esp_decrement);
+                       dt_X86_REG_ESP, sp_delta - esp_decrement);
 #else
     if (CODEIS64) {
         ir1_opnd_build_mem(&mem_ir1_opnd, esp_decrement << 3,
-            dt_X86_REG_RSP, -esp_decrement);
+                           dt_X86_REG_RSP, sp_delta - esp_decrement);
     } else {
         ir1_opnd_build_mem(&mem_ir1_opnd, esp_decrement << 3,
-            dt_X86_REG_ESP, -esp_decrement);
+                           dt_X86_REG_ESP, sp_delta - esp_decrement);
     }
 #endif
     IR2_OPND value_opnd =
         load_ireg_from_ir1(ir1_get_opnd(pir1, 0), UNKNOWN_EXTENSION, false);
     store_ireg_to_ir1(value_opnd, &mem_ir1_opnd, false);
 
-    la_addi_addrx(esp_opnd, esp_opnd,
-                    -esp_decrement);
+#ifdef CONFIG_LATX_OPT_PUSH_POP_TRANS
+    if (delay_sp) {
+        lsenv->tr_data->sp_delta -= esp_decrement;
+#ifdef CONFIG_LATX_DEBUG
+        qemu_log_mask(LAT_IR2_SCHED,
+                      "[LAT_PUSH_TRANS] push delta=%d\n",
+                      lsenv->tr_data->sp_delta);
+#endif
+    } else
+#endif
+    {
+        la_addi_addrx(esp_opnd, esp_opnd, -esp_decrement);
+    }
     return true;
 }
 
@@ -327,10 +404,14 @@ static void translate_mov_from_gpr(IR1_OPND *opnd0, IR1_OPND *opnd1)
                 li_w(tmp, offset);
                 la_add_d(tmp, mem, tmp);
                 // save context
-                tr_save_registers_to_env(0xff, 0x0, 0x0, 0);
+                bool use_static_helper =
+                    tr_gen_call_to_static_helper_nofp_prologue(tmp);
+                if (!use_static_helper) {
+                    tr_save_registers_to_env(0xff, 0x0, 0x0, 0);
 #ifdef TARGET_X86_64
-                tr_save_x64_8_registers_to_env(0xff, 0x0);
+                    tr_save_x64_8_registers_to_env(0xff, 0x0);
 #endif
+                }
                 // call smc_store_helper
                 la_mov64(a0_ir2_opnd, env_ir2_opnd);
                 la_mov64(a1_ir2_opnd, tmp);
@@ -340,10 +421,14 @@ static void translate_mov_from_gpr(IR1_OPND *opnd0, IR1_OPND *opnd1)
                         LOAD_HELPER_SMC_ST, 0);
                 la_jirl(ra_ir2_opnd, tmp, 0);
                 // restore context
-                tr_load_registers_from_env(0xff, 0x0, 0x0, 0);
+                if (use_static_helper) {
+                    tr_gen_call_to_static_helper_nofp_epilogue();
+                } else {
+                    tr_load_registers_from_env(0xff, 0x0, 0x0, 0);
 #ifdef TARGET_X86_64
-                tr_load_x64_8_registers_from_env(0xff, 0x0);
+                    tr_load_x64_8_registers_from_env(0xff, 0x0);
 #endif
+                }
                 // beq a0, finish
                 la_beq(a0_ir2_opnd, zero_ir2_opnd, label_finish);
                 store_ireg_to_ir1(src, opnd0, false);

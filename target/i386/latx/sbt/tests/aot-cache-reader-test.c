@@ -12,6 +12,7 @@ char aot_file_lock_buffer[PATH_MAX];
 char *aot_file_path = aot_file_path_buffer;
 char *aot_file_lock = aot_file_lock_buffer;
 int qemu_loglevel;
+int option_static_helper = 1;
 static bool fail_fdopen;
 static int tracked_fd;
 static int sentinel_fd;
@@ -102,6 +103,7 @@ static void write_cache(const char *name, bool has_header, bool has_footer,
     contents = g_malloc0(size);
     if (has_header) {
         ((aot_header *)contents)->aot_file_type = CACHE_AOT_FILE;
+        ((aot_header *)contents)->static_helper = !!option_static_helper;
     }
     if (has_footer) {
         memcpy(contents + size - footer_size, AOT_VERSION, footer_size);
@@ -134,6 +136,7 @@ int main(void)
     char bad_footer_name[] = "bad-footer";
     char truncated_name[] = "truncated";
     char complete_name[] = "complete";
+    char mode_mismatch_name[] = "mode-mismatch";
     char fdopen_failure_name[] = "fdopen-failure";
     char cache_path[PATH_MAX];
     void *buffer;
@@ -171,6 +174,20 @@ int main(void)
     assert_stream_closed();
     g_assert(lib_tree_remove(complete_name));
 
+    option_static_helper = 0;
+    write_cache(mode_mismatch_name, true, true, cache_path);
+    option_static_helper = 1;
+    g_assert(aot_get_tb_num(lib_name, mode_mismatch_name, NULL) == 0);
+    g_assert(!g_file_test(cache_path, G_FILE_TEST_EXISTS));
+
+    buffer = NULL;
+    write_cache(mode_mismatch_name, true, true, cache_path);
+    option_static_helper = 0;
+    g_assert(aot_load(lib_name, mode_mismatch_name, &buffer) == NULL);
+    g_assert(buffer == NULL);
+    g_assert(!g_file_test(cache_path, G_FILE_TEST_EXISTS));
+    option_static_helper = 1;
+
     reset_stream_counts();
     fail_fdopen = true;
     buffer = NULL;
@@ -184,6 +201,7 @@ int main(void)
     remove_cache(bad_footer_name);
     remove_cache(truncated_name);
     remove_cache(complete_name);
+    remove_cache(mode_mismatch_name);
     remove_cache(fdopen_failure_name);
     cache_dir = g_build_filename(test_dir, ".cache", "latx", NULL);
     g_assert(g_rmdir(cache_dir) == 0);

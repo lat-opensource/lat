@@ -89,6 +89,8 @@ extern int option_fputag;
 extern int option_save_xmm;
 extern int option_enable_lasx;
 extern int option_vpaes;
+extern int option_static_helper;
+extern int option_static_helper_stats;
 extern int option_split_tb;
 extern int option_anonym;
 extern int option_imm_reg;
@@ -125,6 +127,8 @@ extern unsigned long long counter_mips_tr;
 #define ENVSUP_LATX \
     ENVFUN(LATX_OPTIMIZE, handle_arg_optimize) \
     ENVFUN(LATX_VPAES, handle_arg_latx_vpaes) \
+    ENVFUN(LATX_STATIC_HELPER, handle_arg_latx_static_helper) \
+    ENVFUN(LATX_STATIC_HELPER_STATS, handle_arg_latx_static_helper_stats) \
     ENVFUN(LATX_SMC, handle_arg_latx_smc) \
     ENVFUN(LATX_CLOSE_PARALLEL, handle_arg_latx_parallel) \
     ENVFUN(LATX_SOFTFPU, handle_arg_latx_softfpu) \

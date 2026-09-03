@@ -39,9 +39,9 @@ extern  const char *aot_left_file_minsize_optarg;
  * +--------------+
  */
 #ifdef CONFIG_LATX_DEBUG
-#define AOT_VERSION "Version: "LATX_VERSION"-debug"
+#define AOT_VERSION "Version: "LATX_VERSION"-debug-shcfg1"
 #else
-#define AOT_VERSION "Version: "LATX_VERSION"-release"
+#define AOT_VERSION "Version: "LATX_VERSION"-release-shcfg1"
 #endif
 typedef struct aot_header {
     uint32_t lib_size;
@@ -57,6 +57,7 @@ typedef struct aot_header {
 #define CACHE_AOT_FILE      4
 #define HASH_AOT_FILE       8
     uint8_t aot_file_type;
+    uint8_t static_helper;
 } aot_header;
 
 typedef struct aot_file_info {
@@ -260,6 +261,10 @@ typedef enum aot_rel_kind {
     LOAD_HELPER_CVTPH2PS_XMM,
     LOAD_HELPER_CVTPS2PH_YMM,
     LOAD_HELPER_CVTPS2PH_XMM,
+    LOAD_STATIC_HELPER_PROLOGUE,
+    LOAD_STATIC_HELPER_EPILOGUE,
+    LOAD_STATIC_HELPER_NOFP_PROLOGUE,
+    LOAD_STATIC_HELPER_NOFP_EPILOGUE,
 
     LOAD_HELPER_END,
 

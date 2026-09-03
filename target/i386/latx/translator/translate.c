@@ -83,6 +83,22 @@ void *interpret_glue;
 ADDR native_rotate_fpu_by; /* native_rotate_fpu_by(step, return_address) */
 ADDR indirect_jmp_glue;
 ADDR parallel_indirect_jmp_glue;
+ADDR static_helper_prologue;
+ADDR static_helper_epilogue;
+ADDR static_helper_nofp_prologue;
+ADDR static_helper_nofp_epilogue;
+static uint64_t static_helper_stub_bytes;
+
+static void static_helper_stats_record(const char *mode, int generated_ir2)
+{
+    if (!option_static_helper_stats) {
+        return;
+    }
+    fprintf(stderr,
+            "[LATX][static-helper] translated-callsite mode=%s "
+            "generated-ir2=%d shared-stub-bytes=%" PRIu64 "\n",
+            mode, generated_ir2, static_helper_stub_bytes);
+}
 
 #ifndef TARGET_X86_64
 int GPR_USEDEF_TO_SAVE = 0x7;
@@ -107,6 +123,9 @@ void tr_init(void *tb)
               t->curr_tb);
     t->curr_tb = tb;
     t->curr_ir1_inst = NULL;
+#ifdef CONFIG_LATX_OPT_PUSH_POP_TRANS
+    t->sp_delta = 0;
+#endif
 
     /* register allocation init */
     ra_free_all();
@@ -147,6 +166,9 @@ void tr_fini(bool check_the_extension)
     /* set current tb and ir1 */
     t->curr_tb = NULL;
     t->curr_ir1_inst = NULL;
+#ifdef CONFIG_LATX_OPT_PUSH_POP_TRANS
+    t->sp_delta = 0;
+#endif
 
     /* reset ir2 array */
     t->ir2_inst_num_current = 0;
@@ -2198,12 +2220,22 @@ int tr_ir2_generate(struct TranslationBlock *tb)
     }
 #endif
     for (i = 0; i < ir1_nr; ++i) {
+#ifdef CONFIG_LATX_OPT_PUSH_POP_TRANS
+        if (!latx_sp_merge_can_delay(pir1)) {
+            latx_sp_merge_flush();
+        }
+#endif
         /*
          * handle segv scenario, store host pc to gen_insn_data and encode to a BYTE
          * at the end of TB translate cache.
          */
         tcg_ctx->gen_insn_data[i][0] = pir1->info->address;
+#ifdef CONFIG_LATX_OPT_PUSH_POP_TRANS
+        tcg_ctx->gen_insn_data[i][1] =
+            (target_ulong)(target_long)lsenv->tr_data->sp_delta;
+#else
         tcg_ctx->gen_insn_data[i][1] = 0;
+#endif
 
 #ifdef CONFIG_LATX_IMM_REG
         imm_cache->curr_ir1_index = i;
@@ -2260,6 +2292,9 @@ int tr_ir2_generate(struct TranslationBlock *tb)
 
         pir1++;
     }
+#ifdef CONFIG_LATX_OPT_PUSH_POP_TRANS
+    latx_sp_merge_flush();
+#endif
 #ifdef CONFIG_LATX_DEBUG
     if (option_dump_ir1) {
         pir1 = tb_ir1_inst(tb, 0);
@@ -3076,6 +3111,115 @@ static int ss_generate_match_fail_native_code(void* code_buf){
 #endif
 }
 
+static int generate_static_helper_prologue(void *code_buf)
+{
+    TRANSLATION_DATA *lat_ctx = lsenv->tr_data;
+    int code_nr;
+
+    tr_init(NULL);
+    tr_save_registers_to_env(0xff, 0xff, 0xff,
+                             options_to_save());
+#ifdef TARGET_X86_64
+    tr_save_x64_8_registers_to_env(0xff, 0xff);
+#endif
+    la_jirl(zero_ir2_opnd, ra_ir2_opnd, 0);
+
+    label_dispose(NULL, lat_ctx);
+    code_nr = tr_ir2_assemble(code_buf, lat_ctx->first_ir2);
+    tr_fini(false);
+    return code_nr;
+}
+
+static int generate_static_helper_epilogue(void *code_buf)
+{
+    TRANSLATION_DATA *lat_ctx = lsenv->tr_data;
+    int code_nr;
+
+    tr_init(NULL);
+#ifdef TARGET_X86_64
+    tr_load_x64_8_registers_from_env(0xff, 0xff);
+#endif
+    tr_load_registers_from_env(0xff, 0xff, 0xff, options_to_save());
+    la_jirl(zero_ir2_opnd, ra_ir2_opnd, 0);
+
+    label_dispose(NULL, lat_ctx);
+    code_nr = tr_ir2_assemble(code_buf, lat_ctx->first_ir2);
+    tr_fini(false);
+    return code_nr;
+}
+
+static int generate_static_helper_nofp_prologue(void *code_buf)
+{
+    TRANSLATION_DATA *lat_ctx = lsenv->tr_data;
+    int code_nr;
+
+    tr_init(NULL);
+    tr_save_registers_to_env(0xff, 0, 0, 0);
+#ifdef TARGET_X86_64
+    tr_save_x64_8_registers_to_env(0xff, 0);
+#endif
+    la_jirl(zero_ir2_opnd, ra_ir2_opnd, 0);
+
+    label_dispose(NULL, lat_ctx);
+    code_nr = tr_ir2_assemble(code_buf, lat_ctx->first_ir2);
+    tr_fini(false);
+    return code_nr;
+}
+
+static int generate_static_helper_nofp_epilogue(void *code_buf)
+{
+    TRANSLATION_DATA *lat_ctx = lsenv->tr_data;
+    int code_nr;
+
+    tr_init(NULL);
+    tr_load_registers_from_env(0xff, 0, 0, 0);
+#ifdef TARGET_X86_64
+    tr_load_x64_8_registers_from_env(0xff, 0);
+#endif
+    la_jirl(zero_ir2_opnd, ra_ir2_opnd, 0);
+
+    label_dispose(NULL, lat_ctx);
+    code_nr = tr_ir2_assemble(code_buf, lat_ctx->first_ir2);
+    tr_fini(false);
+    return code_nr;
+}
+
+static int generate_static_helper_stub_code(void *code_buf)
+{
+    int code_nr;
+    int total_code_nr = 0;
+
+    static_helper_prologue = (ADDR)code_buf;
+    code_nr = generate_static_helper_prologue(code_buf);
+    total_code_nr += code_nr;
+    code_buf += code_nr * 4;
+
+    static_helper_epilogue = (ADDR)code_buf;
+    code_nr = generate_static_helper_epilogue(code_buf);
+    total_code_nr += code_nr;
+    code_buf += code_nr * 4;
+
+    static_helper_nofp_prologue = (ADDR)code_buf;
+    code_nr = generate_static_helper_nofp_prologue(code_buf);
+    total_code_nr += code_nr;
+    code_buf += code_nr * 4;
+
+    static_helper_nofp_epilogue = (ADDR)code_buf;
+    code_nr = generate_static_helper_nofp_epilogue(code_buf);
+    total_code_nr += code_nr;
+    static_helper_stub_bytes = total_code_nr * 4;
+
+    if (option_dump) {
+        qemu_log("[static helper] default prologue at %p, epilogue at %p; "
+                 "nofp prologue at %p, epilogue at %p; size = %d\n",
+                 (void *)static_helper_prologue,
+                 (void *)static_helper_epilogue,
+                 (void *)static_helper_nofp_prologue,
+                 (void *)static_helper_nofp_epilogue, total_code_nr * 4);
+    }
+    return total_code_nr;
+}
+
 /* note: native_rotate_fpu_by rotate data between mapped fp registers instead
  * of the in memory env->fpregs
  */
@@ -3201,6 +3345,9 @@ int generate_native_rotate_fpu_by(void *code_buf_addr)
     insts_num = ss_generate_match_fail_native_code(code_buf);
     total_insts_num += insts_num;
     code_buf += insts_num * 4;
+
+    insts_num = generate_static_helper_stub_code(code_buf);
+    total_insts_num += insts_num;
 
     return total_insts_num;
 }
@@ -3981,8 +4128,59 @@ void convert_fpregs_x80_to_64(void)
     }
 }
 
-static void tr_gen_call_to_helper_prologue(int use_fp)
+static void tr_gen_call_to_static_helper_stub(ADDR stub,
+        enum aot_rel_kind rel_kind)
 {
+    TranslationBlock *tb __attribute__((unused)) = NULL;
+
+    if (option_aot) {
+        tb = (TranslationBlock *)lsenv->tr_data->curr_tb;
+    }
+#ifdef CONFIG_LATX_IMM_REG
+    if (option_imm_reg) {
+        free_imm_reg_all();
+    }
+#endif
+    IR2_OPND stub_addr = ra_alloc_dbt_arg2();
+    aot_load_host_addr(stub_addr, stub, rel_kind, 0);
+    la_jirl(ra_ir2_opnd, stub_addr, 0);
+}
+
+bool tr_gen_call_to_static_helper_nofp_prologue(IR2_OPND live_opnd)
+{
+    int stats_ir2_start;
+
+    if (!option_static_helper) {
+        return false;
+    }
+
+    stats_ir2_start = lsenv->tr_data->ir2_inst_num_current;
+    /* The shared stub may reuse a caller itemp in its independent RA state. */
+    helper_save_reg(live_opnd);
+    tr_gen_call_to_static_helper_stub(static_helper_nofp_prologue,
+                                      LOAD_STATIC_HELPER_NOFP_PROLOGUE);
+    helper_restore_reg(live_opnd);
+    static_helper_stats_record(
+        "static-nofp",
+        lsenv->tr_data->ir2_inst_num_current - stats_ir2_start);
+    return true;
+}
+
+void tr_gen_call_to_static_helper_nofp_epilogue(void)
+{
+    tr_gen_call_to_static_helper_stub(static_helper_nofp_epilogue,
+                                      LOAD_STATIC_HELPER_NOFP_EPILOGUE);
+}
+
+static bool tr_gen_call_to_helper_prologue(int use_fp,
+        bool static_compatible)
+{
+    if (option_static_helper && static_compatible && !use_fp) {
+        tr_gen_call_to_static_helper_stub(static_helper_prologue,
+                                          LOAD_STATIC_HELPER_PROLOGUE);
+        return true;
+    }
+
     tr_save_registers_to_env(0, FPR_USEDEF_TO_SAVE, XMM_USEDEF_TO_SAVE,
                              options_to_save());
 #ifdef TARGET_X86_64
@@ -4003,10 +4201,17 @@ static void tr_gen_call_to_helper_prologue(int use_fp)
         la_mov64(a0_ir2_opnd, env_ir2_opnd);
         la_jirl(ra_ir2_opnd, func_addr_opnd, 0);
     }
+    return false;
 }
 
-static void tr_gen_call_to_helper_epilogue(int use_fp)
+static void tr_gen_call_to_helper_epilogue(int use_fp, bool use_static)
 {
+    if (use_static) {
+        tr_gen_call_to_static_helper_stub(static_helper_epilogue,
+                                          LOAD_STATIC_HELPER_EPILOGUE);
+        return;
+    }
+
     if (use_fp) {
         IR2_OPND func_addr_opnd = ra_alloc_dbt_arg2();
         TranslationBlock *tb __attribute__((unused)) = NULL;
@@ -4025,9 +4230,61 @@ static void tr_gen_call_to_helper_epilogue(int use_fp)
                                options_to_save());
 }
 
+static bool tr_gen_call_to_helper_full_prologue(void)
+{
+    if (option_static_helper) {
+        tr_gen_call_to_static_helper_stub(static_helper_prologue,
+                                          LOAD_STATIC_HELPER_PROLOGUE);
+        return true;
+    }
+
+    tr_save_registers_to_env(0xff, FPR_USEDEF_TO_SAVE, 0xff,
+                             options_to_save());
+#ifdef TARGET_X86_64
+    tr_save_x64_8_registers_to_env(0xff, 0xff);
+#endif
+    return false;
+}
+
+static void tr_gen_call_to_helper_full_epilogue(bool use_static)
+{
+    if (use_static) {
+        tr_gen_call_to_static_helper_stub(static_helper_epilogue,
+                                          LOAD_STATIC_HELPER_EPILOGUE);
+        return;
+    }
+
+    tr_load_registers_from_env(0xff, FPR_USEDEF_TO_SAVE, 0xff,
+                               options_to_save());
+#ifdef TARGET_X86_64
+    tr_load_x64_8_registers_from_env(0xff, 0xff);
+#endif
+}
+
+static const char *static_helper_mode(bool use_static, int use_fp,
+        bool static_compatible)
+{
+    if (use_static) {
+        return "static";
+    }
+    if (!option_static_helper) {
+        return "inline-disabled";
+    }
+    if (use_fp) {
+        return "inline-fp80";
+    }
+    if (!static_compatible) {
+        return "inline-special";
+    }
+    return "inline";
+}
+
 /* helper with 1 default arg(CPUArchState*) */
 void tr_gen_call_to_helper1(ADDR func, int use_fp, enum aot_rel_kind REL_KIND)
 {
+    int stats_ir2_start = lsenv->tr_data->ir2_inst_num_current;
+    bool use_static;
+
     /* aot relocation requires the tb struct */
     TranslationBlock *tb __attribute__((unused)) = NULL;
     if (option_aot) {
@@ -4035,7 +4292,7 @@ void tr_gen_call_to_helper1(ADDR func, int use_fp, enum aot_rel_kind REL_KIND)
     }
 
     /* prologue */
-    tr_gen_call_to_helper_prologue(use_fp);
+    use_static = tr_gen_call_to_helper_prologue(use_fp, true);
 
     /* load the helper addr */
     IR2_OPND func_addr_opnd = ra_alloc_dbt_arg2();
@@ -4044,12 +4301,18 @@ void tr_gen_call_to_helper1(ADDR func, int use_fp, enum aot_rel_kind REL_KIND)
     /* jmp and epilogue */
     la_mov64(a0_ir2_opnd, env_ir2_opnd);
     la_jirl(ra_ir2_opnd, func_addr_opnd, 0);
-    tr_gen_call_to_helper_epilogue(use_fp);
+    tr_gen_call_to_helper_epilogue(use_fp, use_static);
+    static_helper_stats_record(static_helper_mode(use_static, use_fp, true),
+        lsenv->tr_data->ir2_inst_num_current - stats_ir2_start);
 }
 
 void tr_gen_call_to_helper2(ADDR func, IR2_OPND mem_opnd, int use_fp,
                             enum aot_rel_kind REL_KIND)
 {
+    int stats_ir2_start = lsenv->tr_data->ir2_inst_num_current;
+    bool preserve_mem_opnd = option_static_helper && !use_fp;
+    bool use_static;
+
     /* aot relocation requires the tb struct */
     TranslationBlock *tb __attribute__((unused)) = NULL;
     if (option_aot) {
@@ -4057,7 +4320,14 @@ void tr_gen_call_to_helper2(ADDR func, IR2_OPND mem_opnd, int use_fp,
     }
 
     /* prologue */
-    tr_gen_call_to_helper_prologue(use_fp);
+    /* mem_opnd remains live, but the shared stub has independent RA state. */
+    if (preserve_mem_opnd) {
+        helper_save_reg(mem_opnd);
+    }
+    use_static = tr_gen_call_to_helper_prologue(use_fp, true);
+    if (use_static) {
+        helper_restore_reg(mem_opnd);
+    }
 
     /* load the helper addr */
     IR2_OPND func_addr_opnd = ra_alloc_dbt_arg2();
@@ -4067,13 +4337,18 @@ void tr_gen_call_to_helper2(ADDR func, IR2_OPND mem_opnd, int use_fp,
     la_mov64(a0_ir2_opnd, env_ir2_opnd);
     la_mov64(a1_ir2_opnd, mem_opnd);
     la_jirl(ra_ir2_opnd, func_addr_opnd, 0);
-    tr_gen_call_to_helper_epilogue(use_fp);
+    tr_gen_call_to_helper_epilogue(use_fp, use_static);
+    static_helper_stats_record(static_helper_mode(use_static, use_fp, true),
+        lsenv->tr_data->ir2_inst_num_current - stats_ir2_start);
 }
 
 
 #ifdef CONFIG_LATX_AVX_OPT
 void tr_gen_call_to_helper_xgetbv(void)
 {
+    int stats_ir2_start = lsenv->tr_data->ir2_inst_num_current;
+    bool use_static;
+
     /* aot relocation requires the tb struct */
     TranslationBlock *tb __attribute__((unused)) = NULL;
     if (option_aot) {
@@ -4081,7 +4356,7 @@ void tr_gen_call_to_helper_xgetbv(void)
     }
 
     /* prologue */
-    tr_gen_call_to_helper_prologue(0);
+    use_static = tr_gen_call_to_helper_prologue(0, false);
 
     /* load func_addr and jmp */
     IR2_OPND func_addr_opnd = ra_alloc_dbt_arg2();
@@ -4102,7 +4377,9 @@ void tr_gen_call_to_helper_xgetbv(void)
     la_bstrpick_d(eax_opnd, a0_ir2_opnd, 31, 0);
     la_bstrpick_d(edx_opnd, a0_ir2_opnd, 63, 32);
 
-    tr_gen_call_to_helper_epilogue(0);
+    tr_gen_call_to_helper_epilogue(0, use_static);
+    static_helper_stats_record(static_helper_mode(use_static, 0, false),
+        lsenv->tr_data->ir2_inst_num_current - stats_ir2_start);
 }
 #endif
 
@@ -4229,6 +4506,9 @@ void gen_test_page_flag(IR2_OPND mem_opnd, int mem_imm, uint32_t flag)
 void tr_gen_call_to_helper_vfll(ADDR func, IR2_OPND arg1, IR2_OPND arg2,
         int use_fp, enum aot_rel_kind REL_KIND)
 {
+    int stats_ir2_start = lsenv->tr_data->ir2_inst_num_current;
+    bool use_static;
+
     /* aot relocation requires the tb struct */
     TranslationBlock *tb __attribute__((unused)) = NULL;
     if (option_aot) {
@@ -4237,7 +4517,7 @@ void tr_gen_call_to_helper_vfll(ADDR func, IR2_OPND arg1, IR2_OPND arg2,
     helper_save_reg(arg1);
     helper_save_reg(arg2);
     /* prologue */
-    tr_gen_call_to_helper_prologue(use_fp);
+    use_static = tr_gen_call_to_helper_prologue(use_fp, true);
     helper_restore_reg(arg1);
     helper_restore_reg(arg2);
     la_mov64(a0_ir2_opnd, env_ir2_opnd);
@@ -4249,17 +4529,16 @@ void tr_gen_call_to_helper_vfll(ADDR func, IR2_OPND arg1, IR2_OPND arg2,
     aot_load_host_addr(func_addr_opnd, (ADDR)func, REL_KIND, 0);
     la_jirl(ra_ir2_opnd, func_addr_opnd, 0);
 
-    tr_gen_call_to_helper_epilogue(use_fp);
+    tr_gen_call_to_helper_epilogue(use_fp, use_static);
+    static_helper_stats_record(static_helper_mode(use_static, use_fp, true),
+        lsenv->tr_data->ir2_inst_num_current - stats_ir2_start);
 }
 
 void tr_gen_call_to_helper_cvttpd2pi(ADDR func, int dest_xmm_num, int src_xmm_num,
         enum aot_rel_kind REL_KIND)
 {
-    /* prologue */
-    tr_save_registers_to_env(0xff, FPR_USEDEF_TO_SAVE, 0xff, options_to_save());
-#ifdef TARGET_X86_64
-    tr_save_x64_8_registers_to_env(0xff, 0xff);
-#endif
+    int stats_ir2_start = lsenv->tr_data->ir2_inst_num_current;
+    bool use_static = tr_gen_call_to_helper_full_prologue();
 
     /* set arguments */
     la_mov64(a0_ir2_opnd, env_ir2_opnd);
@@ -4283,22 +4562,16 @@ void tr_gen_call_to_helper_cvttpd2pi(ADDR func, int dest_xmm_num, int src_xmm_nu
     aot_load_host_addr(func_addr_opnd, (ADDR)func, REL_KIND, 0);
     la_jirl(ra_ir2_opnd, func_addr_opnd, 0);
 
-    /* prologue, jmp and epilogue */
-    tr_load_registers_from_env(0xff, FPR_USEDEF_TO_SAVE, 0xff, options_to_save());
-#ifdef TARGET_X86_64
-    tr_load_x64_8_registers_from_env(0xff, 0xff);
-#endif
-
+    tr_gen_call_to_helper_full_epilogue(use_static);
+    static_helper_stats_record(static_helper_mode(use_static, 0, true),
+        lsenv->tr_data->ir2_inst_num_current - stats_ir2_start);
 }
 
-void tr_gen_call_to_helper_pcmpxstrx(ADDR func, int dest_xmm_num, int src_xmm_num, int ctrl,
-        enum aot_rel_kind REL_KIND)
+void tr_gen_call_to_helper_pcmpxstrx(ADDR func, int dest_xmm_num,
+        int src_xmm_num, int ctrl, enum aot_rel_kind REL_KIND)
 {
-    /* prologue */
-    tr_save_registers_to_env(0xff, FPR_USEDEF_TO_SAVE, 0xff, options_to_save());
-#ifdef TARGET_X86_64
-    tr_save_x64_8_registers_to_env(0xff, 0xff);
-#endif
+    int stats_ir2_start = lsenv->tr_data->ir2_inst_num_current;
+    bool use_static = tr_gen_call_to_helper_full_prologue();
 
     /* set arguments */
     la_mov64(a0_ir2_opnd, env_ir2_opnd);
@@ -4318,21 +4591,18 @@ void tr_gen_call_to_helper_pcmpxstrx(ADDR func, int dest_xmm_num, int src_xmm_nu
 #endif
     li_d(a3_ir2_opnd, ctrl);
 
-    /* load func_addr and jmp */
-    IR2_OPND func_addr_opnd = ra_alloc_dbt_arg2();
-    aot_load_host_addr(func_addr_opnd, (ADDR)func, REL_KIND, 0);
-    la_jirl(ra_ir2_opnd, func_addr_opnd, 0);
-
-    /* prologue, jmp and epilogue */
-    tr_load_registers_from_env(0xff, FPR_USEDEF_TO_SAVE, 0xff, options_to_save());
-#ifdef TARGET_X86_64
-    tr_load_x64_8_registers_from_env(0xff, 0xff);
-#endif
+    tr_gen_call_to_helper(func, REL_KIND);
+    tr_gen_call_to_helper_full_epilogue(use_static);
+    static_helper_stats_record(static_helper_mode(use_static, 0, true),
+        lsenv->tr_data->ir2_inst_num_current - stats_ir2_start);
 }
 
 void tr_gen_call_to_helper_pclmulqdq(ADDR func, int  d, int s1, int s2, int ctrl,int use_fp,
         enum aot_rel_kind REL_KIND)
 {
+    int stats_ir2_start = lsenv->tr_data->ir2_inst_num_current;
+    bool use_static;
+
     /* aot relocation requires the tb struct */
     TranslationBlock *tb __attribute__((unused)) = NULL;
     if (option_aot) {
@@ -4340,7 +4610,7 @@ void tr_gen_call_to_helper_pclmulqdq(ADDR func, int  d, int s1, int s2, int ctrl
     }
 
     /* prologue */
-    tr_gen_call_to_helper_prologue(use_fp);
+    use_static = tr_gen_call_to_helper_prologue(use_fp, true);
 
     /* set arguments */
     la_mov64(a0_ir2_opnd, env_ir2_opnd);
@@ -4369,17 +4639,17 @@ void tr_gen_call_to_helper_pclmulqdq(ADDR func, int  d, int s1, int s2, int ctrl
     aot_load_host_addr(func_addr_opnd, (ADDR)func, REL_KIND, 0);
     la_jirl(ra_ir2_opnd, func_addr_opnd, 0);
 
-    tr_gen_call_to_helper_epilogue(use_fp);
+    tr_gen_call_to_helper_epilogue(use_fp, use_static);
+    static_helper_stats_record(static_helper_mode(use_static, use_fp, true),
+        lsenv->tr_data->ir2_inst_num_current - stats_ir2_start);
 }
 
 void tr_gen_call_to_helper_aes(ADDR func, int dest_xmm_num, int src1_xmm_num, int src2_xmm_num,
         enum aot_rel_kind REL_KIND)
 {
-    /* prologue */
-    tr_save_registers_to_env(0xff, FPR_USEDEF_TO_SAVE, 0xff, options_to_save());
-#ifdef TARGET_X86_64
-    tr_save_x64_8_registers_to_env(0xff, 0xff);
-#endif
+    int stats_ir2_start = lsenv->tr_data->ir2_inst_num_current;
+    bool use_static = tr_gen_call_to_helper_full_prologue();
+
     /* set arguments */
     la_mov64(a0_ir2_opnd, env_ir2_opnd);
 #ifndef TARGET_X86_64
@@ -4404,11 +4674,9 @@ void tr_gen_call_to_helper_aes(ADDR func, int dest_xmm_num, int src1_xmm_num, in
     IR2_OPND func_addr_opnd = ra_alloc_dbt_arg2();
     aot_load_host_addr(func_addr_opnd, (ADDR)func, REL_KIND, 0);
     la_jirl(ra_ir2_opnd, func_addr_opnd, 0);
-    /* prologue, jmp and epilogue */
-    tr_load_registers_from_env(0xff, FPR_USEDEF_TO_SAVE, 0xff, options_to_save());
-#ifdef TARGET_X86_64
-    tr_load_x64_8_registers_from_env(0xff, 0xff);
-#endif
+    tr_gen_call_to_helper_full_epilogue(use_static);
+    static_helper_stats_record(static_helper_mode(use_static, 0, true),
+        lsenv->tr_data->ir2_inst_num_current - stats_ir2_start);
 }
 
 IR2_OPND tr_lat_spin_lock(IR2_OPND mem_addr, int imm)
