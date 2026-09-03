@@ -459,11 +459,8 @@ bool translate_vmaskmovpx(IR1_INST * pir1) {
     }
     if (ir1_opnd_is_xmm(opnd0) || ir1_opnd_is_ymm(opnd0)) {
         IR2_OPND dest = load_freg256_from_ir1(opnd0);
-        temp = ra_alloc_ftemp();
-        la_xvandi_b(temp, temp, 0);
         tr_slt(mask, src1, 0);
-        la_xvbitsel_v(temp, temp, src2, mask);
-        la_xvori_b(dest, temp, 0);
+        la_xvand_v(dest, src2, mask);
         if (ir1_opnd_is_xmm(opnd0)) {
             set_high128_xreg_to_zero(dest);
         }
