@@ -419,9 +419,21 @@ static void latx_pressure_vessel_append_i386_sysroot(envlist_t *envlist)
 void latx_pressure_vessel_prepare(const char *program, char **target_argv,
                                   envlist_t *envlist)
 {
+    const char *basename = program ? strrchr(program, '/') : NULL;
     const char *expected_files;
+    bool wrapper_name;
 
     pressure_vessel_payload = NULL;
+
+    expected_files = envlist_getenv(envlist,
+                                    LATX_PRESSURE_VESSEL_RUNTIME_FILES_ENV);
+    wrapper_name = !g_strcmp0(basename ? basename + 1 : program,
+                              "pressure-vessel-wrap");
+
+    /* Avoid Runtime discovery for launches outside the pressure-vessel chain. */
+    if (!wrapper_name && !expected_files) {
+        return;
+    }
 
     /* Discovery alone must not override generic guest path resolution. */
     latx_pressure_vessel_runtime_configure(envlist, NULL);
@@ -429,8 +441,7 @@ void latx_pressure_vessel_prepare(const char *program, char **target_argv,
         if (!latx_pressure_vessel_runtime_mark(envlist)) {
             return;
         }
-    } else if (!envlist_getenv(envlist,
-                               LATX_PRESSURE_VESSEL_RUNTIME_FILES_ENV)) {
+    } else if (!expected_files) {
         return;
     }
 
