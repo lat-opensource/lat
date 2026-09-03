@@ -143,6 +143,7 @@ void tu_reset_tb(TranslationBlock *tb)
     tb->jmp_list_next[1] = (uintptr_t)NULL;
 
     /* init top in and top out */
+    tb->s_data->eflag_out = 0;
     tb->s_data->_top_out = -1;
     tb->s_data->_top_in = -1;
     tb->jmp_reset_offset[0] = TB_JMP_RESET_OFFSET_INVALID;

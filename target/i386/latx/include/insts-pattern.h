@@ -163,4 +163,13 @@ bool insts_pattern_scan_jcc_end(TranslationBlock *tb, IR1_INST *ir1, int index, 
 
 bool try_translate_instptn(IR1_INST *pir1);
 
+static inline uint8_t instptn_replaced_eflag_use(IR1_INST *ir1)
+{
+#ifdef CONFIG_LATX_INSTS_PATTERN
+    return ir1->instptn.replaced_eflag_use;
+#else
+    return 0;
+#endif
+}
+
 #endif

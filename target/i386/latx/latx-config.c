@@ -27,15 +27,16 @@
 void target_disasm(struct TranslationBlock *tb, int max_insns)
 {
     /* max_insns = 100; */
-    counter_tb_tr += 1;
+    if (!suppress_disasm_side_effects) {
+        counter_tb_tr += 1;
+        trace_xtm_tr_tb((void *)tb, (void *)tb->tc.ptr,
+                        (void *)(unsigned long long)tb->pc);
 
-    trace_xtm_tr_tb((void *)tb, (void *)tb->tc.ptr,
-                    (void *)(unsigned long long)tb->pc);
-
-    if (option_dump) {
-        qemu_log("=====================================\n");
-        qemu_log("|| TB translation : %14p ||\n", tb);
-        qemu_log("=====================================\n");
+        if (option_dump) {
+            qemu_log("=====================================\n");
+            qemu_log("|| TB translation : %14p ||\n", tb);
+            qemu_log("=====================================\n");
+        }
     }
 
     /* target => IR1
@@ -62,14 +63,18 @@ void target_disasm(struct TranslationBlock *tb, int max_insns)
 #endif
 
 #ifdef CONFIG_LATX_DEBUG
-    counter_ir1_tr += tb->icount;
+    if (!suppress_disasm_side_effects) {
+        counter_ir1_tr += tb->icount;
+    }
 #endif
 
     /* tr_disasm(tb, max_insns); */
 
 #ifdef CONFIG_LATX_PROFILER
-    qatomic_set(&prof->tr_disasm_time,
-                prof->tr_disasm_time + profile_getclock() - ti);
+    if (!suppress_disasm_side_effects) {
+        qatomic_set(&prof->tr_disasm_time,
+                    prof->tr_disasm_time + profile_getclock() - ti);
+    }
 #endif
 
     /* ir1_optimization(tb); */

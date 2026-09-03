@@ -143,6 +143,8 @@ typedef struct IR1_INST {
 #ifdef CONFIG_LATX_INSTS_PATTERN
     struct {
         int opc;
+        /* EFLAGS reads replaced by the native pattern translation. */
+        uint8_t replaced_eflag_use;
         struct IR1_INST * next; /* index of IR1 list */
     } instptn;
 #endif

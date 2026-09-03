@@ -390,6 +390,7 @@ ADDRX ir1_disasm(IR1_INST *ir1, uint8_t *addr, ADDRX t_pc, int ir1_num, void *pi
     }
 #ifdef CONFIG_LATX_INSTS_PATTERN
     ir1->instptn.opc  = INSTPTN_OPC_NONE;
+    ir1->instptn.replaced_eflag_use = 0;
     ir1->instptn.next = NULL;
 #endif
     return (ADDRX)(ir1->info->address + ir1->info->size);

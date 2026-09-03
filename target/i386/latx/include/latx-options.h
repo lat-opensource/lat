@@ -27,6 +27,9 @@ extern int option_instptn;
 #ifdef CONFIG_LATX_FLAG_REDUCTION
 extern int option_flag_reduction;
 #endif
+
+/* Proof-driven TU EFLAGS analysis across direct CALL/RET. */
+extern int option_eflags_cross;
 #ifdef CONFIG_LATX_TU
 extern int option_tu_link;
 #endif
@@ -156,6 +159,7 @@ extern unsigned long long counter_mips_tr;
     ENVFUN(LATX_PRLIMIT, handle_arg_latx_prlimit) \
     ENVFUN(LATX_ROUNDING_OPT, handle_arg_latx_rounding) \
     ENVFUN(LATX_CVT_OPT, handle_arg_latx_cvt_opt) \
+    ENVFUN(LATX_EFLAGS_CROSS, handle_arg_latx_eflags_cross) \
     ENVFUN(LATX_FPUTAG, handle_arg_latx_fputag) \
     ENVFUN(SAVE_XMM, handle_arg_save_xmm) \
     ENVFUN(LATX_JRRA, handle_arg_latx_jrra) \
