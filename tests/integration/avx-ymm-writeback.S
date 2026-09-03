@@ -36,6 +36,26 @@ _start:
     test eax, eax
     jne .Lfail_blendw
 
+    vmovdqu ymm0, ymmword ptr [rip + .Lword_source1]
+    vmovdqu ymm2, ymmword ptr [rip + .Lword_source2]
+    vpblendw ymm0, ymm0, ymm2, 0x55
+    vmovdqu ymmword ptr [rip + .Lactual], ymm0
+    lea rsi, [rip + .Lactual]
+    lea rdi, [rip + .Lblend55_expected]
+    call .Lcompare_32
+    test eax, eax
+    jne .Lfail_blend55
+
+    vmovdqu ymm1, ymmword ptr [rip + .Lword_source1]
+    vmovdqu ymm0, ymmword ptr [rip + .Lword_source2]
+    vpblendw ymm0, ymm1, ymm0, 0xaa
+    vmovdqu ymmword ptr [rip + .Lactual], ymm0
+    lea rsi, [rip + .Lactual]
+    lea rdi, [rip + .Lblendaa_expected]
+    call .Lcompare_32
+    test eax, eax
+    jne .Lfail_blendaa
+
     xor edi, edi
     jmp .Lexit
 
@@ -63,6 +83,12 @@ _start:
     jmp .Lexit
 .Lfail_blendw:
     mov edi, 3
+    jmp .Lexit
+.Lfail_blend55:
+    mov edi, 4
+    jmp .Lexit
+.Lfail_blendaa:
+    mov edi, 5
 .Lexit:
     vzeroupper
     mov eax, 60
@@ -108,6 +134,12 @@ _start:
 .Lword_expected:
     .word 0, 101, 2, 103, 104, 5, 106, 7
     .word 8, 109, 10, 111, 112, 13, 114, 15
+.Lblend55_expected:
+    .word 100, 1, 102, 3, 104, 5, 106, 7
+    .word 108, 9, 110, 11, 112, 13, 114, 15
+.Lblendaa_expected:
+    .word 0, 101, 2, 103, 4, 105, 6, 107
+    .word 8, 109, 10, 111, 12, 113, 14, 115
 
 .section .bss
 .p2align 5
