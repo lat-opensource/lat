@@ -51,6 +51,13 @@
 
 #define INSTPTN_OPC_SHR_JCC        0x10000000
 #define INSTPTN_OPC_AND_JCC        0x20000000
+#define INSTPTN_OPC_REPEAT_ADD     0x40000000
+#define INSTPTN_OPC_AVX_SUM3       (-0x7fffffff - 1)
+#define INSTPTN_OPC_SCALAR_HDR     (-0x7fffffff)
+
+void insts_pattern_repeat_add(TranslationBlock *tb);
+void insts_pattern_avx_sum3(TranslationBlock *tb);
+void insts_pattern_scalar_hdr(TranslationBlock *tb);
 
 typedef int scan_elem_t;
 

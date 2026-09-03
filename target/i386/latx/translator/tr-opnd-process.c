@@ -1389,13 +1389,40 @@ static int mapped_ymm_index(IR2_OPND opnd)
     return -1;
 }
 
+static void clear_high128_xreg_with_zero(IR2_OPND opnd, IR2_OPND zero)
+{
+    la_xvpermi_q(opnd, zero, XVPERMI_Q_4_0(0, 2));
+}
+
 static void clear_high128_xreg_now(IR2_OPND opnd)
 {
-    la_xvinsgr2vr_d(opnd, zero_ir2_opnd, 2);
-    la_xvinsgr2vr_d(opnd, zero_ir2_opnd, 3);
+    IR2_OPND zero = ra_alloc_ftemp();
+
+    la_vxor_v(zero, zero, zero);
+    clear_high128_xreg_with_zero(opnd, zero);
+    ra_free_temp(zero);
 }
 
 void materialize_deferred_ymmh_zero(IR2_OPND opnd)
+{
+    int index;
+    uint16_t mask;
+
+    if (!option_enable_lasx) {
+        return;
+    }
+    index = mapped_ymm_index(opnd);
+    if (index < 0) {
+        return;
+    }
+    mask = UINT16_C(1) << index;
+    if (lsenv->tr_data->ymmh_zero_pending & mask) {
+        clear_high128_xreg_now(opnd);
+        lsenv->tr_data->ymmh_zero_pending &= ~mask;
+    }
+}
+
+void mark_high128_xreg_zeroed(IR2_OPND opnd)
 {
     int index;
 
@@ -1403,9 +1430,9 @@ void materialize_deferred_ymmh_zero(IR2_OPND opnd)
         return;
     }
     index = mapped_ymm_index(opnd);
-    if (index >= 0 &&
-        (lsenv->tr_data->ymmh_zero_pending & (UINT16_C(1) << index))) {
-        clear_high128_xreg_now(opnd);
+    if (index >= 0) {
+        lsenv->tr_data->ymmh_zero_pending &=
+            ~(UINT16_C(1) << index);
     }
 }
 
@@ -1418,6 +1445,12 @@ static void emit_deferred_ymmh_zeros(void)
     }
 
     pending = lsenv->tr_data->ymmh_zero_pending;
+    if (!pending) {
+        return;
+    }
+
+    IR2_OPND zero = ra_alloc_ftemp();
+    la_vxor_v(zero, zero, zero);
     for (int index = 0; index < CPU_NB_REGS; ++index) {
         IR2_OPND opnd;
 
@@ -1425,8 +1458,9 @@ static void emit_deferred_ymmh_zeros(void)
             continue;
         }
         ir2_opnd_build(&opnd, IR2_OPND_FPR, reg_xmm_map[index]);
-        clear_high128_xreg_now(opnd);
+        clear_high128_xreg_with_zero(opnd, zero);
     }
+    ra_free_temp(zero);
 }
 
 void materialize_deferred_ymmh_zeros_for_exit(void)
