@@ -1736,6 +1736,9 @@ static void do_tb_phys_invalidate(TranslationBlock *tb, bool rm_from_page_list)
     if (!qht_remove(&tb_ctx.htable, tb, h)) {
         return;
     }
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+    latx_shadow_jmp_cache_remove(tb);
+#endif
 
     /* remove the TB from the page list */
     if (rm_from_page_list) {
@@ -1867,6 +1870,10 @@ tb_link_page(TranslationBlock *tb, tb_page_addr_t phys_pc,
     if (unlikely(existing_tb)) {
         tb_remove(tb);
         tb = existing_tb;
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+    } else {
+        latx_shadow_jmp_cache_add(tb);
+#endif
     }
 
     if (p2 && p2 != p) {

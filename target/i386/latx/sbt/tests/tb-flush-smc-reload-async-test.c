@@ -97,6 +97,10 @@ void latx_fast_jmp_cache_clear_all(CPUState *cpu G_GNUC_UNUSED)
 {
 }
 
+void latx_shadow_jmp_cache_clear_all(void)
+{
+}
+
 static SMCReloadInfo *new_reload_node(target_ulong page_addr)
 {
     SMCReloadInfo *node = g_new0(SMCReloadInfo, 1);

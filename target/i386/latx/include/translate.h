@@ -1706,6 +1706,7 @@ void tr_generate_goto_tb(void);                          /* TODO */
 extern ADDR native_rotate_fpu_by;
 extern ADDR indirect_jmp_glue;
 extern ADDR parallel_indirect_jmp_glue;
+extern ADDR shadow_jmp_glue;
 void rotate_fpu_to_top(int top);
 void rotate_fpu_by(int step);
 void rotate_fpu_to_bias(int bias);

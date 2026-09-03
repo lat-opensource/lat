@@ -215,6 +215,7 @@ static gboolean merge_dump_rel_table_tree_node(gpointer key, gpointer val,
             break;
 
         case B_NATIVE_JMP_GLUE2:
+        case B_SHADOW_JMP_GLUE:
             lsassert(((*pinsn) & 0xfc000000) == 0x50000000 ||
               (((*pinsn) & 0xfe000000) == 0x1e000000 &&/* pcaddu18i */
               (*(pinsn + 1) & 0xfc000000) == 0x4c000000));
