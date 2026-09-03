@@ -3089,6 +3089,95 @@ typedef struct PageFlagsNode {
 } PageFlagsNode;
 
 IntervalTreeRoot pageflags_root;
+#if defined(CONFIG_LATX) && defined(TARGET_I386) && TARGET_ABI_BITS == 32
+uint8_t *latx_4k_page_writable;
+uint8_t *latx_16k_page_write_mixed;
+
+void latx_init_16k_write_checks(void)
+{
+    if (sysconf(_SC_PAGESIZE) != LATX_HOST_16K_PAGE_SIZE ||
+        latx_4k_page_writable) {
+        return;
+    }
+
+    latx_4k_page_writable = g_new0(uint8_t, LATX_GUEST_PAGE_COUNT);
+    latx_16k_page_write_mixed =
+        g_new0(uint8_t, LATX_HOST_16K_PAGE_COUNT);
+}
+
+#define LATX_MINKE_WINE_HELPER_PC       UINT32_C(0x7b71d000)
+#define LATX_MINKE_MAX_JIT_MAPPING_SIZE (64 * KiB)
+
+static uint8_t *latx_minke_16k_write_tb_pages;
+
+void latx_enable_minke_16k_write_checks(void)
+{
+    latx_init_16k_write_checks();
+    if (!latx_4k_page_writable || latx_minke_16k_write_tb_pages) {
+        return;
+    }
+
+    latx_minke_16k_write_tb_pages =
+        g_new0(uint8_t, LATX_GUEST_PAGE_COUNT);
+    qatomic_set(&latx_minke_16k_write_tb_pages[
+                LATX_MINKE_WINE_HELPER_PC >> TARGET_PAGE_BITS], 1);
+}
+
+bool latx_minke_16k_write_check_pc(target_ulong pc)
+{
+    return latx_minke_16k_write_tb_pages &&
+        qatomic_read(&latx_minke_16k_write_tb_pages[
+                     pc >> TARGET_PAGE_BITS]);
+}
+
+void latx_minke_register_16k_tb_range(abi_ulong start, abi_ulong end)
+{
+    uint32_t first, last, i;
+
+    if (!latx_minke_16k_write_tb_pages || start >= end ||
+        end - start > LATX_MINKE_MAX_JIT_MAPPING_SIZE) {
+        return;
+    }
+
+    first = start >> TARGET_PAGE_BITS;
+    last = (end - 1) >> TARGET_PAGE_BITS;
+    for (i = first; i <= last; i++) {
+        qatomic_set(&latx_minke_16k_write_tb_pages[i], 1);
+    }
+}
+
+static void latx_update_write_permissions(target_ulong start, target_ulong end)
+{
+    target_ulong addr, host_addr;
+
+    if (!latx_4k_page_writable ||
+        qemu_host_page_size != LATX_HOST_16K_PAGE_SIZE) {
+        return;
+    }
+
+    for (addr = start; addr < end; addr += TARGET_PAGE_SIZE) {
+        qatomic_set(&latx_4k_page_writable[addr >> TARGET_PAGE_BITS],
+                    !!(page_get_flags(addr) & PAGE_WRITE));
+    }
+
+    start &= ~(target_ulong)(LATX_HOST_16K_PAGE_SIZE - 1);
+    end = ROUND_UP(end, LATX_HOST_16K_PAGE_SIZE);
+    for (host_addr = start; host_addr < end;
+         host_addr += LATX_HOST_16K_PAGE_SIZE) {
+        int flags = page_get_flags(host_addr) & PAGE_BITS;
+        int mixed = 0;
+
+        for (addr = host_addr + TARGET_PAGE_SIZE;
+             addr < host_addr + LATX_HOST_16K_PAGE_SIZE;
+             addr += TARGET_PAGE_SIZE) {
+            mixed |= flags ^ (page_get_flags(addr) & PAGE_BITS);
+        }
+        qatomic_set(&latx_16k_page_write_mixed[
+                    host_addr >> LATX_HOST_16K_PAGE_BITS],
+                    !!(mixed & PAGE_WRITE));
+    }
+}
+#endif
 
 static PageFlagsNode *pageflags_find(target_ulong start, target_ulong last)
 {
@@ -3673,6 +3762,12 @@ void page_set_flags_tb_reload(target_ulong start, target_ulong end,
         inval_tb |= pageflags_set_clear(start, last, flags,
             ~(reset ? 0 : PAGE_ANON | PAGE_OVERFLOW | PAGE_MEMSHARE));
     }
+
+#if defined(CONFIG_LATX) && defined(TARGET_I386) && TARGET_ABI_BITS == 32
+    if (latx_4k_page_writable) {
+        latx_update_write_permissions(start, end);
+    }
+#endif
 
     if (inval_tb) {
 #ifdef CONFIG_LATX_AOT

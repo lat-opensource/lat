@@ -240,6 +240,22 @@ extern const TargetPageBits target_page;
  */
 extern uintptr_t qemu_host_page_size;
 extern intptr_t qemu_host_page_mask;
+#if defined(CONFIG_LATX) && defined(TARGET_I386)
+#define LATX_HOST_16K_PAGE_BITS 14
+#define LATX_HOST_16K_PAGE_SIZE (1UL << LATX_HOST_16K_PAGE_BITS)
+#if TARGET_ABI_BITS == 32
+#define LATX_GUEST_PAGE_COUNT   \
+    (1U << (TARGET_ABI_BITS - TARGET_PAGE_BITS))
+#define LATX_HOST_16K_PAGE_COUNT \
+    (1U << (TARGET_ABI_BITS - LATX_HOST_16K_PAGE_BITS))
+extern uint8_t *latx_4k_page_writable;
+extern uint8_t *latx_16k_page_write_mixed;
+void latx_init_16k_write_checks(void);
+void latx_enable_minke_16k_write_checks(void);
+bool latx_minke_16k_write_check_pc(target_ulong pc);
+void latx_minke_register_16k_tb_range(abi_ulong start, abi_ulong end);
+#endif
+#endif
 
 #define HOST_PAGE_ALIGN(addr) ROUND_UP((addr), qemu_host_page_size)
 #define REAL_HOST_PAGE_ALIGN(addr) ROUND_UP((addr), qemu_real_host_page_size)

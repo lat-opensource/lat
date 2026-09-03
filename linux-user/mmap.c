@@ -27,6 +27,7 @@
 #endif
 #ifdef CONFIG_LATX
 #include "latx-config.h"
+#include "latx-options.h"
 #endif
 #if defined(CONFIG_LATX_KZT) && defined(TARGET_X86_64)
 #include "kzt_relro_preprotect.h"
@@ -39,7 +40,6 @@
 #include "aot.h"
 #include "aot_smc.h"
 #include "aot_page.h"
-#include "latx-options.h"
 #endif
 #include <sys/resource.h>
 
@@ -280,6 +280,12 @@ static int target_mprotect_internal(abi_ulong start, abi_ulong len,
     }
 
     page_set_flags_tb_reload(start, start + len, page_flags, true);
+
+#if defined(CONFIG_LATX) && defined(TARGET_I386) && TARGET_ABI_BITS == 32
+    if (option_minke_16k_page_check && (target_prot & PROT_EXEC)) {
+        latx_minke_register_16k_tb_range(start, start + len);
+    }
+#endif
 
     if (target_prot == PROT_NONE) {
 #ifdef CONFIG_LATX_AOT
@@ -1163,6 +1169,11 @@ abi_long target_mmap(abi_ulong start, abi_ulong len, int target_prot,
     if (fd > 2 && (target_prot & PROT_EXEC)) {
         ht_pc_thunk_invalidate(start, start + len);
     }
+#if TARGET_ABI_BITS == 32
+    if (option_minke_16k_page_check && (target_prot & PROT_EXEC)) {
+        latx_minke_register_16k_tb_range(start, start + len);
+    }
+#endif
 #endif
 #endif
 
