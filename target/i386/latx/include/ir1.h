@@ -95,6 +95,60 @@ typedef dt_x86_insn_group IR1_OPCODE_TYPE;
 
 #define MAX_IR1_NUM_PER_TB TCG_MAX_INSNS
 
+#ifdef CONFIG_LATX_INSTS_PATTERN
+/*
+ * Pattern opcodes identify the translation selected for an IR1 instruction.
+ *
+ * Keep the legacy numeric values stable: some debug and AOT paths retain IR1
+ * metadata while a TB is being processed.  These values are identifiers, not
+ * option bits.  New opcodes may be allocated sequentially starting at
+ * INSTPTN_OPC_EXTENSION_BASE instead of consuming another power of two.
+ */
+typedef enum InstPtnOpcode {
+    INSTPTN_OPC_NONE        = 0x000000,
+    INSTPTN_OPC_NOP         = 0x000001,
+    INSTPTN_OPC_NOP_DIV     = 0x000002,
+    INSTPTN_OPC_CMP_JCC     = 0x000010,
+    INSTPTN_OPC_TEST_JCC    = 0x000020,
+    INSTPTN_OPC_BT_JCC      = 0x000040,
+    INSTPTN_OPC_CQO_IDIV    = 0x000080,
+    INSTPTN_OPC_CMP_SBB     = 0x000100,
+    INSTPTN_OPC_COMISD_JCC  = 0x000200,
+    INSTPTN_OPC_COMISS_JCC  = 0x000400,
+    INSTPTN_OPC_UCOMISD_JCC = 0x000800,
+    INSTPTN_OPC_UCOMISS_JCC = 0x001000,
+    INSTPTN_OPC_XOR_DIV     = 0x002000,
+    INSTPTN_OPC_CDQ_IDIV    = 0x004000,
+
+    INSTPTN_OPC_CMP_XX_JCC     = 0x008000,
+    INSTPTN_OPC_TEST_XX_JCC    = 0x010000,
+    INSTPTN_OPC_BT_XX_JCC      = 0x020000,
+    INSTPTN_OPC_COMISD_XX_JCC  = 0x040000,
+    INSTPTN_OPC_COMISS_XX_JCC  = 0x080000,
+    INSTPTN_OPC_UCOMISD_XX_JCC = 0x100000,
+    INSTPTN_OPC_UCOMISS_XX_JCC = 0x200000,
+
+    INSTPTN_OPC_CMP_XXCC       = 0x400000,
+    INSTPTN_OPC_TEST_XXCC      = 0x800000,
+
+    INSTPTN_OPC_UCOMISD_SETA   = 0x1000000,
+    INSTPTN_OPC_SUB_JCC        = 0x2000000,
+    INSTPTN_OPC_MOVAPS_VST_X4  = 0x4000000,
+    INSTPTN_OPC_NEG_CMOVCC     = 0x8000000,
+    INSTPTN_OPC_SHR_JCC        = 0x10000000,
+    INSTPTN_OPC_AND_JCC        = 0x20000000,
+
+    INSTPTN_OPC_EXTENSION_BASE = 0x20000001,
+    INSTPTN_OPC_ADD_JCC        = INSTPTN_OPC_EXTENSION_BASE,
+    INSTPTN_OPC_SAR_JCC,
+    INSTPTN_OPC_SHR_JE,
+    INSTPTN_OPC_OR_JCC,
+    INSTPTN_OPC_OR_XX_JCC,
+    INSTPTN_OPC_XOR_JCC,
+    INSTPTN_OPC_DEC_JCC,
+} InstPtnOpcode;
+#endif
+
 typedef struct IR1_INST {
     struct la_dt_insn *info;
     /**
@@ -142,7 +196,7 @@ typedef struct IR1_INST {
 #endif
 #ifdef CONFIG_LATX_INSTS_PATTERN
     struct {
-        int opc;
+        InstPtnOpcode opc;
         struct IR1_INST * next; /* index of IR1 list */
     } instptn;
 #endif

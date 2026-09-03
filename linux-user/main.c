@@ -58,6 +58,9 @@ int mydebug = 1;
 #include "latx-options.h"
 #include "latx-runtime.h"
 #include "aot.h"
+#ifdef CONFIG_LATX_INSTS_PATTERN
+#include "insts-pattern.h"
+#endif
 #include <openssl/evp.h>
 #endif
 #ifdef CONFIG_LATX_PERF
@@ -227,6 +230,13 @@ void fork_end(int child)
     path_fork_end(child);
     fd_trans_fork_end();
     if (child) {
+#ifdef CONFIG_LATX_INSTS_PATTERN
+        /*
+         * Statistics describe translations performed by this host process.
+         * Do not let the child report the parent's pre-fork history.
+         */
+        instptn_stats_reset();
+#endif
         CPUState *cpu, *next_cpu;
         /* Child processes created by fork() only have a single thread.
            Discard information about the parent threads.  */
@@ -630,6 +640,18 @@ static void handle_arg_optimize(const char *arg)
     options_parse_opt(arg);
 }
 
+#ifdef CONFIG_LATX_INSTS_PATTERN
+static void handle_arg_latx_instptn_mask(const char *arg)
+{
+    options_parse_instptn_mask(arg);
+}
+
+static void handle_arg_latx_instptn_stats(const char *arg)
+{
+    options_parse_instptn_stats(arg);
+}
+#endif
+
 static void handle_arg_latx_vpaes(const char *arg)
 {
     option_vpaes = strtol(arg, NULL, 0);
@@ -904,6 +926,14 @@ static const struct qemu_argument arg_table[] = {
 #ifdef CONFIG_LATX
     {"latx-optimize",   "LATX_OPTIMIZE",      false, handle_arg_optimize,
     "",           "specify enabled optimize type"},
+#ifdef CONFIG_LATX_INSTS_PATTERN
+    {"latx-instptn-mask", "LATX_INSTPTN_MASK", true,
+    handle_arg_latx_instptn_mask, "mask",
+    "set the 64-bit instruction pattern option mask"},
+    {"latx-instptn-stats", "LATX_INSTPTN_STATS", true,
+    handle_arg_latx_instptn_stats, "0|1",
+    "dump instruction pattern counters at process exit"},
+#endif
     {"latx-vpaes",      "LATX_VPAES",         true,  handle_arg_latx_vpaes,
     "",           "enable vpaes AES translation"},
     {"latx-smc",        "LATX_SMC",         true,   handle_arg_latx_smc,
@@ -1449,6 +1479,11 @@ int main(int argc, char **argv, char **envp)
     options_set(target_argv);
 
     if (!latx_options_finalize()) {
+#if defined(CONFIG_LATX_INSTS_PATTERN)
+        if (option_instptn_mask_error || option_instptn_stats_error) {
+            return EXIT_FAILURE;
+        }
+#endif
 #if defined(CONFIG_LATX_KZT)
         error_report("invalid KZT configuration: %s; KZT disabled",
                      kzt_groups_last_error());

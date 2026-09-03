@@ -15,44 +15,120 @@
 #include "common.h"
 #include "ir1.h"
 #include "ir2.h"
+#include "latx-options.h"
 
 #define INSTPTN_BUF_SIZE 4
 
-#define INSTPTN_OPC_NONE        0x000000
-#define INSTPTN_OPC_NOP         0x000001
-#define INSTPTN_OPC_NOP_DIV     0x000002
-#define INSTPTN_OPC_CMP_JCC     0x000010
-#define INSTPTN_OPC_TEST_JCC    0x000020
-#define INSTPTN_OPC_BT_JCC      0x000040
-#define INSTPTN_OPC_CQO_IDIV    0x000080
-#define INSTPTN_OPC_CMP_SBB     0x000100
-#define INSTPTN_OPC_COMISD_JCC  0x000200
-#define INSTPTN_OPC_COMISS_JCC  0x000400
-#define INSTPTN_OPC_UCOMISD_JCC 0x000800
-#define INSTPTN_OPC_UCOMISS_JCC 0x001000
-#define INSTPTN_OPC_XOR_DIV     0x002000
-#define INSTPTN_OPC_CDQ_IDIV    0x004000
+/*
+ * Options are indexed independently from InstPtnOpcode.  Preserve the first
+ * 26 indices so the default mask remains bit-for-bit compatible with the old
+ * (INSTPTN_OPC_* >> 4) encoding.
+ */
+typedef enum InstPtnOption {
+    INSTPTN_OPT_CMP_JCC,
+    INSTPTN_OPT_TEST_JCC,
+    INSTPTN_OPT_BT_JCC,
+    INSTPTN_OPT_CQO_IDIV,
+    INSTPTN_OPT_CMP_SBB,
+    INSTPTN_OPT_COMISD_JCC,
+    INSTPTN_OPT_COMISS_JCC,
+    INSTPTN_OPT_UCOMISD_JCC,
+    INSTPTN_OPT_UCOMISS_JCC,
+    INSTPTN_OPT_XOR_DIV,
+    INSTPTN_OPT_CDQ_IDIV,
+    INSTPTN_OPT_CMP_XX_JCC,
+    INSTPTN_OPT_TEST_XX_JCC,
+    INSTPTN_OPT_BT_XX_JCC,
+    INSTPTN_OPT_COMISD_XX_JCC,
+    INSTPTN_OPT_COMISS_XX_JCC,
+    INSTPTN_OPT_UCOMISD_XX_JCC,
+    INSTPTN_OPT_UCOMISS_XX_JCC,
+    INSTPTN_OPT_CMP_XXCC,
+    INSTPTN_OPT_TEST_XXCC,
+    INSTPTN_OPT_UCOMISD_SETA,
+    INSTPTN_OPT_SUB_JCC,
+    INSTPTN_OPT_MOVAPS_VST_X4,
+    INSTPTN_OPT_NEG_CMOVCC,
+    INSTPTN_OPT_SHR_JCC,
+    INSTPTN_OPT_AND_JCC,
 
-#define INSTPTN_OPC_CMP_XX_JCC     0x008000
-#define INSTPTN_OPC_TEST_XX_JCC    0x010000
-#define INSTPTN_OPC_BT_XX_JCC      0x020000
-#define INSTPTN_OPC_COMISD_XX_JCC  0x040000
-#define INSTPTN_OPC_COMISS_XX_JCC  0x080000
-#define INSTPTN_OPC_UCOMISD_XX_JCC 0x100000
-#define INSTPTN_OPC_UCOMISS_XX_JCC 0x200000
+    /* Reserved for PERF-001 through PERF-006 and PERF-009. */
+    INSTPTN_OPT_ADD_JCC,
+    INSTPTN_OPT_OR_JCC,
+    INSTPTN_OPT_XOR_JCC,
+    INSTPTN_OPT_SAR_JCC,
+    INSTPTN_OPT_DEC_JCC,
+    INSTPTN_OPT_CMP_JS_JNS,
+    INSTPTN_OPT_SUB_JS_JNS,
+    INSTPTN_OPT_AND_JE,
+    INSTPTN_OPT_SHR_JE,
+    INSTPTN_OPT_OR_XX_JCC,
 
-#define INSTPTN_OPC_CMP_XXCC    0x400000
-#define INSTPTN_OPC_TEST_XXCC   0x800000
+    INSTPTN_OPT_COUNT,
+} InstPtnOption;
 
-#define INSTPTN_OPC_UCOMISD_SETA   0x1000000
-#define INSTPTN_OPC_SUB_JCC        0x2000000
-#define INSTPTN_OPC_MOVAPS_VST_X4  0x4000000
-#define INSTPTN_OPC_NEG_CMOVCC     0x8000000
+#define INSTPTN_OPT_FIRST_RESERVED INSTPTN_OPT_ADD_JCC
+#define INSTPTN_OPTION_BIT(opt) (UINT64_C(1) << (opt))
+#define INSTPTN_DEFAULT_OPTIONS \
+    (INSTPTN_OPTION_BIT(INSTPTN_OPT_FIRST_RESERVED) - UINT64_C(1))
+#define INSTPTN_ALL_OPTIONS \
+    (INSTPTN_OPTION_BIT(INSTPTN_OPT_COUNT) - UINT64_C(1))
 
-#define INSTPTN_OPC_SHR_JCC        0x10000000
-#define INSTPTN_OPC_AND_JCC        0x20000000
+_Static_assert(INSTPTN_OPT_COUNT < 64,
+               "instruction pattern option mask exceeds uint64_t");
+_Static_assert(INSTPTN_DEFAULT_OPTIONS == UINT64_C(0x3ffffff),
+               "legacy instruction pattern default mask changed");
+
+typedef enum InstPtnRejectReason {
+    /* Existing scanners report a reason only after identifying an option. */
+    INSTPTN_REJECT_DISABLED,
+    INSTPTN_REJECT_NON_ADJACENT,
+    INSTPTN_REJECT_UNSUPPORTED_CC,
+    INSTPTN_REJECT_UNSUPPORTED_OPERAND,
+    INSTPTN_REJECT_ZERO_SHIFT_COUNT,
+    /* Used by later patterns when these conditions reject a known option. */
+    INSTPTN_REJECT_FLAGS_LIVE,
+    INSTPTN_REJECT_CLOBBER,
+    INSTPTN_REJECT_FAULT_OR_HELPER,
+    INSTPTN_REJECT_TEMP_LIFETIME,
+    INSTPTN_REJECT_OTHER,
+    INSTPTN_REJECT_COUNT,
+} InstPtnRejectReason;
+
+typedef struct InstPtnStats {
+    uint64_t matches;
+    uint64_t rejects[INSTPTN_REJECT_COUNT];
+    uint64_t eflags_eliminations;
+    uint64_t eflags_fallbacks;
+    uint64_t ir2_emitted;
+    uint64_t host_emitted;
+} InstPtnStats;
 
 typedef int scan_elem_t;
+
+#ifdef CONFIG_LATX_INSTS_PATTERN
+
+extern InstPtnStats instptn_stats[INSTPTN_OPT_COUNT];
+
+static inline bool instptn_option_enabled(InstPtnOption option)
+{
+    return option >= 0 && option < INSTPTN_OPT_COUNT &&
+           (option_instptn & INSTPTN_OPTION_BIT(option));
+}
+
+void instptn_stats_reset(void);
+void instptn_stats_dump(void);
+void instptn_stats_record_match_opcode(InstPtnOpcode opcode);
+void instptn_stats_record_reject(InstPtnOption option,
+                                 InstPtnRejectReason reason);
+void instptn_stats_record_eflags_eliminated(InstPtnOption option);
+void instptn_stats_record_eflags_fallback(InstPtnOption option);
+void instptn_stats_record_eflags_fallback_opcode(InstPtnOpcode opcode);
+void instptn_stats_record_codegen_opcode(InstPtnOpcode opcode,
+                                         uint64_t ir2_emitted,
+                                         uint64_t host_emitted);
+
+#endif
 
 void insts_pattern_scan_con(TranslationBlock *tb, IR1_INST *ir1, int index, scan_elem_t *scan_buf);
 bool insts_pattern_scan_jcc_end(TranslationBlock *tb, IR1_INST *ir1, int index, scan_elem_t *scan_buf);
@@ -67,8 +143,15 @@ bool insts_pattern_scan_jcc_end(TranslationBlock *tb, IR1_INST *ir1, int index, 
         do { \
             if (option_instptn) { \
                 insts_pattern_scan_con(tb, inst, index, _prex##_scaned_cond); \
-                if (scan_head)  \
+                if (scan_head) { \
+                    InstPtnOpcode _opc_before = (inst)->instptn.opc; \
                     scan_head = insts_pattern_scan_jcc_end(tb, inst, index, _prex##_scaned_jcc_end); \
+                    if (_opc_before == INSTPTN_OPC_NONE && \
+                        (inst)->instptn.opc != INSTPTN_OPC_NONE) { \
+                        instptn_stats_record_match_opcode( \
+                            (inst)->instptn.opc); \
+                    } \
+                } \
             } \
         } while (0)
 
@@ -91,7 +174,11 @@ bool insts_pattern_scan_jcc_end(TranslationBlock *tb, IR1_INST *ir1, int index, 
 } while (0)
 
 #define INSTPTN_CHECK_XX_0(OPC) do {   \
-    if (!(option_instptn & (INSTPTN_OPC_##OPC >> 4))) return 0;      \
+    if (!instptn_option_enabled(INSTPTN_OPT_##OPC)) { \
+        instptn_stats_record_reject(INSTPTN_OPT_##OPC, \
+                                    INSTPTN_REJECT_DISABLED); \
+        return 0; \
+    } \
 } while (0)
 
 #define instptn_check_cmp_jcc_0() INSTPTN_CHECK_XX_0(CMP_JCC)
@@ -124,7 +211,14 @@ bool insts_pattern_scan_jcc_end(TranslationBlock *tb, IR1_INST *ir1, int index, 
 #define instptn_check_neg_cmovcc_0() INSTPTN_CHECK_XX_0(NEG_CMOVCC)
 
 #define instptn_check_shr_jcc_0() INSTPTN_CHECK_XX_0(SHR_JCC)
+#define instptn_check_sar_jcc_0() INSTPTN_CHECK_XX_0(SAR_JCC)
+#define instptn_check_shr_je_0() INSTPTN_CHECK_XX_0(SHR_JE)
 #define instptn_check_and_jcc_0() INSTPTN_CHECK_XX_0(AND_JCC)
+#define instptn_check_add_jcc_0() INSTPTN_CHECK_XX_0(ADD_JCC)
+#define instptn_check_or_jcc_0() INSTPTN_CHECK_XX_0(OR_JCC)
+#define instptn_check_xor_jcc_0() INSTPTN_CHECK_XX_0(XOR_JCC)
+#define instptn_check_dec_jcc_0() INSTPTN_CHECK_XX_0(DEC_JCC)
+#define instptn_check_or_xx_jcc_0() INSTPTN_CHECK_XX_0(OR_XX_JCC)
 #else
 #define instptn_check_void(option)
 #define instptn_check_false(option)
@@ -158,7 +252,14 @@ bool insts_pattern_scan_jcc_end(TranslationBlock *tb, IR1_INST *ir1, int index, 
 #define instptn_check_neg_cmovcc_0()
 
 #define instptn_check_shr_jcc_0()
+#define instptn_check_sar_jcc_0()
+#define instptn_check_shr_je_0()
 #define instptn_check_and_jcc_0()
+#define instptn_check_add_jcc_0()
+#define instptn_check_or_jcc_0()
+#define instptn_check_xor_jcc_0()
+#define instptn_check_dec_jcc_0()
+#define instptn_check_or_xx_jcc_0()
 #endif
 
 bool try_translate_instptn(IR1_INST *pir1);

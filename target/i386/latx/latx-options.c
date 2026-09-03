@@ -56,7 +56,10 @@ int option_tunnel_lib;
 #endif
 
 #ifdef CONFIG_LATX_INSTS_PATTERN
-int option_instptn = 0x3ffffff;
+uint64_t option_instptn = INSTPTN_DEFAULT_OPTIONS;
+int option_instptn_stats;
+char *option_instptn_mask_error;
+char *option_instptn_stats_error;
 #endif
 
 int close_latx_parallel;
@@ -243,6 +246,14 @@ void options_init(void)
     counter_ir1_tr = 0;
     counter_mips_tr = 0;
 
+#ifdef CONFIG_LATX_INSTS_PATTERN
+    option_instptn = INSTPTN_DEFAULT_OPTIONS;
+    option_instptn_stats = 0;
+    g_clear_pointer(&option_instptn_mask_error, g_free);
+    g_clear_pointer(&option_instptn_stats_error, g_free);
+    instptn_stats_reset();
+#endif
+
 #ifdef CONFIG_LATX_AVX_OPT
     option_avx_cpuid = 1;
 #endif /*CONFIG_LATX_AVX_OPT*/
@@ -289,6 +300,11 @@ void options_init(void)
 
 bool latx_options_finalize(void)
 {
+#ifdef CONFIG_LATX_INSTS_PATTERN
+    if (option_instptn_mask_error || option_instptn_stats_error) {
+        return false;
+    }
+#endif
 #if defined(CONFIG_LATX_KZT)
     if (option_kzt_log_error) {
         kzt_groups_reject_configuration(option_kzt_log_error, true);
@@ -313,6 +329,41 @@ bool latx_options_finalize(void)
 #endif
     return true;
 }
+
+#ifdef CONFIG_LATX_INSTS_PATTERN
+void options_parse_instptn_mask(const char *arg)
+{
+    uint64_t mask;
+
+    g_clear_pointer(&option_instptn_mask_error, g_free);
+    if (!arg || qemu_strtou64(arg, NULL, 0, &mask) ||
+        (mask & ~INSTPTN_ALL_OPTIONS)) {
+        option_instptn_mask_error = g_strdup_printf(
+            "LATX_INSTPTN_MASK must be a valid instruction "
+            "pattern mask (got '%s')", arg ? arg : "");
+        error_report("%s", option_instptn_mask_error);
+        return;
+    }
+    option_instptn = mask;
+}
+
+void options_parse_instptn_stats(const char *arg)
+{
+    int enabled;
+
+    g_clear_pointer(&option_instptn_stats_error, g_free);
+    if (!arg || qemu_strtoi(arg, NULL, 0, &enabled) ||
+        (enabled != 0 && enabled != 1)) {
+        option_instptn_stats_error = g_strdup_printf(
+            "LATX_INSTPTN_STATS must be exactly 0 or 1 (got '%s')",
+            arg ? arg : "");
+        error_report("%s", option_instptn_stats_error);
+        return;
+    }
+
+    option_instptn_stats = enabled;
+}
+#endif
 
 #define OPTIONS_IMM_REG 0
 #define OPTIONS_IMM_RIP 1
