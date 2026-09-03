@@ -10,6 +10,7 @@
  * @brief AOT optimization
  */
 #include "aot_merge.h"
+#include "aot_static_layout.h"
 #include "latx-options.h"
 #include "file_ctx.h"
 
@@ -464,6 +465,10 @@ static bool merge_aot_generate(void)
     char *curr_name = aot_x86_lib_names;
     uint8_t aot_file_type = get_file_type(merge_seg_info_vector[0]->file_name);
     p_header->aot_file_type = aot_file_type;
+    p_header->layout_line_log2 = 0;
+    p_header->layout_set_log2 = 0;
+    p_header->layout_ways = 0;
+    p_header->layout_magic = 0;
     int page_index = 0;
     for (int i = 0; i < seg_info_num; i++) {
         seg_info *curr_seg_info = merge_seg_info_vector[i]->s_info;
@@ -490,6 +495,8 @@ static bool merge_aot_generate(void)
         p_segments[i].lib_name_offset =
             (uintptr_t)last_name - (uintptr_t)p_header;
         p_segments[i].segment_tbs_num = 0;
+        p_segments[i].layout_padding_budget[0] = 0;
+        p_segments[i].layout_padding_budget[1] = 0;
         p_segments[i].page_table_offset = 
             (uintptr_t)(aot_page_table + page_index) - (uintptr_t)p_header;
         page_index += (curr_seg_info->seg_end - curr_seg_info->seg_begin
@@ -563,6 +570,9 @@ static bool merge_aot_generate(void)
     assert((void *)curr_insn - (void *)insn_buffer == total_code_cache_size);
     if (total_code_cache_size == 0) {
         goto out;
+    }
+    if (option_aot_static_layout) {
+        aot_static_layout_store_header(p_header, p_segments);
     }
     /* Write file metadata infomation(aot_buffer) into aot. */
 

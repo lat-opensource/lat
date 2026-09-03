@@ -68,6 +68,7 @@ extern int option_tunnel_lib;
 extern uint64_t option_end_trace_addr;
 extern uint64_t option_begin_trace_addr;
 extern int option_aot;
+extern int option_aot_static_layout;
 extern int option_smc_reload;
 extern int option_aot_wine;
 extern int option_load_aot;
@@ -192,6 +193,7 @@ extern unsigned long long counter_mips_tr;
 #if defined(CONFIG_LATX) && defined(CONFIG_LATX_AOT)
 #define ENVSUP_AOT \
     ENVFUN(LATX_AOT, handle_arg_latx_aot) \
+    ENVFUN(LATX_AOT_STATIC_LAYOUT, handle_arg_latx_aot_static_layout) \
     ENVFUN(LAT_AOT_FILE_SIZE, handle_arg_lat_aot_file_size) \
     ENVFUN(LAT_AOT_LEFT_FILE_SIZE, handle_arg_lat_aot_left_file_size) \
     ENVFUN(LATX_AOT_WINE_PEFILES_CACHE, handle_arg_latx_aot_wine_pefiles_cache)
