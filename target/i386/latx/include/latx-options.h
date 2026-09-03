@@ -68,6 +68,8 @@ extern int option_tunnel_lib;
 extern uint64_t option_end_trace_addr;
 extern uint64_t option_begin_trace_addr;
 extern int option_aot;
+/* -1 selects automatic generation, 0 disables it, 1 forces it. */
+extern int option_aot_generate;
 extern int option_smc_reload;
 extern int option_aot_wine;
 extern int option_load_aot;
