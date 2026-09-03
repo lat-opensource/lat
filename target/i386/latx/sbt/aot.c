@@ -1310,6 +1310,7 @@ void aot_do_tb_reloc(TranslationBlock *tb, struct aot_tb *stb,
     uintptr_t helper_address;
     int lib_method_index;
     ADDR loacl_indirect_jmp_glue = indirect_jmp_glue;
+    ADDR local_shadow_jmp_glue = shadow_jmp_glue;
 
     aot_rel_table = aot_buffer +
         ((aot_header *)aot_buffer)->rel_table_offset;
@@ -1375,6 +1376,13 @@ void aot_do_tb_reloc(TranslationBlock *tb, struct aot_tb *stb,
             (*(pinsn + 1) & 0xfc000000) == 0x4c000000));
             light_tb_target_set_jmp_target((uintptr_t)tb->tc.ptr,
             (uintptr_t)pinsn, (uintptr_t)pinsn, loacl_indirect_jmp_glue);
+            break;
+        case B_SHADOW_JMP_GLUE:
+            lsassert(((*pinsn) & 0xfc000000) == 0x50000000 ||
+            (((*pinsn) & 0xfe000000) == 0x1e000000 &&
+            (*(pinsn + 1) & 0xfc000000) == 0x4c000000));
+            light_tb_target_set_jmp_target((uintptr_t)tb->tc.ptr,
+            (uintptr_t)pinsn, (uintptr_t)pinsn, local_shadow_jmp_glue);
             break;
         case LOAD_TB_ADDR:
             lsassert(aot_rel_table[i].rel_slots_num == 3);

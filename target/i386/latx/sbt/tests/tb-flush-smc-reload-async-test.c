@@ -97,6 +97,10 @@ void latx_fast_jmp_cache_clear_all(CPUState *cpu G_GNUC_UNUSED)
 {
 }
 
+void latx_shadow_jmp_cache_clear_all(void)
+{
+}
+
 static SMCReloadInfo *new_reload_node(target_ulong page_addr)
 {
     SMCReloadInfo *node = g_new0(SMCReloadInfo, 1);
@@ -116,22 +120,22 @@ static void run_queued_flush(CPUState *cpu)
 
 int main(void)
 {
-    CPUState cpu = { 0 };
+    g_autofree CPUState *cpu = g_new0(CPUState, 1);
 
     option_smc_reload = true;
     tb_ctx.tb_flush_count = 1;
 
-    tb_flush(&cpu);
+    tb_flush(cpu);
     g_assert(queued_func != NULL);
     smc_reload_tree_insert(new_reload_node(0x1000));
-    run_queued_flush(&cpu);
+    run_queued_flush(cpu);
     g_assert(smc_reload_tree_get_node_count() == 0);
 
     smc_reload_tree_insert(new_reload_node(0x2000));
-    tb_flush(&cpu);
+    tb_flush(cpu);
     g_assert(queued_func != NULL);
     tb_ctx.tb_flush_count++;
-    run_queued_flush(&cpu);
+    run_queued_flush(cpu);
     g_assert(smc_reload_tree_get_node_count() == 1);
     smc_reload_tree_clear();
     return 0;

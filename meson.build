@@ -676,6 +676,23 @@ foreach target : target_dirs
       suite: 'lat-pr-fast',
     )
 
+    shadow_jmp_cache_test = executable(
+      'test-latx-shadow-jmp-cache',
+      files(
+        'target/i386/latx/sbt/tests/shadow-jmp-cache-test.c',
+        'target/i386/latx/shadow-jmp-cache.c'
+      ) + genh + tcg_trace_genh + [syscall_nr_generated],
+      c_args: smc_reload_test_c_args + ['-DLATX_SHADOW_JMP_BITS=3'],
+      dependencies: [glib],
+      include_directories: target_inc,
+      link_args: smc_reload_test_link_args
+    )
+    test(
+      'latx-shadow-jmp-cache',
+      shadow_jmp_cache_test,
+      suite: 'lat-pr-fast',
+    )
+
     aot_file_publish_test = executable(
       'test-latx-aot-file-publish',
       files(

@@ -83,6 +83,7 @@ void *interpret_glue;
 ADDR native_rotate_fpu_by; /* native_rotate_fpu_by(step, return_address) */
 ADDR indirect_jmp_glue;
 ADDR parallel_indirect_jmp_glue;
+ADDR shadow_jmp_glue;
 
 #ifndef TARGET_X86_64
 int GPR_USEDEF_TO_SAVE = 0x7;
@@ -2649,7 +2650,9 @@ int tr_translate_tb(struct TranslationBlock *tb)
  * ra_alloc_dbt_arg2: next x86 ip
  */
 
-static void generate_indirect_goto(void *code_buf)
+static void generate_indirect_goto(void *code_buf, ADDR miss_target,
+                                   enum aot_rel_kind miss_rel_kind,
+                                   TranslationBlock *source_tb)
 {
     /*
      * WARNING!!!
@@ -2668,16 +2671,14 @@ static void generate_indirect_goto(void *code_buf)
     IR2_OPND next_tb = V0_RENAME_OPND;
     /*
      * lookup HASH_JMP_CACHE
-     * Step 1: calculate HASH = (x86_addr >> 12) ^ (x86_addr & 0xfff)
+     * Step 1: calculate HASH from the low address bits
      * Step 2: load &HASH_JMP_CACHE[0]
      * Step 3: load tb = HASH_JMP_CACHE[HASH]
      * Step 4: if (tb == 0) {goto labal_miss}
      * Step 5: if (tb.pc == x86_addr) {goto fpu_rotate}
      *         else {goto labal_miss}
      */
-    la_srli_d(next_tb, next_x86_addr, TB_JMP_CACHE_BITS);
-    la_xor(next_tb, next_x86_addr, next_tb);
-    la_bstrpick_d(next_tb, next_tb, TB_JMP_CACHE_BITS - 1, 0);
+    la_bstrpick_d(next_tb, next_x86_addr, TB_JMP_CACHE_BITS - 1, 0);
 
 #ifdef CONFIG_LATX_FAST_JMPCACHE
 #ifdef CONFIG_LATX_GLUE_MASK
@@ -2752,8 +2753,11 @@ static void generate_indirect_goto(void *code_buf)
         la_label(label_skip);
     }
 #endif
-    la_data_li(target, context_switch_native_to_bt_ret_0);
-    aot_la_append_ir2_jmp_far(target, base, B_EPILOGUE_RET_0, 0);
+    if (source_tb) {
+        aot_load_host_addr(V0_RENAME_OPND, (ADDR)source_tb, LOAD_TB_ADDR, 0);
+    }
+    la_data_li(target, miss_target);
+    aot_la_append_ir2_jmp_far(target, base, miss_rel_kind, 0);
 
     return;
 }
@@ -3012,7 +3016,8 @@ indirect_jmp:
             IR2_OPND old_jmp_label = ra_alloc_label();
             la_label(old_jmp_label);
             tb->jmp_indirect = ir2_opnd_label_id(&old_jmp_label);
-            generate_indirect_goto((void *)tb->tc.ptr);
+            generate_indirect_goto((void *)tb->tc.ptr, shadow_jmp_glue,
+                                   B_SHADOW_JMP_GLUE, tb);
         } else {
             la_data_li(target, context_switch_native_to_bt_ret_0);
             aot_la_append_ir2_jmp_far(target, base, B_EPILOGUE_RET_0, 0);
@@ -3161,7 +3166,80 @@ static int generate_indirect_jmp_glue(void *code_buf)
     int ins_num;
     tr_init(NULL);
 
-    generate_indirect_goto(code_buf);
+    generate_indirect_goto(code_buf, context_switch_native_to_bt_ret_0,
+                           B_EPILOGUE_RET_0, NULL);
+
+    TRANSLATION_DATA *lat_ctx = lsenv->tr_data;
+    label_dispose(NULL, lat_ctx);
+    ins_num = tr_ir2_assemble(code_buf, lat_ctx->first_ir2) + 1;
+    tr_fini(false);
+
+    return ins_num;
+}
+
+static int generate_shadow_jmp_glue(void *code_buf)
+{
+    int ins_num;
+    tr_init(NULL);
+    IR2_OPND current_tb = V0_RENAME_OPND;
+    IR2_OPND next_x86_addr = ra_alloc_dbt_arg2();
+    IR2_OPND jmp_cache_addr = ra_alloc_static0();
+    IR2_OPND index = ra_alloc_itemp();
+    IR2_OPND first_index = ra_alloc_itemp();
+    IR2_OPND base = ra_alloc_itemp();
+    IR2_OPND entry = ra_alloc_itemp();
+    IR2_OPND native_target = ra_alloc_itemp();
+    IR2_OPND desired = ra_alloc_itemp();
+    IR2_OPND exit_target = ra_alloc_data();
+    IR2_OPND code_base = ra_alloc_data();
+    IR2_OPND label_loop = ra_alloc_label();
+    IR2_OPND label_next = ra_alloc_label();
+    IR2_OPND label_miss = ra_alloc_label();
+
+    li_d(base, (ADDR)latx_shadow_jmp_entries);
+    li_d(native_target, LATX_SHADOW_JMP_HASH_MULT);
+    la_mul_d(index, next_x86_addr, native_target);
+    la_srli_d(index, index, 64 - LATX_SHADOW_JMP_BITS);
+    la_or(first_index, index, zero_ir2_opnd);
+
+    la_label(label_loop);
+    la_alsl_d(entry, index, base, 2);
+    la_ld_d(native_target, entry, offsetof(LatxShadowJmpEntry, tb));
+    la_beq(native_target, zero_ir2_opnd, label_miss);
+    la_addi_d(entry, native_target, -1);
+    la_beq(entry, zero_ir2_opnd, label_next);
+    la_ld_d(entry, native_target, offsetof(TranslationBlock, pc));
+    la_bne(entry, next_x86_addr, label_next);
+    /*
+     * An indirect branch normally preserves the translation mode.  If it
+     * changes flags or cflags, rejecting the candidate is conservative and
+     * lets the regular dispatcher calculate the exact next-TB key.
+     */
+    la_ld_wu(desired, current_tb, offsetof(TranslationBlock, flags));
+    la_ld_wu(entry, native_target, offsetof(TranslationBlock, flags));
+    la_bne(entry, desired, label_next);
+    la_ld_wu(desired, current_tb, offsetof(TranslationBlock, cflags));
+    la_ld_wu(entry, native_target, offsetof(TranslationBlock, cflags));
+    la_bne(entry, desired, label_next);
+    la_ld_d(native_target, native_target,
+            offsetof(TranslationBlock, tc) + offsetof(struct tb_tc, ptr));
+    /* Promote an FSHT hit so repeated jumps use the primary FastTB path. */
+    la_bstrpick_d(entry, next_x86_addr, TB_JMP_CACHE_BITS - 1, 0);
+    la_alsl_d(entry, entry, jmp_cache_addr, 3);
+    la_st_d(native_target, entry, offsetof(FastTB, ptr));
+    la_st_d(next_x86_addr, entry, offsetof(FastTB, pc));
+    la_jirl(zero_ir2_opnd, native_target, 0);
+
+    la_label(label_next);
+    la_addi_d(index, index, 1);
+    la_bstrpick_d(index, index, LATX_SHADOW_JMP_BITS - 1, 0);
+    la_beq(index, first_index, label_miss);
+    la_b(label_loop);
+
+    la_label(label_miss);
+    la_data_li(code_base, (ADDR)code_buf);
+    la_data_li(exit_target, context_switch_native_to_bt_ret_0);
+    aot_la_append_ir2_jmp_far(exit_target, code_base, B_EPILOGUE_RET_0, 0);
 
     TRANSLATION_DATA *lat_ctx = lsenv->tr_data;
     label_dispose(NULL, lat_ctx);
@@ -3389,6 +3467,15 @@ int generate_native_rotate_fpu_by(void *code_buf_addr)
     if (option_dump)
         qemu_log("[glue] indirect jump dispatch at %p. size = %d\n",
                 code_buf, insts_num);
+    total_insts_num += insts_num;
+    code_buf += insts_num * 4;
+
+    shadow_jmp_glue = (ADDR)code_buf;
+    insts_num = generate_shadow_jmp_glue(code_buf);
+    if (option_dump) {
+        qemu_log("[glue] shadow jump dispatch at %p. size = %d\n",
+                 code_buf, insts_num);
+    }
     total_insts_num += insts_num;
     code_buf += insts_num * 4;
 
