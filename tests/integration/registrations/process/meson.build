@@ -47,6 +47,14 @@ if 'x86_64-linux-user' in target_dirs
       files('../../softfpu-helper-store-gpr-x86_64.S'),
     ],
   }]
+  latx_integration_tests += [{
+    'name': 'test-softfpu-shared-region-gpr-x86_64',
+    'runner': find_program('../../test-softfpu-shared-region-gpr-x86_64.sh'),
+    'args': [
+      emulators['latx-x86_64'],
+      files('../../softfpu-shared-region-gpr-x86_64.S'),
+    ],
+  }]
   if 'CONFIG_LATX_AVX_OPT' in config_host
     latx_integration_tests += [{
       'name': 'test-softfpu-xgetbv-gpr-x86_64',

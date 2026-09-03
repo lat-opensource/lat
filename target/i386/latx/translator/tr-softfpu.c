@@ -411,14 +411,25 @@ void gen_softfpu_helper_epilogue(IR1_INST *pir1)
 }
 
 __attribute__((unused))
+static void gen_softfpu_helper_call(IR2_OPND func_addr_opnd)
+{
+    save_imm_cache();
+    la_jirl(ra_ir2_opnd, func_addr_opnd, 0);
+    restore_imm_cache();
+
+    /* Helpers clobber the caller-saved host registers mapped to R8-R15. */
+    if (option_softfpu == 2) {
+        restore_gpr();
+    }
+}
+
+__attribute__((unused))
 static void gen_softfpu_helper1(ADDR func)
 {
     IR2_OPND func_addr_opnd = ra_alloc_dbt_arg2();
     li_d(func_addr_opnd, (ADDR)func);
     la_mov64(a0_ir2_opnd, env_ir2_opnd);
-    save_imm_cache();
-    la_jirl(ra_ir2_opnd, func_addr_opnd, 0);
-    restore_imm_cache();
+    gen_softfpu_helper_call(func_addr_opnd);
 }
 
 __attribute__((unused))
@@ -429,9 +440,7 @@ static void gen_softfpu_helper2i(ADDR func, int arg1)
     la_mov64(a0_ir2_opnd, env_ir2_opnd);
     li_d(a1_ir2_opnd, arg1);
     /* load func_addr and jmp */
-    save_imm_cache();
-    la_jirl(ra_ir2_opnd, func_addr_opnd, 0);
-    restore_imm_cache();
+    gen_softfpu_helper_call(func_addr_opnd);
 }
 
 __attribute__((unused))
@@ -442,9 +451,7 @@ static void gen_softfpu_helper2m_16s(ADDR func, IR2_OPND mem_opnd)
     la_mov64(a0_ir2_opnd, env_ir2_opnd);
     la_ld_h(a1_ir2_opnd, mem_opnd, 0);
     /* load func_addr and jmp */
-    save_imm_cache();
-    la_jirl(ra_ir2_opnd, func_addr_opnd, 0);
-    restore_imm_cache();
+    gen_softfpu_helper_call(func_addr_opnd);
 }
 
 __attribute__((unused))
@@ -455,9 +462,7 @@ static void gen_softfpu_helper2m_16u(ADDR func, IR2_OPND mem_opnd)
     la_mov64(a0_ir2_opnd, env_ir2_opnd);
     la_ld_hu(a1_ir2_opnd, mem_opnd, 0);
     /* load func_addr and jmp */
-    save_imm_cache();
-    la_jirl(ra_ir2_opnd, func_addr_opnd, 0);
-    restore_imm_cache();
+    gen_softfpu_helper_call(func_addr_opnd);
 }
 
 __attribute__((unused))
@@ -468,9 +473,7 @@ static void gen_softfpu_helper2m_32s(ADDR func, IR2_OPND mem_opnd)
     la_mov64(a0_ir2_opnd, env_ir2_opnd);
     la_ld_w(a1_ir2_opnd, mem_opnd, 0);
     /* load func_addr and jmp */
-    save_imm_cache();
-    la_jirl(ra_ir2_opnd, func_addr_opnd, 0);
-    restore_imm_cache();
+    gen_softfpu_helper_call(func_addr_opnd);
 }
 
 __attribute__((unused))
@@ -481,9 +484,7 @@ static void gen_softfpu_helper2m_32u(ADDR func, IR2_OPND mem_opnd)
     la_mov64(a0_ir2_opnd, env_ir2_opnd);
     la_ld_wu(a1_ir2_opnd, mem_opnd, 0);
     /* load func_addr and jmp */
-    save_imm_cache();
-    la_jirl(ra_ir2_opnd, func_addr_opnd, 0);
-    restore_imm_cache();
+    gen_softfpu_helper_call(func_addr_opnd);
 }
 
 __attribute__((unused))
@@ -494,9 +495,7 @@ static void gen_softfpu_helper2m_64(ADDR func, IR2_OPND mem_opnd)
     la_mov64(a0_ir2_opnd, env_ir2_opnd);
     la_ld_d(a1_ir2_opnd, mem_opnd, 0);
     /* load func_addr and jmp */
-    save_imm_cache();
-    la_jirl(ra_ir2_opnd, func_addr_opnd, 0);
-    restore_imm_cache();
+    gen_softfpu_helper_call(func_addr_opnd);
 }
 
 __attribute__((unused))
@@ -507,9 +506,7 @@ static void gen_softfpu_helper2m_ptr(ADDR func, IR2_OPND ptr)
     la_mov64(a0_ir2_opnd, env_ir2_opnd);
     la_mov64(a1_ir2_opnd, ptr);
     /* load func_addr and jmp */
-    save_imm_cache();
-    la_jirl(ra_ir2_opnd, func_addr_opnd, 0);
-    restore_imm_cache();
+    gen_softfpu_helper_call(func_addr_opnd);
 }
 
 __attribute__((unused))
@@ -522,9 +519,7 @@ static void gen_softfpu_helper3i(ADDR func, IR2_OPND arg1,
     la_mov64(a1_ir2_opnd, arg1);
     li_d(a2_ir2_opnd, arg2);
     /* load func_addr and jmp */
-    save_imm_cache();
-    la_jirl(ra_ir2_opnd, func_addr_opnd, 0);
-    restore_imm_cache();
+    gen_softfpu_helper_call(func_addr_opnd);
 }
 
 __attribute__((unused))
@@ -536,9 +531,7 @@ static void gen_softfpu_helper3_ll(ADDR func, IR2_OPND arg1, IR2_OPND arg2)
     la_mov64(a1_ir2_opnd, arg1);
     la_mov64(a2_ir2_opnd, arg2);
     /* load func_addr and jmp */
-    save_imm_cache();
-    la_jirl(ra_ir2_opnd, func_addr_opnd, 0);
-    restore_imm_cache();
+    gen_softfpu_helper_call(func_addr_opnd);
 }
 
 
