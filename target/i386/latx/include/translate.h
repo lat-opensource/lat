@@ -1606,6 +1606,7 @@ IR2_OPND convert_gpr_opnd(IR1_OPND *, EXTENSION_MODE);
 IR2_OPND load_freg128_from_ir1(IR1_OPND *);
 void load_imm_to_ir1_opnd_gpr(IR1_OPND *opnd0, uint64_t imm);
 IR2_OPND load_freg256_from_ir1(IR1_OPND *opnd1);
+void clear_xmm_high64(IR2_OPND opnd);
 void set_high128_xreg_to_zero(IR2_OPND opnd);
 IR2_OPND load_ymm_high128_shadow(int index);
 void store_ymm_high128_shadow(IR2_OPND src, int index);
