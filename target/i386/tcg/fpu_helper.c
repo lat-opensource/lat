@@ -3222,6 +3222,81 @@ void cpu_x86_xrstor(CPUX86State *env, target_ulong ptr)
 {
     do_xrstor(env, ptr, -1, 0);
 }
+
+#ifdef CONFIG_LATX
+void cpu_x86_canonicalize_latx_mmx_state(CPUX86State *env)
+{
+    int i;
+
+    if (env->mode_fpu) {
+        return;
+    }
+
+    env->fpstt = 0;
+    memset(env->fptags, 0, sizeof(env->fptags));
+    for (i = 0; i < 8; i++) {
+        CPU_LDoubleU reg = { .d = env->fpregs[i].d };
+
+        reg.l.upper = 0xffff;
+        env->fpregs[i].d = reg.d;
+    }
+}
+
+static bool latx_x87_state_is_mmx(const CPUX86State *env)
+{
+    int i;
+
+    /* MMX sets every x87 tag valid and every physical exponent to 0xffff. */
+    for (i = 0; i < 8; i++) {
+        CPU_LDoubleU reg = { .d = env->fpregs[i].d };
+
+        if (env->fptags[i] || reg.l.upper != 0xffff) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void cpu_x86_sync_latx_fcsr(CPUX86State *env)
+{
+    static const uint8_t rounding_map[4] = { 0, 3, 2, 1 };
+    static const uint8_t exception_map[5] = { 5, 4, 3, 2, 0 };
+    uint32_t fpuc = env->fpuc;
+    uint32_t fpus = env->fpus;
+    uint32_t rc = (fpuc & FPU_RC_MASK) >> FPU_RC_SHIFT;
+    uint32_t fcsr = rounding_map[rc] << 8;
+    int i;
+
+    /* Keep these exception mappings in sync with tr-fctrl.c. */
+    for (i = 0; i < 5; i++) {
+        uint32_t x87_mask = 1 << exception_map[i];
+
+        if ((!option_enable_fcsr_exc || i != 0) && !(fpuc & x87_mask)) {
+            fcsr |= 1 << i;
+        }
+        if (fpus & x87_mask) {
+            fcsr |= 1 << (16 + i);
+        }
+    }
+
+    env->fcsr = fcsr;
+}
+
+void cpu_x86_sync_latx_fpu_mode(CPUX86State *env)
+{
+    env->mode_fpu = !latx_x87_state_is_mmx(env);
+}
+#endif
+
+void cpu_x86_init_user_x87(CPUX86State *env)
+{
+    do_fninit(env);
+
+#ifdef CONFIG_LATX
+    env->fcsr = 0;
+    env->mode_fpu = 1;
+#endif
+}
 #endif
 
 uint64_t helper_xgetbv(CPUX86State *env, uint32_t ecx)

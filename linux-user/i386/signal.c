@@ -454,6 +454,7 @@ static void setup_sigcontext(struct target_sigcontext *sc,
     CPUState *cs = env_cpu(env);
 #ifdef CONFIG_LATX
     save_xmm_to_env(env);
+    cpu_x86_canonicalize_latx_mmx_state(env);
 #endif
 #ifndef TARGET_X86_64
     uint16_t magic;
@@ -638,6 +639,8 @@ void setup_frame(int sig, struct target_sigaction *ka,
 
     unlock_user_struct(frame, frame_addr, 1);
 
+    cpu_x86_init_user_x87(env);
+
     return;
 
 give_sigsegv:
@@ -727,6 +730,8 @@ void setup_rt_frame(int sig, struct target_sigaction *ka,
     env->eflags &= ~TF_MASK;
 
     unlock_user_struct(frame, frame_addr, 1);
+
+    cpu_x86_init_user_x87(env);
 
     return;
 
@@ -836,6 +841,10 @@ restore_sigcontext(CPUX86State *env, struct target_sigcontext *sc)
 #endif
         unlock_user_struct(fpstate, fpstate_addr, 0);
 #ifdef CONFIG_LATX
+        if (!err) {
+            cpu_x86_sync_latx_fcsr(env);
+            cpu_x86_sync_latx_fpu_mode(env);
+        }
         load_xmm_from_env(env);
 #endif
     } else {
