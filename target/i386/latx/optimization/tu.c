@@ -687,6 +687,13 @@ uint bcc_ins_convert(uint convert_insn)
 
 static bool bcc_jmp_fail;
 
+#ifdef CONFIG_LATX_FAST_TRANSLATOR
+bool tu_bcc_jmp_retrying(void)
+{
+    return bcc_jmp_fail;
+}
+#endif
+
 int tu_relocat_target_branch(TranslationBlock * tb)
 {
     TranslationBlock *target_tb = tb->s_data->next_tb[TU_TB_INDEX_TARGET];

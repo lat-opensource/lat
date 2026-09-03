@@ -5,6 +5,7 @@ make_configure=0
 opt_level=1
 low_mem_mode=""
 avx_support=""
+fast_translator=""
 
 help() {
     echo "Usage:"
@@ -20,11 +21,12 @@ help() {
     echo "                  -l 1 : l0 + close CONFIG_LATX_SPLIT_TB, CONFIG_LATX_TU, CONFIG_LATX_JRRA"
     echo "                  -l 2 : l1 + set 64MB code cache, close CONFIG_LATX_INSTS_PATTERN"
     echo "  -a              AVX Instruction Translation Support"
+    echo "  -f              compile the Quicktrans fast translation path"
     echo "  -h              help"
 }
 
 parseArgs() {
-    while getopts "cO:l:h,a" opt; do
+    while getopts "cO:l:h,af" opt; do
         case ${opt} in
         c)
             make_configure=1
@@ -37,6 +39,9 @@ parseArgs() {
             ;;
         a)
             avx_support="--enable-latx-avx-opt"
+            ;;
+        f)
+            fast_translator="--enable-latx-fast-translator"
             ;;
         h)
             help
@@ -68,19 +73,19 @@ make_cmd() {
         if [ "$opt_level" = "0" ] ; then
             ../configure --target-list=x86_64-linux-user --enable-latx \
                 --disable-debug-info --optimize-O0 --static --extra-ldflags=-ldl \
-                --disable-docs ${low_mem_mode} ${avx_support}
+                --disable-docs ${low_mem_mode} ${avx_support} ${fast_translator}
         elif [ "$opt_level" = "1" ] ; then
             ../configure --target-list=x86_64-linux-user --enable-latx \
                 --disable-debug-info --optimize-O1 --extra-ldflags=-ldl --enable-kzt \
-                --disable-docs ${low_mem_mode} ${avx_support}
+                --disable-docs ${low_mem_mode} ${avx_support} ${fast_translator}
         elif [ "$opt_level" = "2" ] ; then
             ../configure --target-list=x86_64-linux-user --enable-latx \
                 --disable-debug-info --optimize-O2 --static --extra-ldflags=-ldl \
-                --disable-docs ${low_mem_mode} ${avx_support}
+                --disable-docs ${low_mem_mode} ${avx_support} ${fast_translator}
         elif [ "$opt_level" = "3" ] ; then
             ../configure --target-list=x86_64-linux-user --enable-latx \
                 --disable-debug-info --optimize-O3 --static --extra-ldflags=-ldl \
-                --disable-docs ${low_mem_mode} ${avx_support}
+                --disable-docs ${low_mem_mode} ${avx_support} ${fast_translator}
         else
             echo "invalid options"
         fi

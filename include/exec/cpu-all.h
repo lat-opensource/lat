@@ -286,6 +286,12 @@ typedef int (*walk_memory_regions_fn)(void *, target_ulong,
                                       target_ulong, unsigned long);
 int walk_memory_regions(void *, walk_memory_regions_fn);
 
+/*
+ * Walk mapped regions overlapping [start, end).  The mmap lock must be held.
+ */
+int walk_memory_regions_range_locked(void *, target_ulong, target_ulong,
+                                     walk_memory_regions_fn);
+
 bool test_flags(target_ulong address, int flags);
 target_ulong get_first_page(target_ulong start, target_ulong end);
 int page_get_flags(target_ulong address);
