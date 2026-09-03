@@ -707,7 +707,8 @@ static bool translate_faddp_softfpu(IR1_INST *pir1)
 {
     IR1_OPND *src = ir1_get_opnd(pir1, 0);
 	int stn = ir1_opnd_base_reg_num(src);
-    if (option_softfpu == 2 && option_softfpu_fast & 0x1) {
+    if (option_softfpu == 2 &&
+        option_softfpu_fast & LATX_SOFTFPU_FAST_FADDP) {
         gen_float64_STN_ST0_pop(pir1, stn);
     } else {
         gen_softfpu_helper2i((ADDR)helper_fadd_STN_ST0, stn);
@@ -731,7 +732,8 @@ static bool translate_fadd_softfpu(IR1_INST *pir1)
         int opnd_size = ir1_opnd_size(src);
         IR2_OPND mem_opnd = convert_mem_no_offset(src);
 
-        if (option_softfpu == 2 && option_softfpu_fast & 0x2) {
+        if (option_softfpu == 2 &&
+            option_softfpu_fast & LATX_SOFTFPU_FAST_FADD) {
             gen_float64_ST0_MEM(pir1, mem_opnd, opnd_size, false);
         } else {
             if (opnd_size == 32) {
@@ -745,7 +747,8 @@ static bool translate_fadd_softfpu(IR1_INST *pir1)
     }
 
     int stn = ir1_opnd_base_reg_num(src);
-    if (option_softfpu == 2 && option_softfpu_fast & 0x2) {
+    if (option_softfpu == 2 &&
+        option_softfpu_fast & LATX_SOFTFPU_FAST_FADD) {
         gen_float64_STN_ST0(pir1, opnd_num, stn);
         return true;
     } else {
@@ -1108,7 +1111,8 @@ static bool translate_fdiv_softfpu(IR1_INST *pir1)
     if (ir1_opnd_is_mem(src)) {
         int opnd_size = ir1_opnd_size(src);
         IR2_OPND mem_opnd = convert_mem_no_offset(src);
-        if (option_softfpu == 2 && option_softfpu_fast & 0x4) {
+        if (option_softfpu == 2 &&
+            option_softfpu_fast & LATX_SOFTFPU_FAST_FDIV) {
             gen_float64_ST0_MEM(pir1, mem_opnd, opnd_size, false);
         } else {
             if (opnd_size == 32) {
@@ -1122,7 +1126,8 @@ static bool translate_fdiv_softfpu(IR1_INST *pir1)
     }
 
     int stn = ir1_opnd_base_reg_num(src);
-    if (option_softfpu == 2 && option_softfpu_fast & 0x4) {
+    if (option_softfpu == 2 &&
+        option_softfpu_fast & LATX_SOFTFPU_FAST_FDIV) {
         gen_float64_STN_ST0(pir1, opnd_num, stn);
         return true;
     } else {
@@ -1143,7 +1148,8 @@ static bool translate_fdivp_softfpu(IR1_INST *pir1)
 {
     IR1_OPND *src = ir1_get_opnd(pir1, 0);
 	int stn = ir1_opnd_base_reg_num(src);
-    if (option_softfpu == 2 && option_softfpu_fast & 0x8) {
+    if (option_softfpu == 2 &&
+        option_softfpu_fast & LATX_SOFTFPU_FAST_FDIVP) {
         gen_float64_STN_ST0_pop(pir1, stn);
     } else {
         gen_softfpu_helper2i((ADDR)helper_fdiv_STN_ST0, stn);
@@ -1161,7 +1167,8 @@ static bool translate_fdivr_softfpu(IR1_INST *pir1)
     if (ir1_opnd_is_mem(src)) {
         int opnd_size = ir1_opnd_size(src);
         IR2_OPND mem_opnd = convert_mem_no_offset(src);
-        if (option_softfpu == 2 && option_softfpu_fast & 0x10) {
+        if (option_softfpu == 2 &&
+            option_softfpu_fast & LATX_SOFTFPU_FAST_FDIVR) {
             gen_float64_ST0_MEM(pir1, mem_opnd, opnd_size, false);
         } else {
             if (opnd_size == 32) {
@@ -1175,7 +1182,8 @@ static bool translate_fdivr_softfpu(IR1_INST *pir1)
     }
 
     int stn = ir1_opnd_base_reg_num(src);
-    if (option_softfpu == 2 && option_softfpu_fast & 0x10) {
+    if (option_softfpu == 2 &&
+        option_softfpu_fast & LATX_SOFTFPU_FAST_FDIVR) {
         gen_float64_STN_ST0(pir1, opnd_num, stn);
         return true;
     } else {
@@ -1196,7 +1204,8 @@ static bool translate_fdivrp_softfpu(IR1_INST *pir1)
 {
     IR1_OPND *src = ir1_get_opnd(pir1, 0);
 	int stn = ir1_opnd_base_reg_num(src);
-    if (option_softfpu == 2 && option_softfpu_fast & 0x20) {
+    if (option_softfpu == 2 &&
+        option_softfpu_fast & LATX_SOFTFPU_FAST_FDIVRP) {
         gen_float64_STN_ST0_pop(pir1, stn);
     } else {
         gen_softfpu_helper2i((ADDR)helper_fdivr_STN_ST0, stn);
@@ -1308,7 +1317,8 @@ static bool translate_fiadd_softfpu(IR1_INST *pir1)
     int opnd_size = ir1_opnd_size(opnd0);
     IR2_OPND mem_opnd = convert_mem_no_offset(opnd0);
 
-    if (option_softfpu == 2 && option_softfpu_fast & 0x40) {
+    if (option_softfpu == 2 &&
+        option_softfpu_fast & LATX_SOFTFPU_FAST_FIADD) {
         gen_float64_ST0_MEM(pir1, mem_opnd, opnd_size, true);
     } else {
         if (opnd_size == 32) {
@@ -1365,7 +1375,8 @@ static bool translate_fidiv_softfpu(IR1_INST *pir1)
     int opnd_size = ir1_opnd_size(opnd0);
     IR2_OPND mem_opnd = convert_mem_no_offset(opnd0);
 
-    if (option_softfpu == 2 && option_softfpu_fast & 0x80) {
+    if (option_softfpu == 2 &&
+        option_softfpu_fast & LATX_SOFTFPU_FAST_FIDIV) {
         gen_float64_ST0_MEM(pir1, mem_opnd, opnd_size, true);
     } else {
         if (opnd_size == 32) {
@@ -1387,7 +1398,8 @@ static bool translate_fidivr_softfpu(IR1_INST *pir1)
     int opnd_size = ir1_opnd_size(opnd0);
     IR2_OPND mem_opnd = convert_mem_no_offset(opnd0);
 
-    if (option_softfpu == 2 && option_softfpu_fast & 0x100) {
+    if (option_softfpu == 2 &&
+        option_softfpu_fast & LATX_SOFTFPU_FAST_FIDIVR) {
         gen_float64_ST0_MEM(pir1, mem_opnd, opnd_size, true);
     } else {
         if (opnd_size == 32) {
@@ -1483,7 +1495,8 @@ static bool translate_fimul_softfpu(IR1_INST *pir1)
     int opnd_size = ir1_opnd_size(opnd0);
     IR2_OPND mem_opnd = convert_mem_no_offset(opnd0);
 
-    if (option_softfpu == 2 && option_softfpu_fast & 0x200) {
+    if (option_softfpu == 2 &&
+        option_softfpu_fast & LATX_SOFTFPU_FAST_FIMUL) {
         gen_float64_ST0_MEM(pir1, mem_opnd, opnd_size, true);
     } else {
         if (opnd_size == 32) {
@@ -1766,7 +1779,8 @@ static bool translate_fisub_softfpu(IR1_INST *pir1)
     int opnd_size = ir1_opnd_size(opnd0);
     IR2_OPND mem_opnd = convert_mem_no_offset(opnd0);
 
-    if (option_softfpu == 2 && option_softfpu_fast & 0x400) {
+    if (option_softfpu == 2 &&
+        option_softfpu_fast & LATX_SOFTFPU_FAST_FISUB) {
         gen_float64_ST0_MEM(pir1, mem_opnd, opnd_size, true);
     } else {
         if (opnd_size == 32) {
@@ -1788,7 +1802,8 @@ static bool translate_fisubr_softfpu(IR1_INST *pir1)
     int opnd_size = ir1_opnd_size(opnd0);
     IR2_OPND mem_opnd = convert_mem_no_offset(opnd0);
 
-    if (option_softfpu == 2 && option_softfpu_fast & 0x800) {
+    if (option_softfpu == 2 &&
+        option_softfpu_fast & LATX_SOFTFPU_FAST_FISUBR) {
         gen_float64_ST0_MEM(pir1, mem_opnd, opnd_size, true);
     } else {
         if (opnd_size == 32) {
@@ -2211,7 +2226,8 @@ static bool translate_fmul_softfpu(IR1_INST *pir1)
     if (ir1_opnd_is_mem(src)) {
         int opnd_size = ir1_opnd_size(src);
         IR2_OPND mem_opnd = convert_mem_no_offset(src);
-        if (option_softfpu == 2 && option_softfpu_fast & 0x1000) {
+        if (option_softfpu == 2 &&
+            option_softfpu_fast & LATX_SOFTFPU_FAST_FMUL) {
             gen_float64_ST0_MEM(pir1, mem_opnd, opnd_size, false);
         } else {
             if (opnd_size == 32) {
@@ -2225,7 +2241,8 @@ static bool translate_fmul_softfpu(IR1_INST *pir1)
     }
 
     int stn = ir1_opnd_base_reg_num(src);
-    if (option_softfpu == 2 && option_softfpu_fast & 0x1000) {
+    if (option_softfpu == 2 &&
+        option_softfpu_fast & LATX_SOFTFPU_FAST_FMUL) {
         gen_float64_STN_ST0(pir1, opnd_num, stn);
         return true;
     } else {
@@ -2246,7 +2263,8 @@ static bool translate_fmulp_softfpu(IR1_INST *pir1)
 {
     IR1_OPND *src = ir1_get_opnd(pir1, 0);
 	int stn = ir1_opnd_base_reg_num(src);
-    if (option_softfpu == 2 && option_softfpu_fast & 0x2000) {
+    if (option_softfpu == 2 &&
+        option_softfpu_fast & LATX_SOFTFPU_FAST_FMULP) {
         gen_float64_STN_ST0_pop(pir1, stn);
     } else {
         gen_softfpu_helper2i((ADDR)helper_fmul_STN_ST0, stn);
@@ -2548,7 +2566,8 @@ static bool translate_fptan_softfpu(IR1_INST *pir1)
 
 static bool translate_frndint_softfpu(IR1_INST *pir1)
 {
-    if (option_softfpu == 2 && option_softfpu_fast & 0x4000) {
+    if (option_softfpu == 2 &&
+        option_softfpu_fast & LATX_SOFTFPU_FAST_FRNDINT) {
         IR2_OPND st0_opnd = ra_alloc_ftemp();
 
         get_float80_from_stn(st0_opnd, 0);
@@ -2598,7 +2617,8 @@ static bool translate_frstor_softfpu(IR1_INST *pir1)
 
 static bool translate_fscale_softfpu(IR1_INST *pir1)
 {
-    if (option_softfpu == 2 && option_softfpu_fast & 0x8000) {
+    if (option_softfpu == 2 &&
+        option_softfpu_fast & LATX_SOFTFPU_FAST_FSCALE) {
         IR2_OPND st0_opnd = ra_alloc_ftemp();
         IR2_OPND st1_opnd = ra_alloc_ftemp();
 
@@ -2634,7 +2654,8 @@ static bool translate_fsincos_softfpu(IR1_INST *pir1)
 
 static bool translate_fsqrt_softfpu(IR1_INST *pir1)
 {
-    if (option_softfpu == 2 && option_softfpu_fast & 0x10000) {
+    if (option_softfpu == 2 &&
+        option_softfpu_fast & LATX_SOFTFPU_FAST_FSQRT) {
         IR2_OPND st0_opnd = ra_alloc_ftemp();
 
         get_float80_from_stn(st0_opnd, 0);
@@ -2790,7 +2811,8 @@ static bool translate_fsub_softfpu(IR1_INST *pir1)
     if (ir1_opnd_is_mem(src)) {
         int opnd_size = ir1_opnd_size(src);
         IR2_OPND mem_opnd = convert_mem_no_offset(src);
-        if (option_softfpu == 2 && option_softfpu_fast & 0x20000) {
+        if (option_softfpu == 2 &&
+            option_softfpu_fast & LATX_SOFTFPU_FAST_FSUB) {
             gen_float64_ST0_MEM(pir1, mem_opnd, opnd_size, false);
         } else {
             if (opnd_size == 32) {
@@ -2804,7 +2826,8 @@ static bool translate_fsub_softfpu(IR1_INST *pir1)
     }
 
     int stn = ir1_opnd_base_reg_num(src);
-    if (option_softfpu == 2 && option_softfpu_fast & 0x20000) {
+    if (option_softfpu == 2 &&
+        option_softfpu_fast & LATX_SOFTFPU_FAST_FSUB) {
         gen_float64_STN_ST0(pir1, opnd_num, stn);
         return true;
     } else {
@@ -2825,7 +2848,8 @@ static bool translate_fsubp_softfpu(IR1_INST *pir1)
 {
     IR1_OPND *src = ir1_get_opnd(pir1, 0);
 	int stn = ir1_opnd_base_reg_num(src);
-    if (option_softfpu == 2 && option_softfpu_fast & 0x40000) {
+    if (option_softfpu == 2 &&
+        option_softfpu_fast & LATX_SOFTFPU_FAST_FSUBP) {
         gen_float64_STN_ST0_pop(pir1, stn);
     } else {
         gen_softfpu_helper2i((ADDR)helper_fsub_STN_ST0, stn);
@@ -2843,7 +2867,8 @@ static bool translate_fsubr_softfpu(IR1_INST *pir1)
     if (ir1_opnd_is_mem(src)) {
         int opnd_size = ir1_opnd_size(src);
         IR2_OPND mem_opnd = convert_mem_no_offset(src);
-        if (option_softfpu == 2 && option_softfpu_fast & 0x80000) {
+        if (option_softfpu == 2 &&
+            option_softfpu_fast & LATX_SOFTFPU_FAST_FSUBR) {
             gen_float64_ST0_MEM(pir1, mem_opnd, opnd_size, false);
         } else {
             if (opnd_size == 32) {
@@ -2857,7 +2882,8 @@ static bool translate_fsubr_softfpu(IR1_INST *pir1)
     }
 
     int stn = ir1_opnd_base_reg_num(src);
-    if (option_softfpu == 2 && option_softfpu_fast & 0x80000) {
+    if (option_softfpu == 2 &&
+        option_softfpu_fast & LATX_SOFTFPU_FAST_FSUBR) {
         gen_float64_STN_ST0(pir1, opnd_num, stn);
         return true;
     } else {
@@ -2878,7 +2904,8 @@ static bool translate_fsubrp_softfpu(IR1_INST *pir1)
 {
     IR1_OPND *src = ir1_get_opnd(pir1, 0);
 	int stn = ir1_opnd_base_reg_num(src);
-    if (option_softfpu == 2 && option_softfpu_fast & 0x100000) {
+    if (option_softfpu == 2 &&
+        option_softfpu_fast & LATX_SOFTFPU_FAST_FSUBRP) {
         gen_float64_STN_ST0_pop(pir1, stn);
     } else {
         gen_softfpu_helper2i((ADDR)helper_fsubr_STN_ST0, stn);
