@@ -643,45 +643,40 @@ EXPORT void my___longjmp_chk(/*struct __jmp_buf_tag __env[1]*/void *p, int32_t _
 //EXPORT int32_t my___sigsetjmp(/*struct __jmp_buf_tag __env[1]*/void *p) __attribute__((alias("my_setjmp")));
 
 EXPORT int my_printf(void* fmt, void* b) {
-    char scratch_buff [26*8] = {0};
     __MY_CPU;
-    myStackAlign((const char*)fmt, b, (uint64_t *)scratch_buff, cpu->regs[R_EAX], 1);
+    myStackAlign((const char*)fmt, b, cpu->scratch, cpu->regs[R_EAX], 1);
     PREPARE_VALIST;
     return vprintf((const char*)fmt, VARARGS);
 }
 EXPORT int my___printf_chk(int chk, void* fmt, void* b)
 {
     (void)chk;
-    char scratch_buff [26*8] = {0};
     __MY_CPU;
-    myStackAlign((const char*)fmt, b, (uint64_t *)scratch_buff, cpu->regs[R_EAX], 2);
+    myStackAlign((const char*)fmt, b, cpu->scratch, cpu->regs[R_EAX], 2);
     PREPARE_VALIST;
     return vprintf((const char*)fmt, VARARGS);
 }
 EXPORT int my_wprintf(void* fmt, void* b) {
-    char scratch_buff [26*8] = {0};
     __MY_CPU;
-    myStackAlignW((const char*)fmt, b, (uint64_t *)scratch_buff, cpu->regs[R_EAX], 1);
+    myStackAlignW((const char*)fmt, b, cpu->scratch, cpu->regs[R_EAX], 1);
     PREPARE_VALIST;
     return vwprintf((const wchar_t*)fmt, VARARGS);
 }
 EXPORT int my___wprintf_chk(int chk, void* fmt, void* b)
 {
     (void)chk;
-    char scratch_buff [26*8] = {0};
     __MY_CPU;
-    myStackAlignW((const char*)fmt, b, (uint64_t *)scratch_buff, cpu->regs[R_EAX], 2);
+    myStackAlignW((const char*)fmt, b, cpu->scratch, cpu->regs[R_EAX], 2);
     PREPARE_VALIST;
     return vwprintf((const wchar_t*)fmt, VARARGS);
 }
 
 EXPORT int my_vprintf(void* fmt, x64_va_list_t b) {
+    __MY_CPU;
     #ifdef CONVERT_VALIST
     CONVERT_VALIST(b);
     #else
-    char scratch_buff [26*8] = {0};
-    myStackAlignValist((const char*)fmt, (uint64_t *)scratch_buff, b);
-    __MY_CPU;
+    myStackAlignValist((const char*)fmt, cpu->scratch, b);
     PREPARE_VALIST;
     #endif
     return vprintf(fmt, VARARGS);
@@ -689,12 +684,11 @@ EXPORT int my_vprintf(void* fmt, x64_va_list_t b) {
 EXPORT int my___vprintf_chk(void* fmt, x64_va_list_t b) __attribute__((alias("my_vprintf")));
 
 EXPORT int my_vfprintf(void* F, void* fmt, x64_va_list_t b) {
+    __MY_CPU;
     #ifdef CONVERT_VALIST
     CONVERT_VALIST(b);
     #else
-    char scratch_buff [26*8] = {0};
-    myStackAlignValist((const char*)fmt, (uint64_t *)scratch_buff, b);
-    __MY_CPU;
+    myStackAlignValist((const char*)fmt, cpu->scratch, b);
     PREPARE_VALIST;
     #endif
     return vfprintf(F, fmt, VARARGS);
@@ -703,28 +697,25 @@ EXPORT int my___vfprintf_chk(void* F, void* fmt, x64_va_list_t b) __attribute__(
 EXPORT int my__IO_vfprintf(void* F, void* fmt, x64_va_list_t b) __attribute__((alias("my_vfprintf")));
 
 EXPORT int my_fprintf(void* F, void* fmt, void* b)  {
-    char scratch_buff [26*8] = {0};
     __MY_CPU;
-    myStackAlign((const char*)fmt, b, (uint64_t *)scratch_buff, cpu->regs[R_EAX], 2);
+    myStackAlign((const char*)fmt, b, cpu->scratch, cpu->regs[R_EAX], 2);
     PREPARE_VALIST;
     return vfprintf(F, fmt, VARARGS);
 }
 EXPORT int my___fprintf_chk(void* F, int flag, void* fmt, void* b)  {
     (void)flag;
-    char scratch_buff [26*8] = {0};
     __MY_CPU;
-    myStackAlign((const char*)fmt, b, (uint64_t *)scratch_buff, cpu->regs[R_EAX], 3);
+    myStackAlign((const char*)fmt, b, cpu->scratch, cpu->regs[R_EAX], 3);
     PREPARE_VALIST;
     return vfprintf(F, fmt, VARARGS);
 }
 
 EXPORT int my_vwprintf(void* fmt, x64_va_list_t b) {
+    __MY_CPU;
     #ifdef CONVERT_VALIST
     CONVERT_VALIST(b);
     #else
-    char scratch_buff [26*8] = {0};
-    myStackAlignWValist((const char*)fmt, (uint64_t *)scratch_buff, b);
-    __MY_CPU;
+    myStackAlignWValist((const char*)fmt, cpu->scratch, b);
     PREPARE_VALIST;
     #endif
     int r = vwprintf(fmt, VARARGS);
@@ -732,82 +723,74 @@ EXPORT int my_vwprintf(void* fmt, x64_va_list_t b) {
 }
 
 EXPORT int my_fwprintf(void* F, void* fmt, void* b)  {
-    char scratch_buff [26*8] = {0};
     __MY_CPU;
-    myStackAlignW((const char*)fmt, b, (uint64_t *)scratch_buff, cpu->regs[R_EAX], 2);
+    myStackAlignW((const char*)fmt, b, cpu->scratch, cpu->regs[R_EAX], 2);
     PREPARE_VALIST;
     return vfwprintf(F, fmt, VARARGS);
 }
 
 EXPORT int my___fwprintf_chk(void* F, int flag, void* fmt, void* b) {
-    char scratch_buff [26*8] = {0};
     __MY_CPU;
-    myStackAlignW((const char*)fmt, b, (uint64_t *)scratch_buff, cpu->regs[R_EAX], 3);
+    myStackAlignW((const char*)fmt, b, cpu->scratch, cpu->regs[R_EAX], 3);
     PREPARE_VALIST;
     return vfwprintf(F, fmt, VARARGS);
 }
 
 EXPORT int my_vfwprintf(void* F, void* fmt, x64_va_list_t  b) {
+    __MY_CPU;
     #ifdef CONVERT_VALIST
     CONVERT_VALIST(b);
     #else
-    char scratch_buff [26*8] = {0};
-    myStackAlignWValist((const char*)fmt, (uint64_t *)scratch_buff, b);
-    __MY_CPU;
+    myStackAlignWValist((const char*)fmt, cpu->scratch, b);
     PREPARE_VALIST;
     #endif
     return vfwprintf(F, fmt, VARARGS);
 }
 EXPORT int my___vfwprintf_chk(void* F, int flag, void* fmt, x64_va_list_t b)  {
+    __MY_CPU;
     #ifdef CONVERT_VALIST
     CONVERT_VALIST(b);
     #else
-    char scratch_buff [26*8] = {0};
-    myStackAlignWValist((const char*)fmt, (uint64_t *)scratch_buff, b);
-    __MY_CPU;
+    myStackAlignWValist((const char*)fmt, cpu->scratch, b);
     PREPARE_VALIST;
     #endif
     return vfwprintf(F, fmt, VARARGS);
 }
 
 EXPORT int my_dprintf(int d, void* fmt, void* b) {
-    char scratch_buff [26*8] = {0};
     __MY_CPU;
-    myStackAlign((const char*)fmt, b, (uint64_t *)scratch_buff, cpu->regs[R_EAX], 2);
+    myStackAlign((const char*)fmt, b, cpu->scratch, cpu->regs[R_EAX], 2);
     PREPARE_VALIST;
     return vdprintf(d, fmt, VARARGS);
 }
 
 EXPORT int my___dprintf_chk(int d, int flag, void* fmt, void* b)  {
     (void)flag;
-    char scratch_buff [26*8] = {0};
     __MY_CPU;
-    myStackAlign((const char*)fmt, b, (uint64_t *)scratch_buff, cpu->regs[R_EAX], 3);
+    myStackAlign((const char*)fmt, b, cpu->scratch, cpu->regs[R_EAX], 3);
     PREPARE_VALIST;
     return vdprintf(d, fmt, VARARGS);
 }
 
 
 EXPORT int my_vdprintf(int d, void* fmt, x64_va_list_t b) {
+    __MY_CPU;
     #ifdef CONVERT_VALIST
     CONVERT_VALIST(b);
     #else
-    char scratch_buff [26*8] = {0};
-    myStackAlignValist((const char*)fmt, (uint64_t *)scratch_buff, b);
-    __MY_CPU;
+    myStackAlignValist((const char*)fmt, cpu->scratch, b);
     PREPARE_VALIST;
     #endif
     return vdprintf(d, fmt, VARARGS);
 }
 
 EXPORT int my___vdprintf_chk(int d, int flag, void* fmt, x64_va_list_t b)  {
+    __MY_CPU;
     (void)flag;
     #ifdef CONVERT_VALIST
     CONVERT_VALIST(b);
     #else
-    char scratch_buff [26*8] = {0};
-    myStackAlignValist((const char*)fmt, (uint64_t *)scratch_buff, b);
-    __MY_CPU;
+    myStackAlignValist((const char*)fmt, cpu->scratch, b);
     PREPARE_VALIST;
     #endif
     return vdprintf(d, fmt, VARARGS);
@@ -822,12 +805,10 @@ EXPORT void *my_div(void *result, int numerator, int denominator) {
 
 EXPORT int my_snprintf(void* buff, size_t s, void * fmt, uint64_t * b) {
     #ifdef PREFER_CONVERT_VAARG
-    char scratch_buff [26*8] = {0};
-    CREATE_VALIST_FROM_VAARG(b, (uint64_t *)scratch_buff, 3);
+    CREATE_VALIST_FROM_VAARG(b, cpu->scratch, 3);
     #else
-    char scratch_buff [26*8] = {0};
     __MY_CPU;
-    myStackAlign((const char*)fmt, b, (uint64_t *)scratch_buff, cpu->regs[R_EAX], 3);
+    myStackAlign((const char*)fmt, b, cpu->scratch, cpu->regs[R_EAX], 3);
     PREPARE_VALIST;
     #endif
     int r = vsnprintf(buff, s, fmt, VARARGS);
@@ -838,12 +819,10 @@ EXPORT int my___snprintf_chk(void* buff, size_t s, int flags, size_t maxlen, voi
 {
     (void)flags; (void)maxlen;
     #ifdef PREFER_CONVERT_VAARG
-    char scratch_buff [26*8] = {0};
-    CREATE_VALIST_FROM_VAARG(b, (uint64_t *)scratch_buff, 5);
+    CREATE_VALIST_FROM_VAARG(b, cpu->scratch, 5);
     #else
-    char scratch_buff [26*8] = {0};
     __MY_CPU;
-    myStackAlign((const char*)fmt, b, (uint64_t *)scratch_buff, cpu->regs[R_EAX], 5);
+    myStackAlign((const char*)fmt, b, cpu->scratch, cpu->regs[R_EAX], 5);
     PREPARE_VALIST;
     #endif
     int r = vsnprintf(buff, s, fmt, VARARGS);
@@ -852,12 +831,10 @@ EXPORT int my___snprintf_chk(void* buff, size_t s, int flags, size_t maxlen, voi
 
 EXPORT int my_sprintf(void* buff, void * fmt, void * b) {
     #ifdef PREFER_CONVERT_VAARG
-    char scratch_buff [26*8] = {0};
-    CREATE_VALIST_FROM_VAARG(b, (uint64_t *)scratch_buff, 2);
+    CREATE_VALIST_FROM_VAARG(b, cpu->scratch, 2);
     #else
-    char scratch_buff [26*8] = {0};
     __MY_CPU;
-    myStackAlign((const char*)fmt, b, (uint64_t *)scratch_buff, cpu->regs[R_EAX], 2);
+    myStackAlign((const char*)fmt, b, cpu->scratch, cpu->regs[R_EAX], 2);
     PREPARE_VALIST;
     #endif
     return vsprintf(buff, (const char*)fmt, VARARGS);
@@ -865,45 +842,40 @@ EXPORT int my_sprintf(void* buff, void * fmt, void * b) {
 EXPORT int my___sprintf_chk(void* buff, int flag, size_t l, void * fmt, void * b) {
     (void)flag; (void)l;
     #ifdef PREFER_CONVERT_VAARG
-    char scratch_buff [26*8] = {0};
-    CREATE_VALIST_FROM_VAARG(b, (uint64_t *)scratch_buff, 4);
+    CREATE_VALIST_FROM_VAARG(b, cpu->scratch, 4);
     #else
-    char scratch_buff [26*8] = {0};
     __MY_CPU;
-    myStackAlign((const char*)fmt, b, (uint64_t *)scratch_buff, cpu->regs[R_EAX], 4);
+    myStackAlign((const char*)fmt, b, cpu->scratch, cpu->regs[R_EAX], 4);
     PREPARE_VALIST;
     #endif
     return vsprintf(buff, (const char*)fmt, VARARGS);
 }
 
 EXPORT int my_asprintf(void** buff, void * fmt, uint64_t * b) {
-    char scratch_buff [26*8] = {0};
     __MY_CPU;
-    myStackAlign((const char*)fmt, b, (uint64_t *)scratch_buff, cpu->regs[R_EAX], 2);
+    myStackAlign((const char*)fmt, b, cpu->scratch, cpu->regs[R_EAX], 2);
     PREPARE_VALIST;
     return vasprintf((char**)buff, (char*)fmt, VARARGS);
 }
 EXPORT int my___asprintf(void** buff, void * fmt, uint64_t * b) __attribute__((alias("my_asprintf")));
 
 EXPORT int my_vasprintf(char** buff, void* fmt, x64_va_list_t b) {
+    __MY_CPU;
     #ifdef CONVERT_VALIST
     CONVERT_VALIST(b);
     #else
-    char scratch_buff [26*8] = {0};
-    myStackAlignValist((const char*)fmt, (uint64_t *)scratch_buff, b);
-    __MY_CPU;
+    myStackAlignValist((const char*)fmt, cpu->scratch, b);
     PREPARE_VALIST;
     #endif
     return vasprintf(buff, fmt, VARARGS);
 }
 
 EXPORT int my_vsprintf(void* buff,  void * fmt, x64_va_list_t b) {
+    __MY_CPU;
     #ifdef CONVERT_VALIST
     CONVERT_VALIST(b);
     #else
-    char scratch_buff [26*8] = {0};
-    myStackAlignValist((const char*)fmt, (uint64_t *)scratch_buff, b);
-    __MY_CPU;
+    myStackAlignValist((const char*)fmt, cpu->scratch, b);
     PREPARE_VALIST;
     #endif
     return vsprintf(buff, fmt, VARARGS);
@@ -912,12 +884,11 @@ EXPORT int my___vsprintf_chk(void* buff, void * fmt, x64_va_list_t b) __attribut
 
 EXPORT int my_vfscanf(void* stream, void* fmt, x64_va_list_t b)
 {
+    __MY_CPU;
     #ifdef CONVERT_VALIST
     CONVERT_VALIST(b);
     #else
-    char scratch_buff [26*8] = {0};
-    myStackAlignScanfValist((const char*)fmt, (uint64_t *)scratch_buff, b);
-    __MY_CPU;
+    myStackAlignScanfValist((const char*)fmt, cpu->scratch, b);
     PREPARE_VALIST;
     #endif
     return vfscanf(stream, fmt, VARARGS);
@@ -925,12 +896,11 @@ EXPORT int my_vfscanf(void* stream, void* fmt, x64_va_list_t b)
 
 EXPORT int my_vsscanf(void* stream, void* fmt, x64_va_list_t b)
 {
+    __MY_CPU;
     #ifdef CONVERT_VALIST
     CONVERT_VALIST(b);
     #else
-    char scratch_buff [26*8] = {0};
-    myStackAlignScanfValist((const char*)fmt, (uint64_t *)scratch_buff, b);
-    __MY_CPU;
+    myStackAlignScanfValist((const char*)fmt, cpu->scratch, b);
     PREPARE_VALIST;
     #endif
     return vsscanf(stream, fmt, VARARGS);
@@ -940,12 +910,11 @@ EXPORT int my__vsscanf(void* stream, void* fmt, void* b) __attribute__((alias("m
 
 EXPORT int my_vswscanf(void* stream, void* fmt, x64_va_list_t b)
 {
+    __MY_CPU;
     #ifdef CONVERT_VALIST
     CONVERT_VALIST(b);
     #else
-    char scratch_buff [26*8] = {0};
-    myStackAlignScanfWValist((const char*)fmt, (uint64_t *)scratch_buff, b);
-    __MY_CPU;
+    myStackAlignScanfWValist((const char*)fmt, cpu->scratch, b);
     PREPARE_VALIST;
     #endif
     return vswscanf(stream, fmt, VARARGS);
@@ -953,9 +922,8 @@ EXPORT int my_vswscanf(void* stream, void* fmt, x64_va_list_t b)
 
 EXPORT int my_sscanf(void* stream, void* fmt, uint64_t* b)
 {
-    char scratch_buff [26*8] = {0};
-    myStackAlignScanf((const char*)fmt, b, (uint64_t *)scratch_buff, 2);
     __MY_CPU;
+    myStackAlignScanf((const char*)fmt, b, cpu->scratch, 2);
     PREPARE_VALIST;
 
     return vsscanf(stream, fmt, VARARGS);
@@ -967,9 +935,8 @@ EXPORT int my___isoc99_vfscanf(void* stream, void* fmt, void* b) __attribute__((
 
 EXPORT int my___isoc99_fscanf(void* stream, void* fmt, uint64_t* b)
 {
-  char scratch_buff [26*8] = {0};
-  myStackAlignScanf((const char*)fmt, b, (uint64_t *)scratch_buff, 2);
   __MY_CPU;
+  myStackAlignScanf((const char*)fmt, b, cpu->scratch, 2);
   PREPARE_VALIST;
 
   return vfscanf(stream, fmt, VARARGS);
@@ -978,9 +945,8 @@ EXPORT int my_fscanf(void* stream, void* fmt, uint64_t* b) __attribute__((alias(
 
 EXPORT int my___isoc99_scanf(void* fmt, uint64_t* b)
 {
-  char scratch_buff [26*8] = {0};
-  myStackAlignScanf((const char*)fmt, b, (uint64_t *)scratch_buff, 1);
   __MY_CPU;
+  myStackAlignScanf((const char*)fmt, b, cpu->scratch, 1);
   PREPARE_VALIST;
 
   return vscanf(fmt, VARARGS);
@@ -988,9 +954,8 @@ EXPORT int my___isoc99_scanf(void* fmt, uint64_t* b)
 
 EXPORT int my___isoc99_sscanf(void* stream, void* fmt, uint64_t* b)
 {
-  char scratch_buff [26*8] = {0};
-  myStackAlignScanf((const char*)fmt, b, (uint64_t *)scratch_buff, 2);
   __MY_CPU;
+  myStackAlignScanf((const char*)fmt, b, cpu->scratch, 2);
   PREPARE_VALIST;
 
   return vsscanf(stream, fmt, VARARGS);
@@ -998,21 +963,19 @@ EXPORT int my___isoc99_sscanf(void* stream, void* fmt, uint64_t* b)
 
 EXPORT int my___isoc99_swscanf(void* stream, void* fmt, uint64_t* b)
 {
-  char scratch_buff [26*8] = {0};
-  myStackAlignScanf((const char*)fmt, b, (uint64_t *)scratch_buff, 2);
   __MY_CPU;
+  myStackAlignScanf((const char*)fmt, b, cpu->scratch, 2);
   PREPARE_VALIST;
 
   return vswscanf(stream, fmt, VARARGS);
 }
 
 EXPORT int my_vsnprintf(void* buff, size_t s, void * fmt, x64_va_list_t b) {
+    __MY_CPU;
     #ifdef CONVERT_VALIST
     CONVERT_VALIST(b);
     #else
-    char scratch_buff [26*8] = {0};
-    myStackAlignValist((const char*)fmt, (uint64_t *)scratch_buff, b);
-    __MY_CPU;
+    myStackAlignValist((const char*)fmt, cpu->scratch, b);
     PREPARE_VALIST;
     #endif
     int r = vsnprintf(buff, s, fmt, VARARGS);
@@ -1020,12 +983,11 @@ EXPORT int my_vsnprintf(void* buff, size_t s, void * fmt, x64_va_list_t b) {
 }
 EXPORT int my___vsnprintf(void* buff, size_t s, void * fmt, x64_va_list_t b) __attribute__((alias("my_vsnprintf")));
 EXPORT int my___vsnprintf_chk(void* buff, size_t s, int flags, size_t slen, void * fmt, x64_va_list_t b) {
+    __MY_CPU;
     #ifdef CONVERT_VALIST
     CONVERT_VALIST(b);
     #else
-    char scratch_buff [26*8] = {0};
-    myStackAlignValist((const char*)fmt, (uint64_t *)scratch_buff, b);
-    __MY_CPU;
+    myStackAlignValist((const char*)fmt, cpu->scratch, b);
     PREPARE_VALIST;
     #endif
     int r = vsnprintf(buff, s, fmt, VARARGS);
@@ -1036,7 +998,6 @@ EXPORT int my_vasprintf(void* strp, void* fmt, void* b, va_list V)
 {
     #ifndef NOALIGN
     // need to align on arm
-    char scratch_buff [26*8] = {0};
     myStackAlign((const char*)fmt, (uint32_t*)b, scratch_buff);
     __MY_CPU;
     PREPARE_VALIST;
@@ -1052,13 +1013,12 @@ EXPORT int my_vasprintf(void* strp, void* fmt, void* b, va_list V)
 #endif
 EXPORT int my___vasprintf_chk(void* buff, int flags, void* fmt, x64_va_list_t b)
 {
+    __MY_CPU;
     (void)flags;
     #ifdef CONVERT_VALIST
     CONVERT_VALIST(b);
     #else
-    char scratch_buff [26*8] = {0};
-    myStackAlignValist((const char*)fmt, (uint64_t *)scratch_buff, b);
-    __MY_CPU;
+    myStackAlignValist((const char*)fmt, cpu->scratch, b);
     PREPARE_VALIST;
     #endif
     int r = vasprintf(buff, fmt, VARARGS);
@@ -1066,19 +1026,17 @@ EXPORT int my___vasprintf_chk(void* buff, int flags, void* fmt, x64_va_list_t b)
 }
 EXPORT int my___asprintf_chk(void* result_ptr, int flags, void* fmt, void* b)
 {
-    char scratch_buff [26*8] = {0};
     __MY_CPU;
-    myStackAlign((const char*)fmt, b, (uint64_t *)scratch_buff, cpu->regs[R_EAX], 3);
+    myStackAlign((const char*)fmt, b, cpu->scratch, cpu->regs[R_EAX], 3);
     PREPARE_VALIST;
     return vasprintf((char**)result_ptr, (char*)fmt, VARARGS);
 }
 EXPORT int my_vswprintf(void* buff, size_t s, void * fmt, x64_va_list_t b) {
+    __MY_CPU;
     #ifdef CONVERT_VALIST
     CONVERT_VALIST(b);
     #else
-    char scratch_buff [26*8] = {0};
-    myStackAlignWValist((const char*)fmt, (uint64_t *)scratch_buff, b);
-    __MY_CPU;
+    myStackAlignWValist((const char*)fmt, cpu->scratch, b);
     PREPARE_VALIST;
     #endif
     int r = vswprintf(buff, s, fmt, VARARGS);
@@ -1089,9 +1047,8 @@ EXPORT int my___vswprintf_chk(void* buff, size_t s, void * fmt, x64_va_list_t b)
 
 EXPORT int my_swscanf(void* stream, void* fmt, uint64_t* b)
 {
-    char scratch_buff [26*8] = {0};
-    myStackAlignScanfW((const char*)fmt, b, (uint64_t *)scratch_buff, 2);
     __MY_CPU;
+    myStackAlignScanfW((const char*)fmt, b, cpu->scratch, 2);
     PREPARE_VALIST;
 
     return vswscanf(stream, fmt, VARARGS);
@@ -1100,7 +1057,6 @@ EXPORT int my_swscanf(void* stream, void* fmt, uint64_t* b)
 #if 0
 EXPORT void my_verr(int eval, void* fmt, void* b) {
     #ifndef NOALIGN
-    char scratch_buff [26*8] = {0};
     myStackAlignW((const char*)fmt, (uint32_t*)b, scratch_buff);
     __MY_CPU;
     PREPARE_VALIST;
@@ -1114,7 +1070,6 @@ EXPORT void my_verr(int eval, void* fmt, void* b) {
 
 EXPORT void my_vwarn(void* fmt, void* b) {
     #ifndef NOALIGN
-    char scratch_buff [26*8] = {0};
     myStackAlignW((const char*)fmt, (uint32_t*)b, scratch_buff);
     __MY_CPU;
     PREPARE_VALIST;
@@ -1127,71 +1082,63 @@ EXPORT void my_vwarn(void* fmt, void* b) {
 }
 #endif
 EXPORT void my_err(int eval, void* fmt, void* b) {
-    char scratch_buff [26*8] = {0};
     __MY_CPU;
-    myStackAlign((const char*)fmt, b, (uint64_t *)scratch_buff, cpu->regs[R_EAX], 2);
+    myStackAlign((const char*)fmt, b, cpu->scratch, cpu->regs[R_EAX], 2);
     PREPARE_VALIST;
     verr(eval, (const char*)fmt, VARARGS);
 }
 EXPORT void my_errx(int eval, void* fmt, void* b) {
-    char scratch_buff [26*8] = {0};
     __MY_CPU;
-    myStackAlign((const char*)fmt, b, (uint64_t *)scratch_buff, cpu->regs[R_EAX], 2);
+    myStackAlign((const char*)fmt, b, cpu->scratch, cpu->regs[R_EAX], 2);
     PREPARE_VALIST;
     verrx(eval, (const char*)fmt, VARARGS);
 }
 EXPORT void my_warn(void* fmt, void* b) {
-    char scratch_buff [26*8] = {0};
     __MY_CPU;
-    myStackAlign((const char*)fmt, b, (uint64_t *)scratch_buff, cpu->regs[R_EAX], 1);
+    myStackAlign((const char*)fmt, b, cpu->scratch, cpu->regs[R_EAX], 1);
     PREPARE_VALIST;
     vwarn((const char*)fmt, VARARGS);
 }
 EXPORT void my_warnx(void* fmt, void* b) {
-    char scratch_buff [26*8] = {0};
     __MY_CPU;
-    myStackAlign((const char*)fmt, b, (uint64_t *)scratch_buff, cpu->regs[R_EAX], 1);
+    myStackAlign((const char*)fmt, b, cpu->scratch, cpu->regs[R_EAX], 1);
     PREPARE_VALIST;
     vwarnx((const char*)fmt, VARARGS);
 }
 
 EXPORT void my_syslog(int priority, const char* fmt, uint64_t* b)
 {
-    char scratch_buff [26*8] = {0};
     __MY_CPU;
-    myStackAlign(fmt, b, (uint64_t *)scratch_buff, cpu->regs[R_EAX], 2);
+    myStackAlign(fmt, b, cpu->scratch, cpu->regs[R_EAX], 2);
     PREPARE_VALIST;
     return vsyslog(priority, fmt, VARARGS);
 }
 EXPORT void my___syslog_chk(int priority, int flags, const char* fmt, uint64_t* b)
 {
     (void)flags;
-    char scratch_buff [26*8] = {0};
     __MY_CPU;
-    myStackAlign(fmt, b, (uint64_t *)scratch_buff, cpu->regs[R_EAX], 3);
+    myStackAlign(fmt, b, cpu->scratch, cpu->regs[R_EAX], 3);
     PREPARE_VALIST;
     return vsyslog(priority, fmt, VARARGS);
 }
 EXPORT void my_vsyslog(int priority, const char* fmt, x64_va_list_t b)
 {
+    __MY_CPU;
     #ifdef CONVERT_VALIST
     CONVERT_VALIST(b);
     #else
-    char scratch_buff [26*8] = {0};
-    myStackAlignValist((const char*)fmt, (uint64_t *)scratch_buff, b);
-    __MY_CPU;
+    myStackAlignValist((const char*)fmt, cpu->scratch, b);
     PREPARE_VALIST;
     #endif
     return vsyslog(priority, fmt, VARARGS);
 }
 EXPORT void my___vsyslog_chk(int priority, int flag, const char* fmt, x64_va_list_t b)
 {
+    __MY_CPU;
     #ifdef CONVERT_VALIST
     CONVERT_VALIST(b);
     #else
-    char scratch_buff [26*8] = {0};
-    myStackAlignValist((const char*)fmt, (uint64_t *)scratch_buff, b);
-    __MY_CPU;
+    myStackAlignValist((const char*)fmt, cpu->scratch, b);
     PREPARE_VALIST;
     #endif
     return vsyslog(priority, fmt, VARARGS);
@@ -1201,17 +1148,15 @@ EXPORT int my___swprintf_chk(void* s, size_t n, int32_t flag, size_t slen, void*
 {
     (void)flag;
     (void)slen;
-    char scratch_buff [26*8] = {0};
     __MY_CPU;
-    myStackAlignW((const char*)fmt, b, (uint64_t *)scratch_buff, cpu->regs[R_EAX], 5);
+    myStackAlignW((const char*)fmt, b, cpu->scratch, cpu->regs[R_EAX], 5);
     PREPARE_VALIST;
     return vswprintf(s, n, (const wchar_t*)fmt, VARARGS);
 }
 EXPORT int my_swprintf(void* s, size_t n, void* fmt, uint64_t* b)
 {
-    char scratch_buff [26*8] = {0};
     __MY_CPU;
-    myStackAlignW((const char*)fmt, b, (uint64_t *)scratch_buff, cpu->regs[R_EAX], 3);
+    myStackAlignW((const char*)fmt, b, cpu->scratch, cpu->regs[R_EAX], 3);
     PREPARE_VALIST;
     return vswprintf(s, n, (const wchar_t*)fmt, VARARGS);
 }
