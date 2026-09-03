@@ -1,19 +1,14 @@
 # EFLAGS CALL/RET: mechanism evidence versus product performance
 
-This is a historical LAT performance case study, not a current-master benchmark
-claim. Revalidate every source revision, binary, cache, runtime, host, and
-workload before reusing its quantitative results.
+This worked example captures a reusable decision pattern, not a benchmark claim
+about any source revision or workload. Establish new source, binary, cache,
+runtime, host, and workload evidence before applying it.
 
 ## The apparent contradiction
 
-The candidate allowed selected EFLAGS analysis to continue across proven-safe
-CALL relationships. Correctness tests and generated-code inspection showed that
-redundant state computation could be removed.
-
-In the historical experiment:
-
-- the generated AOT code set became modestly smaller;
-- the complete SPEC workload became modestly slower.
+Suppose a candidate safely carries selected EFLAGS analysis across proven CALL
+relationships. Correctness and generated-code evidence show less redundant
+state computation, while controlled end-to-end measurements become slower.
 
 These measurements answer different questions. Static code reduction showed the
 mechanism worked; slower complete runtime showed the product-performance gate did
@@ -32,17 +27,16 @@ Use **stop, keep, ask**:
 Do not choose between “discard the entire direction” and “merge because one
 metric improved.” Keep each conclusion within its evidence.
 
-## The later explanation and its boundary
+## Investigate the offsetting cost
 
-In a controlled `crafty` run, the strongest observed explanation pointed to code
-layout and L1I effects: retired instructions were nearly unchanged, while L1I
-misses and cycles increased. That explained the controlled case better than the
-original instruction-count story, but it did not prove L1I was the only cause of
-the complete SPEC result. BTB, iTLB, address phase, and workload-specific effects
-could still matter.
+Treat layout, L1I, BTB, iTLB, branch behavior, register pressure, and other
+effects as hypotheses, not automatic explanations. Select measurements that can
+distinguish them, predict which mechanism metric and end-to-end result should
+change, and reject an explanation when its prediction fails.
 
-A later layout candidate improved one AOT mode but was neutral or mixed in the
-default mode, so it remained off by default.
+A follow-up candidate that helps only a non-default mode or one narrow workload
+does not repair the product result. Keep it off by default unless its own support
+scope and maintenance cost are explicitly accepted.
 
 ## Reusable lesson
 

@@ -15,36 +15,18 @@ task involves EFLAGS/CALL/RET or when mechanism and end-to-end results conflict.
 When the bottleneck or candidate is not yet established, read
 [references/bottleneck-discovery-and-candidate.md](references/bottleneck-discovery-and-candidate.md).
 
-## Establish the performance problem
+## Establish or receive a candidate
 
-- Translate the request into a product scenario, representative workload,
-  user-visible outcome, primary metric, and decision scope.
-- Reproduce a stable baseline before editing. Measure normal variation and
-  separate setup, cold generation, warm execution, and external waiting when
-  they could change the conclusion.
-- Do not assume that a familiar pass, instruction, or subsystem is the
-  bottleneck. First establish which cost is material to the product question.
-
-## Discover the bottleneck and form a candidate
-
-1. Choose the least intrusive current observation that can distinguish the
-   plausible cost centers. Account for measurement overhead and use a control
-   when instrumentation can perturb the workload.
-2. Attribute and rank material costs by contribution and product relevance.
-   Inspect source, history, invariants, and external precedent for the
-   evidence-selected path rather than surveying every possible optimization.
-3. State a falsifiable hypothesis: the proposed change, the mechanism metric it
-   should alter, the expected end-to-end effect, and an observation that would
-   disprove the explanation.
-4. If implementation is authorized, implement one small, reversible candidate
-   that tests the principal variable. Otherwise stop with an evidence-backed
-   candidate contract and implementation plan. Keep diagnostic instrumentation
-   and behavior-neutral preparation separate, and preserve correctness,
-   fallback behavior, and an actual-path sentinel.
-
-These are decision gates, not a prescribed profiler, pass, or implementation.
-Choose or invent the measurement and candidate that best distinguish the
-current hypotheses, then apply the controlled experiment below.
+- Require a product scenario, representative workload, user-visible outcome,
+  primary metric, and stable baseline with understood variation. Do not assume
+  that a familiar pass, instruction, or subsystem is the bottleneck.
+- If no evidence-backed candidate exists, read the bottleneck-discovery
+  reference. Without implementation authorization, stop with its candidate
+  contract and implementation plan.
+- Require the candidate to predict a mechanism metric, end-to-end effect, and
+  disconfirming result, with an actual-path sentinel and correct fallback. Keep
+  it reversible and attributable, but do not prescribe the profiler, pass, or
+  implementation; choose or invent what best distinguishes the hypotheses.
 
 ## Define the experiment
 
