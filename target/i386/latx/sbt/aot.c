@@ -28,6 +28,7 @@
 #include "aot_smc.h"
 #include "aot_page.h"
 #include "../translator/tr-vpaes.h"
+#include "crypto/aes.h"
 #include<sys/syscall.h>
 #include "exec/translate-all.h"
 #include "latx-smc.h"
@@ -1266,8 +1267,9 @@ static void* relkind_to_fixup_addr[] = {
     [LOAD_HELPER_AESKEYGENASSIST_XMM] = helper_aeskeygenassist_xmm,
     [LOAD_HELPER_AESDEC_XMM] = helper_aesdec_xmm,
     [LOAD_HELPER_AESDECLAST_XMM] = helper_aesdeclast_xmm,
-    [LOAD_HELPER_AESENC_XMM] = helper_aesenc_xmm,
-    [LOAD_HELPER_AESENCLAST_XMM] = helper_aesenclast_xmm,
+    [LOAD_HOST_AES_TE_LATX] = (void *)AES_Te_latx,
+    [LOAD_HOST_AES_SBOX_LATX] = (void *)AES_sbox_latx,
+    [LOAD_HOST_AES_VPAES_LASX] = (void *)AES_vpaes_lasx,
     [LOAD_HELPER_SHA1NEXTE] = helper_sha1nexte,
     [LOAD_HELPER_SHA1MSG1] = helper_sha1msg1,
     [LOAD_HELPER_SHA1MSG2] = helper_sha1msg2,

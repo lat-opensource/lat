@@ -12770,6 +12770,7 @@ CPUID_GROUP_EXT,
 CPUID_GROUP_EXT2,
 CPUID_GROUP_EXT3,
 CPUID_GROUP_EBX,
+CPUID_GROUP_ECX,
 CPUID_GROUP_XSAVE,
 };
 const char *__x86_cpuid_flags_table[] = {
@@ -12800,6 +12801,11 @@ const char *__x86_cpuid_flags_table[] = {
 "avx512f", "avx512dq", "rdseed","adx", "smap", "avx512ifma", "pcommit", "clflushopt",
 "clwb", "intel_pt", "avx512pf", "avx512er", "avx512cd", "sha_ni", "avx512bw", "avx512vl",
 /*xsave*/
+"", "avx512vbmi", "umip", "pku", "ospke", "waitpkg", "avx512vbmi2", "",
+"gfni", "vaes", "vpclmulqdq", "avx512vnni", "avx512bitalg", "", "avx512-vpopcntdq", "",
+"la57", "", "", "", "", "", "rdpid", "",
+"bus-lock-detect", "cldemote", "", "movdiri", "movdir64b", "", "", "pks",
+/*xsave*/
 "xsaveopt", "xsavec", "xgetbv1", "xsaves", "", "", "", "",
 "", "", "", "", "" "", "", "",
 "", "", "", "", "", "", "", "",
@@ -12825,6 +12831,8 @@ static char *cpuinfo_flags(CPUArchState *env)
                 group = CPUID_GROUP_EXT3;
             } else if (i == FEAT_7_0_EBX) {
                 group = CPUID_GROUP_EBX;
+            } else if (i == FEAT_7_0_ECX) {
+                group = CPUID_GROUP_ECX;
             } else if (i == FEAT_XSAVE) {
                 group = CPUID_GROUP_XSAVE;
             } else if (i == FEAT_XSAVE_COMP_LO || i ==FEAT_XSAVE_COMP_HI) {

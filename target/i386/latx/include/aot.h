@@ -39,10 +39,13 @@ extern  const char *aot_left_file_minsize_optarg;
  * +--------------+
  */
 #ifdef CONFIG_LATX_DEBUG
-#define AOT_VERSION "Version: "LATX_VERSION"-debug"
+#define AOT_BUILD_FLAVOR "debug"
 #else
-#define AOT_VERSION "Version: "LATX_VERSION"-release"
+#define AOT_BUILD_FLAVOR "release"
 #endif
+#define LATX_STRINGIFY_INNER(value) #value
+#define LATX_STRINGIFY(value) LATX_STRINGIFY_INNER(value)
+#define AOT_VERSION "Version: " LATX_VERSION "-" AOT_BUILD_FLAVOR "-" LATX_STRINGIFY(LATX_BUILD_TIMESTAMP)
 typedef struct aot_header {
     uint32_t lib_size;
     struct timespec last_modify_time;
@@ -230,8 +233,9 @@ typedef enum aot_rel_kind {
     LOAD_HELPER_AESKEYGENASSIST_XMM,
     LOAD_HELPER_AESDEC_XMM,
     LOAD_HELPER_AESDECLAST_XMM,
-    LOAD_HELPER_AESENC_XMM,
-    LOAD_HELPER_AESENCLAST_XMM,
+    LOAD_HOST_AES_TE_LATX,
+    LOAD_HOST_AES_SBOX_LATX,
+    LOAD_HOST_AES_VPAES_LASX,
     LOAD_HELPER_SHA1NEXTE,
     LOAD_HELPER_SHA1MSG1,
     LOAD_HELPER_SHA1MSG2,

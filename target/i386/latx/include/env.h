@@ -64,6 +64,10 @@ typedef struct TRANSLATION_DATA {
 
     bool softfpu_region_active;
 
+    /* Read-only AES table address retained across consecutive AES rounds. */
+    int aes_table_reg;
+    uint8_t aes_table_kind;
+
     /* manage the immediate number cache */
     IMM_CACHE *imm_cache;
 } TRANSLATION_DATA;
