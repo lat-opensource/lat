@@ -5,8 +5,9 @@ if 'x86_64-linux-user' in target_dirs
     'args': [
       emulators['latx-x86_64'],
       files('../../vex128-ymmh-zero.S'),
+      files('../../vex128-ymmh-signal.S'),
     ],
-    'timeout': 120,
+    'timeout': 180,
   }]
   latx_integration_tests += [{
     'name': 'test-avx-ymm-writeback',
@@ -46,7 +47,20 @@ if 'x86_64-linux-user' in target_dirs
       emulators['latx-x86_64'],
       files('../../scalar-hdr-pattern.S'),
       files('../../vroundps-imm0b.S'),
+      files('../../rip-relative-load.S'),
     ],
     'timeout': 120,
+  }]
+  latx_integration_tests += [{
+    'name': 'test-avx-lowering',
+    'runner': find_program('../../test-avx-lowering.sh'),
+    'args': [
+      emulators['latx-x86_64'],
+      files('../../vcvtps2dq-alias.c'),
+      files('../../vpackus-fast.c'),
+      files('../../vpmulhrsw-fast.c'),
+      files('../../vpshufb-fast.c'),
+    ],
+    'timeout': 300,
   }]
 endif

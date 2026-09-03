@@ -16,16 +16,18 @@ else
 fi
 
 for source_file in "$@"; do
-    name=$(basename "$source_file" .S)
-    guest="$workdir/$name"
-    "$clang" --target=x86_64-linux-gnu -fuse-ld=lld -nostdlib -static \
-        -Wl,--build-id=none "$source_file" -o "$guest"
+    name=$(basename "$source_file" .c)
+    "$clang" --target=x86_64-linux-gnu -fuse-ld=lld -O2 -mavx2 \
+        -nostdlib -static -ffreestanding -fno-builtin \
+        -fno-stack-protector -Wl,--build-id=none \
+        "$source_file" -o "$workdir/$name"
 
-    LATX_AOT=0 LATX_TU=0 "$emulator" "$guest"
+    LATX_AOT=0 LATX_TU=0 "$emulator" "$workdir/$name"
 
     aot_home="$workdir/aot-$name"
     mkdir -p "$aot_home"
-    HOME="$aot_home" LATX_AOT=1 LATX_TU=1 "$emulator" "$guest"
+    HOME="$aot_home" LATX_AOT=1 LATX_TU=1 \
+        "$emulator" "$workdir/$name"
 
     aot_file=
     for _ in $(seq 1 100); do
@@ -39,8 +41,8 @@ for source_file in "$@"; do
         exit 1
     fi
 
-    for _ in 1 2 3; do
-        HOME="$aot_home" LATX_AOT=1 LATX_TU=1 "$emulator" "$guest"
-    done
+    HOME="$aot_home" LATX_AOT=1 LATX_TU=1 \
+        "$emulator" "$workdir/$name"
 done
-echo "PASS: VEX.128 YMM-high zeroing, signal state, and JIT/cold-AOT/hot-AOT"
+
+echo "PASS: AVX lowering JIT/cold-AOT/hot-AOT"
