@@ -2096,9 +2096,10 @@ static void tr_check_x86ins_change(struct TranslationBlock *tb)
 #endif
 
 /*
- * Keep this list explicit: x87 opcodes are not contiguous in dt_x86_insn.
- * Include every mode 2 softfpu translation that needs a shared helper region.
- * Fast paths with a locally wrapped fallback are excluded when enabled.
+ * Keep this list explicit: helper-calling softfpu translations are not
+ * contiguous in dt_x86_insn. Include every mode 2 translation that needs a
+ * shared helper region. Fast paths with a locally wrapped fallback are
+ * excluded when enabled.
  */
 static bool is_softfpu_region_insn(IR1_OPCODE opcode)
 {
@@ -2160,6 +2161,12 @@ static bool is_softfpu_region_insn(IR1_OPCODE opcode)
     case dt_X86_INS_FIST:
     case dt_X86_INS_FXRSTOR64:
     case dt_X86_INS_FXSAVE64:
+#ifdef CONFIG_LATX_AVX_OPT
+    case dt_X86_INS_XSETBV:
+    case dt_X86_INS_XSAVE:
+    case dt_X86_INS_XSAVEOPT:
+    case dt_X86_INS_XRSTOR:
+#endif
         return true;
     case dt_X86_INS_FISTP:
         /* Only the conditional slow path calls a locally wrapped helper. */
