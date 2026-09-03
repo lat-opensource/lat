@@ -21,15 +21,6 @@ static char **pressure_vessel_payload;
 #define LATX_PRESSURE_VESSEL_RUNTIME_FILES_ENV \
     "LATX_PRESSURE_VESSEL_RUNTIME_FILES"
 
-static bool latx_pressure_vessel_runtime_is_inherited(const envlist_t *envlist)
-{
-    const char *files = latx_pressure_vessel_runtime_files();
-    const char *inherited = envlist_getenv(
-        envlist, LATX_PRESSURE_VESSEL_RUNTIME_FILES_ENV);
-
-    return files && inherited && !strcmp(inherited, files);
-}
-
 static bool latx_pressure_vessel_runtime_mark(envlist_t *envlist)
 {
     const char *files = latx_pressure_vessel_runtime_files();
@@ -398,7 +389,7 @@ static void latx_pressure_vessel_append_i386_sysroot(envlist_t *envlist)
     g_autofree char *assignment = NULL;
     bool runtime_seen = false;
 
-    if (!library_path || !latx_pressure_vessel_runtime_is_active()) {
+    if (!library_path) {
         return;
     }
 
@@ -428,17 +419,18 @@ static void latx_pressure_vessel_append_i386_sysroot(envlist_t *envlist)
 void latx_pressure_vessel_prepare(const char *program, char **target_argv,
                                   envlist_t *envlist)
 {
-    bool wrapper;
+    const char *expected_files;
 
     pressure_vessel_payload = NULL;
 
     /* Discovery alone must not override generic guest path resolution. */
-    latx_pressure_vessel_runtime_configure(envlist);
-    wrapper = latx_pressure_vessel_runtime_is_wrapper(program);
-    if (wrapper && !latx_pressure_vessel_runtime_mark(envlist)) {
-        return;
-    }
-    if (!wrapper && !latx_pressure_vessel_runtime_is_inherited(envlist)) {
+    latx_pressure_vessel_runtime_configure(envlist, NULL);
+    if (latx_pressure_vessel_runtime_is_wrapper(program)) {
+        if (!latx_pressure_vessel_runtime_mark(envlist)) {
+            return;
+        }
+    } else if (!envlist_getenv(envlist,
+                               LATX_PRESSURE_VESSEL_RUNTIME_FILES_ENV)) {
         return;
     }
 
@@ -447,18 +439,15 @@ void latx_pressure_vessel_prepare(const char *program, char **target_argv,
         program, target_argv, envlist);
 #endif
 
-    latx_pressure_vessel_runtime_configure(envlist);
-    if (!latx_pressure_vessel_runtime_is_inherited(envlist)) {
+    expected_files = envlist_getenv(envlist,
+                                    LATX_PRESSURE_VESSEL_RUNTIME_FILES_ENV);
+    if (!latx_pressure_vessel_runtime_configure(envlist, expected_files)) {
         return;
     }
-    latx_pressure_vessel_runtime_activate();
 
 #if defined(TARGET_I386) && !defined(TARGET_X86_64)
     latx_pressure_vessel_append_i386_sysroot(envlist);
-    latx_pressure_vessel_runtime_configure(envlist);
-    if (latx_pressure_vessel_runtime_is_inherited(envlist)) {
-        latx_pressure_vessel_runtime_activate();
-    }
+    (void)latx_pressure_vessel_runtime_configure(envlist, expected_files);
 #endif
 }
 

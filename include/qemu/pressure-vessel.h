@@ -7,11 +7,12 @@
 
 #include "qemu/envlist.h"
 
-/* Discover a Runtime candidate without changing generic path resolution. */
-void latx_pressure_vessel_runtime_configure(const envlist_t *envlist);
-/* Allow generic Runtime handling for a verified pressure-vessel launch. */
-void latx_pressure_vessel_runtime_activate(void);
-bool latx_pressure_vessel_runtime_is_active(void);
+/*
+ * Discover a Runtime candidate. Generic Runtime handling is enabled only
+ * when expected_files matches the candidate's canonical files path.
+ */
+bool latx_pressure_vessel_runtime_configure(const envlist_t *envlist,
+                                            const char *expected_files);
 /* Candidate accessors used by the pressure-vessel launch helper. */
 const char *latx_pressure_vessel_runtime_files(void);
 /* Generic callers only observe this once the Runtime is active. */
