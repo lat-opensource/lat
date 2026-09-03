@@ -1935,9 +1935,10 @@ bool translate_vpblendvb(IR1_INST * pir1) {
     src3 = load_freg256_from_ir1(opnd3);
     la_xvslti_b(temp, src3, 0);
     la_xvbitsel_v(temp, src1, src2, temp);
-    if (ir1_opnd_is_xmm(opnd0))
-        la_xvori_b(dest, temp, 0);
-    set_high128_xreg_to_zero(dest);
+    la_xvori_b(dest, temp, 0);
+    if (ir1_opnd_is_xmm(opnd0)) {
+        set_high128_xreg_to_zero(dest);
+    }
     return true;
 }
 
@@ -2016,9 +2017,10 @@ bool translate_vpblendw(IR1_INST * pir1) {
     if (imm & 0x80)
         la_xvextrins_h(temp, src2, VEXTRINS_IMM_4_0(7, 7));
 
-    if (ir1_opnd_is_xmm(opnd0))
-        la_xvori_b(dest, temp, 0);
-    set_high128_xreg_to_zero(dest);
+    la_xvori_b(dest, temp, 0);
+    if (ir1_opnd_is_xmm(opnd0)) {
+        set_high128_xreg_to_zero(dest);
+    }
     return true;
 }
 
