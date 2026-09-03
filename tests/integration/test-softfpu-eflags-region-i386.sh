@@ -19,7 +19,12 @@ fi
     -Wl,--build-id=none "$source_file" \
     -o "$workdir/softfpu-eflags-region-i386"
 
-LATX_AOT=0 LATX_MT=0 LATX_SOFTFPU=2 LATX_SOFTFPU_FAST=0xc00000 \
+LATX_AOT=0 LATX_MT=0 LATX_SOFTFPU=1 LATX_SOFTFPU_FAST=0 \
     "$emulator" "$workdir/softfpu-eflags-region-i386"
 
-echo "PASS: softfpu helper regions preserve x87 comparison flags"
+for fast in 0 0xc00000; do
+    LATX_AOT=0 LATX_MT=0 LATX_SOFTFPU=2 LATX_SOFTFPU_FAST=$fast \
+        "$emulator" "$workdir/softfpu-eflags-region-i386"
+done
+
+echo "PASS: x87 comparison flags preserved in all softfpu variants"
