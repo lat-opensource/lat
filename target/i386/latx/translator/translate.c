@@ -3179,50 +3179,43 @@ static int generate_shadow_jmp_glue(void *code_buf)
     tr_init(NULL);
     IR2_OPND next_x86_addr = ra_alloc_dbt_arg2();
     IR2_OPND jmp_cache_addr = ra_alloc_static0();
-    IR2_OPND entry = ra_alloc_itemp();
-    IR2_OPND first_entry = ra_alloc_itemp();
-    IR2_OPND value = ra_alloc_itemp();
+    IR2_OPND index = ra_alloc_itemp();
+    IR2_OPND first_index = ra_alloc_itemp();
     IR2_OPND base = ra_alloc_itemp();
-    IR2_OPND end = ra_alloc_itemp();
-    IR2_OPND hash_mul = ra_alloc_itemp();
-    IR2_OPND tombstone = ra_alloc_itemp();
+    IR2_OPND entry = ra_alloc_itemp();
     IR2_OPND native_target = ra_alloc_itemp();
     IR2_OPND exit_target = ra_alloc_data();
     IR2_OPND code_base = ra_alloc_data();
     IR2_OPND label_loop = ra_alloc_label();
     IR2_OPND label_next = ra_alloc_label();
-    IR2_OPND label_no_wrap = ra_alloc_label();
     IR2_OPND label_miss = ra_alloc_label();
 
     li_d(base, (ADDR)latx_shadow_jmp_entries);
-    li_d(end, (ADDR)(latx_shadow_jmp_entries + LATX_SHADOW_JMP_SIZE));
-    li_d(hash_mul, LATX_SHADOW_JMP_HASH_MULT);
-    li_d(tombstone, (ADDR)LATX_SHADOW_JMP_TOMBSTONE);
-
-    la_mul_d(entry, next_x86_addr, hash_mul);
-    la_srli_d(entry, entry, 64 - LATX_SHADOW_JMP_BITS);
-    la_alsl_d(entry, entry, base, 3);
-    la_or(first_entry, entry, zero_ir2_opnd);
+    li_d(native_target, LATX_SHADOW_JMP_HASH_MULT);
+    la_mul_d(index, next_x86_addr, native_target);
+    la_srli_d(index, index, 64 - LATX_SHADOW_JMP_BITS);
+    la_or(first_index, index, zero_ir2_opnd);
 
     la_label(label_loop);
+    la_alsl_d(entry, index, base, 3);
     la_ld_d(native_target, entry, offsetof(LatxShadowJmpEntry, ptr));
     la_beq(native_target, zero_ir2_opnd, label_miss);
-    la_beq(native_target, tombstone, label_next);
-    la_ld_d(value, entry, offsetof(LatxShadowJmpEntry, pc));
-    la_bne(value, next_x86_addr, label_next);
+    la_addi_d(entry, native_target, -1);
+    la_beq(entry, zero_ir2_opnd, label_next);
+    la_alsl_d(entry, index, base, 3);
+    la_ld_d(entry, entry, offsetof(LatxShadowJmpEntry, pc));
+    la_bne(entry, next_x86_addr, label_next);
     /* Promote an FSHT hit so repeated jumps use the primary FastTB path. */
-    la_bstrpick_d(value, next_x86_addr, TB_JMP_CACHE_BITS - 1, 0);
-    la_alsl_d(value, value, jmp_cache_addr, 3);
-    la_st_d(native_target, value, offsetof(FastTB, ptr));
-    la_st_d(next_x86_addr, value, offsetof(FastTB, pc));
+    la_bstrpick_d(entry, next_x86_addr, TB_JMP_CACHE_BITS - 1, 0);
+    la_alsl_d(entry, entry, jmp_cache_addr, 3);
+    la_st_d(native_target, entry, offsetof(FastTB, ptr));
+    la_st_d(next_x86_addr, entry, offsetof(FastTB, pc));
     la_jirl(zero_ir2_opnd, native_target, 0);
 
     la_label(label_next);
-    la_addi_d(entry, entry, sizeof(LatxShadowJmpEntry));
-    la_bne(entry, end, label_no_wrap);
-    la_or(entry, base, zero_ir2_opnd);
-    la_label(label_no_wrap);
-    la_beq(entry, first_entry, label_miss);
+    la_addi_d(index, index, 1);
+    la_bstrpick_d(index, index, LATX_SHADOW_JMP_BITS - 1, 0);
+    la_beq(index, first_index, label_miss);
     la_b(label_loop);
 
     la_label(label_miss);
