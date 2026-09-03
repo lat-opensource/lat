@@ -2095,14 +2095,82 @@ static void tr_check_x86ins_change(struct TranslationBlock *tb)
 }
 #endif
 
-/*
- * Keep this list explicit: helper-calling softfpu translations are not
- * contiguous in dt_x86_insn. Include every mode 2 translation that needs a
- * shared helper region. Fast paths with a locally wrapped fallback are
- * excluded when enabled.
- */
-static bool is_softfpu_region_insn(IR1_OPCODE opcode)
+typedef enum SoftFPURegionClass {
+    SOFTFPU_REGION_NONE,
+    SOFTFPU_REGION_REQUIRED,
+    SOFTFPU_REGION_TRANSPARENT,
+} SoftFPURegionClass;
+
+static uint32_t softfpu_fast_mask(IR1_OPCODE opcode)
 {
+    switch (opcode) {
+    case dt_X86_INS_FADDP:
+        return LATX_SOFTFPU_FAST_FADDP;
+    case dt_X86_INS_FADD:
+        return LATX_SOFTFPU_FAST_FADD;
+    case dt_X86_INS_FDIV:
+        return LATX_SOFTFPU_FAST_FDIV;
+    case dt_X86_INS_FDIVP:
+        return LATX_SOFTFPU_FAST_FDIVP;
+    case dt_X86_INS_FDIVR:
+        return LATX_SOFTFPU_FAST_FDIVR;
+    case dt_X86_INS_FDIVRP:
+        return LATX_SOFTFPU_FAST_FDIVRP;
+    case dt_X86_INS_FIADD:
+        return LATX_SOFTFPU_FAST_FIADD;
+    case dt_X86_INS_FIDIV:
+        return LATX_SOFTFPU_FAST_FIDIV;
+    case dt_X86_INS_FIDIVR:
+        return LATX_SOFTFPU_FAST_FIDIVR;
+    case dt_X86_INS_FIMUL:
+        return LATX_SOFTFPU_FAST_FIMUL;
+    case dt_X86_INS_FISUB:
+        return LATX_SOFTFPU_FAST_FISUB;
+    case dt_X86_INS_FISUBR:
+        return LATX_SOFTFPU_FAST_FISUBR;
+    case dt_X86_INS_FMUL:
+        return LATX_SOFTFPU_FAST_FMUL;
+    case dt_X86_INS_FMULP:
+        return LATX_SOFTFPU_FAST_FMULP;
+    case dt_X86_INS_FRNDINT:
+        return LATX_SOFTFPU_FAST_FRNDINT;
+    case dt_X86_INS_FSCALE:
+        return LATX_SOFTFPU_FAST_FSCALE;
+    case dt_X86_INS_FSQRT:
+        return LATX_SOFTFPU_FAST_FSQRT;
+    case dt_X86_INS_FSUB:
+        return LATX_SOFTFPU_FAST_FSUB;
+    case dt_X86_INS_FSUBP:
+        return LATX_SOFTFPU_FAST_FSUBP;
+    case dt_X86_INS_FSUBR:
+        return LATX_SOFTFPU_FAST_FSUBR;
+    case dt_X86_INS_FSUBRP:
+        return LATX_SOFTFPU_FAST_FSUBRP;
+    case dt_X86_INS_FIST:
+        return LATX_SOFTFPU_FAST_FIST;
+    case dt_X86_INS_FISTP:
+        return LATX_SOFTFPU_FAST_FISTP;
+    case dt_X86_INS_FST:
+    case dt_X86_INS_FSTP:
+        return LATX_SOFTFPU_FAST_FST;
+    default:
+        return 0;
+    }
+}
+
+/*
+ * REQUIRED instructions need a shared helper wrapper. TRANSPARENT
+ * instructions need no wrapper on their common path, but may remain inside
+ * a region that joins required instructions on both sides.
+ */
+static SoftFPURegionClass softfpu_region_class(IR1_OPCODE opcode)
+{
+    uint32_t fast_mask = softfpu_fast_mask(opcode);
+
+    if (fast_mask && (option_softfpu_fast & fast_mask)) {
+        return SOFTFPU_REGION_TRANSPARENT;
+    }
+
     switch (opcode) {
     case dt_X86_INS_F2XM1:
     case dt_X86_INS_WAIT:
@@ -2157,7 +2225,10 @@ static bool is_softfpu_region_insn(IR1_OPCODE opcode)
     case dt_X86_INS_FXTRACT:
     case dt_X86_INS_FYL2X:
     case dt_X86_INS_FYL2XP1:
-    case dt_X86_INS_FILD:
+    case dt_X86_INS_FIST:
+    case dt_X86_INS_FISTP:
+    case dt_X86_INS_FST:
+    case dt_X86_INS_FSTP:
     case dt_X86_INS_FXRSTOR64:
     case dt_X86_INS_FXSAVE64:
 #ifdef CONFIG_LATX_AVX_OPT
@@ -2167,19 +2238,11 @@ static bool is_softfpu_region_insn(IR1_OPCODE opcode)
     case dt_X86_INS_XSAVEOPT:
     case dt_X86_INS_XRSTOR:
 #endif
-        return true;
-    case dt_X86_INS_FIST:
-        /* Only the conditional slow path calls a locally wrapped helper. */
-        return !(option_softfpu_fast & LATX_SOFTFPU_FAST_FIST);
-    case dt_X86_INS_FISTP:
-        /* Only the conditional slow path calls a locally wrapped helper. */
-        return !(option_softfpu_fast & LATX_SOFTFPU_FAST_FISTP);
-    case dt_X86_INS_FST:
-    case dt_X86_INS_FSTP:
-        /* The fast path is entirely inline and never calls a helper. */
-        return !(option_softfpu_fast & LATX_SOFTFPU_FAST_FST);
+        return SOFTFPU_REGION_REQUIRED;
+    case dt_X86_INS_FILD:
+        return SOFTFPU_REGION_TRANSPARENT;
     default:
-        return false;
+        return SOFTFPU_REGION_NONE;
     }
 }
 
@@ -2199,6 +2262,32 @@ static bool is_softfpu_eflags_insn(IR1_OPCODE opcode)
     default:
         return false;
     }
+}
+
+static int softfpu_region_last_required(IR1_INST *first, int count)
+{
+    int last_required = 0;
+
+    lsassert(softfpu_region_class(ir1_opcode(first)) ==
+             SOFTFPU_REGION_REQUIRED);
+    if (is_softfpu_eflags_insn(ir1_opcode(first))) {
+        return 0;
+    }
+
+    for (int i = 1; i < count; i++) {
+        IR1_OPCODE opcode = ir1_opcode(first + i);
+        SoftFPURegionClass class = softfpu_region_class(opcode);
+
+        if (class == SOFTFPU_REGION_NONE ||
+            is_softfpu_eflags_insn(opcode)) {
+            break;
+        }
+        if (class == SOFTFPU_REGION_REQUIRED) {
+            last_required = i;
+        }
+    }
+
+    return last_required;
 }
 
 int tr_ir2_generate(struct TranslationBlock *tb)
@@ -2221,6 +2310,9 @@ int tr_ir2_generate(struct TranslationBlock *tb)
     IR1_INST *pir1 = tb_ir1_inst(tb, 0);
 
     bool reduce_proepo = false;
+    int softfpu_region_end = -1;
+
+    lsenv->tr_data->softfpu_region_active = false;
 
 #ifdef CONFIG_LATX_MONITOR_SHARED_MEM
     if (option_monitor_shared_mem && tb->checksum) {
@@ -2328,8 +2420,12 @@ int tr_ir2_generate(struct TranslationBlock *tb)
 #endif
 
         if (option_softfpu == 2 && !reduce_proepo &&
-            is_softfpu_region_insn(ir1_opcode(pir1))) {
+            softfpu_region_class(ir1_opcode(pir1)) ==
+                SOFTFPU_REGION_REQUIRED) {
             reduce_proepo = true;
+            softfpu_region_end = i +
+                softfpu_region_last_required(pir1, ir1_nr - i);
+            lsenv->tr_data->softfpu_region_active = true;
             gen_softfpu_helper_prologue(pir1);
         }
 
@@ -2342,21 +2438,11 @@ int tr_ir2_generate(struct TranslationBlock *tb)
 #endif
         }
 
-        if (option_softfpu == 2 && reduce_proepo) {
-            bool end_region = i == ir1_nr - 1 ||
-                              is_softfpu_eflags_insn(ir1_opcode(pir1));
-
-            if (!end_region) {
-                IR1_INST *pir1_next = pir1 + 1;
-
-                end_region =
-                    !is_softfpu_region_insn(ir1_opcode(pir1_next)) ||
-                    is_softfpu_eflags_insn(ir1_opcode(pir1_next));
-            }
-            if (end_region) {
-                reduce_proepo = false;
-                gen_softfpu_helper_epilogue(pir1);
-            }
+        if (option_softfpu == 2 && reduce_proepo &&
+            i == softfpu_region_end) {
+            reduce_proepo = false;
+            lsenv->tr_data->softfpu_region_active = false;
+            gen_softfpu_helper_epilogue(pir1);
         }
 
 #ifdef CONFIG_LATX_IMM_REG

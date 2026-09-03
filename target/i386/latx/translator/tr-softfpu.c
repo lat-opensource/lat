@@ -1446,7 +1446,15 @@ static bool translate_fild_softfpu(IR1_INST *pir1)
             li_d(itemp2, 12);
             la_bge(itemp1, itemp2, label_hard);
 
+            bool local_region =
+                !lsenv->tr_data->softfpu_region_active;
+            if (local_region) {
+                gen_softfpu_helper_prologue(pir1);
+            }
             gen_softfpu_helper2m_64((ADDR)helper_fildll_ST0, mem_opnd);
+            if (local_region) {
+                gen_softfpu_helper_epilogue(pir1);
+            }
             la_b(label_exit);
 
             la_label(label_hard);
@@ -1592,8 +1600,10 @@ static bool translate_fist_softfpu(IR1_INST *pir1)
 
 
         la_label(label_softfpu);
-        /* The fast FIST path is outside a shared helper region. */
-        gen_softfpu_helper_prologue(pir1);
+        bool local_region = !lsenv->tr_data->softfpu_region_active;
+        if (local_region) {
+            gen_softfpu_helper_prologue(pir1);
+        }
         if (opnd_size == 16) {
             gen_softfpu_helper1((ADDR)helper_fist_ST0);
         } else if (opnd_size == 32) {
@@ -1604,7 +1614,9 @@ static bool translate_fist_softfpu(IR1_INST *pir1)
         restore_gpr();
         store_ireg_to_ir1(a0_ir2_opnd, opnd0, false);
         save_gpr();
-        gen_softfpu_helper_epilogue(pir1);
+        if (local_region) {
+            gen_softfpu_helper_epilogue(pir1);
+        }
 
         la_label(label_exit);
 
@@ -1696,8 +1708,10 @@ static bool translate_fistp_softfpu(IR1_INST *pir1)
         la_b(label_exit);
 
         la_label(label_softfpu);
-        /* The fast FISTP path is outside a shared helper region. */
-        gen_softfpu_helper_prologue(pir1);
+        bool local_region = !lsenv->tr_data->softfpu_region_active;
+        if (local_region) {
+            gen_softfpu_helper_prologue(pir1);
+        }
         if (opnd_size == 16) {
             gen_softfpu_helper1((ADDR)helper_fist_ST0);
         } else if (opnd_size == 32) {
@@ -1711,7 +1725,9 @@ static bool translate_fistp_softfpu(IR1_INST *pir1)
         store_ireg_to_ir1(a0_ir2_opnd, opnd0, false);
         save_gpr();
         la_fpu_pop();
-        gen_softfpu_helper_epilogue(pir1);
+        if (local_region) {
+            gen_softfpu_helper_epilogue(pir1);
+        }
 
         la_label(label_exit);
 
