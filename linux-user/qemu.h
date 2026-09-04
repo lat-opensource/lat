@@ -380,6 +380,10 @@ void fork_start(void);
 void fork_end(int child);
 void fd_trans_fork_start(void);
 void fd_trans_fork_end(void);
+#ifdef CONFIG_LATX
+void latx_syscall_fs_fork_start(void);
+void latx_syscall_fs_fork_end(void);
+#endif
 
 /**
  * probe_guest_base:
