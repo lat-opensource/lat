@@ -377,6 +377,16 @@ static void la_update_fp_status(IR2_OPND cw_opnd)
     ra_free_temp(tmp_fcsr);
 }
 
+static void la_update_fp_status_from_env(void)
+{
+    IR2_OPND cw_opnd = ra_alloc_itemp();
+
+    la_ld_hu(cw_opnd, env_ir2_opnd,
+             lsenv_offset_of_control_word(lsenv));
+    la_update_fp_status(cw_opnd);
+    ra_free_temp(cw_opnd);
+}
+
 __attribute__((unused))
 void gen_softfpu_helper_prologue(IR1_INST *pir1)
 {
@@ -1924,17 +1934,12 @@ static bool translate_fldcw_softfpu(IR1_INST *pir1)
 {
     IR1_OPND *opnd0 = ir1_get_opnd(pir1, 0);
     IR2_OPND mem_opnd = convert_mem_no_offset(opnd0);
+    IR2_OPND new_cw = ra_alloc_itemp();
 
-    if (option_softfpu == 2) {
-        IR2_OPND new_cw = ra_alloc_itemp();
-        la_ld_hu(new_cw, mem_opnd, 0);
-        la_st_h(new_cw, env_ir2_opnd, lsenv_offset_of_control_word(lsenv));
-        la_update_fp_status(new_cw);
-        ra_free_temp(new_cw);
-
-    } else {
-        gen_softfpu_helper2m_16u((ADDR)helper_fldcw, mem_opnd);
-    }
+    la_ld_hu(new_cw, mem_opnd, 0);
+    la_st_h(new_cw, env_ir2_opnd, lsenv_offset_of_control_word(lsenv));
+    la_update_fp_status(new_cw);
+    ra_free_temp(new_cw);
     return true;
 }
 
@@ -2020,6 +2025,7 @@ static bool translate_fldenv_softfpu(IR1_INST *pir1)
 
     } else {
         gen_softfpu_helper3i((ADDR)helper_fldenv, mem_opnd, data32);
+        la_update_fp_status_from_env();
     }
     return true;
 }
@@ -2325,6 +2331,7 @@ static bool translate_fninit_softfpu(IR1_INST *pir1)
         ra_free_temp(temp);
     } else {
         gen_softfpu_helper1((ADDR)helper_fninit);
+        la_update_fp_status_from_env();
     }
     return true;
 }
@@ -2474,6 +2481,7 @@ static bool translate_fnsave_softfpu(IR1_INST *pir1)
     } else {
         IR2_OPND mem_opnd = convert_mem_no_offset(opnd0);
         gen_softfpu_helper3i((ADDR)helper_fsave, mem_opnd, data32);
+        la_update_fp_status_from_env();
     }
     return true;
 }
@@ -2618,6 +2626,7 @@ static bool translate_frstor_softfpu(IR1_INST *pir1)
     } else {
         IR2_OPND mem_opnd = convert_mem_no_offset(opnd0);
         gen_softfpu_helper3i((ADDR)helper_frstor, mem_opnd, data32);
+        la_update_fp_status_from_env();
 
     }
     return true;
@@ -3131,6 +3140,7 @@ static bool translate_fxrstor_softfpu(IR1_INST *pir1)
     IR2_OPND mem_opnd = convert_mem_no_offset(opnd0);
 
     gen_softfpu_helper2m_ptr((ADDR)helper_fxrstor, mem_opnd);
+    la_update_fp_status_from_env();
     return true;
 }
 
@@ -3227,6 +3237,7 @@ static bool translate_xrstor_softfpu(IR1_INST *pir1)
     la_bstrins_d(temp_rfbm, eax_opnd, 31, 0);
     la_bstrins_d(temp_rfbm, edx_opnd, 63, 32);
     gen_softfpu_helper3_ll((ADDR)helper_xrstor, mem_opnd, temp_rfbm);
+    la_update_fp_status_from_env();
     return true;
 }
 #endif
@@ -3268,7 +3279,7 @@ TRANS_FPU_WRAP_GEN(fisub);
 TRANS_FPU_WRAP_GEN(fisubr);
 TRANS_FPU_WRAP_GEN(fld1);
 TRANS_FPU_WRAP_GEN(fld);
-TRANS_FPU_WRAP_GEN(fldcw);
+TRANS_FPU_WRAP_GEN_NO_PROLOGUE(fldcw);
 TRANS_FPU_WRAP_GEN(fldenv);
 TRANS_FPU_WRAP_GEN(fldl2e);
 TRANS_FPU_WRAP_GEN(fldl2t);
