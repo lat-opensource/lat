@@ -723,6 +723,60 @@ static void handle_arg_latx_imm_reg(const char *arg)
     options_parse_imm_reg(arg);
 }
 
+static void handle_arg_latx_imm_rip(const char *arg)
+{
+    int value;
+
+    if (qemu_strtoi(arg, NULL, 0, &value) || value < 0 || value > 1) {
+        error_report("LATX_IMM_RIP must be exactly 0 or 1 (got '%s')", arg);
+        exit(EXIT_FAILURE);
+    }
+    option_imm_rip = value;
+    if (value) {
+        option_imm_reg = 1;
+    }
+}
+
+static void handle_arg_latx_imm_rip_stats(const char *arg)
+{
+    int value;
+
+    if (qemu_strtoi(arg, NULL, 0, &value) || value < 0 || value > 1) {
+        error_report("LATX_IMM_RIP_STATS must be exactly 0 or 1 (got '%s')",
+                     arg);
+        exit(EXIT_FAILURE);
+    }
+    option_imm_rip_stats = value;
+}
+
+static void handle_arg_latx_imm_complex(const char *arg)
+{
+    int value;
+
+    if (qemu_strtoi(arg, NULL, 0, &value) || value < 0 ||
+        value > LATX_IMM_COMPLEX_ALL) {
+        error_report("LATX_IMM_COMPLEX must be a mask from 0 to %d (got '%s')",
+                     LATX_IMM_COMPLEX_ALL, arg);
+        exit(EXIT_FAILURE);
+    }
+    option_imm_complex = value;
+    if (value) {
+        option_imm_reg = 1;
+    }
+}
+
+static void handle_arg_latx_imm_complex_stats(const char *arg)
+{
+    int value;
+
+    if (qemu_strtoi(arg, NULL, 0, &value) || value < 0 || value > 1) {
+        error_report("LATX_IMM_COMPLEX_STATS must be exactly 0 or 1 "
+                     "(got '%s')", arg);
+        exit(EXIT_FAILURE);
+    }
+    option_imm_complex_stats = value;
+}
+
 static void handle_arg_save_xmm(const char *arg)
 {
     if (strtol(arg, NULL, 0)) {
@@ -945,6 +999,17 @@ static const struct qemu_argument arg_table[] = {
     "",           "enable jrra"},
     {"latx-imm-reg",    "LATX_IMM_REG",     true,  handle_arg_latx_imm_reg,
     "",           "enable imm reg optimization"},
+    {"latx-imm-rip", "LATX_IMM_RIP", true, handle_arg_latx_imm_rip,
+    "0|1",        "enable CODE64 RIP-relative immediate cache"},
+    {"latx-imm-rip-stats", "LATX_IMM_RIP_STATS", true,
+    handle_arg_latx_imm_rip_stats, "0|1",
+    "report per-TB RIP-relative immediate cache statistics"},
+    {"latx-imm-complex", "LATX_IMM_COMPLEX", true,
+    handle_arg_latx_imm_complex, "mask",
+    "enable complex-address cache modes (1=base, 2=index, 4=combined)"},
+    {"latx-imm-complex-stats", "LATX_IMM_COMPLEX_STATS", true,
+    handle_arg_latx_imm_complex_stats, "0|1",
+    "report per-TB complex-address cache statistics"},
     {"latx-mem-test",    "LATX_MT",     true,  handle_arg_latx_mem_test,
     "",           "test memory right when memory access"},
     {"latx-real-maps",    "LATX_REAL_MAPS",     true,  handle_arg_latx_real_maps,

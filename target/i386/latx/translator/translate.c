@@ -135,7 +135,7 @@ void tr_init(void *tb)
     }
 
     if (t->imm_cache == NULL) {
-        t->imm_cache = (IMM_CACHE *)mm_malloc(sizeof(IMM_CACHE));
+        t->imm_cache = (IMM_CACHE *)mm_calloc(1, sizeof(IMM_CACHE));
         t->imm_cache->bucket = (IMM_CACHE_BUCKET *)mm_calloc(
             CACHE_MAX_CAPACITY, sizeof(IMM_CACHE_BUCKET));
     }
@@ -2360,16 +2360,13 @@ int tr_ir2_generate(struct TranslationBlock *tb)
                         continue;
                     }
 #endif
-                    /* convert_mem_helper will put si12 offset into host_off */
-                    if (!si12_overflow(offset)) {
-                        continue;
-                    }
                     // record base and index
                     bool has_index = ir1_opnd_has_index(opnd);
                     bool has_base = ir1_opnd_has_base(opnd);
                     int base_op = -1;
                     int index_op = -1;
                     int scale = -1;
+                    int complex_kind = -1;
                     if (has_base) {
                         base_op = ir1_opnd_base_reg_num(opnd);
                     }
@@ -2380,6 +2377,38 @@ int tr_ir2_generate(struct TranslationBlock *tb)
                             scale != 8) {
                             scale = -1;
                         }
+                    }
+
+                    if (has_base && has_index) {
+                        complex_kind = IMM_CACHE_COMPLEX_BASE_INDEX_DISP;
+                    } else if (has_index) {
+                        complex_kind = IMM_CACHE_COMPLEX_INDEX_DISP;
+                    } else if (has_base && offset) {
+                        complex_kind = IMM_CACHE_COMPLEX_BASE_DISP;
+                    }
+
+                    if (complex_kind < 0 ||
+                        !(option_imm_complex & (1 << complex_kind)) ||
+#ifdef TARGET_X86_64
+                        !CODEIS64 ||
+#endif
+                        ir1_addr_size(t_pir1) != 64 ||
+                        ir1_opnd_has_seg(opnd) ||
+                        (has_index && scale < 0)) {
+                        continue;
+                    }
+
+                    /*
+                     * convert_mem_helper leaves a small displacement in the
+                     * host load/store. Only base+disp has no address cache
+                     * work left in that case. The other modes cache the
+                     * base/index expression at offset zero.
+                     */
+                    if (!si12_overflow(offset)) {
+                        if (complex_kind == IMM_CACHE_COMPLEX_BASE_DISP) {
+                            continue;
+                        }
+                        offset = 0;
                     }
 
                     if (base_op != -1 || index_op != -1) {
@@ -2455,6 +2484,12 @@ int tr_ir2_generate(struct TranslationBlock *tb)
 
         pir1++;
     }
+#ifdef CONFIG_LATX_IMM_REG
+    if (option_imm_reg) {
+        imm_cache_print_rip_stats(imm_cache, tb->pc);
+        imm_cache_print_complex_stats(imm_cache, tb->pc);
+    }
+#endif
 #ifdef CONFIG_LATX_DEBUG
     if (option_dump_ir1) {
         pir1 = tb_ir1_inst(tb, 0);
@@ -4140,6 +4175,9 @@ void tr_load_x64_8_registers_from_env(uint8 gpr_to_load, uint8 xmm_to_load)
 
 void tr_gen_call_to_helper(ADDR func_addr, enum aot_rel_kind REL_KIND)
 {
+#ifdef CONFIG_LATX_IMM_REG
+    imm_cache_invalidate_for_helper();
+#endif
     IR2_OPND func_addr_opnd = ra_alloc_dbt_arg2();
     TranslationBlock *tb __attribute__((unused)) = NULL;
     if (option_aot) {
@@ -4178,6 +4216,9 @@ void convert_fpregs_x80_to_64(void)
 
 static void tr_gen_call_to_helper_prologue(int use_fp)
 {
+#ifdef CONFIG_LATX_IMM_REG
+    imm_cache_invalidate_for_helper();
+#endif
     tr_save_registers_to_env(0, FPR_USEDEF_TO_SAVE, XMM_USEDEF_TO_SAVE,
                              options_to_save());
 #ifdef TARGET_X86_64

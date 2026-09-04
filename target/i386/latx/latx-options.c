@@ -81,8 +81,10 @@ int option_smc_reload;
 int option_debug_aot;
 int option_imm_reg;
 int option_imm_rip;
+int option_imm_rip_stats;
 int option_imm_precache;
 int option_imm_complex;
+int option_imm_complex_stats;
 int option_debug_imm_reg;
 uint64_t imm_skip_pc;
 uint64_t debug_tb_pc;
@@ -255,10 +257,16 @@ void options_init(void)
 #endif
     option_smc_reload = 0;
 #ifdef CONFIG_LATX_IMM_REG
+#ifdef TARGET_X86_64
+    option_imm_reg = 1;
+    option_imm_complex = LATX_IMM_COMPLEX_ALL;
+#else
     option_imm_reg = 0;
-    option_imm_rip = 0;
-    // complex:base+index*scale
     option_imm_complex = 0;
+#endif
+    option_imm_rip = 0;
+    option_imm_rip_stats = 0;
+    option_imm_complex_stats = 0;
     option_imm_precache = 0;
     option_debug_imm_reg = 0;
     imm_skip_pc = 0;
@@ -342,7 +350,7 @@ void options_parse_imm_reg(const char *bits)
     }
 
     if (bits[OPTIONS_IMM_COMPLEX] == '1') {
-        option_imm_complex = 1;
+        option_imm_complex = LATX_IMM_COMPLEX_ALL;
     } else if (bits[OPTIONS_IMM_COMPLEX] == '0') {
         option_imm_complex = 0;
     } else {

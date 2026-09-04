@@ -39,6 +39,18 @@ static void test_release_loader_prefix_config(void)
     g_assert_true(config_option_registered("LAT_LD_PREFIX"));
 }
 
+static void test_rip_imm_cache_options_registered(void)
+{
+    g_assert_true(config_option_registered("LATX_IMM_RIP"));
+    g_assert_true(config_option_registered("LATX_IMM_RIP_STATS"));
+}
+
+static void test_complex_imm_cache_options_registered(void)
+{
+    g_assert_true(config_option_registered("LATX_IMM_COMPLEX"));
+    g_assert_true(config_option_registered("LATX_IMM_COMPLEX_STATS"));
+}
+
 static void test_runtime_prefix_source(void)
 {
     latx_runtime_reset();
@@ -187,6 +199,10 @@ int main(int argc, char **argv)
                     test_target_config_files);
     g_test_add_func("/latx/config/release-loader-prefix",
                     test_release_loader_prefix_config);
+    g_test_add_func("/latx/config/rip-imm-cache-options",
+                    test_rip_imm_cache_options_registered);
+    g_test_add_func("/latx/config/complex-imm-cache-options",
+                    test_complex_imm_cache_options_registered);
     g_test_add_func("/latx/config/runtime-prefix-source",
                     test_runtime_prefix_source);
     g_test_add_func("/latx/config/user-config-path",

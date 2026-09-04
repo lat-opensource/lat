@@ -84,6 +84,22 @@ static void index_add_base(IR2_OPND dest, IR2_OPND base,
     }
 }
 
+#ifdef CONFIG_LATX_IMM_REG
+static int imm_cache_complex_kind(bool has_base, bool has_index, longx offset)
+{
+    if (has_base && has_index) {
+        return IMM_CACHE_COMPLEX_BASE_INDEX_DISP;
+    }
+    if (has_index) {
+        return IMM_CACHE_COMPLEX_INDEX_DISP;
+    }
+    if (has_base && offset) {
+        return IMM_CACHE_COMPLEX_BASE_DISP;
+    }
+    return -1;
+}
+#endif
+
 /**
 * @brief adjust_dest - store the dest based on the values of
 *       dest_size and addr_size.
@@ -181,6 +197,9 @@ static IR2_OPND convert_mem_helper(IR1_OPND *opnd1, IR2_OPND *arg_dest_op,
     IMM_CACHE *imm_cache = lsenv->tr_data->imm_cache;
     imm_cache->itemp_allocated = false;
     bool cache_skip = false;
+    bool complex_attempted = false;
+    int complex_kind = -1;
+    int complex_host_off = 0;
 #endif
     dest_need_itmp = false;
     if (!arg_dest_op) {
@@ -210,6 +229,7 @@ static IR2_OPND convert_mem_helper(IR1_OPND *opnd1, IR2_OPND *arg_dest_op,
 
     pir1 = lsenv->tr_data->curr_ir1_inst;
     lsassert(pir1 != NULL);
+    addr_size = ir1_addr_size(pir1);
     offset = ir1_opnd_simm(opnd1);
     TranslationBlock *tb __attribute__((unused)) = lsenv->tr_data->curr_tb;
 
@@ -228,14 +248,16 @@ static IR2_OPND convert_mem_helper(IR1_OPND *opnd1, IR2_OPND *arg_dest_op,
 
 #ifdef CONFIG_LATX_IMM_REG
         if (dest_need_itmp) {
-            if (!option_imm_reg || !option_imm_rip || cache_skip) {
+            if (!option_imm_reg || !option_imm_rip || cache_skip ||
+                addr_size != 64 || ir1_opnd_has_seg(opnd1)) {
                 dest_op = ra_alloc_itemp();
                 imm_cache->itemp_allocated = true;
             } else {
                 /* Determine if this RIP address can be optimized */
 
                 IMM_CACHE_RES res =
-                    imm_cache_allocate(imm_cache, -100, -1, -1, offset);
+                    imm_cache_allocate(imm_cache, IMM_CACHE_RIP_BASE,
+                                       -1, -1, offset);
                 dest_op = ra_alloc_imm_reg(res.itemp_num);
                 if (ir2_opnd_is_none(&dest_op)) {
                     // itemp is not available skip directly
@@ -243,6 +265,7 @@ static IR2_OPND convert_mem_helper(IR1_OPND *opnd1, IR2_OPND *arg_dest_op,
                     imm_log("[alloc none] %d\n", res.itemp_num);
                     free_imm_reg(res.itemp_num);
                     imm_cache->itemp_allocated = true;
+                    imm_cache->rip_stats.itemp_fallbacks++;
                 } else {
                     // 1. cached?
                     if (res.cached) {
@@ -273,11 +296,15 @@ static IR2_OPND convert_mem_helper(IR1_OPND *opnd1, IR2_OPND *arg_dest_op,
                         }
                         if (host_off) {
                             *host_off = res.diff;
+                            imm_cache->rip_stats.host_offset_hits++;
                         } else if (res.diff != 0) {
                             // cache imm offset should be updated at the sametime if no host_off
                             imm_cache_update_by_diff(imm_cache, res.cache_id,
                                                      res.diff);
                             la_addi_d(dest_op, dest_op, res.diff);
+                            imm_cache->rip_stats.addi_hits++;
+                        } else {
+                            imm_cache->rip_stats.direct_hits++;
                         } 
                         return dest_op;
                     }
@@ -292,6 +319,12 @@ static IR2_OPND convert_mem_helper(IR1_OPND *opnd1, IR2_OPND *arg_dest_op,
         target_ulong call_offset __attribute__((unused)) =
                 aot_get_call_offset(offset);
         aot_load_guest_addr(dest_op, offset, LOAD_CALL_TARGET, call_offset);
+#ifdef CONFIG_LATX_IMM_REG
+        if (option_imm_reg && option_imm_rip && addr_size == 64 &&
+            !ir1_opnd_has_seg(opnd1)) {
+            imm_cache->rip_stats.full_loads++;
+        }
+#endif
         if (host_off) {
             *host_off = 0;
         }
@@ -319,9 +352,6 @@ static IR2_OPND convert_mem_helper(IR1_OPND *opnd1, IR2_OPND *arg_dest_op,
     has_base = ir1_opnd_has_base(opnd1);
 
 #ifdef CONFIG_LATX_IMM_REG
-    if (!option_imm_reg || !option_imm_complex) {
-        cache_skip = true;
-    }
     int base = -1;
     int index = -1;
     int scale = ir1_opnd_scale(opnd1);
@@ -339,13 +369,50 @@ static IR2_OPND convert_mem_helper(IR1_OPND *opnd1, IR2_OPND *arg_dest_op,
         scale = -1;
     }
 
+    complex_kind = imm_cache_complex_kind(has_base, has_index, offset);
+    if (complex_kind < 0) {
+        cache_skip = true;
+        imm_cache->complex_stats
+            .skips[IMM_CACHE_COMPLEX_SKIP_UNSUPPORTED_FORM]++;
+    } else if (!option_imm_reg ||
+               !(option_imm_complex & (1 << complex_kind))) {
+        cache_skip = true;
+        imm_cache->complex_stats.skips[IMM_CACHE_COMPLEX_SKIP_DISABLED]++;
+#ifndef TARGET_X86_64
+    } else if (complex_kind >= 0) {
+        cache_skip = true;
+        imm_cache->complex_stats.skips[IMM_CACHE_COMPLEX_SKIP_NOT_CODE64]++;
+#else
+    } else if (!CODEIS64) {
+        cache_skip = true;
+        imm_cache->complex_stats.skips[IMM_CACHE_COMPLEX_SKIP_NOT_CODE64]++;
+    } else if (addr_size != 64) {
+        cache_skip = true;
+        imm_cache->complex_stats.skips[IMM_CACHE_COMPLEX_SKIP_ADDR_SIZE]++;
+    } else if (has_seg) {
+        cache_skip = true;
+        imm_cache->complex_stats.skips[IMM_CACHE_COMPLEX_SKIP_SEGMENT]++;
+    } else if (has_index && scale < 0) {
+        cache_skip = true;
+        imm_cache->complex_stats.skips[IMM_CACHE_COMPLEX_SKIP_INVALID_SCALE]++;
+#endif
+    } else if (cache_skip) {
+        imm_cache->complex_stats.skips[IMM_CACHE_COMPLEX_SKIP_INSTRUCTION]++;
+    }
+
 #endif
     if (host_off) {
         if (si12_overflow(offset)) {
             *host_off = 0;
         } else {
 #ifdef CONFIG_LATX_IMM_REG
-            cache_skip = true;
+            if (!cache_skip &&
+                complex_kind == IMM_CACHE_COMPLEX_BASE_DISP) {
+                cache_skip = true;
+                imm_cache->complex_stats
+                    .skips[IMM_CACHE_COMPLEX_SKIP_NO_BENEFIT]++;
+            }
+            complex_host_off = offset;
 
 #endif /* ifdef CONFIG_LATX_IMM_REG */
             *host_off = offset;
@@ -365,6 +432,10 @@ static IR2_OPND convert_mem_helper(IR1_OPND *opnd1, IR2_OPND *arg_dest_op,
 #ifdef CONFIG_LATX_IMM_REG
     // i need base, index, scale offset
     if (!dest_need_itmp) {
+        if (!cache_skip && complex_kind >= 0) {
+            imm_cache->complex_stats
+                .skips[IMM_CACHE_COMPLEX_SKIP_FIXED_DEST]++;
+        }
         goto imm_cache_exit;
     }
     if (cache_skip) {
@@ -380,6 +451,7 @@ static IR2_OPND convert_mem_helper(IR1_OPND *opnd1, IR2_OPND *arg_dest_op,
      */
     IMM_CACHE_RES res =
         imm_cache_allocate(imm_cache, base, index, scale, offset);
+    complex_attempted = true;
     dest_op = ra_alloc_imm_reg(res.itemp_num);
     imm_log("[complex]bitmap:%d\n", bitmap);
     // check if alloc reg conflict with itemp alloc
@@ -389,6 +461,7 @@ static IR2_OPND convert_mem_helper(IR1_OPND *opnd1, IR2_OPND *arg_dest_op,
         dest_op = ra_alloc_itemp();
         free_imm_reg(res.itemp_num);
         imm_cache->itemp_allocated = true;
+        imm_cache->complex_stats.itemp_conflicts[complex_kind]++;
         goto imm_cache_exit;
     }
     // reg allocate success.
@@ -446,17 +519,35 @@ static IR2_OPND convert_mem_helper(IR1_OPND *opnd1, IR2_OPND *arg_dest_op,
         }
         //?
         if (host_off) {
-            *host_off = res.diff;
+            long host_diff = complex_host_off + res.diff;
+
+            if (!si12_overflow(host_diff)) {
+                *host_off = host_diff;
+                imm_cache->complex_stats
+                    .host_offset_hits[complex_kind]++;
+            } else {
+                imm_cache_update_by_diff(imm_cache, res.cache_id,
+                                         res.diff);
+                la_addi_d(dest_op, dest_op, res.diff);
+                *host_off = complex_host_off;
+                imm_cache->complex_stats.addi_hits[complex_kind]++;
+            }
             offset = 0;
         } else if (res.diff != 0) {
             imm_cache_update_by_diff(imm_cache, res.cache_id, res.diff);
             la_addi_d(dest_op, dest_op, res.diff);
+            imm_cache->complex_stats.addi_hits[complex_kind]++;
+        } else {
+            imm_cache->complex_stats.direct_hits[complex_kind]++;
         }
 
         goto skip;
     }
 
 imm_cache_exit:
+    if (complex_attempted) {
+        imm_cache->complex_stats.full_generations[complex_kind]++;
+    }
 #endif
 
     switch (bitmap) {
@@ -554,7 +645,6 @@ skip:
         lsassert(arg_dest_op);
     }
 
-    addr_size = ir1_addr_size(pir1);
     return adjust_dest(dest_op, arg_dest_op, dest_size, addr_size);
 }
 
