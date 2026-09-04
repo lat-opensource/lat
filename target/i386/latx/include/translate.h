@@ -1607,6 +1607,7 @@ IR2_OPND load_freg128_from_ir1(IR1_OPND *);
 void load_imm_to_ir1_opnd_gpr(IR1_OPND *opnd0, uint64_t imm);
 IR2_OPND load_freg256_from_ir1(IR1_OPND *opnd1);
 void set_high128_xreg_to_zero(IR2_OPND opnd);
+void set_all_high128_xregs_to_zero(void);
 void mark_high128_xreg_zeroed(IR2_OPND opnd);
 void materialize_deferred_ymmh_zero(IR2_OPND opnd);
 void materialize_deferred_ymmh_zeros_now(void);

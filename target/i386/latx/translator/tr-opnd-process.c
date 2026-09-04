@@ -1512,6 +1512,13 @@ void set_high128_xreg_to_zero(IR2_OPND opnd)
     clear_high128_xreg_now(opnd);
 }
 
+void set_all_high128_xregs_to_zero(void)
+{
+    if (option_enable_lasx) {
+        lsenv->tr_data->ymmh_zero_pending = UINT16_MAX;
+    }
+}
+
 static IR2_OPND get_ymm_high128_shadow_addr(int index)
 {
 #ifdef TARGET_X86_64

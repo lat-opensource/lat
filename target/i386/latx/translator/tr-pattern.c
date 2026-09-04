@@ -2442,6 +2442,26 @@ static bool translate_avx_sum3(IR1_INST *pir1)
     return true;
 }
 
+static bool translate_ymm_hsumq(IR1_INST *pir1)
+{
+    IR1_INST *move = pir1 + 4;
+    IR2_OPND temp = ra_alloc_xmm(
+        ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 0)));
+    IR2_OPND src = ra_alloc_xmm(
+        ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 1)));
+    IR2_OPND dest = ra_alloc_gpr(
+        ir1_opnd_base_reg_num(ir1_get_opnd(move, 0)));
+
+    materialize_deferred_ymmh_zero(src);
+    la_xvbsrl_v(temp, src, 8);
+    la_xvadd_d(src, src, temp);
+    la_xvpermi_q(temp, src, VEXTRINS_IMM_4_0(3, 1));
+    la_vadd_d(src, src, temp);
+    la_vpickve2gr_du(dest, src, 0);
+    set_all_high128_xregs_to_zero();
+    return true;
+}
+
 static bool translate_repeat_add(IR1_INST *pir1)
 {
     IR2_OPND dest = load_ireg_from_ir1(ir1_get_opnd(pir1, 0),
@@ -2458,6 +2478,73 @@ static bool translate_repeat_add(IR1_INST *pir1)
     la_add_d(dest, dest, product);
     ra_free_temp(product);
     ra_free_temp(count);
+    return true;
+}
+
+static bool translate_bsr_not_add(IR1_INST *pir1)
+{
+    IR2_OPND src = load_ireg_from_ir1(ir1_get_opnd(pir1, 1),
+                                       ZERO_EXTENSION, false);
+    IR2_OPND dest = ra_alloc_gpr(
+        ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 0)));
+
+    /* BSR leaves its destination undefined for a zero source. */
+    la_clz_d(dest, src);
+    la_addi_d(dest, dest, -49);
+    la_bstrpick_d(dest, dest, 31, 0);
+    return true;
+}
+
+static bool translate_clamp_u8(IR1_INST *pir1)
+{
+    IR2_OPND limit = ra_alloc_gpr(
+        ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 0)));
+    IR2_OPND value = ra_alloc_gpr(
+        ir1_opnd_base_reg_num(ir1_get_opnd(pir1 + 1, 1)));
+    IR2_OPND zero = ra_alloc_gpr(
+        ir1_opnd_base_reg_num(ir1_get_opnd(pir1 + 3, 0)));
+    IR2_OPND output = ra_alloc_gpr(
+        ir1_opnd_base_reg_num(ir1_get_opnd(pir1 + 8, 0)));
+
+    li_wu(limit, 255);
+    la_sub_w(limit, limit, value);
+    la_srli_w(limit, limit, 23);
+    la_sltui(zero, value, 1);
+    la_or(limit, limit, value);
+    la_or(limit, limit, zero);
+    la_andi(output, limit, 255);
+    return true;
+}
+
+static bool translate_diff_cmov_u16(IR1_INST *pir1)
+{
+    IR1_OPND *load_mem = ir1_get_opnd(pir1, 1);
+    IR2_OPND input = ra_alloc_gpr(
+        ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 0)));
+    IR2_OPND diff = ra_alloc_gpr(
+        ir1_opnd_base_reg_num(ir1_get_opnd(pir1 + 1, 0)));
+    IR2_OPND value = ra_alloc_gpr(
+        ir1_opnd_base_reg_num(ir1_get_opnd(pir1 + 3, 0)));
+    IR2_OPND previous = ra_alloc_gpr(
+        ir1_opnd_base_reg_num(ir1_get_opnd(pir1 + 4, 1)));
+    IR2_OPND alternate = ra_alloc_gpr(
+        ir1_opnd_base_reg_num(ir1_get_opnd(pir1 + 6, 1)));
+    IR2_OPND condition = ra_alloc_itemp();
+    IR2_OPND keep = ra_alloc_itemp();
+
+    load_ireg_from_ir1_mem(input, load_mem, ZERO_EXTENSION, false);
+    li_wu(diff, UINT32_C(0x8000));
+    la_sub_d(diff, diff, input);
+    la_sub_d(value, diff, previous);
+    la_bstrpick_d(value, value, 15, 0);
+    la_sltui(condition, value, 5);
+    la_masknez(keep, value, condition);
+    la_maskeqz(condition, alternate, condition);
+    la_or(value, keep, condition);
+    la_bstrpick_d(previous, value, 15, 0);
+
+    ra_free_temp(keep);
+    ra_free_temp(condition);
     return true;
 }
 
@@ -2662,8 +2749,16 @@ bool try_translate_instptn(IR1_INST *pir1)
         return translate_repeat_add(pir1);
     case INSTPTN_OPC_AVX_SUM3:
         return translate_avx_sum3(pir1);
+    case INSTPTN_OPC_YMM_HSUMQ:
+        return translate_ymm_hsumq(pir1);
     case INSTPTN_OPC_SCALAR_HDR:
         return translate_scalar_hdr(pir1);
+    case INSTPTN_OPC_BSR_NOT_ADD:
+        return translate_bsr_not_add(pir1);
+    case INSTPTN_OPC_CLAMP_U8:
+        return translate_clamp_u8(pir1);
+    case INSTPTN_OPC_DIFF_CMOV_U16:
+        return translate_diff_cmov_u16(pir1);
     default:
         lsassert(0);
         break;

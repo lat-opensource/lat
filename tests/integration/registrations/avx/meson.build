@@ -27,6 +27,8 @@ if 'x86_64-linux-user' in target_dirs
       files('../../avx-sum3-pattern.S'),
       files('../../repeat-add.S'),
       files('../../vcomis-jcc.S'),
+      files('../../avx-ymm-horizontal-sum.S'),
+      files('../../scalar-integer-patterns.S'),
     ],
     'timeout': 120,
   }]

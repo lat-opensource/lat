@@ -1872,7 +1872,8 @@ bool ir1_translate(IR1_INST *ir1)
     bool instptn_owns_ymmh = false;
 
 #ifdef CONFIG_LATX_INSTS_PATTERN
-    instptn_owns_ymmh = ir1->instptn.opc == INSTPTN_OPC_NOP ||
+    instptn_owns_ymmh = ir1->instptn.opc == INSTPTN_OPC_YMM_HSUMQ ||
+                       ir1->instptn.opc == INSTPTN_OPC_NOP ||
                        ir1->instptn.opc == INSTPTN_OPC_NOP_DIV;
 #endif
 

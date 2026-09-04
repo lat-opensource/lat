@@ -412,6 +412,225 @@ void insts_pattern_scan_con(TranslationBlock *tb, IR1_INST *ir1, int index, scan
     }
 }
 
+void insts_pattern_bsr_not_add(TranslationBlock *tb)
+{
+    for (int i = 0; i + 2 < tb_ir1_num(tb); ++i) {
+        IR1_INST *bsr = tb_ir1_inst(tb, i);
+        IR1_INST *not = tb_ir1_inst(tb, i + 1);
+        IR1_INST *add = tb_ir1_inst(tb, i + 2);
+        IR1_OPND *dest;
+
+        if (ir1_opcode(bsr) != WRAP(BSR) ||
+            ir1_opcode(not) != WRAP(NOT) ||
+            ir1_opcode(add) != WRAP(ADD) ||
+            bsr->instptn.opc != INSTPTN_OPC_NONE ||
+            not->instptn.opc != INSTPTN_OPC_NONE ||
+            add->instptn.opc != INSTPTN_OPC_NONE ||
+            bsr->info->bytes[0] == 0xf3 ||
+            ir1_get_eflag_def(bsr) != 0 ||
+            ir1_get_eflag_def(add) != 0) {
+            continue;
+        }
+
+        dest = ir1_get_opnd(bsr, 0);
+        if (!ir1_opnd_is_gpr(dest) || ir1_opnd_size(dest) != 32 ||
+            !ir1_opnd_is_same_reg(dest, ir1_get_opnd(not, 0)) ||
+            !ir1_opnd_is_same_reg(dest, ir1_get_opnd(add, 0)) ||
+            !ir1_opnd_is_imm(ir1_get_opnd(add, 1)) ||
+            ir1_opnd_simm(ir1_get_opnd(add, 1)) != 15) {
+            continue;
+        }
+
+        bsr->instptn.opc = INSTPTN_OPC_BSR_NOT_ADD;
+        bsr->instptn.next = add;
+        not->instptn.opc = INSTPTN_OPC_NOP;
+        add->instptn.opc = INSTPTN_OPC_NOP;
+        i += 2;
+    }
+}
+
+void insts_pattern_clamp_u8(TranslationBlock *tb)
+{
+    int count = tb_ir1_num(tb);
+
+    for (int i = 0; i + 8 < count; ++i) {
+        IR1_INST *mov_limit = tb_ir1_inst(tb, i);
+        IR1_INST *sub = tb_ir1_inst(tb, i + 1);
+        IR1_INST *shr = tb_ir1_inst(tb, i + 2);
+        IR1_INST *xor = tb_ir1_inst(tb, i + 3);
+        IR1_INST *test = tb_ir1_inst(tb, i + 4);
+        IR1_INST *sete = tb_ir1_inst(tb, i + 5);
+        IR1_INST *or_value = tb_ir1_inst(tb, i + 6);
+        IR1_INST *or_zero = tb_ir1_inst(tb, i + 7);
+        IR1_INST *movzx = tb_ir1_inst(tb, i + 8);
+        IR1_OPND *limit;
+        IR1_OPND *value;
+        IR1_OPND *zero;
+        if (ir1_opcode(mov_limit) != WRAP(MOV) ||
+            ir1_opcode(sub) != WRAP(SUB) ||
+            ir1_opcode(shr) != WRAP(SHR) ||
+            ir1_opcode(xor) != WRAP(XOR) ||
+            ir1_opcode(test) != WRAP(TEST) ||
+            ir1_opcode(sete) != WRAP(SETE) ||
+            ir1_opcode(or_value) != WRAP(OR) ||
+            ir1_opcode(or_zero) != WRAP(OR) ||
+            ir1_opcode(movzx) != WRAP(MOVZX) ||
+            ir1_get_opnd_num(mov_limit) != 2 ||
+            ir1_get_opnd_num(sub) != 2 ||
+            ir1_get_opnd_num(shr) != 2 ||
+            ir1_get_opnd_num(xor) != 2 ||
+            ir1_get_opnd_num(test) != 2 ||
+            ir1_get_opnd_num(sete) != 1 ||
+            ir1_get_opnd_num(or_value) != 2 ||
+            ir1_get_opnd_num(or_zero) != 2 ||
+            ir1_get_opnd_num(movzx) != 2 ||
+            ir1_get_eflag_def(or_zero) != 0) {
+            continue;
+        }
+
+        limit = ir1_get_opnd(mov_limit, 0);
+        value = ir1_get_opnd(sub, 1);
+        zero = ir1_get_opnd(xor, 0);
+        if (!ir1_opnd_is_gpr(limit) || ir1_opnd_size(limit) != 32 ||
+            !ir1_opnd_is_imm(ir1_get_opnd(mov_limit, 1)) ||
+            ir1_opnd_uimm(ir1_get_opnd(mov_limit, 1)) != 255 ||
+            !ir1_opnd_is_same_reg(limit, ir1_get_opnd(sub, 0)) ||
+            !ir1_opnd_is_gpr(value) || ir1_opnd_size(value) != 32 ||
+            !ir1_opnd_is_same_reg(limit, ir1_get_opnd(shr, 0)) ||
+            !ir1_opnd_is_imm(ir1_get_opnd(shr, 1)) ||
+            ir1_opnd_uimm(ir1_get_opnd(shr, 1)) != 23 ||
+            !ir1_opnd_is_gpr(zero) || ir1_opnd_size(zero) != 32 ||
+            ir1_opnd_base_reg_num(limit) == ir1_opnd_base_reg_num(value) ||
+            ir1_opnd_base_reg_num(limit) == ir1_opnd_base_reg_num(zero) ||
+            ir1_opnd_base_reg_num(value) == ir1_opnd_base_reg_num(zero) ||
+            !ir1_opnd_is_same_reg(zero, ir1_get_opnd(xor, 1)) ||
+            !ir1_opnd_is_same_reg_without_width(value,
+                                                ir1_get_opnd(test, 0)) ||
+            !ir1_opnd_is_same_reg_without_width(value,
+                                                ir1_get_opnd(test, 1)) ||
+            ir1_opnd_size(ir1_get_opnd(test, 0)) != 64 ||
+            !ir1_opnd_is_same_reg_without_width(zero,
+                                                ir1_get_opnd(sete, 0)) ||
+            ir1_opnd_size(ir1_get_opnd(sete, 0)) != 8 ||
+            !ir1_opnd_is_same_reg(limit, ir1_get_opnd(or_value, 0)) ||
+            !ir1_opnd_is_same_reg(value, ir1_get_opnd(or_value, 1)) ||
+            !ir1_opnd_is_same_reg(limit, ir1_get_opnd(or_zero, 0)) ||
+            !ir1_opnd_is_same_reg(zero, ir1_get_opnd(or_zero, 1)) ||
+            !ir1_opnd_is_gpr(ir1_get_opnd(movzx, 0)) ||
+            ir1_opnd_size(ir1_get_opnd(movzx, 0)) != 32 ||
+            !ir1_opnd_is_same_reg_without_width(limit,
+                                                ir1_get_opnd(movzx, 1)) ||
+            ir1_opnd_size(ir1_get_opnd(movzx, 1)) != 8) {
+            continue;
+        }
+
+        mov_limit->instptn.opc = INSTPTN_OPC_CLAMP_U8;
+        for (int j = 1; j < 9; ++j) {
+            tb_ir1_inst(tb, i + j)->instptn.opc = INSTPTN_OPC_NOP;
+        }
+        i += 8;
+    }
+}
+
+void insts_pattern_diff_cmov_u16(TranslationBlock *tb)
+{
+    int count = tb_ir1_num(tb);
+
+    for (int i = 0; i + 8 < count; ++i) {
+        IR1_INST *load = tb_ir1_inst(tb, i);
+        IR1_INST *mov_imm = tb_ir1_inst(tb, i + 1);
+        IR1_INST *sub_input = tb_ir1_inst(tb, i + 2);
+        IR1_INST *mov_diff = tb_ir1_inst(tb, i + 3);
+        IR1_INST *sub_prev = tb_ir1_inst(tb, i + 4);
+        IR1_INST *cmp = tb_ir1_inst(tb, i + 5);
+        IR1_INST *cmov = tb_ir1_inst(tb, i + 6);
+        IR1_INST *movzx = tb_ir1_inst(tb, i + 7);
+        IR1_INST *next_cmp = tb_ir1_inst(tb, i + 8);
+        IR1_OPND *input;
+        IR1_OPND *diff;
+        IR1_OPND *value;
+        IR1_OPND *previous;
+        IR1_OPND *alternate;
+        int regs[5];
+        bool distinct = true;
+
+        if (ir1_opcode(load) != WRAP(MOVZX) ||
+            ir1_opcode(mov_imm) != WRAP(MOV) ||
+            ir1_opcode(sub_input) != WRAP(SUB) ||
+            ir1_opcode(mov_diff) != WRAP(MOV) ||
+            ir1_opcode(sub_prev) != WRAP(SUB) ||
+            ir1_opcode(cmp) != WRAP(CMP) ||
+            ir1_opcode(cmov) != WRAP(CMOVB) ||
+            ir1_opcode(movzx) != WRAP(MOVZX) ||
+            ir1_opcode(next_cmp) != WRAP(CMP) ||
+            ir1_get_opnd_num(load) != 2 ||
+            ir1_get_opnd_num(mov_imm) != 2 ||
+            ir1_get_opnd_num(sub_input) != 2 ||
+            ir1_get_opnd_num(mov_diff) != 2 ||
+            ir1_get_opnd_num(sub_prev) != 2 ||
+            ir1_get_opnd_num(cmp) != 2 ||
+            ir1_get_opnd_num(cmov) != 2 ||
+            ir1_get_opnd_num(movzx) != 2 ||
+            ir1_get_opnd_num(next_cmp) != 2) {
+            continue;
+        }
+
+        input = ir1_get_opnd(load, 0);
+        diff = ir1_get_opnd(mov_imm, 0);
+        value = ir1_get_opnd(mov_diff, 0);
+        previous = ir1_get_opnd(sub_prev, 1);
+        alternate = ir1_get_opnd(cmov, 1);
+        if (!ir1_opnd_is_gpr(input) || ir1_opnd_size(input) != 32 ||
+            !ir1_opnd_is_mem(ir1_get_opnd(load, 1)) ||
+            ir1_opnd_size(ir1_get_opnd(load, 1)) != 16 ||
+            !ir1_opnd_is_gpr(diff) || ir1_opnd_size(diff) != 32 ||
+            !ir1_opnd_is_imm(ir1_get_opnd(mov_imm, 1)) ||
+            (uint32_t)ir1_opnd_uimm(ir1_get_opnd(mov_imm, 1)) !=
+                UINT32_C(0xffff8000) ||
+            !ir1_opnd_is_same_reg(diff, ir1_get_opnd(sub_input, 0)) ||
+            !ir1_opnd_is_same_reg(input, ir1_get_opnd(sub_input, 1)) ||
+            !ir1_opnd_is_gpr(value) || ir1_opnd_size(value) != 32 ||
+            !ir1_opnd_is_same_reg(diff, ir1_get_opnd(mov_diff, 1)) ||
+            !ir1_opnd_is_same_reg(value, ir1_get_opnd(sub_prev, 0)) ||
+            !ir1_opnd_is_gpr(previous) || ir1_opnd_size(previous) != 32 ||
+            !ir1_opnd_is_same_reg_without_width(value,
+                                                ir1_get_opnd(cmp, 0)) ||
+            ir1_opnd_size(ir1_get_opnd(cmp, 0)) != 16 ||
+            !ir1_opnd_is_imm(ir1_get_opnd(cmp, 1)) ||
+            ir1_opnd_uimm(ir1_get_opnd(cmp, 1)) != 5 ||
+            !ir1_opnd_is_same_reg(value, ir1_get_opnd(cmov, 0)) ||
+            !ir1_opnd_is_gpr(alternate) || ir1_opnd_size(alternate) != 32 ||
+            !ir1_opnd_is_same_reg(previous, ir1_get_opnd(movzx, 0)) ||
+            !ir1_opnd_is_same_reg_without_width(value,
+                                                ir1_get_opnd(movzx, 1)) ||
+            ir1_opnd_size(ir1_get_opnd(movzx, 1)) != 16 ||
+            !ir1_opnd_is_same_reg(previous, ir1_get_opnd(next_cmp, 0)) ||
+            !ir1_opnd_is_imm(ir1_get_opnd(next_cmp, 1)) ||
+            ir1_opnd_uimm(ir1_get_opnd(next_cmp, 1)) != 0x7fff) {
+            continue;
+        }
+
+        regs[0] = ir1_opnd_base_reg_num(input);
+        regs[1] = ir1_opnd_base_reg_num(diff);
+        regs[2] = ir1_opnd_base_reg_num(value);
+        regs[3] = ir1_opnd_base_reg_num(previous);
+        regs[4] = ir1_opnd_base_reg_num(alternate);
+        for (int a = 0; a < 5; ++a) {
+            for (int b = a + 1; b < 5; ++b) {
+                distinct &= regs[a] != regs[b];
+            }
+        }
+        if (!distinct) {
+            continue;
+        }
+        load->instptn.opc = INSTPTN_OPC_DIFF_CMOV_U16;
+        for (int j = 1; j < 8; ++j) {
+            tb_ir1_inst(tb, i + j)->instptn.opc = INSTPTN_OPC_NOP;
+        }
+        i += 7;
+    }
+}
+
 bool insts_pattern_scan_jcc_end(TranslationBlock *tb, IR1_INST *pir1, int pir1_index, scan_elem_t *scan)
 {
 
@@ -810,6 +1029,69 @@ static bool avx_sum3_imm(IR1_INST *ir1, int opnd_index, ulongx value)
     return opnd_index < ir1_get_opnd_num(ir1) &&
            ir1_opnd_is_imm(ir1_get_opnd(ir1, opnd_index)) &&
            ir1_opnd_uimm(ir1_get_opnd(ir1, opnd_index)) == value;
+}
+
+static int ymm_hsumq_reg(IR1_INST *ir1, int opnd_index, bool ymm)
+{
+    IR1_OPND *opnd;
+
+    if (opnd_index >= ir1_get_opnd_num(ir1)) {
+        return -1;
+    }
+    opnd = ir1_get_opnd(ir1, opnd_index);
+    if (ymm ? !ir1_opnd_is_ymm(opnd) : !ir1_opnd_is_xmm(opnd)) {
+        return -1;
+    }
+    return ir1_opnd_base_reg_num(opnd);
+}
+
+void insts_pattern_ymm_hsumq(TranslationBlock *tb)
+{
+    int count = tb_ir1_num(tb);
+
+    for (int i = 0; i + 6 <= count; ++i) {
+        IR1_INST *shift = tb_ir1_inst(tb, i);
+        IR1_INST *add256 = tb_ir1_inst(tb, i + 1);
+        IR1_INST *extract = tb_ir1_inst(tb, i + 2);
+        IR1_INST *add128 = tb_ir1_inst(tb, i + 3);
+        IR1_INST *move = tb_ir1_inst(tb, i + 4);
+        IR1_INST *zero = tb_ir1_inst(tb, i + 5);
+        int src = ymm_hsumq_reg(shift, 1, true);
+        int temp = ymm_hsumq_reg(shift, 0, true);
+        bool match = src >= 0 && temp >= 0 && src != temp &&
+            ir1_opcode(shift) == WRAP(VPSRLDQ) &&
+            avx_sum3_imm(shift, 2, 8) &&
+            ir1_opcode(add256) == WRAP(VPADDQ) &&
+            ymm_hsumq_reg(add256, 0, true) == src &&
+            ymm_hsumq_reg(add256, 1, true) == src &&
+            ymm_hsumq_reg(add256, 2, true) == temp &&
+            ir1_opcode(extract) == WRAP(VEXTRACTI128) &&
+            ymm_hsumq_reg(extract, 0, false) == temp &&
+            ymm_hsumq_reg(extract, 1, true) == src &&
+            avx_sum3_imm(extract, 2, 1) &&
+            ir1_opcode(add128) == WRAP(VPADDQ) &&
+            ymm_hsumq_reg(add128, 0, false) == src &&
+            ymm_hsumq_reg(add128, 1, false) == src &&
+            ymm_hsumq_reg(add128, 2, false) == temp &&
+            ir1_opcode(move) == WRAP(VMOVQ) &&
+            ir1_get_opnd_num(move) == 2 &&
+            ir1_opnd_is_gpr(ir1_get_opnd(move, 0)) &&
+            ymm_hsumq_reg(move, 1, false) == src &&
+            ir1_opcode(zero) == WRAP(VZEROUPPER);
+
+        for (int j = 0; match && j < 6; ++j) {
+            match = tb_ir1_inst(tb, i + j)->instptn.opc ==
+                    INSTPTN_OPC_NONE;
+        }
+        if (!match) {
+            continue;
+        }
+        shift->instptn.opc = INSTPTN_OPC_YMM_HSUMQ;
+        for (int j = 1; j < 6; ++j) {
+            tb_ir1_inst(tb, i + j)->instptn.opc = INSTPTN_OPC_NOP;
+        }
+        i += 5;
+    }
 }
 
 static bool avx_sum3_match_group(TranslationBlock *tb, int pos,
