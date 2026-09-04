@@ -121,6 +121,10 @@ bool generate_eflag_by_lbt(IR2_OPND dest, IR2_OPND src0, IR2_OPND src1,
     case dt_X86_INS_COMISD:
     case dt_X86_INS_UCOMISS:
     case dt_X86_INS_UCOMISD:
+    case dt_X86_INS_VCOMISS:
+    case dt_X86_INS_VCOMISD:
+    case dt_X86_INS_VUCOMISS:
+    case dt_X86_INS_VUCOMISD:
 #endif
     case dt_X86_INS_AAM:
     case dt_X86_INS_AAD:

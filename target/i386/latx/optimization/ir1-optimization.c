@@ -53,6 +53,17 @@ static void ir1_optimization_over_tb(TranslationBlock *tb)
         OPT_INSTS_PTN(tb, ir1, i, ptn);
     }
     SAVE_FLAG_TO_TB(rdtn, tb);
+#ifdef CONFIG_LATX_INSTS_PATTERN
+    if (option_instptn) {
+        insts_pattern_ymm_hsumq(tb);
+        insts_pattern_avx_sum3(tb);
+        insts_pattern_repeat_add(tb);
+        insts_pattern_scalar_hdr(tb);
+        insts_pattern_bsr_not_add(tb);
+        insts_pattern_clamp_u8(tb);
+        insts_pattern_diff_cmov_u16(tb);
+    }
+#endif
 }
 
 static void get_eflag_out(TranslationBlock *tb)
@@ -167,4 +178,15 @@ void ir1_optimization(TranslationBlock *tb)
         OPT_INSTS_PTN(tb, ir1, i, ptn);
     }
     SAVE_FLAG_TO_TB(rdtn, tb);
+#ifdef CONFIG_LATX_INSTS_PATTERN
+    if (option_instptn) {
+        insts_pattern_ymm_hsumq(tb);
+        insts_pattern_avx_sum3(tb);
+        insts_pattern_repeat_add(tb);
+        insts_pattern_scalar_hdr(tb);
+        insts_pattern_bsr_not_add(tb);
+        insts_pattern_clamp_u8(tb);
+        insts_pattern_diff_cmov_u16(tb);
+    }
+#endif
 }
