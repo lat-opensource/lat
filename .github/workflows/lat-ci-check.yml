@@ -1,0 +1,82 @@
+name: Publish LAT CI check
+
+on:
+  workflow_dispatch:
+    inputs:
+      head_sha:
+        description: "Exact LAT commit checked by lat-ci-hub"
+        required: true
+        type: string
+      conclusion:
+        description: "success or failure after all selected suites and platform reporting finish"
+        required: true
+        type: choice
+        options:
+          - success
+          - failure
+      summary:
+        description: "Short, non-sensitive result summary"
+        required: true
+        type: string
+      details_url:
+        description: "lat-ci-hub workflow URL"
+        required: true
+        type: string
+
+permissions:
+  checks: write
+  contents: read
+
+jobs:
+  publish:
+    name: Publish final LAT CI result
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create Check Run on the tested LAT commit
+        env:
+          HEAD_SHA: ${{ inputs.head_sha }}
+          CONCLUSION: ${{ inputs.conclusion }}
+          SUMMARY: ${{ inputs.summary }}
+          DETAILS_URL: ${{ inputs.details_url }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          import urllib.request
+
+          head_sha = os.environ["HEAD_SHA"].lower()
+          conclusion = os.environ["CONCLUSION"]
+          if not re.fullmatch(r"[0-9a-f]{40,64}", head_sha):
+              raise SystemExit("head_sha must be a lowercase Git commit SHA")
+          if conclusion not in {"success", "failure"}:
+              raise SystemExit("conclusion is invalid")
+          payload = json.dumps(
+              {
+                  "name": "LAT CI",
+                  "head_sha": head_sha,
+                  "status": "completed",
+                  "conclusion": conclusion,
+                  "details_url": os.environ["DETAILS_URL"],
+                  "output": {
+                      "title": "LAT CI",
+                      "summary": os.environ["SUMMARY"],
+                  },
+              }
+          ).encode()
+          request = urllib.request.Request(
+              f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/check-runs",
+              data=payload,
+              method="POST",
+              headers={
+                  "Accept": "application/vnd.github+json",
+                  "Authorization": f"Bearer {os.environ['GITHUB_TOKEN']}",
+                  "Content-Type": "application/json",
+                  "X-GitHub-Api-Version": "2022-11-28",
+              },
+          )
+          with urllib.request.urlopen(request, timeout=30) as response:
+              if response.status != 201:
+                  raise SystemExit(f"Check Run creation returned HTTP {response.status}")
+          PY
