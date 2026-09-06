@@ -36,9 +36,12 @@ EXPORT void* my_xcb_wait_for_event(void* v1)
 {
     int oldtype;
     void* ret;
-    uint64_t callbackret = RunFunctionWithState((uintptr_t)x86pthread_setcanceltype , 2, PTHREAD_CANCEL_ASYNCHRONOUS, &oldtype);
+    uint64_t callbackret = RunFunctionWithStateInternal(
+        (uintptr_t)x86pthread_setcanceltype, 2,
+        PTHREAD_CANCEL_ASYNCHRONOUS, &oldtype);
     ret = my->xcb_wait_for_event(v1);
-    callbackret = RunFunctionWithState((uintptr_t)x86pthread_setcanceltype , 2, oldtype, NULL);
+    callbackret = RunFunctionWithStateInternal(
+        (uintptr_t)x86pthread_setcanceltype, 2, oldtype, NULL);
     (void)callbackret;
     return ret;
 }
@@ -55,9 +58,12 @@ EXPORT void* my_xcb_wait_for_reply(void* v1, uint32_t v2, void* v3)
 {
     int oldtype;
     void* ret;
-    uint64_t callbackret = RunFunctionWithState((uintptr_t)x86pthread_setcanceltype , 2, PTHREAD_CANCEL_ASYNCHRONOUS, &oldtype);
+    uint64_t callbackret = RunFunctionWithStateInternal(
+        (uintptr_t)x86pthread_setcanceltype, 2,
+        PTHREAD_CANCEL_ASYNCHRONOUS, &oldtype);
     ret = my->xcb_wait_for_reply(v1, v2, v3);
-    callbackret = RunFunctionWithState((uintptr_t)x86pthread_setcanceltype , 2, oldtype, NULL);
+    callbackret = RunFunctionWithStateInternal(
+        (uintptr_t)x86pthread_setcanceltype, 2, oldtype, NULL);
     (void)callbackret;
     return ret;
 }
@@ -67,9 +73,12 @@ EXPORT void* my_xcb_wait_for_reply64(void* v1, uint64_t v2, void* v3)
 {
     int oldtype;
     void* ret;
-    uint64_t callbackret = RunFunctionWithState((uintptr_t)x86pthread_setcanceltype , 2, PTHREAD_CANCEL_ASYNCHRONOUS, &oldtype);
+    uint64_t callbackret = RunFunctionWithStateInternal(
+        (uintptr_t)x86pthread_setcanceltype, 2,
+        PTHREAD_CANCEL_ASYNCHRONOUS, &oldtype);
     ret = my->xcb_wait_for_reply64(v1, v2, v3);
-    callbackret = RunFunctionWithState((uintptr_t)x86pthread_setcanceltype , 2, oldtype, NULL);
+    callbackret = RunFunctionWithStateInternal(
+        (uintptr_t)x86pthread_setcanceltype, 2, oldtype, NULL);
     (void)callbackret;
     return ret;
 }
@@ -79,9 +88,12 @@ EXPORT void* my_xcb_wait_for_special_event(void* v1, void* v2)
 {
     int oldtype;
     void* ret;
-    uint64_t callbackret = RunFunctionWithState((uintptr_t)x86pthread_setcanceltype , 2, PTHREAD_CANCEL_ASYNCHRONOUS, &oldtype);
+    uint64_t callbackret = RunFunctionWithStateInternal(
+        (uintptr_t)x86pthread_setcanceltype, 2,
+        PTHREAD_CANCEL_ASYNCHRONOUS, &oldtype);
     ret = my->xcb_wait_for_special_event(v1, v2);
-    callbackret = RunFunctionWithState((uintptr_t)x86pthread_setcanceltype , 2, oldtype, NULL);
+    callbackret = RunFunctionWithStateInternal(
+        (uintptr_t)x86pthread_setcanceltype, 2, oldtype, NULL);
     (void)callbackret;
     return ret;
 }
