@@ -11051,6 +11051,39 @@ static int do_sys_futex(int *uaddr, int op, int val,
     g_assert_not_reached();
 }
 
+static int sanitize_private_futex_fault(int ret, int *uaddr, int op)
+{
+#if defined(CONFIG_LATX) && defined(TARGET_I386) && !defined(TARGET_X86_64)
+    int base_op;
+    bool mapped = false;
+
+    /*
+     * The i386 lock-instruction interpreter transiently moves a complete
+     * host page.  A private futex in that page can observe the short gap as
+     * EFAULT, including when host and target pages are both 4 KiB.  The guest
+     * mapping metadata persists across that host-only move.  Check it under
+     * mmap_lock so unmapped or unreadable guest futex addresses retain
+     * EFAULT.  For a mapped private WAIT, return EAGAIN so userspace reloads
+     * the futex word and retries.
+     */
+    if (ret != -TARGET_EFAULT || !(op & FUTEX_PRIVATE_FLAG)) {
+        return ret;
+    }
+    base_op = op & FUTEX_CMD_MASK;
+    if (!h2g_valid(uaddr)) {
+        return ret;
+    }
+    mmap_lock();
+    mapped = (page_get_flags(h2g(uaddr)) & (PAGE_VALID | PAGE_READ)) ==
+             (PAGE_VALID | PAGE_READ);
+    mmap_unlock();
+    if ((base_op == FUTEX_WAIT || base_op == FUTEX_WAIT_BITSET) && mapped) {
+        return -TARGET_EAGAIN;
+    }
+#endif
+    return ret;
+}
+
 static int do_safe_futex(int *uaddr, int op, int val,
                          const struct timespec *timeout, int *uaddr2,
                          int val3)
@@ -11058,19 +11091,24 @@ static int do_safe_futex(int *uaddr, int op, int val,
 #if HOST_LONG_BITS == 64
 #if defined(__NR_futex)
     /* always a 64-bit time_t, it doesn't define _time64 version  */
-    return get_errno(safe_futex(uaddr, op, val, timeout, uaddr2, val3));
+    return sanitize_private_futex_fault(
+        get_errno(safe_futex(uaddr, op, val, timeout, uaddr2, val3)), uaddr,
+        op);
 #endif
 #else /* HOST_LONG_BITS == 64 */
 #if defined(__NR_futex_time64)
     if (sizeof(timeout->tv_sec) == 8) {
         /* _time64 function on 32bit arch */
-        return get_errno(safe_futex_time64(uaddr, op, val, timeout, uaddr2,
-                                           val3));
+        return sanitize_private_futex_fault(
+            get_errno(safe_futex_time64(uaddr, op, val, timeout, uaddr2,
+                                         val3)), uaddr, op);
     }
 #endif
 #if defined(__NR_futex)
     /* old function on 32bit arch */
-    return get_errno(safe_futex(uaddr, op, val, timeout, uaddr2, val3));
+    return sanitize_private_futex_fault(
+        get_errno(safe_futex(uaddr, op, val, timeout, uaddr2, val3)), uaddr,
+        op);
 #endif
 #endif /* HOST_LONG_BITS == 64 */
     return -TARGET_ENOSYS;
