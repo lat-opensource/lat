@@ -79,6 +79,7 @@ int mydebug = 1;
 #if defined(CONFIG_LATX_KZT)
 #include "kzt-groups.h"
 #include "kzt-guest-tls.h"
+#include "kzt-libc-semantic.h"
 #include "wrappertbbridge.h"
 box64context_t* my_context = NULL;
 elfheader_t* elf_header = NULL;
@@ -332,6 +333,7 @@ static CPUArchState *cpu_copy_into(CPUArchState *env, CPUState *new_cpu)
     new_env->kzt_guest_tls_allocation = NULL;
     new_env->kzt_guest_tls_parent_snapshot = NULL;
     new_env->kzt_guest_thread_state = NULL;
+    new_env->kzt_libc_semantic_state = NULL;
 #endif
 
     /*
