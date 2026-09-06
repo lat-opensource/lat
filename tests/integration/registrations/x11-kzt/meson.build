@@ -88,6 +88,16 @@ if 'x86_64-linux-user' in target_dirs and \
     'timeout': 180,
   }]
 
+  latx_integration_tests += [{
+    'name': 'test-kzt-libc-boundary',
+    'runner': find_program('../../test-kzt-libc-boundary.sh'),
+    'args': [
+      emulators['latx-x86_64'],
+      files('../../kzt-libc-boundary.c'),
+      files('../../x11-async-bridge-dummy.c'),
+    ],
+    'timeout': 120,
+  }]
 
 
   endif

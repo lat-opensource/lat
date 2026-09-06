@@ -20,6 +20,7 @@
 #include "lsenv.h"
 #include "qemu.h"
 #include "kzt-guest-tls.h"
+#include "kzt-libc-semantic.h"
 
 #ifdef TARGET_X86_64
 typedef struct CallbackFrame {
@@ -154,13 +155,15 @@ typedef enum LatxGuestCallKind {
     LATX_GUEST_USER_CALLBACK,
     LATX_GUEST_INTERNAL_HELPER,
     LATX_GUEST_INTERNAL_NO_REFRESH,
+    LATX_GUEST_LIBC_CALLBACK,
 } LatxGuestCallKind;
 
 #define LATX_GUEST_TLS_REFRESH_RETRIES 1000
 
 static bool callback_is_user(LatxGuestCallKind kind)
 {
-    return kind == LATX_GUEST_USER_CALLBACK;
+    return kind == LATX_GUEST_USER_CALLBACK ||
+           kind == LATX_GUEST_LIBC_CALLBACK;
 }
 
 static int callback_disable_cancellation(LatxGuestCallKind kind,
@@ -190,6 +193,7 @@ typedef struct CallbackScope {
     int old_cancel_state;
     int cancellation_disabled;
     bool execution_entered;
+    bool semantic_entered;
 } CallbackScope;
 
 static void callback_scope_leave(CallbackScope *scope)
@@ -200,7 +204,9 @@ static void callback_scope_leave(CallbackScope *scope)
 
     /* Restoring cancellation may not return; cleanup must be idempotent. */
     *scope = (CallbackScope) { 0 };
-
+    if (current.semantic_entered) {
+        kzt_libc_semantic_host_to_guest_leave(current.cpu);
+    }
     if (current.execution_entered) {
         kzt_guest_tls_execution_leave(current.cpu);
     }
@@ -254,7 +260,15 @@ static int callback_scope_enter(CallbackScope *scope, LatxGuestCallKind kind)
     if (callback_is_user(kind)) {
         kzt_guest_tls_execution_enter(scope->cpu);
         scope->execution_entered = true;
-
+        if (kind == LATX_GUEST_LIBC_CALLBACK) {
+            if (!kzt_libc_semantic_process_ready()) {
+                result = -1;
+                goto out;
+            }
+            result = kzt_libc_semantic_host_to_guest_enter(
+                scope->cpu, entry_errno, entry_h_errno);
+            scope->semantic_entered = result == 0;
+        }
     }
 out:
     errno = entry_errno;
@@ -508,4 +522,16 @@ int latx_run_guest_callback(uintptr_t entry, const long *gpr_args,
     return run_guest_callback_impl(entry, gpr_args, gpr_count, xmm_args,
         xmm_count, stack_args, stack_count, rax, rdx, xmm0, xmm1, st0,
         LATX_GUEST_USER_CALLBACK);
+}
+
+int latx_run_guest_callback_with_libc(uintptr_t entry, const long *gpr_args,
+                      int gpr_count, const long *xmm_args,
+                      int xmm_count, const long *stack_args,
+                      int stack_count, long *rax, long *rdx,
+                      long *xmm0, long *xmm1,
+                      unsigned __int128 *st0)
+{
+    return run_guest_callback_impl(entry, gpr_args, gpr_count, xmm_args,
+        xmm_count, stack_args, stack_count, rax, rdx, xmm0, xmm1, st0,
+        LATX_GUEST_LIBC_CALLBACK);
 }

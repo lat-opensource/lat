@@ -17,6 +17,7 @@
 #include "kzt-groups.h"
 #include "kzt_public_loader_observer.h"
 #include "kzt-guest-tls.h"
+#include "kzt-libc-semantic.h"
 #include "kzt_relro_preprotect.h"
 #include "latx-options.h"
 #include "librarian_private.h"
@@ -3752,6 +3753,7 @@ static void kzt_guest_main_entry_callback(CPUX86State *env)
     uintptr_t dynamic_addr = 0;
     size_t dynamic_count = 0;
 
+    kzt_libc_semantic_process_reset(env);
     kzt_guest_tls_loader_tracking_reset();
     if (latx_finalize_host_thread_template(env) != 0) {
         fprintf(stderr,

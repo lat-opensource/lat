@@ -1666,6 +1666,7 @@ typedef struct CPUX86State {
     void *kzt_guest_tls_allocation;
     void *kzt_guest_thread_state;
     void *kzt_guest_tls_parent_snapshot;
+    void *kzt_libc_semantic_state;
 #endif
 #endif
 } CPUX86State;
