@@ -161,6 +161,7 @@
 #include "lsenv.h"
 #include "kzt-guest-tls.h"
 #include "kzt-guest-thread.h"
+#include "kzt-libc-semantic.h"
 #include "myalign.h"
 #include <tunnel_lib.h>
 #include "aot.h"
@@ -9647,6 +9648,7 @@ static void latx_host_thread_destructor(void *opaque)
     CPUState *cpu = opaque;
 
     kzt_guest_thread_destroy(cpu->env_ptr);
+    kzt_libc_semantic_destroy(cpu->env_ptr);
     if (kzt_guest_tls_cleanup_robust_list(cpu->env_ptr) != 0) {
         fprintf(stderr,
                 "KZT Guest robust-list cleanup failed; "
@@ -9724,6 +9726,7 @@ int latx_finalize_host_thread_template(CPUArchState *env)
     template_env->kzt_guest_tls_parent_snapshot = NULL;
     template_env->kzt_guest_tls_allocation = NULL;
     template_env->kzt_guest_thread_state = NULL;
+    template_env->kzt_libc_semantic_state = NULL;
     if (kzt_guest_tls_snapshot_parent(env, template_env) != 0) {
         latx_host_thread_release_cpu(template_cpu);
         goto out;
@@ -9797,6 +9800,7 @@ static int latx_attach_current_host_thread_once(void)
     new_env->kzt_guest_tls_parent_snapshot = NULL;
     new_env->kzt_guest_tls_allocation = NULL;
     new_env->kzt_guest_thread_state = NULL;
+    new_env->kzt_libc_semantic_state = NULL;
     if (kzt_guest_tls_clone_parent_snapshot(parent_env, new_env) != 0) {
         latx_host_thread_release_cpu(new_cpu);
         rcu_unregister_thread();
@@ -9843,7 +9847,13 @@ static int latx_attach_current_host_thread_once(void)
         return ret;
     }
     kzt_guest_thread_initialize(new_env);
-
+    if (kzt_libc_semantic_process_ready() &&
+        kzt_libc_semantic_initialize(new_env) != 0) {
+        pthread_mutex_unlock(&clone_lock);
+        latx_host_thread_destructor(new_cpu);
+        pthread_setcancelstate(old_cancel_state, NULL);
+        return -1;
+    }
     if (pthread_setspecific(latx_host_thread_key, new_cpu) != 0) {
         pthread_mutex_unlock(&clone_lock);
         latx_host_thread_destructor(new_cpu);
@@ -9933,6 +9943,7 @@ static void *clone_func(void *arg)
 
 static void cleanup_guest_thread_resources(CPUArchState *env)
 {
+    kzt_libc_semantic_destroy(env);
     assert(env->gdt.base);
     target_munmap(env->gdt.base, sizeof(uint64_t) * TARGET_GDT_ENTRIES, 0);
 }
@@ -10214,6 +10225,7 @@ static int do_fork(CPUArchState *env, unsigned int flags, abi_ulong newsp,
             kzt_guest_tls_after_fork_child(env);
             kzt_guest_loader_after_fork_child();
             kzt_guest_thread_after_fork_child();
+            kzt_libc_semantic_after_fork_child();
 #if defined(TARGET_NR_timer_create)
             posix_timer_fork_end(true);
 #endif
