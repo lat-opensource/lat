@@ -157,6 +157,41 @@ test(
   suite: 'lat-pr-fast',
 )
 
+test_kzt_guest_tls_policy = executable(
+  'test-kzt-guest-tls-policy',
+  files('kzt/test_kzt_guest_tls_policy.c'),
+  include_directories: include_directories('../../target/i386/latx/include'),
+  build_by_default: false,
+)
+test('test-kzt-guest-tls-policy', test_kzt_guest_tls_policy, suite: 'lat-pr-fast')
+
+test_kzt_guest_tls_epoch = executable(
+  'test-kzt-guest-tls-epoch',
+  files('kzt/test_kzt_guest_tls_epoch.c'),
+  include_directories: include_directories(
+    '../../target/i386/latx/include',
+  ),
+  build_by_default: false,
+)
+
+test(
+  'test-kzt-guest-tls-epoch',
+  test_kzt_guest_tls_epoch,
+  suite: 'lat-pr-fast',
+)
+
+test(
+  'check-kzt-tls-refresh-boundary',
+  python,
+  args: [
+    files('kzt/check_kzt_tls_refresh_boundary.py'),
+    project_source_root / 'target/i386/latx/context/callback.c',
+    project_source_root / 'target/i386/latx/context/wrappedlibdl.c',
+    project_source_root / 'target/i386/latx/context/myalign.c',
+  ],
+  suite: 'lat-pr-fast',
+)
+
 test_kzt_relocation_transaction = executable(
   'test-kzt-relocation-transaction',
   files(

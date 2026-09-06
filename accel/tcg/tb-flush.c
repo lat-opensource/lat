@@ -105,10 +105,15 @@ done:
         qemu_plugin_flush_cb();
     }
 #if defined(CONFIG_LATX_KZT)
-    CPU_FOREACH(cpu) {
-        /* The installer also checks the effective library-group mask. */
-        if (cpu && option_kzt) {
-            kzt_install_runtime_callbacks(cpu, &info1);
+    if (!latx_kzt_guest_tls_enabled() || did_flush) {
+        CPU_FOREACH(cpu) {
+            /* The installer checks the effective library-group mask. */
+            if (cpu && option_kzt) {
+                kzt_install_runtime_callbacks(cpu, &info1);
+                if (latx_kzt_guest_tls_enabled()) {
+                    break;
+                }
+            }
         }
     }
 #endif

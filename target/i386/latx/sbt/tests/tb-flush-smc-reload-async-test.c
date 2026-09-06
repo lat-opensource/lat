@@ -26,6 +26,8 @@ int qemu_loglevel;
 __thread int in_pre_translate;
 #if defined(CONFIG_LATX_KZT)
 int option_kzt;
+int option_kzt_guest_tls;
+uint32_t kzt_effective_groups;
 struct image_info info1;
 #endif
 

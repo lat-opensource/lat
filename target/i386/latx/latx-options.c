@@ -18,6 +18,8 @@
 
 #if defined(CONFIG_LATX_KZT)
 int option_kzt = 0;
+int option_kzt_guest_tls = 0;
+char *option_kzt_guest_tls_error;
 int option_kzt_log = 0;
 char *option_kzt_libs;
 char *option_kzt_error;
@@ -219,6 +221,8 @@ void options_init(void)
     latx_runtime_reset();
 #if defined(CONFIG_LATX_KZT)
     option_kzt = 0;
+    option_kzt_guest_tls = 0;
+    g_clear_pointer(&option_kzt_guest_tls_error, g_free);
     option_kzt_log = 0;
     g_clear_pointer(&option_kzt_libs, g_free);
     g_clear_pointer(&option_kzt_error, g_free);
@@ -290,6 +294,11 @@ void options_init(void)
 bool latx_options_finalize(void)
 {
 #if defined(CONFIG_LATX_KZT)
+    if (option_kzt_guest_tls_error) {
+        kzt_groups_reject_configuration(option_kzt_guest_tls_error, true);
+        option_kzt = 0;
+        return false;
+    }
     if (option_kzt_log_error) {
         kzt_groups_reject_configuration(option_kzt_log_error, true);
         option_kzt = 0;

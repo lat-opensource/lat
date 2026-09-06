@@ -19,6 +19,7 @@
 #include "debug.h"
 #include "lsenv.h"
 #include "qemu.h"
+#include "kzt-guest-tls.h"
 
 #ifdef TARGET_X86_64
 typedef struct CallbackFrame {
@@ -155,6 +156,112 @@ typedef enum LatxGuestCallKind {
     LATX_GUEST_INTERNAL_NO_REFRESH,
 } LatxGuestCallKind;
 
+#define LATX_GUEST_TLS_REFRESH_RETRIES 1000
+
+static bool callback_is_user(LatxGuestCallKind kind)
+{
+    return kind == LATX_GUEST_USER_CALLBACK;
+}
+
+static int callback_disable_cancellation(LatxGuestCallKind kind,
+                                         int *old_state)
+{
+    if (!latx_kzt_guest_tls_enabled() ||
+        !callback_is_user(kind)) {
+        return 0;
+    }
+    return pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, old_state) == 0
+               ? 1 : -1;
+}
+
+static void callback_restore_cancellation(int disabled, int old_state,
+                                          int saved_errno,
+                                          int saved_h_errno)
+{
+    if (disabled > 0) {
+        (void)pthread_setcancelstate(old_state, NULL);
+    }
+    errno = saved_errno;
+    h_errno = saved_h_errno;
+}
+
+typedef struct CallbackScope {
+    CPUX86State *cpu;
+    int old_cancel_state;
+    int cancellation_disabled;
+    bool execution_entered;
+} CallbackScope;
+
+static void callback_scope_leave(CallbackScope *scope)
+{
+    CallbackScope current = *scope;
+    int saved_errno;
+    int saved_h_errno;
+
+    /* Restoring cancellation may not return; cleanup must be idempotent. */
+    *scope = (CallbackScope) { 0 };
+
+    if (current.execution_entered) {
+        kzt_guest_tls_execution_leave(current.cpu);
+    }
+    if (current.cancellation_disabled > 0) {
+        saved_errno = errno;
+        saved_h_errno = h_errno;
+        callback_restore_cancellation(current.cancellation_disabled,
+                                      current.old_cancel_state,
+                                      saved_errno, saved_h_errno);
+    }
+}
+
+static int callback_scope_enter(CallbackScope *scope, LatxGuestCallKind kind)
+{
+    int entry_errno;
+    int entry_h_errno;
+    int result = 0;
+
+    memset(scope, 0, sizeof(*scope));
+    if (!latx_kzt_guest_tls_enabled()) {
+        return 0;
+    }
+    entry_errno = errno;
+    entry_h_errno = h_errno;
+    scope->cancellation_disabled = callback_disable_cancellation(
+        kind, &scope->old_cancel_state);
+    if (scope->cancellation_disabled < 0) {
+        return -1;
+    }
+    if ((!lsenv || !lsenv->cpu_state) &&
+        latx_attach_current_host_thread() != 0) {
+        fprintf(stderr, "KZT cannot attach native thread for Guest callback\n");
+        result = -1;
+        goto out;
+    }
+    scope->cpu = (CPUX86State *)lsenv->cpu_state;
+    if (kind != LATX_GUEST_INTERNAL_NO_REFRESH) {
+        for (int attempt = 0; attempt < LATX_GUEST_TLS_REFRESH_RETRIES;
+             ++attempt) {
+            result = kzt_guest_tls_refresh_if_needed(scope->cpu);
+            if (result != KZT_GUEST_TLS_REFRESH_BUSY ||
+                !callback_is_user(kind)) {
+                break;
+            }
+            g_usleep(1000);
+        }
+        if (result != 0) {
+            goto out;
+        }
+    }
+    if (callback_is_user(kind)) {
+        kzt_guest_tls_execution_enter(scope->cpu);
+        scope->execution_entered = true;
+
+    }
+out:
+    errno = entry_errno;
+    h_errno = entry_h_errno;
+    return result;
+}
+
 static uint64_t run_function_with_state_va(uintptr_t fnc, int nargs,
                                            LatxGuestCallKind kind,
                                            va_list *ap)
@@ -163,8 +270,11 @@ static uint64_t run_function_with_state_va(uintptr_t fnc, int nargs,
     size_t stack_args;
     CallbackFrame frame;
     uint64_t *stack;
+    CallbackScope scope __attribute__((cleanup(callback_scope_leave))) = { 0 };
 
-
+    if (callback_scope_enter(&scope, kind) != 0) {
+        return 0;
+    }
 
     lsassert(fnc);
     lsassert(nargs >= 0);
@@ -185,7 +295,6 @@ static uint64_t run_function_with_state_va(uintptr_t fnc, int nargs,
         }
     }
 
-    (void)kind;
     return callback_frame_run(&frame, fnc);
 #else
     (void)fnc;
@@ -240,8 +349,11 @@ uint64_t RunFunctionFmt(uintptr_t fnc, const char *fmt, ...)
     CallbackFrame frame;
     LatxCallbackArgs args;
     va_list ap;
+    CallbackScope scope __attribute__((cleanup(callback_scope_leave))) = { 0 };
 
-
+    if (callback_scope_enter(&scope, LATX_GUEST_USER_CALLBACK) != 0) {
+        return 0;
+    }
 
     lsassert(fnc);
     lsassert(fmt);
@@ -282,8 +394,11 @@ float RunFunctionFmtFloat(uintptr_t fnc, const char *fmt, ...)
     CallbackFrame frame;
     LatxCallbackArgs args;
     va_list ap;
+    CallbackScope scope __attribute__((cleanup(callback_scope_leave))) = { 0 };
 
-
+    if (callback_scope_enter(&scope, LATX_GUEST_USER_CALLBACK) != 0) {
+        return 0.0f;
+    }
 
     lsassert(fnc);
     lsassert(fmt);
@@ -316,4 +431,81 @@ float RunFunctionFmtFloat(uintptr_t fnc, const char *fmt, ...)
 #else
     return 0.0f;
 #endif
+}
+
+static int run_guest_callback_impl(uintptr_t entry, const long *gpr_args,
+                      int gpr_count, const long *xmm_args,
+                      int xmm_count, const long *stack_args,
+                      int stack_count, long *rax, long *rdx,
+                      long *xmm0, long *xmm1,
+                      unsigned __int128 *st0, LatxGuestCallKind kind)
+{
+#ifndef TARGET_X86_64
+    return -1;
+#else
+    CallbackFrame frame;
+    CallbackResult result;
+    uint64_t *guest_stack;
+    CallbackScope scope __attribute__((cleanup(callback_scope_leave))) = { 0 };
+
+    if (!entry || gpr_count < 0 || gpr_count > LATX_CALLBACK_GPR_ARGS ||
+        xmm_count < 0 || xmm_count > LATX_CALLBACK_XMM_ARGS ||
+        stack_count < 0 || (gpr_count && !gpr_args) ||
+        (xmm_count && !xmm_args) || (stack_count && !stack_args)) {
+        return -1;
+    }
+    if (!latx_kzt_guest_tls_enabled() ||
+        callback_scope_enter(&scope, kind) != 0) {
+        return -1;
+    }
+
+    frame = callback_frame_enter((size_t)stack_count, false);
+    guest_stack = (uint64_t *)frame.cpu->regs[R_ESP];
+    for (int index = 0; index < gpr_count; ++index) {
+        frame.cpu->regs[callback_gpr_regs[index]] =
+            (uint64_t)gpr_args[index];
+    }
+    for (int index = 0; index < xmm_count; ++index) {
+        frame.cpu->xmm_regs[index].ZMM_Q(0) =
+            (uint64_t)xmm_args[index];
+    }
+    for (int index = 0; index < stack_count; ++index) {
+        guest_stack[index] = (uint64_t)stack_args[index];
+    }
+
+    callback_frame_run_result(&frame, entry, &result);
+    /*
+     * Semantic helpers may use Guest result registers. Publish the captured
+     * result only after those helpers finish, even if an output aliases env.
+     */
+    callback_scope_leave(&scope);
+    if (rax) {
+        *rax = (long)result.rax;
+    }
+    if (rdx) {
+        *rdx = (long)result.rdx;
+    }
+    if (xmm0) {
+        *xmm0 = (long)result.xmm0;
+    }
+    if (xmm1) {
+        *xmm1 = (long)result.xmm1;
+    }
+    if (st0) {
+        *st0 = result.st0;
+    }
+    return 0;
+#endif
+}
+
+int latx_run_guest_callback(uintptr_t entry, const long *gpr_args,
+                      int gpr_count, const long *xmm_args,
+                      int xmm_count, const long *stack_args,
+                      int stack_count, long *rax, long *rdx,
+                      long *xmm0, long *xmm1,
+                      unsigned __int128 *st0)
+{
+    return run_guest_callback_impl(entry, gpr_args, gpr_count, xmm_args,
+        xmm_count, stack_args, stack_count, rax, rdx, xmm0, xmm1, st0,
+        LATX_GUEST_USER_CALLBACK);
 }
