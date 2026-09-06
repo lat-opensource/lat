@@ -372,8 +372,15 @@ abi_long do_syscall_with_seccomp(void *cpu_env, int num, int seccomp_num,
                                 abi_long arg5, abi_long arg6, abi_long arg7,
                                 abi_long arg8);
 extern __thread CPUState *thread_cpu;
+#ifdef CONFIG_LATX
+void latx_register_host_thread_template(CPUArchState *env);
+int latx_finalize_host_thread_template(CPUArchState *env);
+int latx_attach_current_host_thread(void);
+#endif
 void cpu_loop(CPUArchState *env);
 const char *target_strerror(int err);
+int host_to_target_errno(int err);
+int target_to_host_errno(int err);
 int get_osversion(void);
 void init_qemu_uname_release(void);
 void fork_start(void);
