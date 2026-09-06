@@ -313,10 +313,9 @@ void init_task_state(TaskState *ts)
 #endif
 }
 
-CPUArchState *cpu_copy(CPUArchState *env)
+static CPUArchState *cpu_copy_into(CPUArchState *env, CPUState *new_cpu)
 {
     CPUState *cpu = env_cpu(env);
-    CPUState *new_cpu = cpu_create(cpu_type);
     CPUArchState *new_env = new_cpu->env_ptr;
     CPUBreakpoint *bp;
     CPUWatchpoint *wp;
@@ -357,6 +356,11 @@ CPUArchState *cpu_copy(CPUArchState *env)
     new_env->tb_jmp_cache_ptr = new_cpu->tb_jmp_cache;
 #endif
     return new_env;
+}
+
+CPUArchState *cpu_copy(CPUArchState *env)
+{
+    return cpu_copy_into(env, cpu_create(cpu_type));
 }
 
 #if defined(CONFIG_LATX_DEBUG) || defined(CONFIG_DEBUG_TCG)
