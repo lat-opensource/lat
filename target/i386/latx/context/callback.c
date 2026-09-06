@@ -6,11 +6,17 @@
  * SPDX-License-Identifier: MIT
  */
 
+#include "config-host.h"
+
 #include <stdarg.h>
+#include <errno.h>
+#include <netdb.h>
+#include <pthread.h>
 
 #include "callback-args.h"
 #include "callback-fpr.h"
 #include "callback.h"
+#include "debug.h"
 #include "lsenv.h"
 #include "qemu.h"
 
@@ -21,6 +27,14 @@ typedef struct CallbackFrame {
     uintptr_t old_rbp;
     size_t stack_words;
 } CallbackFrame;
+
+typedef struct CallbackResult {
+    uint64_t rax;
+    uint64_t rdx;
+    uint64_t xmm0;
+    uint64_t xmm1;
+    unsigned __int128 st0;
+} CallbackResult;
 
 static const int callback_gpr_regs[LATX_CALLBACK_GPR_ARGS] = {
     R_EDI, R_ESI, R_EDX, R_ECX, R_R8, R_R9,
@@ -75,7 +89,9 @@ static CallbackFrame callback_frame_enter(size_t stack_args,
     return frame;
 }
 
-static uint64_t callback_frame_run(CallbackFrame *frame, uintptr_t fnc)
+static uint64_t callback_frame_run_result(CallbackFrame *frame,
+                                          uintptr_t fnc,
+                                          CallbackResult *result)
 {
     CPUX86State *cpu = frame->cpu;
     CPUState *cs = frame->cs;
@@ -95,6 +111,17 @@ static uint64_t callback_frame_run(CallbackFrame *frame, uintptr_t fnc)
     memcpy(&cs->jmp_env, &buf, sizeof(buf));
     cpu->eip = oldip;
 
+    if (result) {
+        result->rax = cpu->regs[R_EAX];
+        result->rdx = cpu->regs[R_EDX];
+        result->xmm0 = cpu->xmm_regs[0].ZMM_Q(0);
+        result->xmm1 = cpu->xmm_regs[1].ZMM_Q(0);
+        result->st0 = 0;
+        memcpy(&result->st0,
+               &cpu->fpregs[(cpu->fpstt) & 7].d.low,
+               sizeof(uint64_t));
+    }
+
     cpu->regs[R_ESP] += frame->stack_words * sizeof(uint64_t);
     cpu->regs[R_R15] = Pop64(cpu);
     cpu->regs[R_R14] = Pop64(cpu);
@@ -113,17 +140,31 @@ static uint64_t callback_frame_run(CallbackFrame *frame, uintptr_t fnc)
     cpu->regs[R_ESP] = frame->old_rbp;
     cpu->regs[R_EBP] = Pop64(cpu);
 
-    return cpu->regs[R_EAX];
+    return result ? result->rax : cpu->regs[R_EAX];
+}
+
+static uint64_t callback_frame_run(CallbackFrame *frame, uintptr_t fnc)
+{
+    return callback_frame_run_result(frame, fnc, NULL);
 }
 #endif
 
-uint64_t RunFunctionWithState(uintptr_t fnc, int nargs, ...)
+typedef enum LatxGuestCallKind {
+    LATX_GUEST_USER_CALLBACK,
+    LATX_GUEST_INTERNAL_HELPER,
+    LATX_GUEST_INTERNAL_NO_REFRESH,
+} LatxGuestCallKind;
+
+static uint64_t run_function_with_state_va(uintptr_t fnc, int nargs,
+                                           LatxGuestCallKind kind,
+                                           va_list *ap)
 {
 #ifdef TARGET_X86_64
     size_t stack_args;
     CallbackFrame frame;
     uint64_t *stack;
-    va_list ap;
+
+
 
     lsassert(fnc);
     lsassert(nargs >= 0);
@@ -135,21 +176,61 @@ uint64_t RunFunctionWithState(uintptr_t fnc, int nargs, ...)
     frame = callback_frame_enter(stack_args, false);
     stack = (uint64_t *)frame.cpu->regs[R_ESP];
 
-    va_start(ap, nargs);
     for (int i = 0; i < nargs; i++) {
         if (i < LATX_CALLBACK_GPR_ARGS) {
             frame.cpu->regs[callback_gpr_regs[i]] =
-                va_arg(ap, uint64_t);
+                va_arg(*ap, uint64_t);
         } else {
-            *stack++ = va_arg(ap, uint64_t);
+            *stack++ = va_arg(*ap, uint64_t);
         }
     }
-    va_end(ap);
 
+    (void)kind;
     return callback_frame_run(&frame, fnc);
 #else
+    (void)fnc;
+    (void)nargs;
+    (void)kind;
+    (void)ap;
     return 0;
 #endif
+}
+
+uint64_t RunFunctionWithState(uintptr_t fnc, int nargs, ...)
+{
+    uint64_t result;
+    va_list ap;
+
+    va_start(ap, nargs);
+    result = run_function_with_state_va(
+        fnc, nargs, LATX_GUEST_USER_CALLBACK, &ap);
+    va_end(ap);
+    return result;
+}
+
+uint64_t RunFunctionWithStateInternal(uintptr_t fnc, int nargs, ...)
+{
+    uint64_t result;
+    va_list ap;
+
+    va_start(ap, nargs);
+    result = run_function_with_state_va(
+        fnc, nargs, LATX_GUEST_INTERNAL_HELPER, &ap);
+    va_end(ap);
+    return result;
+}
+
+uint64_t RunFunctionWithStateInternalNoRefresh(uintptr_t fnc, int nargs,
+                                               ...)
+{
+    uint64_t result;
+    va_list ap;
+
+    va_start(ap, nargs);
+    result = run_function_with_state_va(
+        fnc, nargs, LATX_GUEST_INTERNAL_NO_REFRESH, &ap);
+    va_end(ap);
+    return result;
 }
 
 uint64_t RunFunctionFmt(uintptr_t fnc, const char *fmt, ...)
@@ -159,6 +240,8 @@ uint64_t RunFunctionFmt(uintptr_t fnc, const char *fmt, ...)
     CallbackFrame frame;
     LatxCallbackArgs args;
     va_list ap;
+
+
 
     lsassert(fnc);
     lsassert(fmt);
@@ -199,6 +282,8 @@ float RunFunctionFmtFloat(uintptr_t fnc, const char *fmt, ...)
     CallbackFrame frame;
     LatxCallbackArgs args;
     va_list ap;
+
+
 
     lsassert(fnc);
     lsassert(fmt);
