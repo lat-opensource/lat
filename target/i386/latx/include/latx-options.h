@@ -37,6 +37,7 @@ extern int option_tu_link;
 extern int option_kzt_log;
 extern char *option_kzt_libs;
 extern char *option_kzt_error;
+extern char *option_kzt_guest_tls_error;
 extern char *option_kzt_log_error;
 #endif
 
@@ -185,6 +186,7 @@ extern unsigned long long counter_mips_tr;
 #if defined(CONFIG_LATX) && defined(CONFIG_LATX_KZT)
 #define ENVSUP_KZT \
     ENVFUN(LATX_KZT, handle_arg_latx_kzt) \
+    ENVFUN(LATX_KZT_GUEST_TLS, handle_arg_latx_kzt_guest_tls) \
     ENVFUN(LATX_KZT_LIBS, handle_arg_latx_kzt_libs) \
     ENVFUN(LATX_KZT_LOG, handle_arg_latx_kzt_log)
 #else

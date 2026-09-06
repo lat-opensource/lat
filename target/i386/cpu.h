@@ -1661,6 +1661,12 @@ typedef struct CPUX86State {
 #ifdef CONFIG_LATX
     ucontext_t *puc;
     uintptr_t insn_save[2];
+    target_ulong kzt_guest_stack_base;
+#ifdef CONFIG_LATX_KZT
+    void *kzt_guest_tls_allocation;
+    void *kzt_guest_thread_state;
+    void *kzt_guest_tls_parent_snapshot;
+#endif
 #endif
 } CPUX86State;
 
