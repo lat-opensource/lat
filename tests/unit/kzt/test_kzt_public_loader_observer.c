@@ -28,7 +28,24 @@
 #define SYMBOL_HASH_ADDR (SYMBOL_ELF_BASE + 0x200)
 #define SYMBOL_TABLE_ADDR (SYMBOL_ELF_BASE + 0x300)
 #define SYMBOL_STRING_ADDR (SYMBOL_ELF_BASE + 0x400)
+#define TLS_ELF_BASE (FIXTURE_BASE + 0x9000)
+#define TLS_DYNAMIC_ADDR (TLS_ELF_BASE + 0x300)
+#define TLS_RELA_ADDR (TLS_ELF_BASE + 0x500)
+#define TLS_IMAGE_ADDR (TLS_ELF_BASE + 0x600)
+#define TLS_MODULE_RELOCATION_ADDR (TLS_ELF_BASE + 0x700)
+#define TLS_EXTERNAL_RELOCATION_ADDR (TLS_ELF_BASE + 0x708)
+#define TLS_STATIC_RELOCATION_ADDR (TLS_ELF_BASE + 0x710)
+#define TLS_SYMBOL_TABLE_ADDR (TLS_ELF_BASE + 0x800)
+#define TLS_STRING_TABLE_ADDR (TLS_ELF_BASE + 0x880)
+#define TLS_HASH_ADDR (TLS_ELF_BASE + 0x8c0)
+#define DUP_TLS_DYNAMIC_ADDR (FIXTURE_BASE + 0x5800)
+#define DUP_TLS_HASH_ADDR (FIXTURE_BASE + 0x5900)
+#define DUP_TLS_SYMBOL_ADDR (FIXTURE_BASE + 0x5a00)
+#define DUP_TLS_STRING_ADDR (FIXTURE_BASE + 0x5b00)
 #define TEST_PAGE_SIZE 0x1000
+#define KZT_TEST_ET_DYN 3
+#define KZT_TEST_EM_X86_64 62
+#define KZT_TEST_PT_LOAD 1
 #define KZT_TEST_PT_GNU_RELRO UINT32_C(0x6474e552)
 
 typedef struct test_x86_64_elf_header {
@@ -67,6 +84,12 @@ typedef struct test_x86_64_symbol {
     uint64_t value;
     uint64_t size;
 } test_x86_64_symbol_t;
+
+typedef struct test_x86_64_relocation {
+    uint64_t offset;
+    uint64_t info;
+    int64_t addend;
+} test_x86_64_relocation_t;
 
 #define CHECK(condition)                                                     \
     do {                                                                     \
@@ -231,14 +254,75 @@ static void write_elf_without_relro(fixture_t *fixture,
     fixture_write(fixture, load_bias + header.phoff, &phdr, sizeof(phdr));
 }
 
-static void write_gnu_hash_dlopen_object(fixture_t *fixture)
+static void write_elf_loads(
+    fixture_t *fixture,
+    uintptr_t load_bias,
+    const test_x86_64_program_header_t *phdrs,
+    size_t phnum)
+{
+    test_x86_64_elf_header_t header = { 0 };
+
+    CHECK(phnum > 0);
+    CHECK(phnum <= UINT16_MAX);
+    header.ident[0] = 0x7f;
+    header.ident[1] = 'E';
+    header.ident[2] = 'L';
+    header.ident[3] = 'F';
+    header.ident[4] = 2;
+    header.ident[5] = 1;
+    header.ident[6] = 1;
+    header.type = KZT_TEST_ET_DYN;
+    header.machine = KZT_TEST_EM_X86_64;
+    header.version = 1;
+    header.phoff = sizeof(header);
+    header.ehsize = sizeof(header);
+    header.phentsize = sizeof(*phdrs);
+    header.phnum = phnum;
+    fixture_write(fixture, load_bias, &header, sizeof(header));
+    fixture_write(fixture, load_bias + header.phoff,
+                  phdrs, phnum * sizeof(*phdrs));
+}
+
+static void write_symbol_object(fixture_t *fixture)
+{
+    const kzt_x86_64_dynamic_entry_t dynamic[] = {
+        { .tag = 4, .value = SYMBOL_HASH_ADDR - SYMBOL_ELF_BASE },
+        { .tag = 5, .value = SYMBOL_STRING_ADDR - SYMBOL_ELF_BASE },
+        { .tag = 6, .value = SYMBOL_TABLE_ADDR - SYMBOL_ELF_BASE },
+        { .tag = 10, .value = sizeof("\0_dl_allocate_tls") },
+        { .tag = 11, .value = sizeof(test_x86_64_symbol_t) },
+        { .tag = KZT_X86_64_DT_NULL, .value = 0 },
+    };
+    const uint32_t hash_header[] = { 1, 2 };
+    const test_x86_64_symbol_t symbols[] = {
+        { 0 },
+        {
+            .name = 1,
+            .info = 0x12,
+            .section_index = 1,
+            .value = 0x1234,
+        },
+    };
+    static const char strings[] = "\0_dl_allocate_tls";
+
+    fixture_write(fixture, SYMBOL_DYNAMIC_ADDR,
+                  dynamic, sizeof(dynamic));
+    fixture_write(fixture, SYMBOL_HASH_ADDR,
+                  hash_header, sizeof(hash_header));
+    fixture_write(fixture, SYMBOL_TABLE_ADDR,
+                  symbols, sizeof(symbols));
+    fixture_write(fixture, SYMBOL_STRING_ADDR,
+                  strings, sizeof(strings));
+}
+
+static void write_gnu_hash_symbol_object(fixture_t *fixture)
 {
     const kzt_x86_64_dynamic_entry_t dynamic[] = {
         { .tag = INT64_C(0x6ffffef5),
           .value = SYMBOL_HASH_ADDR - SYMBOL_ELF_BASE },
         { .tag = 5, .value = SYMBOL_STRING_ADDR - SYMBOL_ELF_BASE },
         { .tag = 6, .value = SYMBOL_TABLE_ADDR - SYMBOL_ELF_BASE },
-        { .tag = 10, .value = sizeof("\0dlopen") },
+        { .tag = 10, .value = sizeof("\0_dl_allocate_tls") },
         { .tag = 11, .value = sizeof(test_x86_64_symbol_t) },
         { .tag = KZT_X86_64_DT_NULL, .value = 0 },
     };
@@ -263,10 +347,10 @@ static void write_gnu_hash_dlopen_object(fixture_t *fixture)
             .name = 1,
             .info = 0x12,
             .section_index = 1,
-            .value = 0x905d0,
+            .value = 0x1234,
         },
     };
-    static const char strings[] = "\0dlopen";
+    static const char strings[] = "\0_dl_allocate_tls";
 
     fixture_write(fixture, SYMBOL_DYNAMIC_ADDR,
                   dynamic, sizeof(dynamic));
@@ -274,6 +358,145 @@ static void write_gnu_hash_dlopen_object(fixture_t *fixture)
     fixture_write(fixture, SYMBOL_TABLE_ADDR,
                   symbols, sizeof(symbols));
     fixture_write(fixture, SYMBOL_STRING_ADDR,
+                  strings, sizeof(strings));
+}
+
+static void write_tls_object(fixture_t *fixture)
+{
+    test_x86_64_elf_header_t header = { 0 };
+    const test_x86_64_program_header_t phdr = {
+        .type = 7,
+        .vaddr = TLS_IMAGE_ADDR - TLS_ELF_BASE + 8,
+        .filesz = 24,
+        .memsz = 32,
+        .align = 64,
+    };
+    const kzt_x86_64_dynamic_entry_t dynamic[] = {
+        { .tag = 7, .value = TLS_RELA_ADDR - TLS_ELF_BASE },
+        { .tag = 8, .value = 6 * sizeof(test_x86_64_relocation_t) },
+        { .tag = 9, .value = sizeof(test_x86_64_relocation_t) },
+        { .tag = 6, .value = TLS_SYMBOL_TABLE_ADDR - TLS_ELF_BASE },
+        { .tag = 11, .value = sizeof(test_x86_64_symbol_t) },
+        { .tag = 5, .value = TLS_STRING_TABLE_ADDR - TLS_ELF_BASE },
+        { .tag = 10, .value = sizeof("\0tls_symbol") },
+        { .tag = 4, .value = TLS_HASH_ADDR - TLS_ELF_BASE },
+        { .tag = KZT_X86_64_DT_NULL, .value = 0 },
+    };
+    const test_x86_64_relocation_t relocations[] = {
+        {
+            .offset = TLS_EXTERNAL_RELOCATION_ADDR - TLS_ELF_BASE,
+            .info = (UINT64_C(1) << 32) | 16,
+        },
+        {
+            .offset = TLS_MODULE_RELOCATION_ADDR - TLS_ELF_BASE,
+            .info = 16,
+        },
+        {
+            .offset = TLS_STATIC_RELOCATION_ADDR - TLS_ELF_BASE,
+            .info = (UINT64_C(1) << 32) | 18,
+            .addend = 4,
+        },
+        {
+            .offset = TLS_IMAGE_ADDR + 8 - TLS_ELF_BASE,
+            .info = 8,
+            .addend = 0x1234,
+        },
+        {
+            .offset = TLS_IMAGE_ADDR + 16 - TLS_ELF_BASE,
+            .info = (UINT64_C(1) << 32) | 1,
+        },
+        {
+            .offset = TLS_IMAGE_ADDR + 24 - TLS_ELF_BASE,
+            .info = (UINT64_C(2) << 32) | 1,
+        },
+    };
+    const test_x86_64_symbol_t symbols[] = {
+        { 0 },
+        {
+            .name = 1,
+            .info = 0x16,
+            /* A default-visible definition can be preempted. */
+            .section_index = 1,
+        },
+        {
+            .info = 0x0a,
+            .section_index = 1,
+            .value = 0x555,
+        },
+    };
+    const uint64_t module_id = 7;
+    const uint64_t external_module_id = 3;
+    const int64_t static_relocation = -0x11c;
+    const uint64_t image_values[] = {
+        UINT64_C(0x123456789abcdef0),
+        UINT64_C(0xabcdef0123456789),
+        UINT64_C(0xfeedfacecafebeef),
+    };
+    static const char string_table[] = "\0tls_symbol";
+    const uint32_t hash_header[] = { 1, 3 };
+
+    header.ident[0] = 0x7f;
+    header.ident[1] = 'E';
+    header.ident[2] = 'L';
+    header.ident[3] = 'F';
+    header.ident[4] = 2;
+    header.ident[5] = 1;
+    header.ident[6] = 1;
+    header.phoff = sizeof(header);
+    header.ehsize = sizeof(header);
+    header.phentsize = sizeof(phdr);
+    header.phnum = 1;
+    fixture_write(fixture, TLS_ELF_BASE, &header, sizeof(header));
+    fixture_write(fixture, TLS_ELF_BASE + header.phoff,
+                  &phdr, sizeof(phdr));
+    fixture_write(fixture, TLS_DYNAMIC_ADDR, dynamic, sizeof(dynamic));
+    fixture_write(fixture, TLS_RELA_ADDR,
+                  relocations, sizeof(relocations));
+    fixture_write(fixture, TLS_SYMBOL_TABLE_ADDR,
+                  symbols, sizeof(symbols));
+    fixture_write(fixture, TLS_STRING_TABLE_ADDR,
+                  string_table, sizeof(string_table));
+    fixture_write(fixture, TLS_HASH_ADDR,
+                  hash_header, sizeof(hash_header));
+    fixture_write(fixture, TLS_MODULE_RELOCATION_ADDR,
+                  &module_id, sizeof(module_id));
+    fixture_write(fixture, TLS_EXTERNAL_RELOCATION_ADDR,
+                  &external_module_id, sizeof(external_module_id));
+    fixture_write(fixture, TLS_STATIC_RELOCATION_ADDR,
+                  &static_relocation, sizeof(static_relocation));
+    fixture_write(fixture, TLS_IMAGE_ADDR + 8,
+                  image_values, sizeof(image_values));
+}
+
+static void write_duplicate_tls_symbol(fixture_t *fixture)
+{
+    const kzt_x86_64_dynamic_entry_t dynamic[] = {
+        { .tag = 4, .value = DUP_TLS_HASH_ADDR },
+        { .tag = 5, .value = DUP_TLS_STRING_ADDR },
+        { .tag = 6, .value = DUP_TLS_SYMBOL_ADDR },
+        { .tag = 10, .value = sizeof("\0tls_symbol") },
+        { .tag = 11, .value = sizeof(test_x86_64_symbol_t) },
+        { .tag = KZT_X86_64_DT_NULL, .value = 0 },
+    };
+    const uint32_t hash_header[] = { 1, 2 };
+    const test_x86_64_symbol_t symbols[] = {
+        { 0 },
+        {
+            .name = 1,
+            .info = 0x16,
+            .section_index = 1,
+            .value = 8,
+        },
+    };
+    static const char strings[] = "\0tls_symbol";
+
+    fixture_write(fixture, DUP_TLS_DYNAMIC_ADDR,
+                  dynamic, sizeof(dynamic));
+    fixture_write(fixture, DUP_TLS_HASH_ADDR,
+                  hash_header, sizeof(hash_header));
+    fixture_write(fixture, DUP_TLS_SYMBOL_ADDR,
+                  symbols, sizeof(symbols));
+    fixture_write(fixture, DUP_TLS_STRING_ADDR,
                   strings, sizeof(strings));
 }
 
@@ -363,12 +586,15 @@ static void test_deleted_address_can_be_observed_again(void)
         .read_memory = fixture_read,
         .opaque = &fixture,
     };
+    uint64_t first_generation;
 
     setup_two_maps(&fixture);
     kzt_public_loader_observer_reset(&observer);
     CHECK(kzt_public_loader_observer_activate(
               &observer, DYNAMIC_ADDR, 16, &reader,
               record_visit, &log) == KZT_PUBLIC_LOADER_OK);
+    first_generation = observer.live_map_generations[1];
+    CHECK(first_generation != 0);
 
     write_map(&fixture, MAP1_ADDR, UINT64_C(0x400000), NAME1_ADDR,
               FIXTURE_BASE + 0x5000, 0, 0);
@@ -389,6 +615,7 @@ static void test_deleted_address_can_be_observed_again(void)
     CHECK(log.count == 1);
     CHECK(log.objects[0].link_map_addr == MAP2_ADDR);
     CHECK(log.objects[0].load_bias == UINT64_C(0xa00000));
+    CHECK(observer.live_map_generations[1] != first_generation);
 }
 
 static void test_cycle_does_not_replace_last_complete_snapshot(void)
@@ -606,6 +833,691 @@ static void test_object_relro_classification_uses_guest_memory(void)
     CHECK(has_relro == 0);
 }
 
+static void test_symbol_lookup_uses_live_relocated_elf_state(void)
+{
+    fixture_t fixture;
+    visit_log_t log = { 0 };
+    kzt_public_loader_observer_t observer;
+    const kzt_public_loader_reader_t reader = {
+        .read_memory = fixture_read,
+        .opaque = &fixture,
+    };
+    uintptr_t symbol_addr = 0;
+
+    memset(&fixture, 0, sizeof(fixture));
+    write_dynamic(&fixture, R_DEBUG_ADDR);
+    write_debug(&fixture, KZT_LOADER_DEBUG_CONSISTENT, MAP1_ADDR);
+    write_map(&fixture, MAP1_ADDR, SYMBOL_ELF_BASE, NAME1_ADDR,
+              SYMBOL_DYNAMIC_ADDR, 0, 0);
+    write_symbol_object(&fixture);
+    kzt_public_loader_observer_reset(&observer);
+    CHECK(kzt_public_loader_observer_activate(
+              &observer, DYNAMIC_ADDR, 16, &reader,
+              record_visit, &log) == KZT_PUBLIC_LOADER_OK);
+
+    CHECK(kzt_public_loader_find_symbol(
+              &observer, &reader, "_dl_allocate_tls", &symbol_addr) ==
+          KZT_PUBLIC_LOADER_OK);
+    CHECK(symbol_addr == SYMBOL_ELF_BASE + 0x1234);
+    CHECK(log.count == 1);
+    symbol_addr = 0;
+    CHECK(kzt_public_loader_find_symbol_in_object(
+              &log.objects[0], &reader,
+              "_dl_allocate_tls", &symbol_addr) ==
+          KZT_PUBLIC_LOADER_OK);
+    CHECK(symbol_addr == SYMBOL_ELF_BASE + 0x1234);
+    CHECK(kzt_public_loader_find_symbol(
+              &observer, &reader, "missing", &symbol_addr) ==
+          KZT_PUBLIC_LOADER_NOT_FOUND);
+
+    memset(&fixture, 0, sizeof(fixture));
+    write_dynamic(&fixture, R_DEBUG_ADDR);
+    write_debug(&fixture, KZT_LOADER_DEBUG_CONSISTENT, MAP1_ADDR);
+    write_map(&fixture, MAP1_ADDR, SYMBOL_ELF_BASE, NAME1_ADDR,
+              SYMBOL_DYNAMIC_ADDR, 0, 0);
+    write_gnu_hash_symbol_object(&fixture);
+    kzt_public_loader_observer_reset(&observer);
+    log.count = 0;
+    CHECK(kzt_public_loader_observer_activate(
+              &observer, DYNAMIC_ADDR, 16, &reader,
+              record_visit, &log) == KZT_PUBLIC_LOADER_OK);
+    CHECK(kzt_public_loader_find_symbol(
+              &observer, &reader, "_dl_allocate_tls", &symbol_addr) ==
+          KZT_PUBLIC_LOADER_OK);
+    CHECK(symbol_addr == SYMBOL_ELF_BASE + 0x1234);
+}
+
+static void test_address_lookup_uses_exact_load_segments(void)
+{
+    fixture_t fixture;
+    visit_log_t log = { 0 };
+    kzt_public_loader_observer_t observer;
+    kzt_public_loader_object_t object = { 0 };
+    const kzt_public_loader_reader_t reader = {
+        .read_memory = fixture_read,
+        .opaque = &fixture,
+    };
+    const test_x86_64_program_header_t elf1_phdrs[] = {
+        {
+            .type = KZT_TEST_PT_LOAD,
+            .offset = 0x1000,
+            .vaddr = 0x1000,
+            .filesz = 0x400,
+            .memsz = 0x800,
+            .align = 0x1000,
+        },
+        {
+            .type = KZT_TEST_PT_LOAD,
+            .offset = 0x3000,
+            .vaddr = 0x3000,
+            .filesz = 0x500,
+            .memsz = 0x500,
+            .align = 0x1000,
+        },
+        {
+            .type = KZT_TEST_PT_LOAD,
+            .offset = 0x3200,
+            .vaddr = 0x3200,
+            .filesz = 0x200,
+            .memsz = 0x200,
+            .align = 0x100,
+        },
+    };
+    const test_x86_64_program_header_t elf2_phdr = {
+        .type = KZT_TEST_PT_LOAD,
+        .offset = 0x5000,
+        .vaddr = 0x5000,
+        .filesz = 0x100,
+        .memsz = 0x100,
+        .align = 0x1000,
+    };
+
+    memset(&fixture, 0, sizeof(fixture));
+    write_dynamic(&fixture, R_DEBUG_ADDR);
+    write_debug(&fixture, KZT_LOADER_DEBUG_CONSISTENT, MAP1_ADDR);
+    write_map(&fixture, MAP1_ADDR, ELF1_BASE, NAME1_ADDR,
+              FIXTURE_BASE + 0x5000, MAP2_ADDR, 0);
+    write_map(&fixture, MAP2_ADDR, ELF2_BASE, NAME2_ADDR,
+              FIXTURE_BASE + 0x5100, 0, MAP1_ADDR);
+    write_elf_loads(&fixture, ELF1_BASE, elf1_phdrs,
+                    sizeof(elf1_phdrs) / sizeof(elf1_phdrs[0]));
+    write_elf_loads(&fixture, ELF2_BASE, &elf2_phdr, 1);
+    kzt_public_loader_observer_reset(&observer);
+    CHECK(kzt_public_loader_observer_activate(
+              &observer, DYNAMIC_ADDR, 16, &reader,
+              record_visit, &log) == KZT_PUBLIC_LOADER_OK);
+
+    CHECK(kzt_public_loader_find_object_by_address(
+              &observer, &reader, ELF1_BASE + 0x1100, &object) ==
+          KZT_PUBLIC_LOADER_OK);
+    CHECK(object.link_map_addr == MAP1_ADDR);
+    CHECK(object.load_bias == ELF1_BASE);
+    CHECK(kzt_public_loader_find_object_by_address(
+              &observer, &reader, ELF1_BASE + 0x1600, &object) ==
+          KZT_PUBLIC_LOADER_OK);
+    CHECK(object.link_map_addr == MAP1_ADDR);
+    CHECK(kzt_public_loader_find_object_by_address(
+              &observer, &reader, ELF1_BASE + 0x3300, &object) ==
+          KZT_PUBLIC_LOADER_OK);
+    CHECK(object.link_map_addr == MAP1_ADDR);
+    CHECK(kzt_public_loader_find_object_by_address(
+              &observer, &reader, ELF1_BASE + 0x2000, &object) ==
+          KZT_PUBLIC_LOADER_NOT_FOUND);
+    CHECK(kzt_public_loader_find_object_by_address(
+              &observer, &reader, ELF1_BASE + 0x1800, &object) ==
+          KZT_PUBLIC_LOADER_NOT_FOUND);
+}
+
+static void test_address_lookup_rejects_ambiguity_and_malformed_elf(void)
+{
+    fixture_t fixture;
+    visit_log_t log = { 0 };
+    kzt_public_loader_observer_t observer;
+    kzt_public_loader_object_t object = { 0 };
+    const kzt_public_loader_reader_t reader = {
+        .read_memory = fixture_read,
+        .opaque = &fixture,
+    };
+    test_x86_64_program_header_t phdr1 = {
+        .type = KZT_TEST_PT_LOAD,
+        .offset = 0x7000,
+        .vaddr = 0x7000,
+        .filesz = 0x200,
+        .memsz = 0x200,
+        .align = 0x1000,
+    };
+    const test_x86_64_program_header_t phdr2 = {
+        .type = KZT_TEST_PT_LOAD,
+        .offset = 0x2000,
+        .vaddr = 0x2000,
+        .filesz = 0x200,
+        .memsz = 0x200,
+        .align = 0x1000,
+    };
+    test_x86_64_elf_header_t invalid_header = { 0 };
+
+    memset(&fixture, 0, sizeof(fixture));
+    write_dynamic(&fixture, R_DEBUG_ADDR);
+    write_debug(&fixture, KZT_LOADER_DEBUG_CONSISTENT, MAP1_ADDR);
+    write_map(&fixture, MAP1_ADDR, ELF1_BASE, NAME1_ADDR,
+              FIXTURE_BASE + 0x5000, MAP2_ADDR, 0);
+    write_map(&fixture, MAP2_ADDR, ELF2_BASE, NAME2_ADDR,
+              FIXTURE_BASE + 0x5100, 0, MAP1_ADDR);
+    write_elf_loads(&fixture, ELF1_BASE, &phdr1, 1);
+    write_elf_loads(&fixture, ELF2_BASE, &phdr2, 1);
+    kzt_public_loader_observer_reset(&observer);
+    CHECK(kzt_public_loader_observer_activate(
+              &observer, DYNAMIC_ADDR, 16, &reader,
+              record_visit, &log) == KZT_PUBLIC_LOADER_OK);
+    CHECK(kzt_public_loader_find_object_by_address(
+              &observer, &reader, ELF1_BASE + 0x7100, &object) ==
+          KZT_PUBLIC_LOADER_INVALID_STATE);
+
+    write_map(&fixture, MAP1_ADDR, ELF1_BASE, NAME1_ADDR,
+              FIXTURE_BASE + 0x5000, 0, 0);
+    CHECK(kzt_public_loader_observer_refresh(
+              &observer, &reader, record_visit, &log) ==
+          KZT_PUBLIC_LOADER_OK);
+    fixture_write(&fixture, ELF1_BASE, &invalid_header,
+                  sizeof(invalid_header));
+    CHECK(kzt_public_loader_find_object_by_address(
+              &observer, &reader, ELF1_BASE + 0x7100, &object) ==
+          KZT_PUBLIC_LOADER_INVALID_STATE);
+
+    write_elf_loads(&fixture, ELF1_BASE, &phdr1, 1);
+    phdr1.vaddr = UINT64_MAX;
+    phdr1.align = 1;
+    fixture_write(&fixture, ELF1_BASE + sizeof(invalid_header),
+                  &phdr1, sizeof(phdr1));
+    CHECK(kzt_public_loader_find_object_by_address(
+              &observer, &reader, ELF1_BASE + 0x7100, &object) ==
+          KZT_PUBLIC_LOADER_OVERFLOW);
+}
+
+static void test_address_lookup_requires_active_consistent_observer(void)
+{
+    fixture_t fixture;
+    visit_log_t log = { 0 };
+    kzt_public_loader_observer_t observer;
+    kzt_public_loader_object_t object = { 0 };
+    const kzt_public_loader_reader_t reader = {
+        .read_memory = fixture_read,
+        .opaque = &fixture,
+    };
+
+    memset(&fixture, 0, sizeof(fixture));
+    kzt_public_loader_observer_reset(&observer);
+    CHECK(kzt_public_loader_find_object_by_address(
+              &observer, &reader, ELF1_BASE + 0x1000, &object) ==
+          KZT_PUBLIC_LOADER_INVALID_INPUT);
+
+    write_dynamic(&fixture, R_DEBUG_ADDR);
+    write_debug(&fixture, KZT_LOADER_DEBUG_CONSISTENT, MAP1_ADDR);
+    write_map(&fixture, MAP1_ADDR, 0, NAME1_ADDR,
+              FIXTURE_BASE + 0x5000, 0, 0);
+    CHECK(kzt_public_loader_observer_activate(
+              &observer, DYNAMIC_ADDR, 16, &reader,
+              record_visit, &log) == KZT_PUBLIC_LOADER_OK);
+    CHECK(kzt_public_loader_find_object_by_address(
+              &observer, &reader, ELF1_BASE + 0x1000, &object) ==
+          KZT_PUBLIC_LOADER_NOT_FOUND);
+
+    write_debug(&fixture, KZT_LOADER_DEBUG_ADD, MAP1_ADDR);
+    CHECK(kzt_public_loader_find_object_by_address(
+              &observer, &reader, ELF1_BASE + 0x1000, &object) ==
+          KZT_PUBLIC_LOADER_BUSY);
+}
+
+static void test_loader_state_probe_requires_same_consistent_instance(void)
+{
+    fixture_t fixture;
+    visit_log_t log = { 0 };
+    kzt_public_loader_observer_t observer;
+    const kzt_public_loader_reader_t reader = {
+        .read_memory = fixture_read,
+        .opaque = &fixture,
+    };
+
+    setup_two_maps(&fixture);
+    kzt_public_loader_observer_reset(&observer);
+    CHECK(kzt_public_loader_observer_activate(
+              &observer, DYNAMIC_ADDR, 16, &reader,
+              record_visit, &log) == KZT_PUBLIC_LOADER_OK);
+    CHECK(kzt_public_loader_state_is_consistent(
+              &observer, &reader) == KZT_PUBLIC_LOADER_OK);
+
+    write_debug(&fixture, KZT_LOADER_DEBUG_ADD, MAP1_ADDR);
+    CHECK(kzt_public_loader_state_is_consistent(
+              &observer, &reader) == KZT_PUBLIC_LOADER_BUSY);
+
+    write_debug(&fixture, KZT_LOADER_DEBUG_CONSISTENT, MAP1_ADDR);
+    observer.r_brk_addr += 8;
+    CHECK(kzt_public_loader_state_is_consistent(
+              &observer, &reader) == KZT_PUBLIC_LOADER_INVALID_STATE);
+}
+
+static void test_address_lookup_accepts_remembered_object_during_add(void)
+{
+    fixture_t fixture;
+    visit_log_t log = { 0 };
+    kzt_public_loader_observer_t observer;
+    kzt_public_loader_object_t object = { 0 };
+    const kzt_public_loader_reader_t reader = {
+        .read_memory = fixture_read,
+        .opaque = &fixture,
+    };
+    const test_x86_64_program_header_t phdr = {
+        .type = KZT_TEST_PT_LOAD,
+        .offset = 0x1000,
+        .vaddr = 0x1000,
+        .filesz = 0x400,
+        .memsz = 0x800,
+        .align = 0x1000,
+    };
+
+    memset(&fixture, 0, sizeof(fixture));
+    write_dynamic(&fixture, R_DEBUG_ADDR);
+    write_debug(&fixture, KZT_LOADER_DEBUG_CONSISTENT, MAP1_ADDR);
+    write_map(&fixture, MAP1_ADDR, ELF1_BASE, NAME1_ADDR,
+              FIXTURE_BASE + 0x5000, 0, 0);
+    write_elf_loads(&fixture, ELF1_BASE, &phdr, 1);
+    write_elf_loads(&fixture, ELF2_BASE, &phdr, 1);
+    kzt_public_loader_observer_reset(&observer);
+    CHECK(kzt_public_loader_observer_activate(
+              &observer, DYNAMIC_ADDR, 16, &reader,
+              record_visit, &log) == KZT_PUBLIC_LOADER_OK);
+
+    /*
+     * The pre-RELRO path can observe and remember a new object while ld.so
+     * still reports RT_ADD.  Address ownership for that already-mapped object
+     * must not wait for the later RT_CONSISTENT notification.
+     */
+    write_map(&fixture, MAP1_ADDR, ELF1_BASE, NAME1_ADDR,
+              FIXTURE_BASE + 0x5000, MAP2_ADDR, 0);
+    write_map(&fixture, MAP2_ADDR, ELF2_BASE, NAME2_ADDR,
+              FIXTURE_BASE + 0x5100, 0, MAP1_ADDR);
+    CHECK(kzt_public_loader_observer_remember(&observer, MAP2_ADDR) ==
+          KZT_PUBLIC_LOADER_OK);
+    write_debug(&fixture, KZT_LOADER_DEBUG_ADD, MAP1_ADDR);
+    log.count = 0;
+    CHECK(kzt_public_loader_observer_refresh(
+              &observer, &reader, record_visit, &log) ==
+          KZT_PUBLIC_LOADER_BUSY);
+    CHECK(log.count == 0);
+
+    CHECK(kzt_public_loader_find_object_by_address(
+              &observer, &reader, ELF2_BASE + 0x1100, &object) ==
+          KZT_PUBLIC_LOADER_OK);
+    CHECK(object.link_map_addr == MAP2_ADDR);
+    CHECK(object.load_bias == ELF2_BASE);
+}
+
+static void test_address_lookup_walks_beyond_snapshot_capacity(void)
+{
+    enum {
+        object_count = KZT_PUBLIC_LOADER_MAX_OBJECTS + 1,
+        elf_stride = 0x80,
+    };
+    const uintptr_t map_base = FIXTURE_BASE + 0x3000;
+    const uintptr_t elf_base = FIXTURE_BASE + 0x6000;
+    const test_x86_64_program_header_t phdr = {
+        .type = KZT_TEST_PT_LOAD,
+        .offset = 0,
+        .vaddr = 0,
+        .filesz = elf_stride,
+        .memsz = elf_stride,
+        .align = 1,
+    };
+    fixture_t fixture;
+    kzt_public_loader_observer_t observer;
+    kzt_public_loader_object_t object = { 0 };
+    const kzt_public_loader_reader_t reader = {
+        .read_memory = fixture_read,
+        .opaque = &fixture,
+    };
+
+    memset(&fixture, 0, sizeof(fixture));
+    write_debug(&fixture, KZT_LOADER_DEBUG_CONSISTENT, map_base);
+    kzt_public_loader_observer_reset(&observer);
+    observer.active = 1;
+    observer.r_debug_addr = R_DEBUG_ADDR;
+    observer.r_brk_addr = R_BRK_ADDR;
+    observer.live_map_count = KZT_PUBLIC_LOADER_MAX_OBJECTS;
+
+    for (size_t index = 0; index < object_count; ++index) {
+        uintptr_t map_addr =
+            map_base + index * sizeof(kzt_x86_64_link_map_prefix_t);
+        uintptr_t object_base = elf_base + index * elf_stride;
+        uintptr_t next = index + 1 < object_count
+            ? map_addr + sizeof(kzt_x86_64_link_map_prefix_t) : 0;
+        uintptr_t previous = index
+            ? map_addr - sizeof(kzt_x86_64_link_map_prefix_t) : 0;
+
+        write_map(&fixture, map_addr, object_base, 0, 0,
+                  next, previous);
+        write_elf_loads(&fixture, object_base, &phdr, 1);
+        if (index < KZT_PUBLIC_LOADER_MAX_OBJECTS) {
+            observer.live_maps[index] = map_addr;
+        }
+    }
+
+    CHECK(kzt_public_loader_find_object_by_address(
+              &observer, &reader,
+              elf_base + (object_count - 1) * elf_stride + 0x70,
+              &object) == KZT_PUBLIC_LOADER_OK);
+    CHECK(object.link_map_addr ==
+          map_base + (object_count - 1) *
+              sizeof(kzt_x86_64_link_map_prefix_t));
+    CHECK(object.load_bias ==
+          elf_base + (object_count - 1) * elf_stride);
+}
+
+static void test_tls_collection_uses_live_image_and_module_relocation(void)
+{
+    fixture_t fixture;
+    visit_log_t log = { 0 };
+    kzt_public_loader_observer_t observer;
+    const kzt_public_loader_reader_t reader = {
+        .read_memory = fixture_read,
+        .opaque = &fixture,
+    };
+    kzt_public_loader_tls_object_t tls_objects[2];
+    size_t tls_count = 0;
+    uint64_t materialized_image[3];
+
+    memset(&fixture, 0, sizeof(fixture));
+    write_dynamic(&fixture, R_DEBUG_ADDR);
+    write_debug(&fixture, KZT_LOADER_DEBUG_CONSISTENT, MAP1_ADDR);
+    write_map(&fixture, MAP1_ADDR, TLS_ELF_BASE, NAME1_ADDR,
+              TLS_DYNAMIC_ADDR, 0, 0);
+    write_tls_object(&fixture);
+    kzt_public_loader_observer_reset(&observer);
+    CHECK(kzt_public_loader_observer_activate(
+              &observer, DYNAMIC_ADDR, 16, &reader,
+              record_visit, &log) == KZT_PUBLIC_LOADER_OK);
+
+    CHECK(kzt_public_loader_collect_tls(
+              &observer, &reader, tls_objects, 2, &tls_count) ==
+          KZT_PUBLIC_LOADER_OK);
+    CHECK(tls_count == 1);
+    CHECK(tls_objects[0].image_addr == TLS_IMAGE_ADDR + 8);
+    CHECK(tls_objects[0].file_size == 24);
+    CHECK(tls_objects[0].memory_size == 32);
+    CHECK(tls_objects[0].alignment == 64);
+    CHECK(tls_objects[0].first_byte_offset == 8);
+    CHECK(tls_objects[0].static_tls_offset == -0x120);
+    CHECK(tls_objects[0].static_tls_offset_valid == 1);
+    CHECK(tls_objects[0].static_tls_offset_needs_validation == 0);
+    CHECK(tls_objects[0].static_tls_symbol_name_addr == 0);
+    CHECK(tls_objects[0].module_id == 7);
+    CHECK(tls_objects[0].link_map_addr == MAP1_ADDR);
+    CHECK(tls_objects[0].load_generation != 0);
+    CHECK(kzt_public_loader_materialize_tls_image(
+              &tls_objects[0], &reader, &materialized_image,
+              sizeof(materialized_image)) == KZT_PUBLIC_LOADER_OK);
+    CHECK(materialized_image[0] == TLS_ELF_BASE + 0x1234);
+    CHECK(materialized_image[1] == UINT64_C(0xabcdef0123456789));
+    CHECK(materialized_image[2] == UINT64_C(0xfeedfacecafebeef));
+    CHECK(kzt_public_loader_materialize_tls_image(
+              &tls_objects[0], &reader, materialized_image,
+              sizeof(materialized_image) - 1) ==
+          KZT_PUBLIC_LOADER_INVALID_INPUT);
+    fixture.reject_reads = 1;
+    CHECK(kzt_public_loader_materialize_tls_image(
+              &tls_objects[0], &reader, materialized_image,
+              sizeof(materialized_image)) ==
+          KZT_PUBLIC_LOADER_READ_ERROR);
+    fixture.reject_reads = 0;
+
+    {
+        test_x86_64_relocation_t original;
+        test_x86_64_relocation_t unsupported;
+        uintptr_t relocation_addr =
+            TLS_RELA_ADDR + 5 * sizeof(test_x86_64_relocation_t);
+
+        CHECK(fixture_read(relocation_addr, &original,
+                           sizeof(original), &fixture) == 0);
+        unsupported = original;
+        unsupported.info = 99;
+        fixture_write(&fixture, relocation_addr,
+                      &unsupported, sizeof(unsupported));
+        CHECK(kzt_public_loader_materialize_tls_image(
+                  &tls_objects[0], &reader, materialized_image,
+                  sizeof(materialized_image)) ==
+              KZT_PUBLIC_LOADER_INVALID_STATE);
+        fixture_write(&fixture, relocation_addr,
+                      &original, sizeof(original));
+    }
+
+    {
+        const uint64_t unresolved_module_id = 0;
+        const uint64_t resolved_module_id = 7;
+
+        fixture_write(&fixture, TLS_MODULE_RELOCATION_ADDR,
+                      &unresolved_module_id,
+                      sizeof(unresolved_module_id));
+        tls_count = 0;
+        CHECK(kzt_public_loader_collect_tls(
+                  &observer, &reader, tls_objects, 2, &tls_count) ==
+              KZT_PUBLIC_LOADER_OK);
+        CHECK(tls_count == 1);
+        CHECK(tls_objects[0].module_id == 0);
+        fixture_write(&fixture, TLS_MODULE_RELOCATION_ADDR,
+                      &resolved_module_id,
+                      sizeof(resolved_module_id));
+    }
+    {
+        const int64_t pending_static_offset = 0;
+        const int64_t resolved_static_offset = -0x11c;
+
+        fixture_write(&fixture, TLS_STATIC_RELOCATION_ADDR,
+                      &pending_static_offset,
+                      sizeof(pending_static_offset));
+        CHECK(kzt_public_loader_collect_tls(
+                  &observer, &reader, tls_objects, 2, &tls_count) ==
+              KZT_PUBLIC_LOADER_BUSY);
+        fixture_write(&fixture, TLS_STATIC_RELOCATION_ADDR,
+                      &resolved_static_offset,
+                      sizeof(resolved_static_offset));
+    }
+
+    write_debug(&fixture, KZT_LOADER_DEBUG_ADD, MAP1_ADDR);
+    tls_count = 0;
+    CHECK(kzt_public_loader_snapshot_tls(
+              &observer, 0, 0, &reader, 0,
+              tls_objects, 2, &tls_count) == KZT_PUBLIC_LOADER_OK);
+    CHECK(tls_count == 1);
+    CHECK(tls_objects[0].module_id == 7);
+    CHECK(tls_objects[0].static_tls_offset == -0x120);
+}
+
+static void test_tls_snapshot_walks_beyond_observer_capacity(void)
+{
+    enum { object_count = KZT_PUBLIC_LOADER_MAX_OBJECTS + 1 };
+    const uintptr_t map_base = FIXTURE_BASE + 0x3000;
+    const uintptr_t tls_map_addr =
+        map_base + (object_count - 1) *
+            sizeof(kzt_x86_64_link_map_prefix_t);
+    fixture_t fixture;
+    kzt_public_loader_observer_t observer;
+    const kzt_public_loader_reader_t reader = {
+        .read_memory = fixture_read,
+        .opaque = &fixture,
+    };
+    kzt_public_loader_tls_object_t tls_objects[2];
+    size_t tls_count = 0;
+    uint64_t first_generation;
+
+    memset(&fixture, 0, sizeof(fixture));
+    write_debug(&fixture, KZT_LOADER_DEBUG_CONSISTENT, map_base);
+    kzt_public_loader_observer_reset(&observer);
+    observer.active = 1;
+    observer.r_debug_addr = R_DEBUG_ADDR;
+    observer.r_brk_addr = R_BRK_ADDR;
+    observer.live_map_count = KZT_PUBLIC_LOADER_MAX_OBJECTS;
+    observer.next_load_generation = KZT_PUBLIC_LOADER_MAX_OBJECTS;
+
+    for (size_t index = 0; index < object_count; ++index) {
+        uintptr_t map_addr =
+            map_base + index * sizeof(kzt_x86_64_link_map_prefix_t);
+        uintptr_t next = index + 1 < object_count
+            ? map_addr + sizeof(kzt_x86_64_link_map_prefix_t) : 0;
+        uintptr_t previous = index
+            ? map_addr - sizeof(kzt_x86_64_link_map_prefix_t) : 0;
+
+        write_map(&fixture, map_addr,
+                  index + 1 == object_count ? TLS_ELF_BASE : 0,
+                  0,
+                  index + 1 == object_count ? TLS_DYNAMIC_ADDR : 0,
+                  next, previous);
+        if (index < KZT_PUBLIC_LOADER_MAX_OBJECTS) {
+            observer.live_maps[index] = map_addr;
+            observer.live_map_generations[index] = index + 1;
+        }
+    }
+    write_tls_object(&fixture);
+
+    CHECK(kzt_public_loader_snapshot_tls(
+              &observer, 0, 0, &reader, 0,
+              tls_objects, 2, &tls_count) == KZT_PUBLIC_LOADER_OK);
+    CHECK(tls_count == 1);
+    CHECK(tls_objects[0].link_map_addr == tls_map_addr);
+    CHECK(tls_objects[0].module_id == 7);
+    CHECK(tls_objects[0].load_generation != 0);
+    first_generation = tls_objects[0].load_generation;
+
+    tls_count = 0;
+    CHECK(kzt_public_loader_snapshot_tls(
+              &observer, 0, 0, &reader, 0,
+              tls_objects, 2, &tls_count) == KZT_PUBLIC_LOADER_OK);
+    CHECK(tls_count == 1);
+    CHECK(tls_objects[0].link_map_addr == tls_map_addr);
+    CHECK(tls_objects[0].load_generation == first_generation);
+}
+
+static void test_tls_snapshot_does_not_consume_binding_visit(void)
+{
+    fixture_t fixture;
+    visit_log_t log = { 0 };
+    kzt_public_loader_observer_t observer;
+    const kzt_public_loader_reader_t reader = {
+        .read_memory = fixture_read,
+        .opaque = &fixture,
+    };
+    kzt_public_loader_tls_object_t tls_objects[2];
+    size_t tls_count = 0;
+
+    memset(&fixture, 0, sizeof(fixture));
+    write_dynamic(&fixture, R_DEBUG_ADDR);
+    write_debug(&fixture, KZT_LOADER_DEBUG_CONSISTENT, MAP1_ADDR);
+    write_map(&fixture, MAP1_ADDR, SYMBOL_ELF_BASE, NAME1_ADDR,
+              SYMBOL_DYNAMIC_ADDR, 0, 0);
+    write_symbol_object(&fixture);
+    kzt_public_loader_observer_reset(&observer);
+    CHECK(kzt_public_loader_observer_activate(
+              &observer, DYNAMIC_ADDR, 16, &reader,
+              record_visit, &log) == KZT_PUBLIC_LOADER_OK);
+    CHECK(observer.live_map_count == 1);
+
+    write_map(&fixture, MAP1_ADDR, 0, NAME1_ADDR,
+              0, MAP2_ADDR, 0);
+    write_map(&fixture, MAP2_ADDR, TLS_ELF_BASE, NAME2_ADDR,
+              TLS_DYNAMIC_ADDR, 0, MAP1_ADDR);
+    write_tls_object(&fixture);
+    CHECK(kzt_public_loader_snapshot_tls(
+              &observer, DYNAMIC_ADDR, 16, &reader, 0,
+              tls_objects, 2, &tls_count) == KZT_PUBLIC_LOADER_OK);
+    CHECK(tls_count == 1);
+    CHECK(tls_objects[0].module_id == 7);
+    CHECK(tls_objects[0].link_map_addr == MAP2_ADDR);
+    CHECK(tls_objects[0].load_generation != 0);
+    CHECK(observer.live_map_count == 1);
+
+    log.count = 0;
+    CHECK(kzt_public_loader_observer_refresh(
+              &observer, &reader, record_visit, &log) ==
+          KZT_PUBLIC_LOADER_OK);
+    CHECK(log.count == 1);
+    CHECK(log.objects[0].link_map_addr == MAP2_ADDR);
+}
+
+static void test_default_visible_tls_requires_unique_owner(void)
+{
+    fixture_t fixture;
+    visit_log_t log = { 0 };
+    kzt_public_loader_observer_t observer;
+    const kzt_public_loader_reader_t reader = {
+        .read_memory = fixture_read,
+        .opaque = &fixture,
+    };
+    kzt_public_loader_tls_object_t tls_objects[2];
+    size_t tls_count = 0;
+
+    memset(&fixture, 0, sizeof(fixture));
+    write_dynamic(&fixture, R_DEBUG_ADDR);
+    write_debug(&fixture, KZT_LOADER_DEBUG_CONSISTENT, MAP1_ADDR);
+    write_map(&fixture, MAP1_ADDR, TLS_ELF_BASE, NAME1_ADDR,
+              TLS_DYNAMIC_ADDR, MAP2_ADDR, 0);
+    write_map(&fixture, MAP2_ADDR, 0, NAME2_ADDR,
+              DUP_TLS_DYNAMIC_ADDR, 0, MAP1_ADDR);
+    write_tls_object(&fixture);
+    write_duplicate_tls_symbol(&fixture);
+    kzt_public_loader_observer_reset(&observer);
+    CHECK(kzt_public_loader_observer_activate(
+              &observer, DYNAMIC_ADDR, 16, &reader,
+              record_visit, &log) == KZT_PUBLIC_LOADER_OK);
+
+    CHECK(kzt_public_loader_collect_tls(
+              &observer, &reader, tls_objects, 2, &tls_count) ==
+          KZT_PUBLIC_LOADER_INVALID_STATE);
+}
+
+static void write_gnu_hash_dlopen_object(fixture_t *fixture)
+{
+    const kzt_x86_64_dynamic_entry_t dynamic[] = {
+        { .tag = INT64_C(0x6ffffef5),
+          .value = SYMBOL_HASH_ADDR - SYMBOL_ELF_BASE },
+        { .tag = 5, .value = SYMBOL_STRING_ADDR - SYMBOL_ELF_BASE },
+        { .tag = 6, .value = SYMBOL_TABLE_ADDR - SYMBOL_ELF_BASE },
+        { .tag = 10, .value = sizeof("\0dlopen") },
+        { .tag = 11, .value = sizeof(test_x86_64_symbol_t) },
+        { .tag = KZT_X86_64_DT_NULL, .value = 0 },
+    };
+    const struct {
+        uint32_t bucket_count;
+        uint32_t symbol_offset;
+        uint32_t bloom_size;
+        uint32_t bloom_shift;
+        uint64_t bloom;
+        uint32_t bucket;
+        uint32_t chain;
+    } hash = {
+        .bucket_count = 1,
+        .symbol_offset = 1,
+        .bloom_size = 1,
+        .bucket = 1,
+        .chain = 1,
+    };
+    const test_x86_64_symbol_t symbols[] = {
+        { 0 },
+        {
+            .name = 1,
+            .info = 0x12,
+            .section_index = 1,
+            .value = 0x905d0,
+        },
+    };
+    static const char strings[] = "\0dlopen";
+
+    fixture_write(fixture, SYMBOL_DYNAMIC_ADDR,
+                  dynamic, sizeof(dynamic));
+    fixture_write(fixture, SYMBOL_HASH_ADDR, &hash, sizeof(hash));
+    fixture_write(fixture, SYMBOL_TABLE_ADDR,
+                  symbols, sizeof(symbols));
+    fixture_write(fixture, SYMBOL_STRING_ADDR,
+                  strings, sizeof(strings));
+}
+
 static void test_symbol_lookup_uses_live_gnu_hash_object(void)
 {
     fixture_t fixture;
@@ -649,6 +1561,17 @@ int main(void)
     test_observed_processed_and_reported_states_are_distinct();
     test_object_relro_classification_uses_guest_memory();
     test_symbol_lookup_uses_live_gnu_hash_object();
+    test_symbol_lookup_uses_live_relocated_elf_state();
+    test_address_lookup_uses_exact_load_segments();
+    test_address_lookup_rejects_ambiguity_and_malformed_elf();
+    test_address_lookup_requires_active_consistent_observer();
+    test_loader_state_probe_requires_same_consistent_instance();
+    test_address_lookup_accepts_remembered_object_during_add();
+    test_address_lookup_walks_beyond_snapshot_capacity();
+    test_tls_collection_uses_live_image_and_module_relocation();
+    test_tls_snapshot_walks_beyond_observer_capacity();
+    test_tls_snapshot_does_not_consume_binding_visit();
+    test_default_visible_tls_requires_unique_owner();
     puts("kzt public loader observer tests: PASS");
     return 0;
 }

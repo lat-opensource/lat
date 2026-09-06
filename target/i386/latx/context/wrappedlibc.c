@@ -70,6 +70,8 @@
 #include "bridge.h"
 #include "globalsymbols.h"
 #include "x86dlfun.h"
+#include "kzt-guest-tls.h"
+#include "kzt-guest-thread.h"
 
 #define LIBNAME libc
 const char* libcName = 
@@ -2337,16 +2339,13 @@ EXPORT int32_t my_posix_spawnp(pid_t* pid, const char* path,
 }
 
 EXPORT void my__Jv_RegisterClasses(void) {}
-#if 0
 EXPORT int32_t my___cxa_thread_atexit_impl(void* dtor, void* obj, void* dso)
 {
-    //printf_log(LOG_INFO, "Warning, call to __cxa_thread_atexit_impl(%p, %p, %p) ignored\n", dtor, obj, dso);
-    AddCleanup1Arg(dtor, obj, dso);
-    return 0;
+    __MY_CPU;
 
-    return 0;
+    return kzt_guest_thread_cxa_atexit(
+        cpu, (uintptr_t)dtor, (uintptr_t)obj, (uintptr_t)dso);
 }
-#endif
 EXPORT int32_t my___register_atfork(void* prepare, void* parent, void* child, void* handle)
 {
     // this is partly incorrect, because the emulated funcionts should be executed by actual fork and not by my_atfork...
@@ -3382,6 +3381,28 @@ EXPORT int my_register_printf_type(void* f)
     return my->register_printf_type(findprintf_typeFct(f));
 }
 
+
+
+EXPORT int my_pthread_key_create(unsigned int *key, void *destructor)
+{
+    __MY_CPU;
+
+    return kzt_guest_thread_key_create(
+        cpu, key, (uintptr_t)destructor);
+}
+
+EXPORT int my_pthread_key_delete(unsigned int key)
+{
+    __MY_CPU;
+
+    return kzt_guest_thread_key_delete(cpu, key);
+}
+
+EXPORT int my___pthread_key_create(unsigned int *key, void *destructor)
+{
+    return my_pthread_key_create(key, destructor);
+}
+
 EXPORT void my___libc_free(void* m)
 {
 	lsassert(0);//for translate_free_int3
@@ -3493,4 +3514,10 @@ int box64_isglibc234 = 1;
 #pragma GCC diagnostic pop
 
 
+#define WRAPPEDLIB_FUNCTION_ENABLED(name) \
+    (latx_kzt_guest_tls_enabled() || \
+     (strcmp(name, "__cxa_thread_atexit_impl") && \
+      strcmp(name, "pthread_key_create") && \
+      strcmp(name, "__pthread_key_create") && \
+      strcmp(name, "pthread_key_delete")))
 #include "wrappedlib_init.h"
