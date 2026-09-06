@@ -336,6 +336,9 @@ ADDRX ir1_disasm(IR1_INST *ir1, uint8_t *addr, ADDRX t_pc, int ir1_num, void *pi
     struct la_dt_insn *info;
     uint32_t nop = 0x401f0f;
     uint64_t nop_5 = 0x441f0f;
+    uint8_t vex_w0[15];
+    const uint8_t *original_addr = addr;
+    bool restore_vex_w = false;
     if (((*((uint32_t *)addr)) & 0xf8ffffff) == 0xc81e0ff3) {
         //repleace endbr32/rdsspd with 4 bytes nop, just a temporary solution
         addr = (uint8_t *)&nop;
@@ -351,6 +354,18 @@ ADDRX ir1_disasm(IR1_INST *ir1, uint8_t *addr, ADDRX t_pc, int ir1_num, void *pi
         addr = (uint8_t *)&nop_5;
     }
 #endif
+    /*
+     * Capstone rejects VEX.W=1 for the four AVX string compare opcodes,
+     * although W selects their 64-bit-length form. Decode the equivalent
+     * W=0 encoding, then retain W and the original bytes in IR1.
+     */
+    if (addr[0] == 0xc4 && (addr[1] & 0x1f) == 0x03 &&
+        (addr[2] & 0x85) == 0x81 && addr[3] >= 0x60 && addr[3] <= 0x63) {
+        memcpy(vex_w0, addr, sizeof(vex_w0));
+        vex_w0[2] &= ~0x80;
+        addr = vex_w0;
+        restore_vex_w = true;
+    }
     /* FIXME:the count parameter in cs_disasm is 1, it means we translte 1 insn at a time,
      * there should be a performance improvement if we increase the number, but
      * for now there are some problems if we change it. It will be settled later.
@@ -368,6 +383,11 @@ ADDRX ir1_disasm(IR1_INST *ir1, uint8_t *addr, ADDRX t_pc, int ir1_num, void *pi
     if (count != 1) {
         fprintf(stderr, "ERROR : disasm, ADDR : 0x%" PRIx64 "\n", (uint64_t)t_pc);
         exit(-1);
+    }
+
+    if (restore_vex_w) {
+        info->x86.rex |= 0x08;
+        memcpy(info->bytes, original_addr, info->size);
     }
 
     disassemble_trace_cmp(addr, 15, (uint64_t)t_pc, 1, info, CODEIS64);

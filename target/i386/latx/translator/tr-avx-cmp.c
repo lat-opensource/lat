@@ -3878,7 +3878,7 @@ bool translate_vcmpss(IR1_INST *pir1)
 	lsassert(ir1_opnd_num(pir1) == 4 &&
 			ir1_opnd_is_imm(ir1_get_opnd(pir1, 3)));
 	lsassert((ir1_opnd_is_xmm(ir1_get_opnd(pir1, 0)) &&
-				ir1_opnd_is_xmm(ir1_get_opnd(pir1, 1))));
+			ir1_opnd_is_xmm(ir1_get_opnd(pir1, 1))));
 	uint8 predicate = ir1_opnd_uimm(ir1_get_opnd(pir1, 3)) & 0x1f;
 	switch (predicate) {
 		case 0:

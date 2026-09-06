@@ -1209,6 +1209,7 @@ static void* relkind_to_fixup_addr[] = {
     [LOAD_VPAES_DEC_TABLES_XV] = (void *)latx_vpaes_dec_tables_xv,
     [LOAD_HELPER_TRACE_SESSION_BEGIN] = trace_session_begin,
     [LOAD_HELPER_UPDATE_MXCSR_STATUS] = update_mxcsr_status,
+    [LOAD_HELPER_UPDATE_MXCSR] = helper_update_mxcsr,
     [LOAD_HELPER_FPATAN] = helper_fpatan,
     [LOAD_HELPER_FPTAN] = helper_fptan,
     [LOAD_HELPER_FPREM] = helper_fprem,
