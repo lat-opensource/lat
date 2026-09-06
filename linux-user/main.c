@@ -445,6 +445,7 @@ static void handle_arg_latx_disassemble_trace_cmp(const char *arg)
 }
 
 #endif
+#endif /* CONFIG_LATX_DEBUG || CONFIG_DEBUG_TCG */
 
 static void handle_arg_imm_skip_pc(const char *arg) {
   imm_skip_pc = strtol(arg, NULL, 16);
@@ -621,7 +622,6 @@ static void handle_arg_plugin(const char *arg)
     qemu_plugin_opt_parse(arg, &plugins);
 }
 #endif
-#endif
 
 static void handle_arg_help(const char *arg)
 {
@@ -644,6 +644,12 @@ static void handle_arg_runtime_info(const char *arg)
 
 static void handle_arg_ld_prefix(const char *arg)
 {
+    g_autofree char *setting = g_strdup_printf(
+        "LAT_LD_PREFIX=%s", arg);
+
+    if (!setting || envlist_setenv(envlist, setting) != 0) {
+        usage(EXIT_FAILURE);
+    }
     interp_prefix = strdup(arg);
     latx_runtime_prefix_selected();
 }
@@ -1077,6 +1083,7 @@ static const struct qemu_argument arg_table[] = {
         true, handle_arg_latx_disassemble_trace_cmp,
         "", "LATX Compare different disassemble."},
 #endif
+#endif /* CONFIG_LATX_DEBUG || CONFIG_DEBUG_TCG */
     {"g",          "LAT_GDB",         true,  handle_arg_gdb,
      "port",       "wait gdb connection to 'port'"},
     {"s",          "LAT_STACK_SIZE",  true,  handle_arg_stack_size,
@@ -1119,7 +1126,6 @@ static const struct qemu_argument arg_table[] = {
 #ifdef CONFIG_PLUGIN
     {"plugin",     "LAT_PLUGIN",      true,  handle_arg_plugin,
      "",           "[file=]<file>[,arg=<string>]"},
-#endif
 #endif
     {"h",          NULL,               false, handle_arg_help,
      "",           "print this help"},
