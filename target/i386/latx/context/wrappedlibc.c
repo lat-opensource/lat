@@ -70,6 +70,7 @@
 #include "bridge.h"
 #include "globalsymbols.h"
 #include "x86dlfun.h"
+#include "kzt-libc-semantic.h"
 #include "kzt-guest-tls.h"
 #include "kzt-guest-thread.h"
 
@@ -3381,7 +3382,13 @@ EXPORT int my_register_printf_type(void* f)
     return my->register_printf_type(findprintf_typeFct(f));
 }
 
+EXPORT void *my_setlocale(int category, const char *locale)
+{
+    __MY_CPU;
 
+    return (void *)kzt_libc_semantic_setlocale(
+        cpu, category, locale);
+}
 
 EXPORT int my_pthread_key_create(unsigned int *key, void *destructor)
 {

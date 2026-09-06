@@ -77,6 +77,10 @@ static __thread abi_long all_len;
 static CPUState *thread_cpu;
 static int clone_lock, allocations, trees, retired_caches, rcu_unregistered;
 static int filter_unref_count, release_cpu, cpu_unrealized, gdt_unmapped;
+static int semantic_destroyed;
+static void kzt_libc_semantic_destroy(CPUArchState *env) {
+    CHECK(env->gdt.base); semantic_destroyed++;
+}
 static bool cpu_list_locked;
 static jmp_buf exit_buffer;
 static void *tracked_malloc(size_t n) {
@@ -276,6 +280,7 @@ int main(void) {
         CHECK(parent_gdt[0] == 0x42 && rcu_unregistered == 0);
     }
     CHECK(cpu_unrealized == 64 && gdt_unmapped == 64);
+    CHECK(semantic_destroyed == 64);
     CHECK(retired_caches == 64 && filter_unref_count == 64);
     CHECK(finish_clone(0, NULL) == 42); /* A successful child stays owned by it. */
     CHECK(allocations == 1 && cpu_unrealized == 64);

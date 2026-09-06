@@ -99,3 +99,4 @@ my_file = files(
 i386_ss.add(when: 'CONFIG_LATX', if_true: my_file)
 i386_ss.add(when: 'CONFIG_LATX_KZT', if_true: files('kzt-guest-tls.c'))
 i386_ss.add(when: 'CONFIG_LATX_KZT', if_true: files('kzt-guest-thread.c'))
+i386_ss.add(when: 'CONFIG_LATX_KZT', if_true: files('kzt-libc-semantic.c'))

@@ -866,7 +866,19 @@ typedef struct { bool active; uintptr_t r_debug_addr, r_brk_addr;
 static Observer kzt_public_loader_observer;
 static int kzt_public_loader_reader;
 #define kzt_try_bind_observed_object NULL
-static KztGuestPcCallbackState kzt_public_r_brk_inst;
+static KztGuestPcCallbackState kzt_public_r_brk_inst, kzt_guest_fork_inst;
+static uintptr_t kzt_guest_fork_addr;
+static uintptr_t kzt_guest_tls_external_maps[1];
+static unsigned int kzt_guest_tls_external_map_count;
+static unsigned int kzt_guest_tls_external_generation;
+static int kzt_guest_tls_external_error;
+static unsigned int tracking_enabled, fork_hooks;
+static bool latx_kzt_guest_tls_enabled(void) { return false; }
+static void kzt_libc_semantic_process_reset(CPUX86State *env) {}
+static void kzt_guest_tls_loader_tracking_reset(void) {}
+static int latx_finalize_host_thread_template(CPUX86State *env) { return 0; }
+static void kzt_guest_tls_loader_tracking_enable(void) { tracking_enabled++; }
+static void kzt_install_guest_fork_callback(CPUState *cpu) { fork_hooks++; }
 static int kzt_main_relocated_before_relro, kzt_main_fallback_reported;
 static int kzt_observer_failure_reported, x64free_fini;
 typedef struct { const char *name; } elfheader_t;
@@ -922,11 +934,13 @@ int main(void)
     kzt_guest_main_entry_callback(&arch);
     CHECK(!kzt_public_loader_observer.active && active_logs == 0);
     CHECK(failed_logs == 1 && finished == 1 && depth == 0);
+    CHECK(tracking_enabled == 0 && fork_hooks == 0);
     CHECK(arch.eip == 0x1234);
     install_ok = true;
     kzt_guest_main_entry_callback(&arch);
     CHECK(kzt_public_loader_observer.active && active_logs == 1);
     CHECK(finished == 2 && arch.eip == 0x1234 && depth == 0);
+    CHECK(tracking_enabled == 1 && fork_hooks == 1);
     kzt_public_loader_observer.active = false;
     install_ok = false;
     kzt_install_runtime_callbacks(&cpu, &info1);
