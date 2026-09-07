@@ -2856,7 +2856,7 @@ void helper_fxsave(CPUX86State *env, target_ulong ptr)
     do_xsave_fpu(env, ptr, ra);
 
     if (env->cr[4] & CR4_OSFXSR_MASK) {
-        cpu_stl_data_ra(env, ptr + XO(legacy.mxcsr_mask), 0x0000ffff, ra);
+        do_xsave_mxcsr(env, ptr, ra);
         /* Fast FXSAVE leaves out the XMM registers */
         if (!(env->efer & MSR_EFER_FFXSR)
             || (env->hflags & HF_CPL_MASK)
