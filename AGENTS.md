@@ -40,6 +40,8 @@
 
 ## Builds and tests
 
+- Before opening or updating a PR, fetch upstream, rebase onto the latest
+  target branch, and validate the resulting candidate.
 - Before opening or updating a pull request, pass the complete `lat-pr-fast`
   suite and all affected focused tests locally, and include the commands and
   results in the pull request. Run affected `latx-integration` tests when the
