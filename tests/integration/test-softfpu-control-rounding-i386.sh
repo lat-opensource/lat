@@ -24,4 +24,4 @@ for mode in 1 2; do
         "$emulator" "$workdir/softfpu-control-rounding-i386"
 done
 
-echo "PASS: softfpu x87 control restores update rounding state"
+echo "PASS: softfpu restores independent x87 and SSE rounding state"

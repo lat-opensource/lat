@@ -8,6 +8,14 @@
     jne \fail
 .endm
 
+.macro check_sse_up fail
+    movss 16(%esp), %xmm0
+    addss 20(%esp), %xmm0
+    movss %xmm0, 4(%esp)
+    cmpl $0x3f800001, 4(%esp)
+    jne \fail
+.endm
+
 .macro check_nearest fail
     fldl 8(%esp)
     fcos
@@ -21,11 +29,13 @@
 .type _start, @function
 _start:
     and $-16, %esp
-    sub $1024, %esp
+    sub $2048, %esp
 
     movw $0x077f, 0(%esp)
     movl $0, 8(%esp)
     movl $0x3d700000, 12(%esp)
+    movl $0x3f800000, 16(%esp)
+    movl $0x33800000, 20(%esp)
 
     /* FLDCW must update both softfloat state and the host FCSR. */
     fninit
@@ -51,12 +61,32 @@ _start:
     frstor 64(%esp)
     check_down .Lfail_frstor
 
-    /* FXRSTOR also restores the x87 control word. */
+    /* FXRSTOR restores independent x87 and MXCSR rounding controls. */
     fldcw 0(%esp)
-    fxsave 256(%esp)
+    movl $0x5f80, 24(%esp)
+    ldmxcsr 24(%esp)
+    stmxcsr 28(%esp)
+    movl 28(%esp), %eax
+    and $0x6000, %eax
+    cmp $0x4000, %eax
+    jne .Lfail_ldmxcsr
+    fxsave 512(%esp)
+    movl 536(%esp), %eax
+    and $0x6000, %eax
+    cmp $0x4000, %eax
+    jne .Lfail_fxsave_mxcsr
     fninit
-    fxrstor 256(%esp)
+    movl $0x3f80, 24(%esp)
+    ldmxcsr 24(%esp)
+    fxrstor 512(%esp)
     check_down .Lfail_fxrstor
+    stmxcsr 28(%esp)
+    movl 28(%esp), %eax
+    and $0x6000, %eax
+    cmp $0x4000, %eax
+    jne .Lfail_fxrstor_saved_mxcsr
+    check_sse_up .Lfail_fxrstor_mxcsr
+    check_down .Lfail_fxrstor_x87_again
 
     xor %ebx, %ebx
     jmp .Lexit
@@ -77,6 +107,21 @@ _start:
     jmp .Lexit
 .Lfail_fxrstor:
     mov $6, %ebx
+    jmp .Lexit
+.Lfail_ldmxcsr:
+    mov $7, %ebx
+    jmp .Lexit
+.Lfail_fxsave_mxcsr:
+    mov $8, %ebx
+    jmp .Lexit
+.Lfail_fxrstor_saved_mxcsr:
+    mov $9, %ebx
+    jmp .Lexit
+.Lfail_fxrstor_mxcsr:
+    mov $10, %ebx
+    jmp .Lexit
+.Lfail_fxrstor_x87_again:
+    mov $11, %ebx
 .Lexit:
     mov $__NR_exit, %eax
     int $0x80
