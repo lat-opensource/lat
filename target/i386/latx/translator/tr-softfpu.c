@@ -3252,7 +3252,7 @@ static bool translate_xrstor_softfpu(IR1_INST *pir1)
     la_bstrins_d(temp_rfbm, eax_opnd, 31, 0);
     la_bstrins_d(temp_rfbm, edx_opnd, 63, 32);
     gen_softfpu_helper3_ll((ADDR)helper_xrstor, mem_opnd, temp_rfbm);
-    la_update_fp_status_from_env();
+    gen_softfpu_x87_fcsr_exit();
     return true;
 }
 #endif

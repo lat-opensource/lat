@@ -118,6 +118,16 @@ if 'i386-linux-user' in target_dirs
       files('../../softfpu-control-rounding-i386.S'),
     ],
   }]
+  if 'CONFIG_LATX_AVX_OPT' in config_host
+    latx_integration_tests += [{
+      'name': 'test-softfpu-xrstor-rounding-i386',
+      'runner': find_program('../../test-softfpu-xrstor-rounding-i386.sh'),
+      'args': [
+        emulators['latx-i386'],
+        files('../../softfpu-xrstor-rounding-i386.S'),
+      ],
+    }]
+  endif
   latx_integration_tests += [{
     'name': 'test-softfpu-eflags-region-i386',
     'runner': find_program('../../test-softfpu-eflags-region-i386.sh'),
