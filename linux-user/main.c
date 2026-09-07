@@ -219,6 +219,9 @@ void fork_start(void)
     mmap_fork_start();
     sigact_fork_start();
     path_fork_start();
+#ifdef CONFIG_LATX
+    latx_syscall_fs_fork_start();
+#endif
     fd_trans_fork_start();
     cpu_list_lock();
 }
@@ -229,6 +232,9 @@ void fork_end(int child)
     sigact_fork_end(child);
     path_fork_end(child);
     fd_trans_fork_end();
+#ifdef CONFIG_LATX
+    latx_syscall_fs_fork_end();
+#endif
     if (child) {
         CPUState *cpu, *next_cpu;
         /* Child processes created by fork() only have a single thread.

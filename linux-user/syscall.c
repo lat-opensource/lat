@@ -66,6 +66,7 @@
 #include <linux/in6.h>
 #include <linux/errqueue.h>
 #include <linux/random.h>
+#include <linux/magic.h>
 #include <linux/sctp.h>
 #ifdef CONFIG_TIMERFD
 #include <sys/timerfd.h>
@@ -12641,12 +12642,119 @@ static int is_proc_myself(const char *filename, const char *entry)
     return 0;
 }
 #ifdef CONFIG_LATX
+static bool latx_stat_same_object(const struct stat *a, const struct stat *b)
+{
+    return a->st_dev == b->st_dev && a->st_ino == b->st_ino;
+}
+
+/*
+ * Serialize identity-sensitive stat sequences with guest changes to cwd,
+ * root, and descriptor bindings.  The fork hooks keep this lock consistent
+ * across a multithreaded fork.
+ */
+static pthread_mutex_t latx_syscall_fs_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static void latx_syscall_fs_lock(void)
+{
+    pthread_mutex_lock(&latx_syscall_fs_mutex);
+}
+
+static void latx_syscall_fs_unlock(void)
+{
+    pthread_mutex_unlock(&latx_syscall_fs_mutex);
+}
+
+void latx_syscall_fs_fork_start(void)
+{
+    latx_syscall_fs_lock();
+}
+
+void latx_syscall_fs_fork_end(void)
+{
+    latx_syscall_fs_unlock();
+}
+
 static bool latx_stat_is_proc_self_task(const struct stat *st)
 {
     struct stat task_st;
 
     return stat("/proc/self/task", &task_st) == 0 &&
-           st->st_dev == task_st.st_dev && st->st_ino == task_st.st_ino;
+           latx_stat_same_object(st, &task_st);
+}
+
+static int latx_stat_dirfd_info(int dirfd, struct stat *st,
+                                struct statfs *fs)
+{
+    return dirfd == AT_FDCWD ?
+           (stat(".", st) == 0 && statfs(".", fs) == 0 ? 0 : -1) :
+           (fstat(dirfd, st) == 0 && fstatfs(dirfd, fs) == 0 ? 0 : -1);
+}
+
+static bool latx_stat_is_proc_self_task_fd(int fd, const struct stat *st)
+{
+    struct stat fd_st;
+    struct stat task_st;
+    struct statfs fs;
+
+    /*
+     * A saved /proc/self/task fd remains usable after a shared chroot makes the
+     * absolute procfs path unreachable.  Verify both the filesystem and the
+     * directory's identity: ../../self/task resolves to the current process
+     * task directory, while another process's task directory does not.
+     */
+    return fd >= 0 && fstatfs(fd, &fs) == 0 &&
+           fs.f_type == PROC_SUPER_MAGIC && fstat(fd, &fd_st) == 0 &&
+           latx_stat_same_object(st, &fd_st) &&
+           fstatat(fd, "../../self/task", &task_st, 0) == 0 &&
+           latx_stat_same_object(st, &task_st);
+}
+
+static char *latx_stat_self_task_path(const char *pathname, int flags)
+{
+    const char *target = pathname;
+
+    if (pathname[0] == '\0') {
+        if (!(flags & AT_EMPTY_PATH)) {
+            return NULL;
+        }
+        target = ".";
+    }
+    return g_strdup_printf("%s/../../self/task", target);
+}
+
+static bool latx_stat_is_proc_self_task_at(int dirfd, const char *pathname,
+                                           int flags,
+                                           const struct stat *st)
+{
+    char *task_path;
+    bool ret;
+    struct stat dir_st;
+    struct stat task_st;
+    struct statfs fs;
+
+    if (latx_stat_is_proc_self_task(st)) {
+        return true;
+    }
+
+    /*
+     * The caller holds latx_syscall_fs_mutex from the original lookup through
+     * this check.  Resolve ../../self/task from the object named by the same
+     * private pathname snapshot, without exposing a temporary fd to the guest.
+     */
+    if (!pathname || pathname[0] == '/' ||
+        (dirfd != AT_FDCWD && dirfd < 0) ||
+        latx_stat_dirfd_info(dirfd, &dir_st, &fs) < 0 ||
+        fs.f_type != PROC_SUPER_MAGIC || st->st_dev != dir_st.st_dev) {
+        return false;
+    }
+    task_path = latx_stat_self_task_path(pathname, flags);
+    if (!task_path) {
+        return false;
+    }
+    ret = fstatat(dirfd, task_path, &task_st, 0) == 0 &&
+          latx_stat_same_object(st, &task_st);
+    g_free(task_path);
+    return ret;
 }
 
 static bool latx_statx_is_proc_self_task(const struct target_statx *stx)
@@ -12659,9 +12767,80 @@ static bool latx_statx_is_proc_self_task(const struct target_statx *stx)
            stx->stx_ino == task_st.st_ino;
 }
 
+static bool latx_statx_is_proc_self_task_at(int dirfd, const char *pathname,
+                                            int flags,
+                                            const struct target_statx *stx)
+{
+    char *task_path;
+    bool ret;
+    struct stat dir_st;
+    struct stat task_st;
+    struct statfs fs;
+
+    if ((stx->stx_mask & STATX_TYPE) && !S_ISDIR(stx->stx_mode)) {
+        return false;
+    }
+
+    if (latx_statx_is_proc_self_task(stx)) {
+        return true;
+    }
+
+    if (!pathname || pathname[0] == '/' ||
+        (dirfd != AT_FDCWD && dirfd < 0) ||
+        latx_stat_dirfd_info(dirfd, &dir_st, &fs) < 0 ||
+        fs.f_type != PROC_SUPER_MAGIC ||
+        stx->stx_dev_major != major(dir_st.st_dev) ||
+        stx->stx_dev_minor != minor(dir_st.st_dev)) {
+        return false;
+    }
+    task_path = latx_stat_self_task_path(pathname, flags);
+    if (!task_path) {
+        return false;
+    }
+    ret = fstatat(dirfd, task_path, &task_st, 0) == 0 &&
+          stx->stx_dev_major == major(task_st.st_dev) &&
+          stx->stx_dev_minor == minor(task_st.st_dev) &&
+          stx->stx_ino == task_st.st_ino;
+    g_free(task_path);
+    return ret;
+}
+
 static void latx_adjust_proc_self_task_stat(struct stat *st)
 {
-    if (latx_stat_is_proc_self_task(st)) {
+    if (S_ISDIR(st->st_mode) && latx_stat_is_proc_self_task(st)) {
+        st->st_nlink = latx_guest_thread_count() + 2;
+    }
+}
+
+static int latx_stat_path(const char *pathname, struct stat *st, bool follow)
+{
+    const char *host_pathname = path(pathname);
+    int ret;
+
+    latx_syscall_fs_lock();
+    ret = follow ? stat(host_pathname, st) : lstat(host_pathname, st);
+    if (ret == 0) {
+        latx_adjust_proc_self_task_stat(st);
+    }
+    latx_syscall_fs_unlock();
+    return ret;
+}
+
+static void latx_adjust_proc_self_task_fstat(int fd, struct stat *st)
+{
+    if (S_ISDIR(st->st_mode) &&
+        (latx_stat_is_proc_self_task(st) ||
+         latx_stat_is_proc_self_task_fd(fd, st))) {
+        st->st_nlink = latx_guest_thread_count() + 2;
+    }
+}
+
+static void latx_adjust_proc_self_task_stat_at(int dirfd, const char *pathname,
+                                               int flags,
+                                               struct stat *st)
+{
+    if (S_ISDIR(st->st_mode) &&
+        latx_stat_is_proc_self_task_at(dirfd, pathname, flags, st)) {
         st->st_nlink = latx_guest_thread_count() + 2;
     }
 }
@@ -14500,8 +14679,15 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
             return ret;
         }
 #endif
+#ifdef CONFIG_LATX
+        latx_syscall_fs_lock();
+#endif
         fd_trans_unregister(arg1);
-        return get_errno(close(arg1));
+        ret = get_errno(close(arg1));
+#ifdef CONFIG_LATX
+        latx_syscall_fs_unlock();
+#endif
+        return ret;
 
     case TARGET_NR_brk:
         return do_brk(arg1);
@@ -15130,7 +15316,13 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
     case TARGET_NR_chdir:
         if (!(p = lock_user_string(arg1)))
             return -TARGET_EFAULT;
+#ifdef CONFIG_LATX
+        latx_syscall_fs_lock();
+#endif
         ret = get_errno(chdir(p));
+#ifdef CONFIG_LATX
+        latx_syscall_fs_unlock();
+#endif
         unlock_user(p, arg1, 0);
         return ret;
 #ifdef TARGET_NR_time
@@ -15222,12 +15414,18 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
              * do that since it's not guaranteed to be a NULL-terminated
              * string.
              */
+#ifdef CONFIG_LATX
+            latx_syscall_fs_lock();
+#endif
             if (!arg5) {
                 ret = mount(p, p2, p3, (unsigned long)arg4, NULL);
             } else {
                 ret = mount(p, p2, p3, (unsigned long)arg4, g2h(cpu, arg5));
             }
             ret = get_errno(ret);
+#ifdef CONFIG_LATX
+            latx_syscall_fs_unlock();
+#endif
 
             if (arg1) {
                 unlock_user(p, arg1, 0);
@@ -15247,7 +15445,13 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
 #endif
         if (!(p = lock_user_string(arg1)))
             return -TARGET_EFAULT;
+#ifdef CONFIG_LATX
+        latx_syscall_fs_lock();
+#endif
         ret = get_errno(umount(p));
+#ifdef CONFIG_LATX
+        latx_syscall_fs_unlock();
+#endif
         unlock_user(p, arg1, 0);
         return ret;
 #endif
@@ -15650,7 +15854,13 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
     case TARGET_NR_umount2:
         if (!(p = lock_user_string(arg1)))
             return -TARGET_EFAULT;
+#ifdef CONFIG_LATX
+        latx_syscall_fs_lock();
+#endif
         ret = get_errno(umount2(p, arg2));
+#ifdef CONFIG_LATX
+        latx_syscall_fs_unlock();
+#endif
         unlock_user(p, arg1, 0);
         return ret;
 #endif
@@ -15676,7 +15886,13 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
     case TARGET_NR_chroot:
         if (!(p = lock_user_string(arg1)))
             return -TARGET_EFAULT;
+#ifdef CONFIG_LATX
+        latx_syscall_fs_lock();
+#endif
         ret = get_errno(chroot(p));
+#ifdef CONFIG_LATX
+        latx_syscall_fs_unlock();
+#endif
         unlock_user(p, arg1, 0);
         return ret;
 #ifdef TARGET_NR_dup2
@@ -15689,10 +15905,16 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
             }
         }
 #endif
+#ifdef CONFIG_LATX
+        latx_syscall_fs_lock();
+#endif
         ret = get_errno(dup2(arg1, arg2));
         if (ret >= 0) {
             fd_trans_dup(arg1, arg2);
         }
+#ifdef CONFIG_LATX
+        latx_syscall_fs_unlock();
+#endif
         return ret;
 #endif
 #if defined(CONFIG_DUP3) && defined(TARGET_NR_dup3)
@@ -15712,10 +15934,16 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
             }
         }
 #endif
+#ifdef CONFIG_LATX
+        latx_syscall_fs_lock();
+#endif
         ret = get_errno(dup3(arg1, arg2, host_flags));
         if (ret >= 0) {
             fd_trans_dup(arg1, arg2);
         }
+#ifdef CONFIG_LATX
+        latx_syscall_fs_unlock();
+#endif
         return ret;
     }
 #endif
@@ -16947,11 +17175,10 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
         if (!(p = lock_user_string(arg1))) {
             return -TARGET_EFAULT;
         }
-        ret = get_errno(stat(path(p), &st));
 #ifdef CONFIG_LATX
-        if (!is_error(ret)) {
-            latx_adjust_proc_self_task_stat(&st);
-        }
+        ret = get_errno(latx_stat_path(p, &st, true));
+#else
+        ret = get_errno(stat(path(p), &st));
 #endif
         unlock_user(p, arg1, 0);
         goto do_stat;
@@ -16961,11 +17188,10 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
         if (!(p = lock_user_string(arg1))) {
             return -TARGET_EFAULT;
         }
-        ret = get_errno(lstat(path(p), &st));
 #ifdef CONFIG_LATX
-        if (!is_error(ret)) {
-            latx_adjust_proc_self_task_stat(&st);
-        }
+        ret = get_errno(latx_stat_path(p, &st, false));
+#else
+        ret = get_errno(lstat(path(p), &st));
 #endif
         unlock_user(p, arg1, 0);
         goto do_stat;
@@ -16973,14 +17199,18 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
 #ifdef TARGET_NR_fstat
     case TARGET_NR_fstat:
         {
+#ifdef CONFIG_LATX
+            latx_syscall_fs_lock();
+#endif
             ret = proc_self_fstat(arg1, &st);
             if (ret) {
                 ret = get_errno(fstat(arg1, &st));
             }
 #ifdef CONFIG_LATX
             if (!is_error(ret)) {
-                latx_adjust_proc_self_task_stat(&st);
+                latx_adjust_proc_self_task_fstat(arg1, &st);
             }
+            latx_syscall_fs_unlock();
 #endif
 #if defined(TARGET_NR_stat) || defined(TARGET_NR_lstat)
         do_stat:
@@ -17293,7 +17523,14 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
     case TARGET_NR_getpgid:
         return get_errno(getpgid(arg1));
     case TARGET_NR_fchdir:
-        return get_errno(fchdir(arg1));
+#ifdef CONFIG_LATX
+        latx_syscall_fs_lock();
+#endif
+        ret = get_errno(fchdir(arg1));
+#ifdef CONFIG_LATX
+        latx_syscall_fs_unlock();
+#endif
+        return ret;
     case TARGET_NR_personality:
         return get_errno(personality(arg1));
 #ifdef TARGET_NR__llseek /* Not on alpha */
@@ -18496,11 +18733,10 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
         if (!(p = lock_user_string(arg1))) {
             return -TARGET_EFAULT;
         }
-        ret = get_errno(stat(path(p), &st));
 #ifdef CONFIG_LATX
-        if (!is_error(ret)) {
-            latx_adjust_proc_self_task_stat(&st);
-        }
+        ret = get_errno(latx_stat_path(p, &st, true));
+#else
+        ret = get_errno(stat(path(p), &st));
 #endif
         unlock_user(p, arg1, 0);
         if (!is_error(ret))
@@ -18512,11 +18748,10 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
         if (!(p = lock_user_string(arg1))) {
             return -TARGET_EFAULT;
         }
-        ret = get_errno(lstat(path(p), &st));
 #ifdef CONFIG_LATX
-        if (!is_error(ret)) {
-            latx_adjust_proc_self_task_stat(&st);
-        }
+        ret = get_errno(latx_stat_path(p, &st, false));
+#else
+        ret = get_errno(lstat(path(p), &st));
 #endif
         unlock_user(p, arg1, 0);
         if (!is_error(ret))
@@ -18525,14 +18760,18 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
 #endif
 #ifdef TARGET_NR_fstat64
     case TARGET_NR_fstat64:
+#ifdef CONFIG_LATX
+        latx_syscall_fs_lock();
+#endif
         ret = proc_self_fstat(arg1, &st);
         if (ret) {
             ret = get_errno(fstat(arg1, &st));
         }
 #ifdef CONFIG_LATX
         if (!is_error(ret)) {
-            latx_adjust_proc_self_task_stat(&st);
+            latx_adjust_proc_self_task_fstat(arg1, &st);
         }
+        latx_syscall_fs_unlock();
 #endif
         if (!is_error(ret))
             ret = host_to_target_stat64(cpu_env, arg2, &st);
@@ -18545,39 +18784,76 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
 #ifdef TARGET_NR_newfstatat
     case TARGET_NR_newfstatat:
 #endif
-        if (!(p = lock_user_string(arg2))) {
-            return -TARGET_EFAULT;
-        }
-        ret = get_errno(fstatat(arg1, path(p), &st, arg4));
-
-        if (!is_error(ret)) {
+        {
 #ifdef CONFIG_LATX
-            latx_adjust_proc_self_task_stat(&st);
-#else
-            if (rcu_call_thread_is_running() &&
-                (!strcmp((const char *)p, "self/task/") ||
-                 is_proc_myself((const char *)p, "task/"))) {
-                st.st_nlink--;
-            }
+            char *pathname;
+            const char *host_pathname;
 #endif
-        }
 
-        unlock_user(p, arg2, 0);
-        if (!is_error(ret))
-            ret = host_to_target_stat64(cpu_env, arg3, &st);
-        return ret;
+            p = lock_user_string(arg2);
+            if (!p) {
+                return -TARGET_EFAULT;
+            }
+#ifdef CONFIG_LATX
+            pathname = g_strdup(p);
+            unlock_user(p, arg2, 0);
+            host_pathname = path(pathname);
+            latx_syscall_fs_lock();
+            ret = get_errno(fstatat(arg1, host_pathname, &st, arg4));
+#else
+            ret = get_errno(fstatat(arg1, path(p), &st, arg4));
+#endif
+
+            if (!is_error(ret)) {
+#ifdef CONFIG_LATX
+                latx_adjust_proc_self_task_stat_at(arg1, pathname, arg4, &st);
+#else
+                if (rcu_call_thread_is_running() &&
+                    (!strcmp((const char *)p, "self/task/") ||
+                     is_proc_myself((const char *)p, "task/"))) {
+                    st.st_nlink--;
+                }
+#endif
+            }
+
+#ifdef CONFIG_LATX
+            latx_syscall_fs_unlock();
+            g_free(pathname);
+#else
+            unlock_user(p, arg2, 0);
+#endif
+            if (!is_error(ret)) {
+                ret = host_to_target_stat64(cpu_env, arg3, &st);
+            }
+            return ret;
+        }
 #endif
 #if defined(TARGET_NR_statx)
     case TARGET_NR_statx:
         {
+            const char *host_pathname;
+            const char *pathname;
             struct target_statx *target_stx;
             int dirfd = arg1;
             int flags = arg3;
+#ifdef CONFIG_LATX
+            char *pathname_snapshot;
+#endif
 
             p = lock_user_string(arg2);
             if (p == NULL) {
                 return -TARGET_EFAULT;
             }
+            pathname = p;
+#ifdef CONFIG_LATX
+            pathname_snapshot = g_strdup(p);
+            pathname = pathname_snapshot;
+            unlock_user(p, arg2, 0);
+            host_pathname = path(pathname);
+            latx_syscall_fs_lock();
+#else
+            host_pathname = path(pathname);
+#endif
 #if defined(__NR_statx)
             {
                 /*
@@ -18586,37 +18862,38 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
                 struct target_statx host_stx;
                 int mask = arg4;
 
-                ret = get_errno(sys_statx(dirfd, p, flags, mask, &host_stx));
+                ret = get_errno(sys_statx(dirfd, pathname, flags, mask,
+                                          &host_stx));
                 if (!is_error(ret)) {
 #ifdef CONFIG_LATX
-                    if (latx_statx_is_proc_self_task(&host_stx)) {
+                    if (latx_statx_is_proc_self_task_at(dirfd, pathname,
+                                                        flags, &host_stx)) {
                         host_stx.stx_nlink = latx_guest_thread_count() + 2;
                     }
 #endif
                     if (host_to_target_statx(&host_stx, arg5) != 0) {
-                        unlock_user(p, arg2, 0);
-                        return -TARGET_EFAULT;
+                        ret = -TARGET_EFAULT;
                     }
                 }
 
                 if (ret != -TARGET_ENOSYS) {
-                    unlock_user(p, arg2, 0);
-                    return ret;
+                    goto statx_done;
                 }
             }
 #endif
-            ret = get_errno(fstatat(dirfd, path(p), &st, flags));
+            ret = get_errno(fstatat(dirfd, host_pathname, &st, flags));
 
 #ifdef CONFIG_LATX
             if (!is_error(ret)) {
-                latx_adjust_proc_self_task_stat(&st);
+                latx_adjust_proc_self_task_stat_at(dirfd, pathname, flags,
+                                                   &st);
             }
 #endif
-            unlock_user(p, arg2, 0);
 
             if (!is_error(ret)) {
                 if (!lock_user_struct(VERIFY_WRITE, target_stx, arg5, 0)) {
-                    return -TARGET_EFAULT;
+                    ret = -TARGET_EFAULT;
+                    goto statx_done;
                 }
                 memset(target_stx, 0, sizeof(*target_stx));
                 __put_user(major(st.st_dev), &target_stx->stx_dev_major);
@@ -18636,8 +18913,15 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
                 __put_user(st.st_ctime, &target_stx->stx_ctime.tv_sec);
                 unlock_user_struct(target_stx, arg5, 1);
             }
+statx_done:
+#ifdef CONFIG_LATX
+            latx_syscall_fs_unlock();
+            g_free(pathname_snapshot);
+#else
+            unlock_user(p, arg2, 0);
+#endif
+            return ret;
         }
-        return ret;
 #endif
 #ifdef TARGET_NR_lchown
     case TARGET_NR_lchown:
@@ -19101,7 +19385,13 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
             if (!p || !p2) {
                 ret = -TARGET_EFAULT;
             } else {
+#ifdef CONFIG_LATX
+                latx_syscall_fs_lock();
+#endif
                 ret = get_errno(safe_pivot_root(p, p2));
+#ifdef CONFIG_LATX
+                latx_syscall_fs_unlock();
+#endif
             }
             unlock_user(p2, arg2, 0);
             unlock_user(p, arg1, 0);
