@@ -134,6 +134,9 @@ void tr_init(void *tb)
         t->curr_top = 0;
     }
 
+    /* A new TB has no translation-time proof about the runtime FCSR owner. */
+    t->fcsr_flags_domain = FCSR_FLAGS_DOMAIN_UNKNOWN;
+
     if (t->imm_cache == NULL) {
         t->imm_cache = (IMM_CACHE *)mm_malloc(sizeof(IMM_CACHE));
         t->imm_cache->bucket = (IMM_CACHE_BUCKET *)mm_calloc(
@@ -163,6 +166,7 @@ void tr_fini(bool check_the_extension)
 
     /* top in translator */
     t->curr_top = 0;
+    t->fcsr_flags_domain = FCSR_FLAGS_DOMAIN_UNKNOWN;
 }
 
 /* func to access QEMU's data */

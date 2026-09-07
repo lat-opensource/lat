@@ -10,6 +10,105 @@
 #include "latx-options.h"
 #include "translate.h"
 
+/*
+ * Map LoongArch FCSR0 sticky Flags V/Z/O/U/I to the common x86
+ * exception-status layout IE/ZE/OE/UE/PE.  Bit 1 (DE) remains clear
+ * because FCSR0 has no directly corresponding flag.
+ *
+ * This only emits register operations.  It neither accesses guest
+ * shadow state nor clears FCSR0.
+ */
+static void fcsr_flags_to_x86_exceptions(IR2_OPND dest, IR2_OPND fcsr)
+{
+    /*
+     * After bit reversal and shifting:
+     * dest[4:0] = I/U/O/Z/V.
+     */
+    la_bitrev_w(dest, fcsr);
+    la_srli_d(dest, dest, 31 - FCSR_OFF_FLAGS_V);
+
+    /* Preserve V as x86 IE at bit 0.  fcsr is scratch from here on. */
+    la_bstrpick_d(fcsr, dest, 0, 0);
+
+    /*
+     * I/U/O/Z move from dest[4:1] to x86 PE/UE/OE/ZE at bits 5:2.
+     * Bit 1, x86 DE, deliberately remains clear.
+     */
+    la_bstrpick_d(dest, dest, 4, 1);
+    la_slli_d(dest, dest, 2);
+    la_or(dest, dest, fcsr);
+}
+
+/* Merge the native FCSR sticky flags into an x86 flag-bearing value. */
+static void merge_fcsr_flags(IR2_OPND value)
+{
+    IR2_OPND fcsr = ra_alloc_itemp();
+    IR2_OPND x86_exceptions = ra_alloc_itemp();
+
+    la_movfcsr2gr(fcsr, fcsr_ir2_opnd);
+    fcsr_flags_to_x86_exceptions(x86_exceptions, fcsr);
+    la_or(value, value, x86_exceptions);
+
+    ra_free_temp(x86_exceptions);
+    ra_free_temp(fcsr);
+}
+
+/* Clear only the native sticky exception flags, preserving FCSR controls. */
+static void clear_native_fcsr_flags(IR2_OPND fcsr)
+{
+
+    la_movfcsr2gr(fcsr, fcsr_ir2_opnd);
+    la_bstrins_w(fcsr, zero_ir2_opnd,
+                 FCSR_OFF_FLAGS_V, FCSR_OFF_FLAGS_I);
+    la_movgr2fcsr(fcsr_ir2_opnd, fcsr);
+
+}
+
+/* Merge native FCSR flags into the SSE/MXCSR shadow. */
+static void submit_sse_flags_from_fcsr(IR2_OPND mxcsr_opnd)
+{
+    int mxcsr_offset = lsenv_offset_of_mxcsr(lsenv);
+
+    lsassert(mxcsr_offset <= 0x7ff);
+    la_ld_wu(mxcsr_opnd, env_ir2_opnd, mxcsr_offset);
+    merge_fcsr_flags(mxcsr_opnd);
+    la_st_w(mxcsr_opnd, env_ir2_opnd, mxcsr_offset);
+}
+
+/*
+ * Access the LATX-private FCSR state byte with the shortest available
+ * addressing form.  The field is appended to CPUX86State and may therefore
+ * be outside the signed 12-bit immediate range on some layouts.
+ */
+void tr_load_fcsr_flags_state(IR2_OPND state)
+{
+    int state_offset = lsenv_offset_of_fcsr_flags_state(lsenv);
+
+    if (!si12_overflow(state_offset)) {
+        la_ld_bu(state, env_ir2_opnd, state_offset);
+    } else {
+        /* The destination is dead before the load, so reuse it for offset. */
+        li_d(state, state_offset);
+        la_ldx_bu(state, env_ir2_opnd, state);
+    }
+}
+
+void tr_store_fcsr_flags_state(IR2_OPND state)
+{
+    int state_offset = lsenv_offset_of_fcsr_flags_state(lsenv);
+
+    if (!si12_overflow(state_offset)) {
+        la_st_b(state, env_ir2_opnd, state_offset);
+    } else {
+        /* Store needs both the value and an independent offset register. */
+        IR2_OPND state_offset_opnd = ra_alloc_itemp();
+
+        li_d(state_offset_opnd, state_offset);
+        la_stx_b(state, env_ir2_opnd, state_offset_opnd);
+        ra_free_temp(state_offset_opnd);
+    }
+}
+
 static void update_fcsr_flag(IR2_OPND status_word, IR2_OPND fcsr)
 {
     IR2_OPND temp = ra_alloc_itemp();
@@ -129,41 +228,213 @@ void update_fcsr_by_cw(IR2_OPND cw)
     ra_free_temp(fcsr);
 }
 
-void update_sw_by_fcsr(IR2_OPND sw_opnd)
+/* Merge native FCSR flags into the x87 status shadow. */
+void submit_x87_flags_from_fcsr(IR2_OPND sw_opnd)
 {
     int status_offset = lsenv_offset_of_status_word(lsenv);
     lsassert(status_offset <= 0x7ff);
     la_ld_h(sw_opnd, env_ir2_opnd, status_offset);
 
-    IR2_OPND fcsr = ra_alloc_itemp();
-    IR2_OPND temp1 = ra_alloc_itemp();
-    IR2_OPND temp2 = ra_alloc_itemp();
-    la_movfcsr2gr(fcsr, fcsr_ir2_opnd);
-
-    /* convert LA to x86*/
-    la_bitrev_w(temp1, fcsr);
-    la_srli_d(temp1, temp1, 11);
-    la_bstrpick_d(temp2, temp1, 0, 0);
-    /* set X87_SR_OFF_IE */
-    la_or(sw_opnd, sw_opnd, temp2);
-    la_bstrpick_d(temp2, temp1, 4, 1);
-    la_slli_d(temp2, temp2, 2);
-    /* set X87_SR_OFF_ZE to X87_SR_OFF_PE */
-    la_or(sw_opnd, sw_opnd, temp2);
-    ra_free_temp(temp2);
-
-    /* update top */
-    la_x86mftop(temp1);
-
-    la_bstrins_d(sw_opnd, temp1, 13, 11);
-
-    /* clean exception flags in fcsr */
-    la_bstrins_w(fcsr, zero_ir2_opnd, FCSR_OFF_FLAGS_V, FCSR_OFF_FLAGS_I);
-    la_movgr2fcsr(fcsr_ir2_opnd, fcsr);
+    merge_fcsr_flags(sw_opnd);
 
     la_st_h(sw_opnd, env_ir2_opnd, status_offset);
-    ra_free_temp(fcsr);
-    ra_free_temp(temp1);
+}
+
+/*
+ * Prepare the shared native FCSR for the selected x87 or SSE/AVX domain.
+ *
+ * A domain transition may:
+ *   - submit pending native Flags from the previous dirty owner;
+ *   - clear native sticky Flags before entering the new domain;
+ *   - load the target domain's rounding mode into FCSR.RM;
+ *   - mark the target owner dirty for the next native producer.
+ *
+ * The runtime state byte remains authoritative across TBs.  The TB-local
+ * domain cache suppresses redundant preparation for consecutive instructions
+ * in the same domain.  Dirty is established before the native producer so an
+ * asynchronous exit cannot observe a producer result while the runtime state
+ * still names the previous domain.
+ */
+void prepare_fcsr_for_domain(FcsrFlagsDomain domain)
+{
+    TRANSLATION_DATA *tr_data = lsenv->tr_data;
+    IR2_OPND state;
+    IR2_OPND state_cmp;
+    IR2_OPND same_owner;
+    IR2_OPND no_submit;
+    int target_owner;
+    int opposite_dirty;
+
+    lsassert(domain == FCSR_FLAGS_DOMAIN_X87 ||
+             domain == FCSR_FLAGS_DOMAIN_SSE);
+
+    if (tr_data->fcsr_flags_domain == domain) {
+        return;
+    }
+
+    target_owner = domain == FCSR_FLAGS_DOMAIN_X87
+                 ? FCSR_FLAGS_STATE_X87 : FCSR_FLAGS_STATE_SSE;
+    opposite_dirty = domain == FCSR_FLAGS_DOMAIN_X87
+                   ? FCSR_FLAGS_STATE_SSE_DIRTY
+                   : FCSR_FLAGS_STATE_X87_DIRTY;
+
+    state = ra_alloc_itemp();
+    state_cmp = ra_alloc_itemp();
+    same_owner = ra_alloc_label();
+    no_submit = ra_alloc_label();
+
+    tr_load_fcsr_flags_state(state);
+
+    /* Same-domain clean/dirty state keeps the existing sticky FCSR flags. */
+    la_andi(state_cmp, state, FCSR_FLAGS_OWNER_MASK);
+    la_xori(state_cmp, state_cmp, target_owner);
+    la_beqz(state_cmp, same_owner);
+
+    /* Submit pending flags only when the previous domain is dirty. */
+    la_xori(state_cmp, state, opposite_dirty);
+    la_bnez(state_cmp, no_submit);
+    if (domain == FCSR_FLAGS_DOMAIN_X87) {
+        submit_sse_flags_from_fcsr(state_cmp);
+    } else {
+        submit_x87_flags_from_fcsr(state_cmp);
+    }
+    la_label(no_submit);
+
+    /* NONE and every cross-domain transition start from clean native flags. */
+    clear_native_fcsr_flags(state_cmp);
+
+    la_label(same_owner);
+
+    if (domain == FCSR_FLAGS_DOMAIN_SSE) {
+        la_ld_wu(state, env_ir2_opnd, lsenv_offset_of_mxcsr(lsenv));
+        la_bstrpick_w(state, state, 14, 13);
+    } else {
+        la_ld_h(state, env_ir2_opnd, lsenv_offset_of_control_word(lsenv));
+        la_bstrpick_w(state, state, X87_CR_OFF_RC + 1, X87_CR_OFF_RC);
+    }
+    /*
+    * x86 RC → LoongArch RM:
+    *
+    * 00 RN → 00
+    * 01 RD → 11
+    * 10 RU → 10
+    * 11 RZ → 01
+    * state initially holds x86 RC.
+    * Convert x86 RC encoding to LoongArch FCSR RM encoding:
+    *
+    *   00 -> 00, 01 -> 11, 10 -> 10, 11 -> 01
+    */
+    IR2_OPND no_toggle = ra_alloc_label();
+
+    la_andi(state_cmp, state, 1);
+    la_beqz(state_cmp, no_toggle);
+    la_xori(state, state, 2);
+
+    la_label(no_toggle);
+
+    la_movfcsr2gr(state_cmp, fcsr_ir2_opnd);
+    la_bstrins_w(state_cmp, state, FCSR_OFF_RM + 1, FCSR_OFF_RM);
+    la_movgr2fcsr(fcsr_ir2_opnd, state_cmp);
+
+    li_wu(state, target_owner | FCSR_FLAGS_DIRTY);
+    tr_store_fcsr_flags_state(state);
+
+    ra_free_temp(state_cmp);
+    ra_free_temp(state);
+
+    tr_data->fcsr_flags_domain = domain;
+}
+
+/*
+ * Prepare an x87 status word for an architectural read.
+ *
+ * The status shadow is the default source.  Native FCSR flags are merged
+ * only when x87 owns the dirty flags; in that case the shadow becomes the
+ * clean x87 owner after the merge.  This helper does not refresh TOP and
+ * does not clear native FCSR flags.
+ */
+void prepare_x87_status(IR2_OPND sw_value)
+{
+    IR2_OPND fcsr_state = ra_alloc_itemp();
+    IR2_OPND no_x87_dirty = ra_alloc_label();
+    int status_offset = lsenv_offset_of_status_word(lsenv);
+
+    lsassert(status_offset <= 0x7ff);
+
+    /* Non-dirty paths use the existing x87 status shadow. */
+    la_ld_h(sw_value, env_ir2_opnd, status_offset);
+
+    tr_load_fcsr_flags_state(fcsr_state);
+    la_xori(fcsr_state,
+            fcsr_state,
+            FCSR_FLAGS_STATE_X87_DIRTY);
+    la_bnez(fcsr_state, no_x87_dirty);
+
+    /* Only X87_DIRTY may contribute native FCSR flags to x87 status. */
+    submit_x87_flags_from_fcsr(sw_value);
+
+    li_wu(fcsr_state, FCSR_FLAGS_STATE_X87);
+    tr_store_fcsr_flags_state(fcsr_state);
+
+    la_label(no_x87_dirty);
+
+    ra_free_temp(fcsr_state);
+    lsenv->tr_data->fcsr_flags_domain = FCSR_FLAGS_DOMAIN_UNKNOWN;
+}
+
+/*
+ * Prepare MXCSR for an architectural read.
+ *
+ * The MXCSR shadow is the default source.  Native FCSR flags are merged
+ * only when SSE owns the dirty flags; after the merge the shadow becomes
+ * the clean SSE owner.  This helper does not clear native FCSR flags.
+ */
+void prepare_sse_mxcsr(IR2_OPND mxcsr_value)
+{
+    IR2_OPND fcsr_state = ra_alloc_itemp();
+    IR2_OPND output = ra_alloc_label();
+    int mxcsr_offset = lsenv_offset_of_mxcsr(lsenv);
+
+    lsassert(mxcsr_offset <= 0x7ff);
+
+    la_ld_wu(mxcsr_value,
+             env_ir2_opnd,
+             mxcsr_offset);
+
+    tr_load_fcsr_flags_state(fcsr_state);
+    la_xori(fcsr_state,
+            fcsr_state,
+            FCSR_FLAGS_STATE_SSE_DIRTY);
+    la_bnez(fcsr_state, output);
+
+    /* Only SSE_DIRTY may contribute native FCSR flags to MXCSR. */
+    merge_fcsr_flags(mxcsr_value);
+
+    la_st_w(mxcsr_value,
+            env_ir2_opnd,
+            mxcsr_offset);
+    li_wu(fcsr_state, FCSR_FLAGS_STATE_SSE);
+    tr_store_fcsr_flags_state(fcsr_state);
+
+    la_label(output);
+
+    ra_free_temp(fcsr_state);
+    lsenv->tr_data->fcsr_flags_domain = FCSR_FLAGS_DOMAIN_UNKNOWN;
+}
+
+void refresh_sw_top(IR2_OPND sw_opnd)
+{
+    IR2_OPND top = ra_alloc_itemp();
+
+    /* update top */
+    if(!option_softfpu) {
+        la_x86mftop(top);
+    } else {
+        la_ld_wu(top, env_ir2_opnd, lsenv_offset_of_top(lsenv));
+    }
+    la_bstrins_d(sw_opnd, top, 13, 11);
+    la_st_h(sw_opnd, env_ir2_opnd, lsenv_offset_of_status_word(lsenv));
+    ra_free_temp(top);
 }
 
 bool translate_fnstcw(IR1_INST *pir1)
@@ -202,19 +473,16 @@ bool translate_fldcw(IR1_INST *pir1)
     update_fcsr_by_cw(new_cw);
     //tr_gen_call_to_helper1((ADDR)update_fp_status, 1);
 
+    lsenv->tr_data->fcsr_flags_domain = FCSR_FLAGS_DOMAIN_UNKNOWN;
     return true;
 }
 
 bool translate_stmxcsr(IR1_INST *pir1)
 {
-    /* 1. load the value of the mxcsr register state from env */
     IR2_OPND mxcsr_opnd = ra_alloc_itemp();
-    int offset = lsenv_offset_of_mxcsr(lsenv);
 
-    lsassert(offset <= 0x7ff);
-    la_ld_wu(mxcsr_opnd, env_ir2_opnd, offset);
+    prepare_sse_mxcsr(mxcsr_opnd);
 
-    /* 2. store  the value of the mxcsr register state to the dest_opnd */
     store_ireg_to_ir1(mxcsr_opnd, ir1_get_opnd(pir1, 0), false);
 
     ra_free_temp(mxcsr_opnd);
@@ -226,15 +494,30 @@ bool translate_ldmxcsr(IR1_INST *pir1)
     /* 1. load new mxcsr value from the source opnd */
     IR2_OPND new_mxcsr =
         load_ireg_from_ir1(ir1_get_opnd(pir1, 0), UNKNOWN_EXTENSION, false);
-    int offset = lsenv_offset_of_mxcsr(lsenv);
+    int mxcsr_offset = lsenv_offset_of_mxcsr(lsenv);
+
+
+    IR2_OPND sw = ra_alloc_itemp();
+    prepare_x87_status(sw);
+    ra_free_temp(sw);
+
+    IR2_OPND fcsr = ra_alloc_itemp();
+    la_movfcsr2gr(fcsr, fcsr_ir2_opnd);
+    la_bstrins_w(fcsr, zero_ir2_opnd,
+             FCSR_OFF_FLAGS_V, FCSR_OFF_FLAGS_I);
+    la_movgr2fcsr(fcsr_ir2_opnd, fcsr);
 
     /* 2. store the value into the env->mxcsr */
-    lsassert(offset <= 0x7ff);
-    la_st_w(new_mxcsr, env_ir2_opnd, offset);
+    lsassert(mxcsr_offset <= 0x7ff);
+    la_st_w(new_mxcsr, env_ir2_opnd, mxcsr_offset);
+    IR2_OPND fcsr_state = ra_alloc_itemp();
+    li_wu(fcsr_state, FCSR_FLAGS_STATE_NONE);
+    tr_store_fcsr_flags_state(fcsr_state);
 
+    ra_free_temp(fcsr_state);
+    ra_free_temp(fcsr);
     tr_gen_call_to_helper1((ADDR)update_mxcsr_status, 1,
                            LOAD_HELPER_UPDATE_MXCSR_STATUS);
-
     return true;
 }
 
@@ -756,13 +1039,16 @@ bool translate_fldenv(IR1_INST *pir1)
     tr_fpu_load_tag_to_env(value);
     /* dispose tag word */
     ra_free_temp(value);
+    lsenv->tr_data->fcsr_flags_domain = FCSR_FLAGS_DOMAIN_UNKNOWN;
     return true;
 }
 
 bool translate_fnstenv(IR1_INST *pir1)
 {
-    IR2_OPND value = ra_alloc_itemp();
+    IR2_OPND cw_value = ra_alloc_itemp();
+    IR2_OPND fcsr_value = ra_alloc_itemp();
     IR2_OPND temp = ra_alloc_itemp();
+    IR2_OPND sw_value = ra_alloc_itemp();
     li_wu(temp, 0xffff0000ULL);
 
     /* mem_opnd is not supported in ir2 assemble */
@@ -773,31 +1059,34 @@ bool translate_fnstenv(IR1_INST *pir1)
 
     int control_offset = lsenv_offset_of_control_word(lsenv);
     lsassert(control_offset <= 0x7ff);
-    la_ld_h(value, env_ir2_opnd, control_offset);
+    la_ld_h(cw_value, env_ir2_opnd, control_offset);
 
-    la_or(value, temp, value);
-    la_st_w(value, mem_opnd, 0);
+    la_or(cw_value, temp, cw_value);
+    la_st_w(cw_value, mem_opnd, 0);
 
     /* Mask all floating-point exceptions */
-    la_ori(value, value, X87_CR_EXCP_MASK);
-    la_st_h(value, env_ir2_opnd, control_offset);
+    la_ori(cw_value, cw_value, X87_CR_EXCP_MASK);
+    la_st_h(cw_value, env_ir2_opnd, control_offset);
+    ra_free_temp(cw_value);
     /* Disable FCSR VZOUI accordingly */
-    la_movfcsr2gr(value , fcsr_ir2_opnd);
-    la_bstrins_w(value, zero_ir2_opnd,
+    la_movfcsr2gr(fcsr_value , fcsr_ir2_opnd);
+    la_bstrins_w(fcsr_value, zero_ir2_opnd,
                             FCSR_OFF_EN_V, FCSR_OFF_EN_I);
-    la_movgr2fcsr(fcsr_ir2_opnd, value);
+    la_movgr2fcsr(fcsr_ir2_opnd, fcsr_value);
+    ra_free_temp(fcsr_value);
 
-    update_sw_by_fcsr(value);
-    la_or(value, temp, value);
-    la_st_w(value, mem_opnd, 4);
+    prepare_x87_status(sw_value);
+    refresh_sw_top(sw_value);
+    la_or(sw_value, temp, sw_value);
+    la_st_w(sw_value, mem_opnd, 4);
 
     /* store FPU tag word to memory */
     tr_fpu_store_tag_to_mem(mem_opnd, 8);
 
     la_st_w(temp, mem_opnd, 24);
 
-    ra_free_temp(value);
     ra_free_temp(temp);
+    ra_free_temp(sw_value);
     return true;
 }
 
@@ -877,25 +1166,32 @@ bool translate_fnclex(IR1_INST *pir1) {
     /* get status word and load in sw_value */
     IR2_OPND sw_value = ra_alloc_itemp();
     IR2_OPND fcsr0 = ra_alloc_itemp();
+    prepare_sse_mxcsr(fcsr0);
     int offset = lsenv_offset_of_status_word(lsenv);
     la_ld_hu(sw_value, env_ir2_opnd, offset);
-    la_movfcsr2gr(fcsr0, fcsr_ir2_opnd);
     la_bstrins_d(sw_value, zero_ir2_opnd, X87_SR_OFF_ES, X87_SR_OFF_IE);
     la_bstrins_d(sw_value, zero_ir2_opnd, X87_SR_OFF_B, X87_SR_OFF_B);
-    la_bstrins_d(fcsr0, zero_ir2_opnd, FCSR_OFF_FLAGS_V, FCSR_OFF_FLAGS_I);
-    la_movgr2fcsr(fcsr_ir2_opnd, fcsr0);
+    clear_native_fcsr_flags(fcsr0);
     la_st_h(sw_value, env_ir2_opnd,
                         lsenv_offset_of_status_word(lsenv));
     ra_free_temp(sw_value);
     ra_free_temp(fcsr0);
+
+    IR2_OPND fcsr_state = ra_alloc_itemp();
+    li_wu(fcsr_state, FCSR_FLAGS_STATE_NONE);
+    tr_store_fcsr_flags_state(fcsr_state);
+    ra_free_temp(fcsr_state);
+    lsenv->tr_data->fcsr_flags_domain = FCSR_FLAGS_DOMAIN_UNKNOWN;
     return true;
 }
 
 bool translate_fninit(IR1_INST *pir1) {
     IR2_OPND temp = ra_alloc_itemp();
     IR2_OPND fcsr0 = ra_alloc_itemp();
+    IR2_OPND fcsr_state = ra_alloc_itemp();
     int offset;
 
+    prepare_sse_mxcsr(temp);
     /* clear status and set control*/
     offset = lsenv_offset_of_status_word(lsenv);
     lsassert(offset <= 0x7ff);
@@ -919,9 +1215,16 @@ bool translate_fninit(IR1_INST *pir1) {
     /* RM = 00 */
     li_wu(temp, FCSR_RM_CLEAR);
     la_and(fcsr0, fcsr0, temp);
+    /* clear native sticky flags FCSR[20:16] */
+    la_bstrins_w(fcsr0, zero_ir2_opnd,
+             FCSR_OFF_FLAGS_V, FCSR_OFF_FLAGS_I);
     la_movgr2fcsr(fcsr_ir2_opnd, fcsr0);
+    li_wu(fcsr_state, FCSR_FLAGS_STATE_NONE);
+    tr_store_fcsr_flags_state(fcsr_state);
 
     ra_free_temp(temp);
     ra_free_temp(fcsr0);
+    ra_free_temp(fcsr_state);
+    lsenv->tr_data->fcsr_flags_domain = FCSR_FLAGS_DOMAIN_UNKNOWN;
     return true;
 }

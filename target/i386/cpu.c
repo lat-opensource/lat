@@ -6237,6 +6237,9 @@ static void x86_cpu_reset(DeviceState *dev)
     cpu_set_fpuc(env, 0x37f);
 
     env->mxcsr = 0x1f80;
+#ifdef CONFIG_LATX
+    env->fcsr_flags_state = FCSR_FLAGS_STATE_NONE;
+#endif
     /* All units are in INIT state.  */
     env->xstate_bv = 0;
 
