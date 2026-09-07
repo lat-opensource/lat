@@ -860,6 +860,9 @@ restore_sigcontext(CPUX86State *env, struct target_sigcontext *sc)
             cpu_x86_sync_latx_fpu_mode(env);
         }
         load_xmm_from_env(env);
+        if (option_softfpu) {
+            cpu_x86_set_host_rounding_from_mxcsr(env);
+        }
 #endif
     } else {
         err = 0;

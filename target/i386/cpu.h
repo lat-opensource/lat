@@ -1948,6 +1948,7 @@ void cpu_x86_init_user_x87(CPUX86State *s);
 void cpu_x86_canonicalize_latx_mmx_state(CPUX86State *s);
 void cpu_x86_sync_latx_fcsr(CPUX86State *s);
 void cpu_x86_sync_latx_fpu_mode(CPUX86State *s);
+void cpu_x86_set_host_rounding_from_mxcsr(CPUX86State *s);
 #endif
 
 /* you can call this signal handler from your SIGBUS and SIGSEGV
