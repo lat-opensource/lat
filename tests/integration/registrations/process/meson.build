@@ -1,5 +1,13 @@
 if 'x86_64-linux-user' in target_dirs
   latx_integration_tests += [{
+    'name': 'test-softfpu-control-rounding-x86_64',
+    'runner': find_program('../../test-softfpu-control-rounding-x86_64.sh'),
+    'args': [
+      emulators['latx-x86_64'],
+      files('../../softfpu-control-rounding-x86_64.S'),
+    ],
+  }]
+  latx_integration_tests += [{
     'name': 'test-proc-readdir',
     'runner': find_program('../../test-proc-readdir.sh'),
     'args': [

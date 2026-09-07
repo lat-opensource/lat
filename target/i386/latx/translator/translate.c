@@ -2101,6 +2101,108 @@ typedef enum SoftFPURegionClass {
     SOFTFPU_REGION_TRANSPARENT,
 } SoftFPURegionClass;
 
+static bool is_softfpu_x87_insn(IR1_OPCODE opcode)
+{
+    switch (opcode) {
+    case dt_X86_INS_WAIT:
+    case dt_X86_INS_F2XM1:
+    case dt_X86_INS_FABS:
+    case dt_X86_INS_FADD:
+    case dt_X86_INS_FADDP:
+    case dt_X86_INS_FBLD:
+    case dt_X86_INS_FBSTP:
+    case dt_X86_INS_FCHS:
+    case dt_X86_INS_FCMOVB:
+    case dt_X86_INS_FCMOVBE:
+    case dt_X86_INS_FCMOVE:
+    case dt_X86_INS_FCMOVNB:
+    case dt_X86_INS_FCMOVNBE:
+    case dt_X86_INS_FCMOVNE:
+    case dt_X86_INS_FCMOVNU:
+    case dt_X86_INS_FCMOVU:
+    case dt_X86_INS_FCOM:
+    case dt_X86_INS_FCOMI:
+    case dt_X86_INS_FCOMIP:
+    case dt_X86_INS_FCOMP:
+    case dt_X86_INS_FCOMPP:
+    case dt_X86_INS_FCOS:
+    case dt_X86_INS_FDECSTP:
+    case dt_X86_INS_FDIV:
+    case dt_X86_INS_FDIVP:
+    case dt_X86_INS_FDIVR:
+    case dt_X86_INS_FDIVRP:
+    case dt_X86_INS_FFREE:
+    case dt_X86_INS_FFREEP:
+    case dt_X86_INS_FIADD:
+    case dt_X86_INS_FICOM:
+    case dt_X86_INS_FICOMP:
+    case dt_X86_INS_FIDIV:
+    case dt_X86_INS_FIDIVR:
+    case dt_X86_INS_FILD:
+    case dt_X86_INS_FIMUL:
+    case dt_X86_INS_FINCSTP:
+    case dt_X86_INS_FIST:
+    case dt_X86_INS_FISTP:
+    case dt_X86_INS_FISTTP:
+    case dt_X86_INS_FISUB:
+    case dt_X86_INS_FISUBR:
+    case dt_X86_INS_FLD1:
+    case dt_X86_INS_FLD:
+    case dt_X86_INS_FLDCW:
+    case dt_X86_INS_FLDENV:
+    case dt_X86_INS_FLDL2E:
+    case dt_X86_INS_FLDL2T:
+    case dt_X86_INS_FLDLG2:
+    case dt_X86_INS_FLDLN2:
+    case dt_X86_INS_FLDPI:
+    case dt_X86_INS_FLDZ:
+    case dt_X86_INS_FMUL:
+    case dt_X86_INS_FMULP:
+    case dt_X86_INS_FNCLEX:
+    case dt_X86_INS_FNINIT:
+    case dt_X86_INS_FNOP:
+    case dt_X86_INS_FNSAVE:
+    case dt_X86_INS_FNSTCW:
+    case dt_X86_INS_FNSTENV:
+    case dt_X86_INS_FNSTSW:
+    case dt_X86_INS_FPATAN:
+    case dt_X86_INS_FPREM1:
+    case dt_X86_INS_FPREM:
+    case dt_X86_INS_FPTAN:
+    case dt_X86_INS_FRNDINT:
+    case dt_X86_INS_FRSTOR:
+    case dt_X86_INS_FSCALE:
+    case dt_X86_INS_FSETPM:
+    case dt_X86_INS_FSIN:
+    case dt_X86_INS_FSINCOS:
+    case dt_X86_INS_FSQRT:
+    case dt_X86_INS_FST:
+    case dt_X86_INS_FSTP:
+    case dt_X86_INS_FSUB:
+    case dt_X86_INS_FSUBP:
+    case dt_X86_INS_FSUBR:
+    case dt_X86_INS_FSUBRP:
+    case dt_X86_INS_FTST:
+    case dt_X86_INS_FUCOM:
+    case dt_X86_INS_FUCOMI:
+    case dt_X86_INS_FUCOMIP:
+    case dt_X86_INS_FUCOMP:
+    case dt_X86_INS_FUCOMPP:
+    case dt_X86_INS_FXAM:
+    case dt_X86_INS_FXCH:
+    case dt_X86_INS_FXRSTOR:
+    case dt_X86_INS_FXRSTOR64:
+    case dt_X86_INS_FXSAVE:
+    case dt_X86_INS_FXSAVE64:
+    case dt_X86_INS_FXTRACT:
+    case dt_X86_INS_FYL2X:
+    case dt_X86_INS_FYL2XP1:
+        return true;
+    default:
+        return false;
+    }
+}
+
 static uint32_t softfpu_fast_mask(IR1_OPCODE opcode)
 {
     switch (opcode) {
@@ -2419,6 +2521,12 @@ int tr_ir2_generate(struct TranslationBlock *tb)
         }
 #endif
 
+        bool x87_insn = option_softfpu &&
+                         is_softfpu_x87_insn(ir1_opcode(pir1));
+        if (x87_insn) {
+            gen_softfpu_x87_fcsr_enter();
+        }
+
         if (option_softfpu == 2 && !reduce_proepo &&
             softfpu_region_class(ir1_opcode(pir1)) ==
                 SOFTFPU_REGION_REQUIRED) {
@@ -2443,6 +2551,10 @@ int tr_ir2_generate(struct TranslationBlock *tb)
             reduce_proepo = false;
             lsenv->tr_data->softfpu_region_active = false;
             gen_softfpu_helper_epilogue(pir1);
+        }
+
+        if (x87_insn) {
+            gen_softfpu_x87_fcsr_exit();
         }
 
 #ifdef CONFIG_LATX_IMM_REG

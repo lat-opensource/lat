@@ -387,6 +387,21 @@ static void la_update_fp_status_from_env(void)
     ra_free_temp(cw_opnd);
 }
 
+void gen_softfpu_x87_fcsr_enter(void)
+{
+    IR2_OPND cw_opnd = ra_alloc_itemp();
+    IR2_OPND fcsr_opnd = ra_alloc_itemp();
+
+    la_ld_hu(cw_opnd, env_ir2_opnd,
+             lsenv_offset_of_control_word(lsenv));
+    la_movfcsr2gr(fcsr_opnd, fcsr_ir2_opnd);
+    update_fcsr_rm(cw_opnd, fcsr_opnd);
+    la_movgr2fcsr(fcsr_ir2_opnd, fcsr_opnd);
+
+    ra_free_temp(cw_opnd);
+    ra_free_temp(fcsr_opnd);
+}
+
 __attribute__((unused))
 void gen_softfpu_helper_prologue(IR1_INST *pir1)
 {
