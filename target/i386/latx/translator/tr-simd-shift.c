@@ -484,6 +484,7 @@ bool translate_addsubpd(IR1_INST *pir1)
 
     IR2_OPND dest = load_freg128_from_ir1(ir1_get_opnd(pir1, 0));
     IR2_OPND src = load_freg128_from_ir1(ir1_get_opnd(pir1, 1));
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     IR2_OPND temp_dest_sub = ra_alloc_ftemp();
     IR2_OPND ftemp_src_add = ra_alloc_ftemp();
     IR2_OPND ftemp_src_sub = ra_alloc_ftemp();
@@ -524,6 +525,7 @@ bool translate_addsubps(IR1_INST *pir1)
 
     IR2_OPND dest = load_freg128_from_ir1(ir1_get_opnd(pir1, 0));
     IR2_OPND src = load_freg128_from_ir1(ir1_get_opnd(pir1, 1));
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     IR2_OPND temp_dest_sub = ra_alloc_ftemp();
     IR2_OPND ftemp_src_add = ra_alloc_ftemp();
     IR2_OPND ftemp_src_sub = ra_alloc_ftemp();

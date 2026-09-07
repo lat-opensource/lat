@@ -1819,7 +1819,8 @@ bool translate_fnsave(IR1_INST *pir1)
     la_or(value, temp, value);
     la_st_w(value, mem_opnd, 0);
 
-    update_sw_by_fcsr(value);
+    prepare_x87_status(value);
+    refresh_sw_top(value);
     la_or(value, temp, value);
     la_st_w(value, mem_opnd, 4);
 
@@ -1864,10 +1865,10 @@ bool translate_fnsave(IR1_INST *pir1)
     }
 
     la_label(label_exit);
-    /* reset SR and CR */
-    translate_fninit(pir1);
     ra_free_temp(temp);
     ra_free_temp(mode_fpu);
+    /* reset SR and CR */
+    translate_fninit(pir1);
     return true;
 }
 
@@ -1902,6 +1903,7 @@ bool translate_frstor(IR1_INST *pir1)
 
     IR2_OPND value = ra_alloc_itemp();
     IR2_OPND temp = ra_alloc_itemp();
+    prepare_sse_mxcsr(temp);
     li_wu(temp, 0xffff0000ULL);
 
     /* mem_opnd is not supported in ir2 assemble */
@@ -1915,11 +1917,13 @@ bool translate_frstor(IR1_INST *pir1)
     la_mov32_zx(value, value);
     la_st_h(value, env_ir2_opnd,
         lsenv_offset_of_control_word(lsenv)); /* control_word */
+    update_fcsr_by_cw(value);
 
     la_ld_w(value, mem_opnd, 4);
     la_mov32_zx(value, value);
     la_st_h(value, env_ir2_opnd,
                       lsenv_offset_of_status_word(lsenv)); /* status_word */
+    update_fcsr_by_sw(value);
 
     /* tag word */
     if (option_fputag) {
@@ -1953,8 +1957,12 @@ bool translate_frstor(IR1_INST *pir1)
     }
 
     la_label(label_exit);
+    li_wu(temp, FCSR_FLAGS_STATE_X87_DIRTY);
+    tr_store_fcsr_flags_state(temp);
+
     ra_free_temp(temp);
     ra_free_temp(mode_fpu);
+    lsenv->tr_data->fcsr_flags_domain = FCSR_FLAGS_DOMAIN_X87;
     return true;
 }
 

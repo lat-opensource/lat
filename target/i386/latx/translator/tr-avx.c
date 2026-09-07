@@ -14,6 +14,7 @@
 
 #ifdef CONFIG_LATX_AVX_OPT
 bool translate_vaddpd(IR1_INST * pir1) {
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     if (!option_enable_lasx) {
         return translate_vaddpd_lsx(pir1);
     }
@@ -44,6 +45,7 @@ bool translate_vaddpd(IR1_INST * pir1) {
 }
 
 bool translate_vaddps(IR1_INST * pir1) {
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     if (!option_enable_lasx) {
         return translate_vaddps_lsx(pir1);
     }
@@ -74,6 +76,7 @@ bool translate_vaddps(IR1_INST * pir1) {
 }
 
 bool translate_vaddsd(IR1_INST * pir1) {
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     if (!option_enable_lasx) {
         return translate_vaddsd_lsx(pir1);
     }
@@ -93,6 +96,7 @@ bool translate_vaddsd(IR1_INST * pir1) {
 }
 
 bool translate_vaddss(IR1_INST * pir1) {
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     if (!option_enable_lasx) {
         return translate_vaddss_lsx(pir1);
     }
@@ -115,6 +119,7 @@ bool translate_vaddss(IR1_INST * pir1) {
 }
 
 bool translate_vsubpd(IR1_INST * pir1) {
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     if (!option_enable_lasx) {
         return translate_vsubpd_lsx(pir1);
     }
@@ -145,6 +150,7 @@ bool translate_vsubpd(IR1_INST * pir1) {
 }
 
 bool translate_vsubps(IR1_INST * pir1) {
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     if (!option_enable_lasx) {
         return translate_vsubps_lsx(pir1);
     }
@@ -175,6 +181,7 @@ bool translate_vsubps(IR1_INST * pir1) {
 }
 
 bool translate_vsubsd(IR1_INST * pir1) {
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     if (!option_enable_lasx) {
         return translate_vsubsd_lsx(pir1);
     }
@@ -195,6 +202,7 @@ bool translate_vsubsd(IR1_INST * pir1) {
 }
 
 bool translate_vsubss(IR1_INST * pir1) {
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     if (!option_enable_lasx) {
         return translate_vsubss_lsx(pir1);
     }
@@ -217,6 +225,7 @@ bool translate_vsubss(IR1_INST * pir1) {
 }
 
 bool translate_vmulpd(IR1_INST * pir1) {
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     if (!option_enable_lasx) {
         return translate_vmulpd_lsx(pir1);
     }
@@ -247,6 +256,7 @@ bool translate_vmulpd(IR1_INST * pir1) {
 }
 
 bool translate_vmulps(IR1_INST * pir1) {
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     if (!option_enable_lasx) {
         return translate_vmulps_lsx(pir1);
     }
@@ -277,6 +287,7 @@ bool translate_vmulps(IR1_INST * pir1) {
 }
 
 bool translate_vmulsd(IR1_INST * pir1) {
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     if (!option_enable_lasx) {
         return translate_vmulsd_lsx(pir1);
     }
@@ -295,6 +306,7 @@ bool translate_vmulsd(IR1_INST * pir1) {
 }
 
 bool translate_vmulss(IR1_INST * pir1) {
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     if (!option_enable_lasx) {
         return translate_vmulss_lsx(pir1);
     }
@@ -317,6 +329,7 @@ bool translate_vmulss(IR1_INST * pir1) {
 }
 
 bool translate_vdivpd(IR1_INST * pir1) {
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     if (!option_enable_lasx) {
         return translate_vdivpd_lsx(pir1);
     }
@@ -347,6 +360,7 @@ bool translate_vdivpd(IR1_INST * pir1) {
 }
 
 bool translate_vdivps(IR1_INST * pir1) {
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     if (!option_enable_lasx) {
         return translate_vdivps_lsx(pir1);
     }
@@ -377,6 +391,7 @@ bool translate_vdivps(IR1_INST * pir1) {
 }
 
 bool translate_vdivsd(IR1_INST * pir1) {
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     if (!option_enable_lasx) {
         return translate_vdivsd_lsx(pir1);
     }
@@ -394,6 +409,7 @@ bool translate_vdivsd(IR1_INST * pir1) {
 }
 
 bool translate_vdivss(IR1_INST * pir1) {
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     if (!option_enable_lasx) {
         return translate_vdivss_lsx(pir1);
     }
@@ -416,6 +432,7 @@ bool translate_vdivss(IR1_INST * pir1) {
 }
 
 bool translate_vsqrtpd(IR1_INST * pir1) {
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     if (!option_enable_lasx) {
         return translate_vsqrtpd_lsx(pir1);
     }
@@ -441,6 +458,7 @@ bool translate_vsqrtpd(IR1_INST * pir1) {
 }
 
 bool translate_vsqrtps(IR1_INST * pir1) {
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     if (!option_enable_lasx) {
         return translate_vsqrtps_lsx(pir1);
     }
@@ -466,6 +484,7 @@ bool translate_vsqrtps(IR1_INST * pir1) {
 }
 
 bool translate_vsqrtsd(IR1_INST * pir1) {
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     if (!option_enable_lasx) {
         return translate_vsqrtsd_lsx(pir1);
     }
@@ -488,6 +507,7 @@ bool translate_vsqrtsd(IR1_INST * pir1) {
 }
 
 bool translate_vsqrtss(IR1_INST * pir1) {
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     if (!option_enable_lasx) {
         return translate_vsqrtss_lsx(pir1);
     }
@@ -510,6 +530,7 @@ bool translate_vsqrtss(IR1_INST * pir1) {
 }
 
 bool translate_vaddsubpd(IR1_INST * pir1) {
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     if (!option_enable_lasx) {
         return translate_vaddsubpd_lsx(pir1);
     }
@@ -546,6 +567,7 @@ bool translate_vaddsubpd(IR1_INST * pir1) {
 }
 
 bool translate_vaddsubps(IR1_INST * pir1) {
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     if (!option_enable_lasx) {
         return translate_vaddsubps_lsx(pir1);
     }
@@ -583,6 +605,7 @@ bool translate_vaddsubps(IR1_INST * pir1) {
 }
 
 bool translate_vhaddpd(IR1_INST * pir1) {
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     if (!option_enable_lasx) {
         return translate_vhaddpd_lsx(pir1);
     }
@@ -621,6 +644,7 @@ bool translate_vhaddpd(IR1_INST * pir1) {
 }
 
 bool translate_vhaddps(IR1_INST * pir1) {
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     if (!option_enable_lasx) {
         return translate_vhaddps_lsx(pir1);
     }
@@ -659,6 +683,7 @@ bool translate_vhaddps(IR1_INST * pir1) {
 }
 
 bool translate_vhsubpd(IR1_INST * pir1) {
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     if (!option_enable_lasx) {
         return translate_vhsubpd_lsx(pir1);
     }
@@ -697,6 +722,7 @@ bool translate_vhsubpd(IR1_INST * pir1) {
 }
 
 bool translate_vhsubps(IR1_INST * pir1) {
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     if (!option_enable_lasx) {
         return translate_vhsubps_lsx(pir1);
     }
@@ -2547,6 +2573,7 @@ bool translate_vpxor(IR1_INST * pir1) {
 }
 
 bool translate_vfmaddxxxss(IR1_INST * pir1) {
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     if (!option_enable_lasx) {
         return translate_vfmaddxxxss_lsx(pir1);
     }
@@ -2581,6 +2608,7 @@ bool translate_vfmaddxxxss(IR1_INST * pir1) {
 }
 
 bool translate_vfmaddxxxsd(IR1_INST * pir1) {
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     if (!option_enable_lasx) {
         return translate_vfmaddxxxsd_lsx(pir1);
     }
@@ -2615,6 +2643,7 @@ bool translate_vfmaddxxxsd(IR1_INST * pir1) {
 }
 
 bool translate_vfmaddxxxpd(IR1_INST * pir1) {
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     if (!option_enable_lasx) {
         return translate_vfmaddxxxpd_lsx(pir1);
     }
@@ -2655,6 +2684,7 @@ bool translate_vfmaddxxxpd(IR1_INST * pir1) {
 }
 
 bool translate_vfmaddxxxps(IR1_INST * pir1) {
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     if (!option_enable_lasx) {
         return translate_vfmaddxxxps_lsx(pir1);
     }
@@ -2695,6 +2725,7 @@ bool translate_vfmaddxxxps(IR1_INST * pir1) {
 }
 
 bool translate_vfmsubxxxss(IR1_INST * pir1) {
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     if (!option_enable_lasx) {
         return translate_vfmsubxxxss_lsx(pir1);
     }
@@ -2729,6 +2760,7 @@ bool translate_vfmsubxxxss(IR1_INST * pir1) {
 }
 
 bool translate_vfmsubxxxsd(IR1_INST * pir1) {
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     if (!option_enable_lasx) {
         return translate_vfmsubxxxsd_lsx(pir1);
     }
@@ -2763,6 +2795,7 @@ bool translate_vfmsubxxxsd(IR1_INST * pir1) {
 }
 
 bool translate_vfmsubxxxpd(IR1_INST * pir1) {
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     if (!option_enable_lasx) {
         return translate_vfmsubxxxpd_lsx(pir1);
     }
@@ -2803,6 +2836,7 @@ bool translate_vfmsubxxxpd(IR1_INST * pir1) {
 }
 
 bool translate_vfmsubxxxps(IR1_INST * pir1) {
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     if (!option_enable_lasx) {
         return translate_vfmsubxxxps_lsx(pir1);
     }
@@ -2843,6 +2877,7 @@ bool translate_vfmsubxxxps(IR1_INST * pir1) {
 }
 
 bool translate_vfnmaddxxxss(IR1_INST * pir1) {
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     if (!option_enable_lasx) {
         return translate_vfnmaddxxxss_lsx(pir1);
     }
@@ -2890,6 +2925,7 @@ bool translate_vfnmaddxxxss(IR1_INST * pir1) {
 }
 
 bool translate_vfnmaddxxxsd(IR1_INST * pir1) {
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     if (!option_enable_lasx) {
         return translate_vfnmaddxxxsd_lsx(pir1);
     }
@@ -2937,6 +2973,7 @@ bool translate_vfnmaddxxxsd(IR1_INST * pir1) {
 }
 
 bool translate_vfnmaddxxxpd(IR1_INST * pir1) {
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     if (!option_enable_lasx) {
         return translate_vfnmaddxxxpd_lsx(pir1);
     }
@@ -3005,6 +3042,7 @@ bool translate_vfnmaddxxxpd(IR1_INST * pir1) {
 }
 
 bool translate_vfnmaddxxxps(IR1_INST * pir1) {
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     if (!option_enable_lasx) {
         return translate_vfnmaddxxxps_lsx(pir1);
     }
@@ -3072,6 +3110,7 @@ bool translate_vfnmaddxxxps(IR1_INST * pir1) {
 }
 
 bool translate_vfnmsubxxxss(IR1_INST * pir1) {
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     if (!option_enable_lasx) {
         return translate_vfnmsubxxxss_lsx(pir1);
     }
@@ -3119,6 +3158,7 @@ bool translate_vfnmsubxxxss(IR1_INST * pir1) {
 }
 
 bool translate_vfnmsubxxxsd(IR1_INST * pir1) {
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     if (!option_enable_lasx) {
         return translate_vfnmsubxxxsd_lsx(pir1);
     }
@@ -3167,6 +3207,7 @@ bool translate_vfnmsubxxxsd(IR1_INST * pir1) {
 }
 
 bool translate_vfnmsubxxxpd(IR1_INST * pir1) {
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     if (!option_enable_lasx) {
         return translate_vfnmsubxxxpd_lsx(pir1);
     }
@@ -3233,6 +3274,7 @@ bool translate_vfnmsubxxxpd(IR1_INST * pir1) {
 }
 
 bool translate_vfnmsubxxxps(IR1_INST * pir1) {
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     if (!option_enable_lasx) {
         return translate_vfnmsubxxxps_lsx(pir1);
     }
@@ -3433,6 +3475,12 @@ bool translate_xsave(IR1_INST *pir1)
     if (!option_enable_lasx) {
         tr_save_ymm_to_env(UINT16_MAX);
     }
+    IR2_OPND state_value = ra_alloc_itemp();
+
+    prepare_x87_status(state_value);
+    prepare_sse_mxcsr(state_value);
+
+    ra_free_temp(state_value);
     tr_gen_call_to_helper_vfll((ADDR)helper_xsave, mem_opnd, temp_rfbm, 1,
             LOAD_HELPER_XSAVE);
     return true;
@@ -3451,6 +3499,12 @@ bool translate_xsaveopt(IR1_INST *pir1)
     if (!option_enable_lasx) {
         tr_save_ymm_to_env(UINT16_MAX);
     }
+    IR2_OPND state_value = ra_alloc_itemp();
+
+    prepare_x87_status(state_value);
+    prepare_sse_mxcsr(state_value);
+
+    ra_free_temp(state_value);
     tr_gen_call_to_helper_vfll((ADDR)helper_xsaveopt, mem_opnd, temp_rfbm, 1,
             LOAD_HELPER_XSAVEOPT);
     return true;
@@ -3469,6 +3523,12 @@ bool translate_xrstor(IR1_INST *pir1)
     tr_gen_call_to_helper_vfll((ADDR)helper_xrstor, mem_opnd, temp_rfbm, 1,
             LOAD_HELPER_XRSTOR);
     tr_load_ymm_high_from_env(UINT16_MAX);
+
+    li_wu(temp_rfbm, FCSR_FLAGS_STATE_NONE);
+    tr_store_fcsr_flags_state(temp_rfbm);
+    ra_free_temp(temp_rfbm);
+    lsenv->tr_data->fcsr_flags_domain = FCSR_FLAGS_DOMAIN_UNKNOWN;
+
     return true;
 }
 
@@ -4925,6 +4985,7 @@ bool translate_vpavgw(IR1_INST * pir1) {
 
 bool translate_vdppd(IR1_INST *pir1)
 {
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     if (!option_enable_lasx) {
         return translate_vdppd_lsx(pir1);
     }
@@ -4974,6 +5035,7 @@ bool translate_vdppd(IR1_INST *pir1)
 
 bool translate_vdpps(IR1_INST *pir1)
 {
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     if (!option_enable_lasx) {
         return translate_vdpps_lsx(pir1);
     }
