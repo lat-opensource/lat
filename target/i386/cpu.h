@@ -1934,6 +1934,9 @@ void cpu_x86_fxsave(CPUX86State *s, target_ulong ptr);
 void cpu_x86_fxrstor(CPUX86State *s, target_ulong ptr);
 void cpu_x86_xsave(CPUX86State *s, target_ulong ptr);
 void cpu_x86_xrstor(CPUX86State *s, target_ulong ptr);
+#ifdef CONFIG_LATX
+void cpu_x86_set_host_rounding_from_mxcsr(CPUX86State *s);
+#endif
 
 /* you can call this signal handler from your SIGBUS and SIGSEGV
    signal handlers to inform the virtual CPU of exceptions. non zero

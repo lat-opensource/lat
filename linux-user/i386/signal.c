@@ -837,6 +837,9 @@ restore_sigcontext(CPUX86State *env, struct target_sigcontext *sc)
         unlock_user_struct(fpstate, fpstate_addr, 0);
 #ifdef CONFIG_LATX
         load_xmm_from_env(env);
+        if (option_softfpu) {
+            cpu_x86_set_host_rounding_from_mxcsr(env);
+        }
 #endif
     } else {
         err = 0;
