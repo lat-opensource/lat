@@ -23,5 +23,7 @@ for mode in 1 2; do
     LATX_AOT=0 LATX_MT=0 LATX_SOFTFPU=$mode LATX_SOFTFPU_FAST=0 \
         "$emulator" "$workdir/softfpu-control-rounding-x86_64"
 done
+LATX_AOT=0 LATX_MT=0 LATX_SOFTFPU=2 LATX_SOFTFPU_FAST=-1 \
+    "$emulator" "$workdir/softfpu-control-rounding-x86_64"
 
 echo "PASS: x86_64 softfpu restores independent rounding state"

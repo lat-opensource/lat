@@ -2431,6 +2431,7 @@ int tr_ir2_generate(struct TranslationBlock *tb)
     IR1_INST *pir1 = tb_ir1_inst(tb, 0);
 
     bool reduce_proepo = false;
+    bool x87_fcsr_active = false;
     int softfpu_region_end = -1;
 
     lsenv->tr_data->softfpu_region_active = false;
@@ -2542,8 +2543,12 @@ int tr_ir2_generate(struct TranslationBlock *tb)
 
         bool x87_insn = option_softfpu &&
                          is_softfpu_x87_insn(ir1_opcode(pir1));
-        if (x87_insn) {
+        if (x87_insn && !x87_fcsr_active) {
             gen_softfpu_x87_fcsr_enter();
+            x87_fcsr_active = true;
+        } else if (!x87_insn && x87_fcsr_active) {
+            gen_softfpu_x87_fcsr_exit();
+            x87_fcsr_active = false;
         }
 
         if (option_softfpu == 2 && !reduce_proepo &&
@@ -2572,10 +2577,6 @@ int tr_ir2_generate(struct TranslationBlock *tb)
             gen_softfpu_helper_epilogue(pir1);
         }
 
-        if (x87_insn) {
-            gen_softfpu_x87_fcsr_exit();
-        }
-
 #ifdef CONFIG_LATX_IMM_REG
         if (option_imm_reg) {
             imm_cache_update_ir1_usage(imm_cache, pir1, i);
@@ -2585,6 +2586,9 @@ int tr_ir2_generate(struct TranslationBlock *tb)
 #endif
 
         pir1++;
+    }
+    if (x87_fcsr_active) {
+        gen_softfpu_x87_fcsr_exit();
     }
 #ifdef CONFIG_LATX_DEBUG
     if (option_dump_ir1) {
