@@ -87,6 +87,14 @@ endif
 
 if 'i386-linux-user' in target_dirs
   latx_integration_tests += [{
+    'name': 'test-softfpu-ldmxcsr-rounding-i386',
+    'runner': find_program('../../test-softfpu-ldmxcsr-rounding-i386.sh'),
+    'args': [
+      emulators['latx-i386'],
+      files('../../softfpu-ldmxcsr-rounding-i386.S'),
+    ],
+  }]
+  latx_integration_tests += [{
     'name': 'test-softfpu-fxsave-mxcsr-i386',
     'runner': find_program('../../test-softfpu-fxsave-mxcsr-i386.sh'),
     'args': [
