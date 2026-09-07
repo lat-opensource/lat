@@ -62,6 +62,8 @@ static bool translate_cvttpx2dq_opt(IR1_INST *pir1)
 
     IR2_OPND dest = ra_alloc_xmm(ir1_opnd_base_reg_num(opnd1));
     IR2_OPND src = load_freg128_from_ir1(opnd2);
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
+
     IR2_OPND temp_f = ra_alloc_ftemp();
     IR2_OPND sse_invalid = ra_alloc_ftemp();
     IR2_OPND overflow = ra_alloc_ftemp();
@@ -119,6 +121,7 @@ bool translate_cvttpx2dq(IR1_INST *pir1)
     IR2_OPND src_lo;
     IR2_OPND src_hi;
     src = load_freg128_from_ir1(opnd2);
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     src_hi = ra_alloc_ftemp();
     split_inst(src_hi, src, VEXTRINS_IMM_4_0(0, 1));
 
@@ -1155,6 +1158,9 @@ static bool translate_cvtsx2si_opt(IR1_INST *pir1)
     IR1_OPND *opnd2 = ir1_get_opnd(pir1, 1);
 
     IR2_OPND src = load_freg128_from_ir1(opnd2);
+
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
+
     IR2_OPND dest = ra_alloc_gpr(ir1_opnd_base_reg_num(opnd1));
     int opnd0_size = ir1_opnd_size(opnd1);
 
@@ -1271,6 +1277,7 @@ bool translate_cvtsx2si(IR1_INST *pir1)
 
     IR2_OPND fcsr_opnd = set_fpu_fcsr_rounding_field_by_x86();
     IR2_OPND src_lo = load_freg128_from_ir1(ir1_get_opnd(pir1, 1));
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     IR2_OPND temp1 = ra_alloc_itemp();
     int opnd0_size = ir1_opnd_size(ir1_get_opnd(pir1, 0));
     IR1_OPCODE op = ir1_opcode(pir1);
@@ -1387,6 +1394,7 @@ static bool translate_cvttsx2si_opt(IR1_INST *pir1)
     IR1_OPND *opnd2 = ir1_get_opnd(pir1, 1);
 
     IR2_OPND src = load_freg128_from_ir1(opnd2);
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     IR2_OPND dest = ra_alloc_gpr(ir1_opnd_base_reg_num(opnd1));
     int opnd0_size = ir1_opnd_size(opnd1);
 
@@ -1478,6 +1486,7 @@ bool translate_cvttsx2si(IR1_INST *pir1)
         return translate_cvttsx2si_opt(pir1);
     }
     IR2_OPND src_lo = load_freg128_from_ir1(ir1_get_opnd(pir1, 1));
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     IR2_OPND temp1 = ra_alloc_itemp();
     int opnd0_size = ir1_opnd_size(ir1_get_opnd(pir1, 0));
     IR1_OPCODE op = ir1_opcode(pir1);

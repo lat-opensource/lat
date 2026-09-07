@@ -16,6 +16,16 @@
 #define ftemp_status_num \
     (sizeof(reg_ftemp_map) / sizeof(int))
 
+/*
+ * Translation-time proof of the native FCSR flags domain in the current TB.
+ * This is an L1 cache only; env->fcsr_flags_state remains the runtime truth.
+ */
+typedef enum FcsrFlagsDomain {
+    FCSR_FLAGS_DOMAIN_UNKNOWN = 0,
+    FCSR_FLAGS_DOMAIN_X87,
+    FCSR_FLAGS_DOMAIN_SSE,
+} FcsrFlagsDomain;
+
 typedef struct TRANSLATION_DATA {
     // EXTENSION_MODE
     // ireg_em[IR2_ITEMP_MAX]; /* extension mode of the 32 integer registers */
@@ -57,6 +67,9 @@ typedef struct TRANSLATION_DATA {
 #endif
 
     int curr_top;               /* top value (changes when translating) */
+
+    /* Reset to UNKNOWN for every TB; never carried across translations. */
+    FcsrFlagsDomain fcsr_flags_domain;
 
     /* TODO : support static translation */
     uint8 curr_ir1_skipped_eflags; /* these eflag calculation can be skipped */

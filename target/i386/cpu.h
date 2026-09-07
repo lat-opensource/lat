@@ -1402,6 +1402,25 @@ typedef struct HVFX86LazyFlags {
     target_ulong auxbits;
 } HVFX86LazyFlags;
 
+#ifdef CONFIG_LATX
+/*
+ * Owner of the native FCSR0 sticky exception flags.  SSE also covers AVX
+ * because both instruction domains expose their exception status via MXCSR.
+ */
+#define FCSR_FLAGS_OWNER_MASK  0x3
+#define FCSR_FLAGS_DIRTY       0x4
+enum FcsrFlagsState {
+    FCSR_FLAGS_STATE_NONE = 0,
+    FCSR_FLAGS_STATE_X87,
+    FCSR_FLAGS_STATE_SSE,
+    FCSR_FLAGS_STATE_X87_DIRTY = FCSR_FLAGS_STATE_X87 |
+                                 FCSR_FLAGS_DIRTY, /* 5 */
+
+    FCSR_FLAGS_STATE_SSE_DIRTY = FCSR_FLAGS_STATE_SSE |
+                                 FCSR_FLAGS_DIRTY, /* 6 */
+};
+#endif
+
 typedef struct CPUX86State {
 #ifdef CONFIG_LATX
     void*  checksum_fail_tb;
@@ -1661,6 +1680,11 @@ typedef struct CPUX86State {
 #ifdef CONFIG_LATX
     ucontext_t *puc;
     uintptr_t insn_save[2];
+    /*
+    * dirty means that owner may have flags not yet merged into guest state.
+    * Keep this LATX-private state at the end to preserve existing member offsets.
+    */
+    uint8_t fcsr_flags_state;
 #endif
 } CPUX86State;
 

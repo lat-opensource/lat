@@ -146,6 +146,12 @@ static inline int lsenv_offset_of_mode_fpu(ENV *lsenv)
     return (int)((ADDR)(&cpu->mode_fpu) - (ADDR)lsenv->cpu_state);
 }
 
+static inline int lsenv_offset_of_fcsr_flags_state(ENV *lsenv)
+{
+    CPUX86State *cpu = (CPUX86State *)lsenv->cpu_state;
+    return (int)((ADDR)(&(cpu->fcsr_flags_state)) - (ADDR)cpu);
+}
+
 static inline int lsenv_offset_of_fpr(ENV *lsenv, int i)
 {
     CPUX86State *cpu = (CPUX86State *)lsenv->cpu_state;

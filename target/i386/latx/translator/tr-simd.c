@@ -677,6 +677,7 @@ bool translate_addps(IR1_INST *pir1)
     lsassert(ir1_opnd_is_xmm(ir1_get_opnd(pir1, 0)));
     IR2_OPND dest = load_freg128_from_ir1(ir1_get_opnd(pir1, 0));
     IR2_OPND src = load_freg128_from_ir1(ir1_get_opnd(pir1, 1));
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     la_vfadd_s(dest, dest, src);
     return true;
 }
@@ -686,6 +687,7 @@ bool translate_addsd(IR1_INST *pir1)
     lsassert(ir1_opnd_is_xmm(ir1_get_opnd(pir1, 0)));
     IR2_OPND dest = load_freg128_from_ir1(ir1_get_opnd(pir1, 0));
     IR2_OPND src = load_freg128_from_ir1(ir1_get_opnd(pir1, 1));
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     if (SHBR_ON_64(pir1)) {
         la_fadd_d(dest, dest, src);
     } else{
@@ -705,6 +707,7 @@ bool translate_addss(IR1_INST *pir1)
     lsassert(ir1_opnd_is_xmm(ir1_get_opnd(pir1, 0)));
     IR2_OPND dest = load_freg128_from_ir1(ir1_get_opnd(pir1, 0));
     IR2_OPND src = load_freg128_from_ir1(ir1_get_opnd(pir1, 1));
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     if (SHBR_ON_32(pir1)) {
         la_fadd_s(dest, dest, src);
     } else{
@@ -748,6 +751,7 @@ bool translate_divpd(IR1_INST *pir1)
     lsassert(ir1_opnd_is_xmm(ir1_get_opnd(pir1, 0)));
     IR2_OPND dest = load_freg128_from_ir1(ir1_get_opnd(pir1, 0));
     IR2_OPND src = load_freg128_from_ir1(ir1_get_opnd(pir1, 1));
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     la_vfdiv_d(dest, dest, src);
     return true;
 }
@@ -757,6 +761,7 @@ bool translate_divps(IR1_INST *pir1)
     lsassert(ir1_opnd_is_xmm(ir1_get_opnd(pir1, 0)));
     IR2_OPND dest = load_freg128_from_ir1(ir1_get_opnd(pir1, 0));
     IR2_OPND src = load_freg128_from_ir1(ir1_get_opnd(pir1, 1));
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     la_vfdiv_s(dest, dest, src);
     return true;
 }
@@ -766,6 +771,7 @@ bool translate_divsd(IR1_INST *pir1)
     lsassert(ir1_opnd_is_xmm(ir1_get_opnd(pir1, 0)));
     IR2_OPND dest = load_freg128_from_ir1(ir1_get_opnd(pir1, 0));
     IR2_OPND src = load_freg128_from_ir1(ir1_get_opnd(pir1, 1));
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     if (SHBR_ON_64(pir1)) {
         la_fdiv_d(dest, dest, src);
     } else{
@@ -785,6 +791,7 @@ bool translate_divss(IR1_INST *pir1)
     lsassert(ir1_opnd_is_xmm(ir1_get_opnd(pir1, 0)));
     IR2_OPND dest = load_freg128_from_ir1(ir1_get_opnd(pir1, 0));
     IR2_OPND src = load_freg128_from_ir1(ir1_get_opnd(pir1, 1));
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     if (SHBR_ON_32(pir1)) {
         la_fdiv_s(dest, dest, src);
     } else{
@@ -1016,6 +1023,7 @@ bool translate_mulpd(IR1_INST *pir1)
     lsassert(ir1_opnd_is_xmm(ir1_get_opnd(pir1, 0)));
     IR2_OPND dest = load_freg128_from_ir1(ir1_get_opnd(pir1, 0));
     IR2_OPND src = load_freg128_from_ir1(ir1_get_opnd(pir1, 1));
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     la_vfmul_d(dest, dest, src);
     return true;
 }
@@ -1025,6 +1033,7 @@ bool translate_mulps(IR1_INST *pir1)
     lsassert(ir1_opnd_is_xmm(ir1_get_opnd(pir1, 0)));
     IR2_OPND dest = load_freg128_from_ir1(ir1_get_opnd(pir1, 0));
     IR2_OPND src = load_freg128_from_ir1(ir1_get_opnd(pir1, 1));
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     la_vfmul_s(dest, dest, src);
     return true;
 }
@@ -1034,6 +1043,7 @@ bool translate_mulsd(IR1_INST *pir1)
     lsassert(ir1_opnd_is_xmm(ir1_get_opnd(pir1, 0)));
     IR2_OPND dest = load_freg128_from_ir1(ir1_get_opnd(pir1, 0));
     IR2_OPND src = load_freg128_from_ir1(ir1_get_opnd(pir1, 1));
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     if (SHBR_ON_64(pir1)) {
         la_fmul_d(dest, dest, src);
     } else{
@@ -1053,6 +1063,7 @@ bool translate_mulss(IR1_INST *pir1)
     lsassert(ir1_opnd_is_xmm(ir1_get_opnd(pir1, 0)));
     IR2_OPND dest = load_freg128_from_ir1(ir1_get_opnd(pir1, 0));
     IR2_OPND src = load_freg128_from_ir1(ir1_get_opnd(pir1, 1));
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     if (SHBR_ON_32(pir1)) {
         la_fmul_s(dest, dest, src);
     } else{
@@ -1492,6 +1503,7 @@ bool translate_sqrtpd(IR1_INST *pir1)
     lsassert(ir1_opnd_is_xmm(ir1_get_opnd(pir1, 0)));
     IR2_OPND dest = load_freg128_from_ir1(ir1_get_opnd(pir1, 0));
     IR2_OPND src = load_freg128_from_ir1(ir1_get_opnd(pir1, 1));
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
 
     if (option_enable_lasx) {
         IR2_OPND temp = ra_alloc_ftemp();
@@ -1513,6 +1525,7 @@ bool translate_sqrtps(IR1_INST *pir1)
     lsassert(ir1_opnd_is_xmm(ir1_get_opnd(pir1, 0)));
     IR2_OPND dest = load_freg128_from_ir1(ir1_get_opnd(pir1, 0));
     IR2_OPND src = load_freg128_from_ir1(ir1_get_opnd(pir1, 1));
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
 
     if (option_enable_lasx) {
         IR2_OPND temp = ra_alloc_ftemp();
@@ -1534,6 +1547,7 @@ bool translate_addpd(IR1_INST *pir1)
     lsassert(ir1_opnd_is_xmm(ir1_get_opnd(pir1, 0)));
     IR2_OPND dest = load_freg128_from_ir1(ir1_get_opnd(pir1, 0));
     IR2_OPND src = load_freg128_from_ir1(ir1_get_opnd(pir1, 1));
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     la_vfadd_d(dest, dest, src);
     return true;
 }
@@ -1654,6 +1668,7 @@ bool translate_subss(IR1_INST *pir1)
     lsassert(ir1_opnd_is_xmm(ir1_get_opnd(pir1, 0)));
     IR2_OPND dest = load_freg128_from_ir1(ir1_get_opnd(pir1, 0));
     IR2_OPND src = load_freg128_from_ir1(ir1_get_opnd(pir1, 1));
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     if (SHBR_ON_32(pir1)) {
         la_fsub_s(dest, dest, src);
     } else{
@@ -1674,6 +1689,7 @@ bool translate_subsd(IR1_INST *pir1)
     lsassert(ir1_opnd_is_xmm(ir1_get_opnd(pir1, 0)));
     IR2_OPND dest = load_freg128_from_ir1(ir1_get_opnd(pir1, 0));
     IR2_OPND src = load_freg128_from_ir1(ir1_get_opnd(pir1, 1));
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     if (SHBR_ON_64(pir1)) {
         la_fsub_d(dest, dest, src);
     } else{
@@ -1693,6 +1709,7 @@ bool translate_subps(IR1_INST *pir1)
     lsassert(ir1_opnd_is_xmm(ir1_get_opnd(pir1, 0)));
     IR2_OPND dest = load_freg128_from_ir1(ir1_get_opnd(pir1, 0));
     IR2_OPND src = load_freg128_from_ir1(ir1_get_opnd(pir1, 1));
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     la_vfsub_s(dest, dest, src);
     return true;
 }
@@ -1702,6 +1719,7 @@ bool translate_subpd(IR1_INST *pir1)
     lsassert(ir1_opnd_is_xmm(ir1_get_opnd(pir1, 0)));
     IR2_OPND dest = load_freg128_from_ir1(ir1_get_opnd(pir1, 0));
     IR2_OPND src = load_freg128_from_ir1(ir1_get_opnd(pir1, 1));
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     la_vfsub_d(dest, dest, src);
     return true;
 }
@@ -1711,6 +1729,7 @@ bool translate_sqrtsd(IR1_INST *pir1)
     lsassert(ir1_opnd_is_xmm(ir1_get_opnd(pir1, 0)));
     IR2_OPND dest = load_freg128_from_ir1(ir1_get_opnd(pir1, 0));
     IR2_OPND src = load_freg128_from_ir1(ir1_get_opnd(pir1, 1));
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     if (SHBR_ON_64(pir1)) {
         la_fsqrt_d(dest, src);
     } else{
@@ -1731,6 +1750,7 @@ bool translate_sqrtss(IR1_INST *pir1)
     lsassert(ir1_opnd_is_xmm(ir1_get_opnd(pir1, 0)));
     IR2_OPND dest = load_freg128_from_ir1(ir1_get_opnd(pir1, 0));
     IR2_OPND src = load_freg128_from_ir1(ir1_get_opnd(pir1, 1));
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     if (SHBR_ON_32(pir1)) {
         la_fsqrt_s(dest, src);
     } else{
@@ -1768,6 +1788,7 @@ bool translate_haddpd(IR1_INST *pir1)
     lsassert(ir1_opnd_is_xmm(ir1_get_opnd(pir1, 0)));
     IR2_OPND dest = load_freg128_from_ir1(ir1_get_opnd(pir1, 0));
     IR2_OPND src = load_freg128_from_ir1(ir1_get_opnd(pir1, 1));
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     IR2_OPND temp1 = ra_alloc_ftemp();
     IR2_OPND temp2 = ra_alloc_ftemp();
     la_vpickev_d(temp1, src, dest);
@@ -1782,6 +1803,7 @@ bool translate_haddps(IR1_INST *pir1)
     lsassert(ir1_opnd_is_xmm(ir1_get_opnd(pir1, 0)));
     IR2_OPND dest = load_freg128_from_ir1(ir1_get_opnd(pir1, 0));
     IR2_OPND src = load_freg128_from_ir1(ir1_get_opnd(pir1, 1));
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     IR2_OPND temp1 = ra_alloc_ftemp();
     IR2_OPND temp2 = ra_alloc_ftemp();
     /**
@@ -1804,6 +1826,7 @@ bool translate_hsubpd(IR1_INST *pir1)
     lsassert(ir1_opnd_is_xmm(ir1_get_opnd(pir1, 0)));
     IR2_OPND dest = load_freg128_from_ir1(ir1_get_opnd(pir1, 0));
     IR2_OPND src = load_freg128_from_ir1(ir1_get_opnd(pir1, 1));
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     IR2_OPND temp1 = ra_alloc_ftemp();
     IR2_OPND temp2 = ra_alloc_ftemp();
     la_vpickev_d(temp1, src, dest);
@@ -1817,6 +1840,7 @@ bool translate_hsubps(IR1_INST *pir1)
     lsassert(ir1_opnd_is_xmm(ir1_get_opnd(pir1, 0)));
     IR2_OPND dest = load_freg128_from_ir1(ir1_get_opnd(pir1, 0));
     IR2_OPND src = load_freg128_from_ir1(ir1_get_opnd(pir1, 1));
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     IR2_OPND temp1 = ra_alloc_ftemp();
     IR2_OPND temp2 = ra_alloc_ftemp();
     la_vpickev_w(temp1, src, dest);
@@ -2321,6 +2345,7 @@ bool translate_dpps(IR1_INST *pir1)
     lsassert(ir1_opnd_is_xmm(opnd0) || ir1_opnd_is_ymm(opnd0));
     IR2_OPND dest = load_freg128_from_ir1(opnd0);
     IR2_OPND src1 = load_freg128_from_ir1(opnd1);
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     IR2_OPND temp1 = ra_alloc_ftemp();
     IR2_OPND temp2 = ra_alloc_ftemp();
     uint8_t imm = ir1_opnd_uimm(opnd2);
@@ -2375,6 +2400,7 @@ bool translate_dppd(IR1_INST *pir1)
     lsassert(ir1_opnd_is_xmm(opnd0));
     IR2_OPND dest = load_freg128_from_ir1(opnd0);
     IR2_OPND src1 = load_freg128_from_ir1(opnd1);
+    prepare_fcsr_for_domain(FCSR_FLAGS_DOMAIN_SSE);
     IR2_OPND temp1 = ra_alloc_ftemp();
     IR2_OPND temp2 = ra_alloc_ftemp();
     uint8_t imm = ir1_opnd_uimm(opnd2);
