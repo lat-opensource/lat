@@ -111,6 +111,24 @@ void update_fcsr_rm(IR2_OPND control_word, IR2_OPND fcsr)
     ra_free_temp(temp_cw);
 }
 
+void gen_softfpu_x87_fcsr_exit(void)
+{
+    IR2_OPND mxcsr_opnd = ra_alloc_itemp();
+    IR2_OPND cw_opnd = ra_alloc_itemp();
+    IR2_OPND fcsr_opnd = ra_alloc_itemp();
+
+    la_ld_wu(mxcsr_opnd, env_ir2_opnd, lsenv_offset_of_mxcsr(lsenv));
+    la_bstrpick_d(cw_opnd, mxcsr_opnd, 14, 13);
+    la_slli_d(cw_opnd, cw_opnd, 10);
+    la_movfcsr2gr(fcsr_opnd, fcsr_ir2_opnd);
+    update_fcsr_rm(cw_opnd, fcsr_opnd);
+    la_movgr2fcsr(fcsr_ir2_opnd, fcsr_opnd);
+
+    ra_free_temp(mxcsr_opnd);
+    ra_free_temp(cw_opnd);
+    ra_free_temp(fcsr_opnd);
+}
+
 void update_fcsr_by_sw(IR2_OPND sw)
 {
     IR2_OPND old_fcsr = ra_alloc_itemp();
@@ -234,6 +252,9 @@ bool translate_ldmxcsr(IR1_INST *pir1)
 
     tr_gen_call_to_helper1((ADDR)update_mxcsr_status, 1,
                            LOAD_HELPER_UPDATE_MXCSR_STATUS);
+    if (option_softfpu) {
+        gen_softfpu_x87_fcsr_exit();
+    }
 
     return true;
 }
