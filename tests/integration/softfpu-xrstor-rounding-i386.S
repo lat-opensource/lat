@@ -61,14 +61,15 @@ _start:
     mov $1, %eax
     xor %edx, %edx
     xrstor 512(%esp)
-    check_down .Lfail_xrstor_fp
+    /* Check SSE before an x87 exit can repair a stale host FCSR. */
     check_sse_nearest .Lfail_xrstor_mask
+    check_down .Lfail_xrstor_fp
 
     mov $3, %eax
     xor %edx, %edx
     xrstor 512(%esp)
-    check_down .Lfail_xrstor_both_x87
     check_sse_up .Lfail_xrstor_both_mxcsr
+    check_down .Lfail_xrstor_both_x87
 
     xor %ebx, %ebx
     jmp .Lexit
