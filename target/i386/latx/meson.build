@@ -75,6 +75,10 @@ i386_ss.add(when: 'CONFIG_LATX', if_true: files(
   'latx-signal.c',
 ) + latx_string_utils + latx_runtime)
 
+i386_ss.add(when: 'CONFIG_LATX_FAST_TRANSLATOR', if_true: files(
+  'quicktrans-host.c',
+))
+
 lazydis_lib = static_library('lazydis',
                          build_by_default: false,
                          sources: files('latx-disassemble-trace/zydis.c'),
@@ -92,6 +96,49 @@ i386_ss.add(when: 'CONFIG_LATX_DEBUG', if_true: files(
 
 if cs_latx_debug or cs_git
     i386_ss.add(when: 'CONFIG_LATX', if_true: capstone_git)
+endif
+
+if 'CONFIG_LATX_FAST_TRANSLATOR' in config_host
+  subdir('quicktrans/meson/latx')
+
+  r = run_command(
+    'python3',
+    quicktrans_latx_generate_fast_la_emit,
+    quicktrans_latx_inst_template,
+    quicktrans_latx_ir2_assemble,
+    quicktrans_latx_fast_la_emit_h,
+    check: true)
+  message('generate-fast-la-emit.py ->', r.stdout().strip(),
+          r.stderr().strip())
+
+  r = run_command(
+    'python3',
+    quicktrans_latx_check_fast_la_opcodes,
+    quicktrans_latx_fast_translator_check_sources,
+    quicktrans_latx_fast_la_emit_h,
+    quicktrans_latx_format_table_h,
+    check: true)
+  message('check-fast-la-opcodes.py ->', r.stdout().strip(),
+          r.stderr().strip())
+
+  r = run_command(
+    'python3',
+    quicktrans_latx_check_fast_la_emit,
+    quicktrans_latx_inst_template,
+    quicktrans_latx_ir2_assemble,
+    join_paths(quicktrans_root, 'include/quicktrans/detail'),
+    check: true)
+  message('check-fast-la-emit.py ->', r.stdout().strip(),
+          r.stderr().strip())
+
+  r = run_command(
+    'python3',
+    quicktrans_latx_check_fast_template_constraints,
+    quicktrans_latx_fast_decoder_template,
+    quicktrans_latx_constraints_source,
+    check: true)
+  message('check-fast-template-constraints.py ->', r.stdout().strip(),
+          r.stderr().strip())
 endif
 
 r = run_command('python3', 'convert.py', check: true)

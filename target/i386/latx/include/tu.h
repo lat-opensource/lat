@@ -111,6 +111,9 @@ int tu_relocat_target_branch(TranslationBlock * tb);
 void tu_relocat_next_branch(TranslationBlock * tb);
 void bcc_ins_recover(TranslationBlock *tb);
 uint bcc_ins_convert(uint convert_insn);
+#ifdef CONFIG_LATX_FAST_TRANSLATOR
+bool tu_bcc_jmp_retrying(void);
+#endif
 #ifdef CONFIG_LATX_DEBUG
 void print_ir1(TranslationBlock* tb);
 void print_tu_tb(TranslationBlock *tb);

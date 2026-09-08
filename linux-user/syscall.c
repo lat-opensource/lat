@@ -14157,6 +14157,59 @@ static abi_long do_prctl_futex_hash(CPUArchState *env, abi_ulong operation,
     }
 }
 
+typedef struct PrctlSetVmaData {
+    const char *name;
+    abi_ulong end;
+    abi_ulong next;
+    abi_ulong anon_start;
+    bool in_anon;
+    bool stopped;
+    abi_long ret;
+} PrctlSetVmaData;
+
+static void prctl_set_vma_flush_anon(PrctlSetVmaData *data, abi_ulong end)
+{
+    if (data->in_anon) {
+        guest_vma_name_apply_locked(data->anon_start, end, data->name);
+        data->in_anon = false;
+    }
+}
+
+static int prctl_set_vma_region(void *opaque, target_ulong start,
+                                target_ulong end, unsigned long flags)
+{
+    PrctlSetVmaData *data = opaque;
+
+    if (data->next < start) {
+        prctl_set_vma_flush_anon(data, data->next);
+        data->ret = -TARGET_ENOMEM;
+        data->next = start;
+    }
+
+    if ((flags & (PAGE_VALID | PAGE_ANON)) ==
+        (PAGE_VALID | PAGE_ANON)) {
+        if (!data->in_anon) {
+            data->anon_start = start;
+            data->in_anon = true;
+        }
+    } else {
+        prctl_set_vma_flush_anon(data, start);
+        if (flags & PAGE_VALID) {
+            data->ret = -TARGET_EBADF;
+            data->stopped = true;
+            return 1;
+        }
+        data->ret = -TARGET_ENOMEM;
+    }
+
+    data->next = end;
+    if (end == data->end) {
+        prctl_set_vma_flush_anon(data, end);
+        return 1;
+    }
+    return 0;
+}
+
 static abi_long do_prctl_set_vma(abi_ulong operation, abi_ulong start,
                                  abi_ulong len,
                                  abi_ulong name_addr)
@@ -14165,10 +14218,7 @@ static abi_long do_prctl_set_vma(abi_ulong operation, abi_ulong start,
     const char *name = NULL;
     abi_ulong rounded_len;
     abi_ulong end;
-    abi_ulong addr;
-    abi_ulong anon_start = 0;
-    bool in_anon = false;
-    abi_long ret;
+    PrctlSetVmaData data;
     size_t name_len;
 
     if (operation != PR_SET_VMA_ANON_NAME) {
@@ -14205,35 +14255,21 @@ static abi_long do_prctl_set_vma(abi_ulong operation, abi_ulong start,
         return 0;
     }
     end = start + rounded_len;
-    ret = 0;
+    data = (PrctlSetVmaData) {
+        .name = name,
+        .end = end,
+        .next = start,
+    };
 
     mmap_lock();
-    for (addr = start; addr < end; addr += TARGET_PAGE_SIZE) {
-        int flags = page_get_flags(addr);
-
-        if ((flags & (PAGE_VALID | PAGE_ANON)) ==
-            (PAGE_VALID | PAGE_ANON)) {
-            if (!in_anon) {
-                anon_start = addr;
-                in_anon = true;
-            }
-            continue;
-        }
-        if (in_anon) {
-            guest_vma_name_apply_locked(anon_start, addr, name);
-            in_anon = false;
-        }
-        if (flags & PAGE_VALID) {
-            ret = -TARGET_EBADF;
-            break;
-        }
-        ret = -TARGET_ENOMEM;
-    }
-    if (in_anon) {
-        guest_vma_name_apply_locked(anon_start, addr, name);
+    walk_memory_regions_range_locked(&data, start, end,
+                                     prctl_set_vma_region);
+    if (!data.stopped && data.next < end) {
+        prctl_set_vma_flush_anon(&data, data.next);
+        data.ret = -TARGET_ENOMEM;
     }
     mmap_unlock();
-    return ret;
+    return data.ret;
 }
 
 /* Called with the linux-user mmap lock held. */

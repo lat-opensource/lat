@@ -248,8 +248,13 @@ void options_init(void)
 #endif /*CONFIG_LATX_AVX_OPT*/
 
 #ifdef CONFIG_LATX_AOT
+#ifdef CONFIG_LATX_FAST_TRANSLATOR
+    option_aot = 0;
+    option_load_aot = 0;
+#else
     option_aot = 1;
     option_load_aot = 1;
+#endif
     option_aot_wine = 0;
     option_debug_aot = 0;
 #endif

@@ -1696,6 +1696,11 @@ void generate_xcomisx(IR2_OPND, IR2_OPND, bool, bool, uint8_t);
 
 void tr_generate_exit_tb(IR1_INST *branch, int succ_id);
 void tr_generate_exit_tb_to_next(IR1_INST *ir1);
+#ifdef CONFIG_LATX_FAST_TRANSLATOR
+int latx_indirect_goto_macro_emit_for_fast(void *code_addr);
+int latx_ret_indirect_goto_macro_emit_for_fast(void *code_addr,
+                                               int rsp_adjust);
+#endif
 #ifdef CONFIG_LATX_XCOMISX_OPT
 void tr_generate_exit_stub_tb(IR1_INST *branch, int succ_id, void *func, IR1_INST *stub);
 #endif

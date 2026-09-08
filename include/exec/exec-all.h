@@ -26,6 +26,9 @@
 #include "cpu.h"
 #ifdef CONFIG_LATX
 #include "optimize-config.h"
+#ifdef CONFIG_LATX_FAST_TRANSLATOR
+#include "exec/latx-tb-exit.h"
+#endif
 #endif
 #include "exec/tb-context.h"
 #ifdef CONFIG_TCG

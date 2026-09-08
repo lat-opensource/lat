@@ -568,6 +568,25 @@ foreach target : target_dirs
   arch_srcs += t.sources()
   arch_deps += t.dependencies()
 
+  if 'CONFIG_LATX_FAST_TRANSLATOR' in config_host and \
+     target == 'x86_64-linux-user'
+    quicktrans_latx_library = static_library(
+      'quicktrans_latx_' + target,
+      quicktrans_latx_library_sources + [syscall_nr_generated] + genh,
+      build_by_default: false,
+      c_args: c_args + quicktrans_latx_c_args + [
+        '-DQUICKTRANS_ENABLE_LEGACY_LATX_TRANSLATOR',
+        '-DQUICKTRANS_LATU',
+        '-include', 'target/i386/latx/include/quicktrans-host-compat.h',
+      ],
+      include_directories: target_inc + quicktrans_latx_include_directories,
+    )
+    arch_deps += declare_dependency(
+      link_with: quicktrans_latx_library,
+      include_directories: quicktrans_latx_include_directories,
+    )
+  endif
+
   target_common = common_ss.apply(config_target, strict: false)
   objects = common_all.extract_objects(target_common.sources())
   deps = target_common.dependencies()
