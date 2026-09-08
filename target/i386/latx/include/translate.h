@@ -34,6 +34,11 @@ bool TRANS_FUNC(name)(IR1_INST * pir1)
 #define TRANS_FUNC_GEN(opcode, function) \
 TRANS_FUNC_GEN_REAL(opcode, TRANS_FUNC(function))
 
+#ifdef CONFIG_LATX_AVX_OPT
+void lasx_fp_fix_fma_nan(IR2_OPND result, IR2_OPND src1, IR2_OPND src2,
+                         IR2_OPND src3, bool double_precision, int lanes);
+#endif
+
 /*
  * AVX integer operations that can be evaluated independently in each 128-bit
  * half. The operation token is also used by the LSX implementation generator.

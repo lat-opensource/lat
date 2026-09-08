@@ -194,7 +194,7 @@ bool translate_vpsrlx(IR1_INST * pir1) {
 
         IR2_OPND count = ra_alloc_itemp();
         IR2_OPND max = ra_alloc_itemp();
-        la_addi_d(max, zero_ir2_opnd, max_count);
+        la_addi_d(max, zero_ir2_opnd, max_count + 1);
         la_vpickve2gr_d(count, src2, 0);
         la_blt(count, max, label_shift);
         la_xvxor_v(dest, dest, dest);
