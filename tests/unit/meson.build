@@ -188,3 +188,14 @@ test(
   test_kzt_address_policy,
   suite: 'lat-pr-fast',
 )
+
+test_kzt_path_collection = executable(
+  'test-kzt-path-collection',
+  files(
+    'kzt/test_kzt_path_collection.c',
+    '../../target/i386/latx/context/pathcoll.c',
+  ) + genh,
+  include_directories: include_directories('../../target/i386/latx/include'),
+  dependencies: [glib],
+)
+test('test-kzt-path-collection', test_kzt_path_collection, suite: 'lat-pr-fast')
