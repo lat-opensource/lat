@@ -8,6 +8,7 @@ if host_machine.cpu_family() == 'loongarch64'
   subdir('registrations/process-vm')
   subdir('registrations/prctl')
   subdir('registrations/seccomp')
+  subdir('registrations/hbr')
 endif
 
 subdir('registrations')
