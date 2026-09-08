@@ -180,6 +180,9 @@ void synchronize_rcu(void)
  */
 static struct rcu_head dummy;
 static struct rcu_head *head = &dummy, **tail = &dummy.next;
+/* Serialize queue mutations with fork, but never hold this across callbacks. */
+static QemuMutex rcu_call_lock;
+/* Includes nodes in a consumer's grace-period batch until actually dequeued. */
 static int rcu_call_count;
 static QemuEvent rcu_call_ready_event;
 static bool atfork_child_deferred;
@@ -265,21 +268,15 @@ static void *call_rcu_thread(void *opaque)
             n = qatomic_read(&rcu_call_count);
         }
 
-        qatomic_sub(&rcu_call_count, n);
         synchronize_rcu();
         qemu_mutex_lock_iothread();
         while (n > 0) {
+            qemu_mutex_lock(&rcu_call_lock);
             node = try_dequeue();
-            while (!node) {
-                qemu_mutex_unlock_iothread();
-                qemu_event_reset(&rcu_call_ready_event);
-                node = try_dequeue();
-                if (!node) {
-                    qemu_event_wait(&rcu_call_ready_event);
-                    node = try_dequeue();
-                }
-                qemu_mutex_lock_iothread();
-            }
+            /* Producers publish complete links while holding the same lock. */
+            g_assert(node != NULL);
+            qatomic_dec(&rcu_call_count);
+            qemu_mutex_unlock(&rcu_call_lock);
 
             n--;
             node->func(node);
@@ -292,8 +289,10 @@ static void *call_rcu_thread(void *opaque)
 void call_rcu1(struct rcu_head *node, void (*func)(struct rcu_head *node))
 {
     node->func = func;
+    qemu_mutex_lock(&rcu_call_lock);
     enqueue(node);
     qatomic_inc(&rcu_call_count);
+    qemu_mutex_unlock(&rcu_call_lock);
     if (!atfork_child_deferred) {
         rcu_start_call_thread();
     }
@@ -387,6 +386,7 @@ static void rcu_init_complete(bool start_thread)
     qatomic_set(&call_rcu_thread_started, false);
     qemu_mutex_init(&rcu_registry_lock);
     qemu_mutex_init(&rcu_sync_lock);
+    qemu_mutex_init(&rcu_call_lock);
     qemu_event_init(&rcu_gp_event, true);
 
     qemu_event_init(&rcu_call_ready_event, false);
@@ -447,6 +447,7 @@ static void rcu_init_lock(void)
     qemu_mutex_lock(&rcu_sync_lock);
     qemu_mutex_lock(&rcu_registry_lock);
 #endif
+    qemu_mutex_lock(&rcu_call_lock);
 }
 
 static void rcu_init_unlock(void)
@@ -455,6 +456,7 @@ static void rcu_init_unlock(void)
         return;
     }
 
+    qemu_mutex_unlock(&rcu_call_lock);
 #ifndef CONFIG_LATX_KZT
     qemu_mutex_unlock(&rcu_registry_lock);
     qemu_mutex_unlock(&rcu_sync_lock);
@@ -468,6 +470,9 @@ static void rcu_init_child(void)
     }
 
     memset(&registry, 0, sizeof(registry));
+    /* The queue lock froze complete links and their pending count at fork.
+     * Preserve queued callbacks; callbacks already dispatched are not replayed.
+     */
 #ifdef CONFIG_LATX
     rcu_init_complete(false);
 #else
