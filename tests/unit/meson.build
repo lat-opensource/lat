@@ -188,3 +188,17 @@ test(
   test_kzt_address_policy,
   suite: 'lat-pr-fast',
 )
+
+test(
+  'test-latx-thread-cleanup',
+  python,
+  args: [files('test-latx-thread-cleanup.py'), '--repo', project_source_root],
+  suite: 'lat-pr-fast',
+)
+
+test(
+  'test-latx-seccomp-lifetime',
+  python,
+  args: [files('test-latx-seccomp-lifetime.py'), project_source_root],
+  suite: 'lat-pr-fast',
+)

@@ -147,6 +147,7 @@
 #include "ioctl/mpt3sas_ctl.h"
 
 #include "qemu.h"
+#include "exec/translate-all.h"
 #include "guest-seccomp.h"
 #include "signal-common.h"
 #include "qemu/guest-random.h"
@@ -4567,6 +4568,14 @@ static __thread struct nlmsghdr *pre_nlmh;
 static __thread void* buf;
 static __thread abi_long all_len;
 
+static void reset_16k_buf(void)
+{
+    free(buf);
+    buf = NULL;
+    pre_nlmh = NULL;
+    all_len = 0;
+}
+
 static void set_16k_buf(struct msghdr *msg)
 {
     buf = malloc(BUFF_16K);
@@ -4597,9 +4606,7 @@ static abi_long get_from_16k_buf(struct msghdr *msg)
     if (NLMSG_OK(nlmh, all_len)) {
         pre_nlmh = nlmh;
     } else {
-        pre_nlmh = NULL;
-        free(buf);
-        buf = NULL;
+        reset_16k_buf();
     }
     return curr_nlmh_len;
 }
@@ -4703,12 +4710,12 @@ static abi_long do_sendrecvmsg_locked(int fd, struct target_msghdr *msgp,
                 size_t iov_len = msg.msg_iov->iov_len;
                 set_16k_buf(&msg);
                 ret = get_errno(safe_recvmsg(fd, &msg, flags));
-                if (is_error(ret)) {
-                    assert(0);
-                    goto out;
-                }
                 msg.msg_iov->iov_base = iov_base;
                 msg.msg_iov->iov_len = iov_len;
+                if (is_error(ret)) {
+                    reset_16k_buf();
+                    goto out;
+                }
                 all_len = ret;
             }
             ret =  get_from_16k_buf(&msg);
@@ -9651,6 +9658,36 @@ static void cleanup_guest_thread_resources(CPUArchState *env)
     target_munmap(env->gdt.base, sizeof(uint64_t) * TARGET_GDT_ENTRIES, 0);
 }
 
+static void cleanup_guest_seccomp(TaskState *ts)
+{
+    /* Keep fork's CPU-list snapshot consistent with the filter references. */
+    cpu_list_lock();
+    ts->seccomp_exiting = true;
+    guest_seccomp_filter_unref(ts->seccomp_filter);
+    ts->seccomp_filter = NULL;
+    cpu_list_unlock();
+}
+
+/* The child has not started; the caller still owns its CPU and TaskState. */
+static void cleanup_failed_guest_thread(CPUArchState *env)
+{
+    CPUState *cpu = env_cpu(env);
+    TaskState *ts = cpu->opaque;
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+    void *fast_jmp_cache = env->tb_jmp_cache_ptr;
+#endif
+
+    cleanup_guest_seccomp(ts);
+    cleanup_guest_thread_resources(env);
+    object_property_set_bool(OBJECT(cpu), "realized", false, NULL);
+    object_unparent(OBJECT(cpu));
+    object_unref(OBJECT(cpu));
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+    latx_fast_jmp_cache_free_rcu(fast_jmp_cache);
+#endif
+    g_free(ts);
+}
+
 /* clone_lock is held and at least one other guest thread exists. */
 static void QEMU_NORETURN exit_guest_thread_locked(CPUArchState *env)
 {
@@ -9661,6 +9698,7 @@ static void QEMU_NORETURN exit_guest_thread_locked(CPUArchState *env)
     void *fast_jmp_cache = x86env->tb_jmp_cache_ptr;
 #endif
 
+    cleanup_guest_seccomp(ts);
     object_property_set_bool(OBJECT(cpu), "realized", false, NULL);
     object_unparent(OBJECT(cpu));
     object_unref(OBJECT(cpu));
@@ -9677,6 +9715,13 @@ static void QEMU_NORETURN exit_guest_thread_locked(CPUArchState *env)
     }
     thread_cpu = NULL;
     g_free(ts);
+    reset_16k_buf();
+#ifdef CONFIG_LATX
+    latx_lsenv_destroy();
+#endif
+#ifdef CONFIG_LATX_SMC_OPT
+    latx_smc_thread_cleanup();
+#endif
     rcu_unregister_thread();
     pthread_exit(NULL);
 }
@@ -9770,6 +9815,7 @@ static int do_fork(CPUArchState *env, unsigned int flags, abi_ulong newsp,
         TaskState *parent_ts = (TaskState *)cpu->opaque;
         new_thread_info info;
         pthread_attr_t attr;
+        int thread_errno = 0;
 
         rcu_start_deferred_thread();
 
@@ -9800,11 +9846,9 @@ static int do_fork(CPUArchState *env, unsigned int flags, abi_ulong newsp,
         cpu_clone_regs_child(new_env, newsp, flags);
         cpu_clone_regs_parent(env, flags);
         new_cpu = env_cpu(new_env);
-        new_cpu->opaque = ts;
         ts->bprm = parent_ts->bprm;
         ts->info = parent_ts->info;
         ts->signal_mask = parent_ts->signal_mask;
-        ts->seccomp_filter = parent_ts->seccomp_filter;
         ts->ipc_namespace_isolated = parent_ts->ipc_namespace_isolated;
 
         if (flags & CLONE_CHILD_CLEARTID) {
@@ -9815,16 +9859,28 @@ static int do_fork(CPUArchState *env, unsigned int flags, abi_ulong newsp,
             cpu_set_tls (new_env, newtls);
         }
 
+        /* Publish the initialized task together with its inherited root.
+         * TSYNC uses this lock and skips CPUs whose task is not yet visible. */
+        cpu_list_lock();
+        ts->seccomp_filter = guest_seccomp_filter_ref(parent_ts->seccomp_filter);
+        new_cpu->opaque = ts;
+        cpu_list_unlock();
+
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+        /* cpu_copy copied the parent's pointer; it remains parent-owned. */
+        new_env->tb_jmp_cache_ptr = NULL;
+        if (!latx_fast_jmp_cache_init(new_env)) {
+            cleanup_failed_guest_thread(new_env);
+            pthread_mutex_unlock(&clone_lock);
+            errno = ENOMEM;
+            return -1;
+        }
+#endif
         memset(&info, 0, sizeof(info));
         pthread_mutex_init(&info.mutex, NULL);
         pthread_mutex_lock(&info.mutex);
         pthread_cond_init(&info.cond, NULL);
         info.env = new_env;
-#ifdef CONFIG_LATX_FAST_JMPCACHE
-        if(!latx_fast_jmp_cache_init(new_env)) {
-            fprintf(stderr, "[LATX-ERR] latx_fast_jmp_cache_init error!\n");
-        }
-#endif
         if (flags & CLONE_CHILD_SETTID) {
             info.child_tidptr = child_tidptr;
         }
@@ -9842,7 +9898,6 @@ static int do_fork(CPUArchState *env, unsigned int flags, abi_ulong newsp,
         cpu->random_seed = qemu_guest_random_seed_thread_part1();
 
         ret = pthread_create(&info.thread, &attr, clone_func, &info);
-        /* TODO: Free new CPU state if thread creation failed.  */
 
         sigprocmask(SIG_SETMASK, &info.sigmask, NULL);
         pthread_attr_destroy(&attr);
@@ -9851,12 +9906,17 @@ static int do_fork(CPUArchState *env, unsigned int flags, abi_ulong newsp,
             pthread_cond_wait(&info.cond, &info.mutex);
             ret = info.tid;
         } else {
+            thread_errno = ret;
+            cleanup_failed_guest_thread(new_env);
             ret = -1;
         }
         pthread_mutex_unlock(&info.mutex);
         pthread_cond_destroy(&info.cond);
         pthread_mutex_destroy(&info.mutex);
         pthread_mutex_unlock(&clone_lock);
+        if (thread_errno) {
+            errno = thread_errno;
+        }
     } else {
         /* if no CLONE_VM, we consider it is a fork */
         if (flags & CLONE_INVALID_FORK_FLAGS) {
@@ -21204,7 +21264,7 @@ abi_long do_syscall_with_seccomp(void *cpu_env, int num, int seccomp_num,
     }
 
 #ifdef CONFIG_LATX_TUNNEL_LIB
-    suppress_tunnel = ts->seccomp_filter && loader_tunnel;
+    suppress_tunnel = qatomic_read(&ts->seccomp_filter) && loader_tunnel;
 #endif
     if (suppress_tunnel) {
         ret = 0;

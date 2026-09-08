@@ -109,6 +109,16 @@ void tu_control_init(void)
     return;
 }
 
+void tu_control_destroy(void)
+{
+    if (tu_data && tu_data->tree) {
+        /* TranslationBlocks belong to the code cache, not this index. */
+        g_tree_destroy(tu_data->tree);
+    }
+    memset(&tu_data_rel, 0, sizeof(tu_data_rel));
+    tu_data = NULL;
+}
+
 inline void tu_push_back(TranslationBlock *tb)
 {
     if (!tb) {
