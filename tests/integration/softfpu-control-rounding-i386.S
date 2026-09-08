@@ -37,6 +37,18 @@ _start:
     movl $0x3f800000, 16(%esp)
     movl $0x33800000, 20(%esp)
 
+    /* Reserved PC=01 follows QEMU's default extended-precision behavior. */
+    movw $0x017f, 128(%esp)
+    fldcw 128(%esp)
+    fld1
+    fldl 8(%esp)
+    faddp
+    fstpl 136(%esp)
+    cmpl $0x00001000, 136(%esp)
+    jne .Lfail_reserved_pc
+    cmpl $0x3ff00000, 140(%esp)
+    jne .Lfail_reserved_pc
+
     /* FLDCW must update both softfloat state and the host FCSR. */
     fninit
     fldcw 0(%esp)
@@ -122,6 +134,9 @@ _start:
     jmp .Lexit
 .Lfail_fxrstor_x87_again:
     mov $11, %ebx
+    jmp .Lexit
+.Lfail_reserved_pc:
+    mov $12, %ebx
 .Lexit:
     mov $__NR_exit, %eax
     int $0x80

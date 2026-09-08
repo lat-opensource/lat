@@ -29,6 +29,18 @@ _start:
     movl $0x3f800000, 16(%rsp)
     movl $0x33800000, 20(%rsp)
 
+    /* Reserved PC=01 follows QEMU's default extended-precision behavior. */
+    movw $0x017f, 128(%rsp)
+    fldcw 128(%rsp)
+    fld1
+    fldl 8(%rsp)
+    faddp
+    fstpl 136(%rsp)
+    cmpl $0x00001000, 136(%rsp)
+    jne .Lfail_reserved_pc
+    cmpl $0x3ff00000, 140(%rsp)
+    jne .Lfail_reserved_pc
+
     fldcw 0(%rsp)
     movl $0x5f80, 24(%rsp)
     ldmxcsr 24(%rsp)
@@ -55,6 +67,9 @@ _start:
     jmp .Lexit
 .Lfail_fxrstor_mxcsr:
     mov $3, %edi
+    jmp .Lexit
+.Lfail_reserved_pc:
+    mov $4, %edi
 .Lexit:
     mov $__NR_exit, %eax
     syscall

@@ -338,7 +338,9 @@ static void la_update_fp_status(IR2_OPND cw_opnd)
     IR2_OPND itemp = ra_alloc_itemp();
     IR2_OPND tmp_fcsr = ra_alloc_itemp();
 
-    IR2_OPND label_float64_float80 = ra_alloc_label();
+    IR2_OPND label_float32 = ra_alloc_label();
+    IR2_OPND label_float64 = ra_alloc_label();
+    IR2_OPND label_precision_done = ra_alloc_label();
 
     int fp_status_offset = lsenv_offset_of_fp_status(lsenv);
     int round_mode_offset = fp_status_offset +
@@ -359,18 +361,28 @@ static void la_update_fp_status(IR2_OPND cw_opnd)
      *          x86      env
      *
      * 32       00       10
+     * reserved 01       00
      * 64       10       01
-     * 80       11       10
+     * 80       11       00
      *
      */
 
     /* Precision Control (9, 8)*/
     la_bstrpick_d(itemp, cw_opnd, 9, 8);
-    la_bne(itemp, zero_ir2_opnd, label_float64_float80);
-    li_wu(itemp, 1);
+    la_beq(itemp, zero_ir2_opnd, label_float32);
+    li_wu(tmp_fcsr, 2);
+    la_beq(itemp, tmp_fcsr, label_float64);
+    li_wu(itemp, floatx80_precision_x);
+    la_b(label_precision_done);
 
-    la_label(label_float64_float80);
-    la_xori(itemp, itemp, 3);
+    la_label(label_float32);
+    li_wu(itemp, floatx80_precision_s);
+    la_b(label_precision_done);
+
+    la_label(label_float64);
+    li_wu(itemp, floatx80_precision_d);
+
+    la_label(label_precision_done);
     la_st_b(itemp, env_ir2_opnd, round_precision_offset);
 
     ra_free_temp(itemp);
