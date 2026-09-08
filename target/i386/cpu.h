@@ -1236,6 +1236,7 @@ typedef struct {
  * that APIC ID hasn't been set yet
  */
 #define UNASSIGNED_APIC_ID 0xFFFFFFFF
+#define N_SCRATCH 200
 
 typedef union X86LegacyXSaveArea {
     struct {
@@ -1662,6 +1663,7 @@ typedef struct CPUX86State {
     ucontext_t *puc;
     uintptr_t insn_save[2];
 #endif
+    uint64_t scratch[N_SCRATCH];
 } CPUX86State;
 
 struct kvm_msrs;
