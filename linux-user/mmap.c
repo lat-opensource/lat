@@ -1169,6 +1169,9 @@ abi_long target_mmap(abi_ulong start, abi_ulong len, int target_prot,
 #ifdef CONFIG_LATX_AOT
     wine_sec_info * wine_sec = NULL;
     uint64_t aot_offset = offset;
+    if (option_aot) {
+        segment_tree_remove_range(start, start + len);
+    }
     if (option_aot_wine && option_aot) {
         wine_dll_track_sections(start, len, offset, fd);
         wine_sec = wine_sec_tree_lookup(start);
@@ -1307,10 +1310,7 @@ int target_munmap(abi_ulong start, abi_ulong len, int rlimit_as_account)
     if (ret == 0) {
 #ifdef CONFIG_LATX_AOT
         if (option_aot) {
-            seg_info *seg = segment_tree_lookup2(start, start + len);
-            if (seg) {
-                segment_tree_remove(seg);
-            }
+            segment_tree_remove_range(start, start + len);
         }
 #endif
         page_set_flags(start, start + len, 0);
@@ -1682,18 +1682,10 @@ mremap_done:
 
 #ifdef CONFIG_LATX_AOT
         if (option_aot) {
-            seg_info *seg;
-
             if (!keep_old || (flags & MREMAP_DONTUNMAP)) {
-                seg = segment_tree_lookup2(old_addr, old_addr + old_size);
-                if (seg) {
-                    segment_tree_remove(seg);
-                }
+                segment_tree_remove_range(old_addr, old_addr + old_size);
             }
-            seg = segment_tree_lookup2(new_addr, new_addr + new_size);
-            if (seg) {
-                segment_tree_remove(seg);
-            }
+            segment_tree_remove_range(new_addr, new_addr + new_size);
         }
 #endif
     }

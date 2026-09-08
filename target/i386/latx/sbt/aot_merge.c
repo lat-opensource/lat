@@ -104,7 +104,7 @@ static gint merge_tb_cmp(gconstpointer a, gconstpointer b)
 static void merge_tb_tree_init(GTree **tree)
 {
     *tree = g_tree_new_full((GCompareDataFunc)merge_tb_cmp,
-       NULL, NULL, NULL);
+       NULL, NULL, free);
     lsassert(*tree);
 }
 
@@ -686,6 +686,16 @@ typedef enum AOTLoadResult {
     AOT_LOAD_INVALID_BASE,
 } AOTLoadResult;
 
+static void aot_merge_release_buffers(void)
+{
+    for (int i = 0; i < aot_buffer_all_num; i++) {
+        free(aot_buffer_all[i].p);
+    }
+    g_free(aot_buffer_all);
+    aot_buffer_all = NULL;
+    aot_buffer_all_num = 0;
+}
+
 static AOTLoadResult aot_load_no_lock(char *lib_name)
 {
     void *buffer;
@@ -802,12 +812,7 @@ invalid_base:
 load_error:
     result = AOT_LOAD_ERROR;
 release_buffers:
-    for (int i = 0; i < j; i++) {
-        free(aot_buffer_all[i].p);
-    }
-    g_free(aot_buffer_all);
-    aot_buffer_all = NULL;
-    aot_buffer_all_num = 0;
+    aot_merge_release_buffers();
     return result;
 }
 
@@ -1053,17 +1058,19 @@ AOTMergeResult aot2_merge(char *curr_lib_name, int first_seg_id,
         return AOT_MERGE_ERROR;
     }
     if (aot_buffer_all_num < 2) {
+        aot_merge_release_buffers();
         return AOT_MERGE_ERROR;
     }
 #ifdef CONFIG_LATX_TU
     result = aot2_merge_tu(curr_lib_name, first_seg_id, last_seg_id, cpu);
 #else
-    g_tree_destroy(merge_segment_tree);
-    merge_segment_tree_init();
     merge_rel_entry_num = 0;
     result = do_merge_seg_aot() ? AOT_MERGE_READY : AOT_MERGE_ERROR;
+    /* Tree entries borrow segment and TB data from the input buffers. */
+    g_tree_destroy(merge_segment_tree);
+    merge_segment_tree_init();
 #endif
-    aot_buffer_all_num = 0;
+    aot_merge_release_buffers();
     return result;
 }
 #endif
