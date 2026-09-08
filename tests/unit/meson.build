@@ -124,6 +124,17 @@ test(
   suite: 'lat-pr-fast',
 )
 
+if 'CONFIG_LATX' in config_host and 'CONFIG_LATX_KZT' in config_host
+  test_rcu_fork_queue = executable(
+    'test-rcu-fork-queue',
+    files('test-rcu-fork-queue.c') + genh,
+    include_directories: include_directories('../..'),
+    dependencies: [glib, qemuutil],
+  )
+  test('test-rcu-fork-queue', test_rcu_fork_queue,
+       suite: 'lat-pr-fast', timeout: 30)
+endif
+
 if 'CONFIG_LATX' in config_host
   test_x11_async_handler = executable(
     'test-x11-async-handler',
