@@ -2343,7 +2343,7 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
 }
 
 #ifdef CONFIG_LATX_AOT
-void aot_tb_register(TranslationBlock *tb)
+void aot_tb_register(TranslationBlock *tb, AOTTBOrigin origin)
 {
     TranslationBlock *existing_tb;
     tb_page_addr_t phys_pc, phys_page2;
@@ -2370,7 +2370,12 @@ void aot_tb_register(TranslationBlock *tb)
 #endif
     }
     tcg_tb_insert(tb);
-    aot_mark_recovered_tb(tb);
+    if (origin == AOT_TB_RECOVERED) {
+        aot_mark_recovered_tb(tb);
+    } else {
+        g_assert(origin == AOT_TB_DYNAMIC);
+        aot_mark_dynamic_tb(tb);
+    }
 }
 
 #endif
