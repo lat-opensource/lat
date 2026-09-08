@@ -8,11 +8,14 @@
 typedef struct TestCallback {
     struct rcu_head rcu;
     int calls;
+    bool published;
     QemuEvent done;
 } TestCallback;
 
+#ifdef CONFIG_LATX_KZT
 static QemuEvent reader_entered, reader_release;
 static struct rcu_reader_data *held_reader_state;
+#endif
 
 static void deadline(int sig)
 {
@@ -31,6 +34,7 @@ static void mark_callback(struct rcu_head *head)
     qemu_event_set(&callback->done);
 }
 
+#ifdef CONFIG_LATX_KZT
 static void *held_reader(void *opaque)
 {
     rcu_register_thread();
@@ -70,6 +74,7 @@ static void end_reader(QemuThread *thread)
     qemu_event_destroy(&reader_entered);
     qemu_event_destroy(&reader_release);
 }
+#endif
 
 static void check_child(pid_t child)
 {
@@ -81,6 +86,7 @@ static void check_child(pid_t child)
     g_assert_cmpint(WEXITSTATUS(status), ==, 0);
 }
 
+#ifdef CONFIG_LATX_KZT
 static void test_held_fork(bool deferred)
 {
     QemuThread reader;
@@ -123,6 +129,7 @@ static void test_held_fork(bool deferred)
     g_assert_cmpint(qatomic_read(&callback.calls), ==, 1);
     qemu_event_destroy(&callback.done);
 }
+#endif
 
 static void test_empty_fork(void)
 {
@@ -135,7 +142,9 @@ static void test_empty_fork(void)
         TestCallback callback = {0};
 
         alarm(3);
+#ifdef CONFIG_LATX
         g_assert_false(rcu_call_thread_is_running());
+#endif
         qemu_event_init(&callback.done, false);
         call_rcu1(&callback.rcu, mark_callback);
         qemu_event_wait(&callback.done);
@@ -168,6 +177,28 @@ static void test_reentrant_callback(void)
 #define CALLBACKS_PER_PRODUCER 128
 static TestCallback concurrent[PRODUCERS * CALLBACKS_PER_PRODUCER];
 static int published, completed;
+static QemuEvent consumer_entered, consumer_release;
+
+static void hold_consumer(struct rcu_head *head)
+{
+    /* Outside synchronize_rcu(): ordinary atfork can take rcu_sync_lock. */
+    qemu_event_set(&consumer_entered);
+    qemu_event_wait(&consumer_release);
+}
+
+static void check_published_callbacks(void)
+{
+    int checked = 0;
+
+    for (size_t i = 0; i < ARRAY_SIZE(concurrent); i++) {
+        if (qatomic_read(&concurrent[i].published)) {
+            g_assert_cmpint(qatomic_read(&concurrent[i].calls), ==, 1);
+            checked++;
+        }
+    }
+    /* Every fork must exercise a nonempty published snapshot. */
+    g_assert_cmpint(checked, >, 0);
+}
 
 static void concurrent_callback(struct rcu_head *head)
 {
@@ -186,40 +217,78 @@ static void *producer(void *opaque)
         TestCallback *callback = &concurrent[id * CALLBACKS_PER_PRODUCER + i];
 
         call_rcu1(&callback->rcu, concurrent_callback);
+        /* Only callbacks whose enqueue has returned are fully published. */
+        qatomic_set(&callback->published, true);
         qatomic_inc(&published);
         g_usleep(250);
     }
     return NULL;
 }
 
-static void test_concurrent_fork(void)
+static void test_concurrent_fork(bool held)
 {
-    QemuThread reader, producers[PRODUCERS];
+#ifdef CONFIG_LATX_KZT
+    QemuThread reader;
+#endif
+    QemuThread producers[PRODUCERS];
+    struct rcu_head blocker = {0};
     pid_t children[4];
 
-    begin_reader(&reader);
+#ifdef CONFIG_LATX_KZT
+    if (held) {
+        begin_reader(&reader);
+    } else
+#endif
+    {
+        /*
+         * This callback has already been dequeued and is not replayed in the
+         * child. All producer callbacks remain queued until the parent releases
+         * it, so no callback under test can be in flight at the fork snapshot.
+         */
+        qemu_event_init(&consumer_entered, false);
+        qemu_event_init(&consumer_release, false);
+        call_rcu1(&blocker, hold_consumer);
+        qemu_event_wait(&consumer_entered);
+    }
     for (size_t i = 0; i < PRODUCERS; i++) {
         qemu_thread_create(&producers[i], "rcu-producer", producer, (void *)i,
                            QEMU_THREAD_JOINABLE);
     }
-    wait_for_grace_period();
+#ifdef CONFIG_LATX_KZT
+    if (held) {
+        wait_for_grace_period();
+    }
+#endif
+    while (qatomic_read(&published) == 0) {
+        g_usleep(1000);
+    }
     for (int i = 0; i < ARRAY_SIZE(children); i++) {
-        int before_fork = qatomic_read(&published);
-
         children[i] = fork();
         g_assert_cmpint(children[i], >=, 0);
         if (children[i] == 0) {
             alarm(3);
             drain_call_rcu();
-            g_assert_cmpint(qatomic_read(&completed), >=, before_fork);
+            check_published_callbacks();
             _exit(0);
         }
     }
     for (size_t i = 0; i < PRODUCERS; i++) {
         qemu_thread_join(&producers[i]);
     }
-    end_reader(&reader);
+#ifdef CONFIG_LATX_KZT
+    if (held) {
+        end_reader(&reader);
+    } else
+#endif
+    {
+        qemu_event_set(&consumer_release);
+    }
     drain_call_rcu();
+    check_published_callbacks();
+    if (!held) {
+        qemu_event_destroy(&consumer_entered);
+        qemu_event_destroy(&consumer_release);
+    }
     g_assert_cmpint(qatomic_read(&completed), ==,
                     PRODUCERS * CALLBACKS_PER_PRODUCER);
     for (int i = 0; i < ARRAY_SIZE(children); i++) {
@@ -227,16 +296,25 @@ static void test_concurrent_fork(void)
     }
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
     signal(SIGALRM, deadline);
     alarm(20);
-    test_held_fork(false);
-    test_held_fork(true);
-    test_empty_fork();
-    test_reentrant_callback();
-    test_concurrent_fork();
+#ifdef CONFIG_LATX_KZT
+    if (argc == 2 && !strcmp(argv[1], "--held-reader")) {
+        test_held_fork(false);
+        test_held_fork(true);
+        test_concurrent_fork(true);
+        puts("RCU fork queue: held grace, lazy/deferred and concurrent producers passed");
+    } else
+#endif
+    {
+        g_assert_cmpint(argc, ==, 1);
+        test_empty_fork();
+        test_reentrant_callback();
+        test_concurrent_fork(false);
+        puts("RCU fork queue: empty, reentrant and concurrent queued callbacks passed");
+    }
     alarm(0);
-    puts("RCU fork queue: held grace, lazy/deferred, reentrant and concurrent producers passed");
     return 0;
 }
