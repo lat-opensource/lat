@@ -170,3 +170,26 @@ With LATX/KZT enabled, also run:
 ```sh
 meson test -C build64-tests test-rcu-fork-queue-held-reader --print-errorlogs
 ```
+
+## SMC shared-backing fallback regression
+
+`test-latx-smc-fallback` exercises the production shared-shadow allocator,
+`page_unprotect()`, SMC profiling, TB invalidation/unwind, store interpreter and
+signal dispatch branch with real Linux mappings. Page metadata, the TB index
+and CPU state are modelled. It injects
+`memfd_create`, `ftruncate` and shadow `mmap` failures while a disjoint TB remains,
+then checks that the current store completes by retrying after whole-host-page
+invalidation. It also checks current-TB exit, guest-page boundaries, and both
+orders of partial shared-backing success across host pages, in debug and NDEBUG
+configurations. Modes 2/3/6/7 and counts 253/254/255 cover the store-helper
+retranslation threshold. Assertions require guest-state restoration and the
+next single-instruction TB, as well as the signal-handler exit; returning 2
+without unwinding cannot pass. AOT-enabled builds check the SMC page-state
+marking on both host pages without claiming AOT artifact execution.
+The metadata geometry includes equal host/guest page sizes and,
+on larger-page hosts, multiple guest pages per host page. This seam is separate
+from full guest execution and real-application acceptance.
+
+```sh
+meson test -C build64-tests test-latx-smc-shmm test-latx-smc-fallback --print-errorlogs
+```
