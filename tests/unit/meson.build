@@ -297,3 +297,22 @@ if 'CONFIG_LATX_CAPSTONE_GIT' in config_host and 'CONFIG_LATX_DEBUG' not in conf
   )
   test('test-ir1-decode', test_ir1_decode, suite: 'lat-pr-fast', timeout: 30)
 endif
+
+# Each case compiles assertion-enabled and NDEBUG fixtures at runtime.
+# Give these compilations separate test budgets when running under QEMU.
+foreach cleanup_case : ['thread', 'netlink', 'clone', 'publication']
+  test(
+    'test-latx-thread-cleanup-' + cleanup_case,
+    python,
+    args: [files('test-latx-thread-cleanup.py'), '--repo', project_source_root,
+           '--case', cleanup_case],
+    suite: 'lat-pr-fast',
+  )
+endforeach
+
+test(
+  'test-latx-seccomp-lifetime',
+  python,
+  args: [files('test-latx-seccomp-lifetime.py'), project_source_root],
+  suite: 'lat-pr-fast',
+)

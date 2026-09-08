@@ -185,6 +185,7 @@ typedef struct TaskState {
     bool ipc_namespace_isolated;
     /* Immutable seccomp filter chain inherited by guest threads. */
     struct GuestSeccompFilter *seccomp_filter;
+    bool seccomp_exiting;
     /* A seccomp errno result must not be treated as an internal restart. */
     bool seccomp_errno_return;
 #ifdef TARGET_X86_64

@@ -33,6 +33,10 @@ void tb_invalidate_phys_page_fast(struct page_collection *pages,
 void tb_invalidate_phys_page(tb_page_addr_t addr);
 void tb_check_watchpoint(CPUState *cpu, uintptr_t retaddr);
 
+#ifdef CONFIG_LATX_SMC_OPT
+void latx_smc_thread_cleanup(void);
+#endif
+
 int get_insn_len_readable(target_ulong address);
 int latx_mprotect_one_page_rw(abi_ulong addr);
 int latx_mprotect_one_page_rw_resolv(abi_ulong addr);
