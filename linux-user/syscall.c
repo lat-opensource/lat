@@ -11141,9 +11141,12 @@ static int do_futex(CPUState *cpu, target_ulong uaddr, int op, int val,
                              op, tswap32(val), pts, NULL, val3);
 #ifdef TARGET_X86_64
     case FUTEX_LOCK_PI:
+    case FUTEX_LOCK_PI2:
         if (timeout) {
             pts = &ts;
-            target_to_host_timespec(pts, timeout);
+            if (target_to_host_timespec(pts, timeout)) {
+                return -TARGET_EFAULT;
+            }
         } else {
             pts = NULL;
         }
