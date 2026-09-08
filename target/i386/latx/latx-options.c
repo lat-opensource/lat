@@ -75,6 +75,7 @@ int option_trace_ir1;
 int option_latx_disassemble_trace_cmp;
 int option_debug_lative;
 int option_aot;
+int option_aot_static_layout;
 int option_load_aot;
 int option_aot_wine;
 int option_smc_reload;
@@ -249,6 +250,7 @@ void options_init(void)
 
 #ifdef CONFIG_LATX_AOT
     option_aot = 1;
+    option_aot_static_layout = 0;
     option_load_aot = 1;
     option_aot_wine = 0;
     option_debug_aot = 0;
