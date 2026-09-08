@@ -279,3 +279,14 @@ if 'CONFIG_LATX_CAPSTONE_GIT' in config_host and 'CONFIG_LATX_DEBUG' not in conf
   )
   test('test-ir1-decode', test_ir1_decode, suite: 'lat-pr-fast', timeout: 30)
 endif
+
+test_kzt_path_collection = executable(
+  'test-kzt-path-collection',
+  files(
+    'kzt/test_kzt_path_collection.c',
+    '../../target/i386/latx/context/pathcoll.c',
+  ) + genh,
+  include_directories: include_directories('../../target/i386/latx/include'),
+  dependencies: [glib],
+)
+test('test-kzt-path-collection', test_kzt_path_collection, suite: 'lat-pr-fast')

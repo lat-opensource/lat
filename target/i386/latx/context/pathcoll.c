@@ -112,6 +112,17 @@ void PrependPath(const char* path, path_collection_t* collection, int folder)
     if(l) {
         if(folder && tmp[l-1]!='/')
             strcat(tmp, "/");
+        for (int i = 0; i < collection->size; i++) {
+            if (!strcmp(tmp, collection->paths[i])) {
+                char *existing = collection->paths[i];
+
+                /* Preserve precedence without accumulating reload duplicates. */
+                memmove(collection->paths + 1, collection->paths,
+                        i * sizeof(*collection->paths));
+                collection->paths[0] = existing;
+                return;
+            }
+        }
         if(collection->size==collection->cap) {
             collection->cap += 4;
             collection->paths = (char**)box_realloc(collection->paths, collection->cap*sizeof(char*));
