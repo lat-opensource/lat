@@ -14,6 +14,12 @@ else
     echo "SKIP: clang is required to build the i386 guest"
     exit 77
 fi
+if ! "$clang" --target=i386-linux-gnu -fuse-ld=lld -nostdlib -static \
+        -Wl,--build-id=none -x assembler /dev/null \
+        -o "$workdir/linker-check" >/dev/null 2>&1; then
+    echo "SKIP: clang with ld.lld is required to build the i386 guest"
+    exit 77
+fi
 
 "$clang" --target=i386-linux-gnu -fuse-ld=lld -nostdlib -static \
     -Wl,--build-id=none "$source_file" \
