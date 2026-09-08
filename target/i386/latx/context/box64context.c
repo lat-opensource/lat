@@ -142,6 +142,12 @@ int AddKztDebugInfo(box64context_t* ctx, struct latx_kzt_debug* debuginfo)
 
 int AddElfHeader(box64context_t* ctx, elfheader_t* head) {
     int idx = ctx->elfsize;
+    for (int i = 0; i < ctx->elfsize; i++) {
+        if (!ctx->elfs[i]) {
+            ctx->elfs[i] = head;
+            return i;
+        }
+    }
     if(idx==ctx->elfcap) {
         // resize...
         ctx->elfcap += 16;
