@@ -3973,81 +3973,27 @@ void page_protect(tb_page_addr_t address)
  *
  * For a guest page at @addr with @size = host page size
  *
- * 0. create shmm_fd with memfd and mmap to get @shmm_base
- * 1. alloc one page from shmm as @shmm_offset
- * 2. mmap(0, size, READ|WRITE, MAP_SHARED, shmm_fd, shmm_offset)
- * 3. munmap(addr, size) after copy data to shmm space
- * 4. mmap(addr, size, READ, MAP_FIXED | MAP_SHARED, shmm_fd, shmm_offset)
+ * 0. create a private memfd for this host page and size it to @size
+ * 1. mmap(0, size, READ|WRITE, MAP_SHARED, shmm_fd, 0)
+ * 2. copy the original guest page to the shadow mapping
+ * 3. mmap(addr, size, READ, MAP_FIXED | MAP_SHARED, shmm_fd, 0)
+ * 4. close shmm_fd; both mappings (including fork descendants) own the file
  *
  * guest space : +++++++++--------+++++++    shadow page +--------+
  *                       ^  size                         ^  size
  *                       addr                            ptr
  *                     /                                   \
- *            shared map --------->   offset   <---------- shared map
+ *            shared map --------->   offset 0 <---------- shared map
  *                                    |  size  |
- *  shmm space : ++++++++++++++++++++++--------+++++++
+ *  shmm space :                      +--------+
  *
- * 5. access with original guest address @addr or @shmm_base + shmm_offset
- */
-
-static int smc_shmm_fd;
-static int smc_shmm_npages;
-static int smc_shmm_pn;
-#define SMC_SHMM_INIT_PAGES     512
-#define SMC_SHMM_EXPAND_PAGES   128
-
-static inline void smc_shmm_create(void)
-{
-    if (smc_shmm_fd) return;
-
-    smc_shmm_fd = memfd_create("smc_shmm", 0);
-    if (smc_shmm_fd == -1) {
-        fprintf(stderr, "%s:%d SMC shmm create fail\n", __func__, __LINE__);
-        latx_smc_shmm_disable();
-        return;
-    }
-
-    smc_shmm_pn = 0; /* start index of pages */
-    smc_shmm_npages = SMC_SHMM_INIT_PAGES; /* total number of pages */
-    if (ftruncate(smc_shmm_fd, smc_shmm_npages * qemu_host_page_size) == -1) {
-        fprintf(stderr, "%s:%d SMC shmm ftruncate fail\n", __func__, __LINE__);
-        latx_smc_shmm_disable();
-        close(smc_shmm_fd);
-    }
-}
-
-/*
- * Alloc a new host page with smc_shmm_fd.
+ * 5. access with original guest address @addr or the shadow mapping
  *
- * On success, return the offset used with smc_shmm_fd.
- * On fail, return -1ULL.
+ * A process-global append-only memfd retains the contents of unmapped pages
+ * until process exit.  Per-page files release their backing automatically
+ * after the last guest/shadow VMA disappears, without truncating or punching
+ * holes in data that may still be mapped by a fork child.
  */
-static inline uint64_t smc_shmm_alloc_page(void)
-{
-    uint64_t offset = -1ULL;
-    uint64_t new_size;
-
-    smc_shmm_create();
-
-    if ((smc_shmm_pn + 1) < smc_shmm_npages) {
-        goto alloc_and_return;
-    }
-
-    smc_shmm_npages += SMC_SHMM_EXPAND_PAGES;
-    new_size = smc_shmm_npages * qemu_host_page_size;
-
-    if (ftruncate(smc_shmm_fd, new_size) == -1) {
-        fprintf(stderr, "%s:%d SMC shmm fail to expand\n", __func__, __LINE__);
-        smc_shmm_npages -= SMC_SHMM_EXPAND_PAGES;
-        goto just_return;
-    }
-
-alloc_and_return:
-    offset = (uint64_t)(smc_shmm_pn * qemu_host_page_size);
-    smc_shmm_pn += 1;
-just_return:
-    return offset;
-}
 
 /*
  * Check if the guest pages belonging to the same one host page are all anon
@@ -4090,10 +4036,9 @@ static inline int smc_shmm_check_page_anon(uint64_t start, int *prot)
 static int smc_create_shadow_page_shmm(uint64_t start)
 {
     uint64_t real_start, real_end, addr, len;
-    uint64_t shmm_offset;
     void *host_start, *ptr, *shmm_ptr;
     int64_t access_off;
-    int prot;
+    int prot, shmm_fd;
     ShadowPageDesc *spd;
 
     /* can NOT use shmm if guest page is not MAP_ANON */
@@ -4101,10 +4046,14 @@ static int smc_create_shadow_page_shmm(uint64_t start)
         return -1;
     }
 
-    /* alloc the shmm space */
-    shmm_offset = smc_shmm_alloc_page();
-    if (shmm_offset == -1ULL) {
-        exit(-1);
+    shmm_fd = memfd_create("smc_shmm", MFD_CLOEXEC);
+    if (shmm_fd == -1) {
+        fprintf(stderr, "%s:%d SMC shmm create fail\n", __func__, __LINE__);
+        return -1;
+    }
+    if (ftruncate(shmm_fd, qemu_host_page_size) == -1) {
+        fprintf(stderr, "%s:%d SMC shmm ftruncate fail\n", __func__, __LINE__);
+        close(shmm_fd);
         return -1;
     }
 
@@ -4113,34 +4062,33 @@ static int smc_create_shadow_page_shmm(uint64_t start)
     len = qemu_host_page_size;
     real_end = real_start + qemu_host_page_size;
 
-    /* protect before memcpy */
-    mprotect(host_start, len, PROT_READ);
-
     /* create shadow page, which is shared mapped to shmm space */
     shmm_ptr = mmap(NULL, len,
                PAGE_READ | PAGE_WRITE, /* allow rw on shadow page */
-               MAP_SHARED,
-               smc_shmm_fd, shmm_offset);
+               MAP_SHARED, shmm_fd, 0);
     if (shmm_ptr == MAP_FAILED) {
         fprintf(stderr, "%s:%d SMC shmm map share fail\n", __func__, __LINE__);
-        fflush(stderr);
-        g_assert_not_reached();
+        close(shmm_fd);
+        return -1;
     }
+
+    /* Preparatory allocation failures leave the original page unchanged. */
+    mprotect(host_start, len, PROT_READ);
 
     /* copy original guest data into the shmm space */
     memcpy(shmm_ptr, g2h_untagged(real_start), len);
 
-    /* release the original guest space */
-    munmap(host_start, len);
-
-    /* create shared map from guest space to shmm space */
+    /* MAP_FIXED replaces the original guest mapping. */
     ptr = mmap(host_start, len,
                prot & PROT_READ, /* allow read on guest space */
-               MAP_SHARED | MAP_FIXED,
-               smc_shmm_fd, shmm_offset);
+               MAP_SHARED | MAP_FIXED, shmm_fd, 0);
+    /* Linux releases the descriptor even on close(EINTR); do not retry it. */
+    close(shmm_fd);
     if (ptr != host_start) {
+        munmap(shmm_ptr, len);
         fprintf(stderr, "%s:%d SMC shmm map guest fail\n", __func__, __LINE__);
         fflush(stderr);
+        /* A failed MAP_FIXED may already have removed the original VMA. */
         g_assert_not_reached();
     }
 
@@ -4513,7 +4461,6 @@ no_pageflags_cache:
         if (inv_one_tb) {
             /* === create shadow page for smc === */
             if (latx_smc_shmm()) {
-                smc_shmm_create();
                 SMC_CREATE_SHADOW_PAGE_SHMM(address, p);
                 if (is_cross_host) {
                     SMC_CREATE_SHADOW_PAGE_SHMM(address2, p2);
