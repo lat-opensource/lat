@@ -305,8 +305,26 @@ bool jrra_translate_ret(TranslationBlock *tb, IR2_OPND return_addr_opnd,
         PER_TB_COUNT((void *)&((tb->profile).jrra_miss), 1);
     }
     if (option_jr_ra_stack) {
+        IR2_OPND guest_return = ra_alloc_label();
+        IR2_OPND reserved = ra_alloc_itemp();
+
+        /*
+         * Optimized CALLs store host translation addresses.
+         * Signal frames and other guest-created returns store x86 addresses.
+         */
+        li_d(reserved, (ADDR)reserved_va);
+        la_bltu(return_addr_opnd, reserved, guest_return);
+        ra_free_temp(reserved);
+
+        /* Host translation address: retain the fast return path. */
         la_jirl(zero_ir2_opnd, return_addr_opnd, 0);
-        return true;
+        la_label(guest_return);
+
+        /*
+         * Guest address: return false so translate_ret() emits the
+         * normal guest-PC exit and TB lookup path.
+         */
+        return false;
     }
 #endif
     return false;
