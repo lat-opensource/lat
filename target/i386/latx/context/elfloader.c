@@ -986,10 +986,10 @@ static int relocate_elf_rela(
                   ) {
                     if (offs){
                         if(p) {
-                            printf_log(LOG_INFO, "RelocateElfRELA : Apply %s R_X86_64_JUMP_SLOT @%p with sym=%s (%p -> %p)\n", (bind==STB_LOCAL)?"Local":"Global", p, symname, *(void**)p, (void*)(offs+rela[i].r_addend));
+                            printf_log(LOG_INFO, "RelocateElfRELA : Apply %s R_X86_64_JUMP_SLOT @%p with sym=%s (%p -> %p)\n", (bind==STB_LOCAL)?"Local":"Global", p, symname, *(void**)p, (void*)offs);
                             if (kzt_relocation_store(
                                     transaction, (uintptr_t *)p,
-                                    offs + rela[i].r_addend) != 0) {
+                                    offs) != 0) {
                                 printf_log(LOG_INFO,
                                            "Cannot write R_X86_64_JUMP_SLOT @%p\n",
                                            p);
