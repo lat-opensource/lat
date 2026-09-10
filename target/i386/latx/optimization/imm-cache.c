@@ -174,6 +174,8 @@ void imm_cache_init(IMM_CACHE *imm_cache, int capacity)
     imm_cache->curr_ir2_index = 0;
     imm_cache->optimized_ir2 = false;
     imm_cache->itemp_allocated = false;
+    memset(&imm_cache->rip_stats, 0, sizeof(imm_cache->rip_stats));
+    memset(&imm_cache->complex_stats, 0, sizeof(imm_cache->complex_stats));
     for (int i = 0; i < 16; i++) {
         imm_cache->ir1_reg_last_updated_index[i] = -1;
     }
@@ -219,61 +221,193 @@ void imm_cache_fill_bucket(IMM_CACHE *cache, int cache_id, int base, int index,
     cache->bucket[cache_id].use_count = 0;
 }
 
-/**
- * TODO: some instructions will change gpr indirectly
- */
+static void imm_cache_mark_gpr_updated(IMM_CACHE *cache, int reg_num,
+                                       int curr_ir1_index)
+{
+    if (reg_num >= 0 && reg_num < 16) {
+        cache->ir1_reg_last_updated_index[reg_num] = curr_ir1_index;
+    }
+}
+
 void imm_cache_update_ir1_usage(IMM_CACHE *cache, IR1_INST *pir1,
                                 int curr_ir1_index)
 {
-    /* trace x86_reg latest define value */
-    if (pir1->info->x86.op_count > 0) {
-        IR1_OPCODE opcode = ir1_opcode(pir1);
-        int *ir1_updated_index = cache->ir1_reg_last_updated_index;
-        switch (opcode) {
-        case dt_X86_INS_PUSH:
-        case dt_X86_INS_PUSHF:
-        case dt_X86_INS_PUSHFD:
-        case dt_X86_INS_PUSHAL:
-        case dt_X86_INS_PUSHAW:
+    IR1_OPCODE opcode = ir1_opcode(pir1);
+    int op_count = pir1->info->x86.op_count;
+    bool string_op = false;
 
-        case dt_X86_INS_POP:
-        case dt_X86_INS_POPF:
-            ir1_updated_index[esp_index] = curr_ir1_index;
-            break;
-        case dt_X86_INS_MUL:
-        case dt_X86_INS_IMUL:
-        case dt_X86_INS_DIV:
-        case dt_X86_INS_IDIV:
-            ir1_updated_index[eax_index] = curr_ir1_index;
-            ir1_updated_index[edx_index] = curr_ir1_index;
-            break;
-        // both src and dest will change
-        case dt_X86_INS_XCHG:
-        case dt_X86_INS_XADD:
-            for (int i = 0; i < 2; i++) {
-                IR1_OPND *opnd0 = ir1_get_opnd(pir1, i);
-                if (ir1_opnd_is_gpr(opnd0)) {
-                    int reg_num = ir1_opnd_base_reg_num(opnd0);
-                    ir1_updated_index[reg_num] = curr_ir1_index;
-                }
-                return;
-            }
-            break;
-        // all reg changes
-        case dt_X86_INS_POPAL:
-        case dt_X86_INS_POPAW:
-            for (int i = 0; i < 16; i++) {
-                ir1_updated_index[i] = curr_ir1_index;
-            }
-            break;
-        default:
-            break;
+    for (int i = 0; i < op_count; i++) {
+        IR1_OPND *opnd = ir1_get_opnd(pir1, i);
+
+        if (ir1_opnd_is_gpr(opnd) &&
+            (opnd->access & dt_CS_AC_WRITE)) {
+            imm_cache_mark_gpr_updated(cache, ir1_opnd_base_reg_num(opnd),
+                                       curr_ir1_index);
         }
+    }
+
+    /* Preserve the historical operand-zero fallback for incomplete metadata. */
+    if (op_count > 0) {
         IR1_OPND *opnd0 = ir1_get_opnd(pir1, 0);
-        if (ir1_opnd_is_gpr(opnd0)) {
-            int reg_num = ir1_opnd_base_reg_num(opnd0);
-            ir1_updated_index[reg_num] = curr_ir1_index;
+
+        if (ir1_opnd_is_gpr(opnd0) &&
+            opnd0->access == dt_CS_AC_INVALID) {
+            imm_cache_mark_gpr_updated(cache,
+                                       ir1_opnd_base_reg_num(opnd0),
+                                       curr_ir1_index);
+            cache->complex_stats.use_def_fallbacks++;
         }
+    }
+
+    /*
+     * CAPSTONE_DIET omits implicit register metadata.  Conservatively treat
+     * operand-less instructions as clobbering every GPR so an unlisted hidden
+     * destination can only reduce cache reuse, never leave a stale address.
+     */
+    if (option_imm_complex && op_count == 0) {
+        for (int i = 0; i < 16; i++) {
+            imm_cache_mark_gpr_updated(cache, i, curr_ir1_index);
+        }
+    }
+
+    switch (opcode) {
+    case dt_X86_INS_PUSH:
+    case dt_X86_INS_PUSHF:
+    case dt_X86_INS_PUSHFD:
+    case dt_X86_INS_PUSHFQ:
+    case dt_X86_INS_PUSHAL:
+    case dt_X86_INS_PUSHAW:
+    case dt_X86_INS_POP:
+    case dt_X86_INS_POPF:
+    case dt_X86_INS_POPFD:
+    case dt_X86_INS_POPFQ:
+        imm_cache_mark_gpr_updated(cache, esp_index, curr_ir1_index);
+        break;
+    case dt_X86_INS_ENTER:
+    case dt_X86_INS_LEAVE:
+        imm_cache_mark_gpr_updated(cache, esp_index, curr_ir1_index);
+        imm_cache_mark_gpr_updated(cache, ebp_index, curr_ir1_index);
+        break;
+    case dt_X86_INS_MUL:
+    case dt_X86_INS_DIV:
+    case dt_X86_INS_IDIV:
+        imm_cache_mark_gpr_updated(cache, eax_index, curr_ir1_index);
+        imm_cache_mark_gpr_updated(cache, edx_index, curr_ir1_index);
+        break;
+    case dt_X86_INS_IMUL:
+        if (op_count == 1) {
+            imm_cache_mark_gpr_updated(cache, eax_index, curr_ir1_index);
+            imm_cache_mark_gpr_updated(cache, edx_index, curr_ir1_index);
+        }
+        break;
+    case dt_X86_INS_CBW:
+    case dt_X86_INS_CWDE:
+    case dt_X86_INS_CDQE:
+    case dt_X86_INS_LAHF:
+    case dt_X86_INS_SALC:
+    case dt_X86_INS_IN:
+    case dt_X86_INS_XLATB:
+        imm_cache_mark_gpr_updated(cache, eax_index, curr_ir1_index);
+        break;
+    case dt_X86_INS_CWD:
+    case dt_X86_INS_CDQ:
+    case dt_X86_INS_CQO:
+        imm_cache_mark_gpr_updated(cache, edx_index, curr_ir1_index);
+        break;
+    case dt_X86_INS_CMPXCHG:
+        imm_cache_mark_gpr_updated(cache, eax_index, curr_ir1_index);
+        break;
+    case dt_X86_INS_CMPXCHG8B:
+    case dt_X86_INS_CMPXCHG16B:
+    case dt_X86_INS_RDTSC:
+    case dt_X86_INS_XGETBV:
+        imm_cache_mark_gpr_updated(cache, eax_index, curr_ir1_index);
+        imm_cache_mark_gpr_updated(cache, edx_index, curr_ir1_index);
+        break;
+    case dt_X86_INS_RDTSCP:
+        imm_cache_mark_gpr_updated(cache, eax_index, curr_ir1_index);
+        imm_cache_mark_gpr_updated(cache, ecx_index, curr_ir1_index);
+        imm_cache_mark_gpr_updated(cache, edx_index, curr_ir1_index);
+        break;
+    case dt_X86_INS_CPUID:
+        imm_cache_mark_gpr_updated(cache, eax_index, curr_ir1_index);
+        imm_cache_mark_gpr_updated(cache, ebx_index, curr_ir1_index);
+        imm_cache_mark_gpr_updated(cache, ecx_index, curr_ir1_index);
+        imm_cache_mark_gpr_updated(cache, edx_index, curr_ir1_index);
+        break;
+    case dt_X86_INS_LODSB:
+    case dt_X86_INS_LODSW:
+    case dt_X86_INS_LODSD:
+    case dt_X86_INS_LODSQ:
+        imm_cache_mark_gpr_updated(cache, eax_index, curr_ir1_index);
+        imm_cache_mark_gpr_updated(cache, esi_index, curr_ir1_index);
+        string_op = true;
+        break;
+    case dt_X86_INS_STOSB:
+    case dt_X86_INS_STOSW:
+    case dt_X86_INS_STOSD:
+    case dt_X86_INS_STOSQ:
+    case dt_X86_INS_SCASB:
+    case dt_X86_INS_SCASW:
+    case dt_X86_INS_SCASD:
+    case dt_X86_INS_SCASQ:
+    case dt_X86_INS_INSB:
+    case dt_X86_INS_INSW:
+    case dt_X86_INS_INSD:
+        imm_cache_mark_gpr_updated(cache, edi_index, curr_ir1_index);
+        string_op = true;
+        break;
+    case dt_X86_INS_MOVSB:
+    case dt_X86_INS_MOVSW:
+    case dt_X86_INS_MOVSQ:
+    case dt_X86_INS_CMPSB:
+    case dt_X86_INS_CMPSW:
+    case dt_X86_INS_CMPSQ:
+        imm_cache_mark_gpr_updated(cache, esi_index, curr_ir1_index);
+        imm_cache_mark_gpr_updated(cache, edi_index, curr_ir1_index);
+        string_op = true;
+        break;
+    case dt_X86_INS_MOVSD:
+        if (pir1->info->x86.opcode[0] == 0xa5) {
+            imm_cache_mark_gpr_updated(cache, esi_index, curr_ir1_index);
+            imm_cache_mark_gpr_updated(cache, edi_index, curr_ir1_index);
+            string_op = true;
+        }
+        break;
+    case dt_X86_INS_CMPSD:
+        if (pir1->info->x86.opcode[0] == 0xa7) {
+            imm_cache_mark_gpr_updated(cache, esi_index, curr_ir1_index);
+            imm_cache_mark_gpr_updated(cache, edi_index, curr_ir1_index);
+            string_op = true;
+        }
+        break;
+    case dt_X86_INS_XCHG:
+    case dt_X86_INS_XADD:
+    case dt_X86_INS_MULX:
+        /* These instructions have two explicit destination operands. */
+        for (int i = 0; i < MIN(op_count, 2); i++) {
+            IR1_OPND *opnd = ir1_get_opnd(pir1, i);
+
+            if (ir1_opnd_is_gpr(opnd)) {
+                imm_cache_mark_gpr_updated(
+                    cache, ir1_opnd_base_reg_num(opnd), curr_ir1_index);
+            }
+        }
+        break;
+    case dt_X86_INS_POPAL:
+    case dt_X86_INS_POPAW:
+        for (int i = 0; i < 16; i++) {
+            imm_cache_mark_gpr_updated(cache, i, curr_ir1_index);
+        }
+        break;
+    default:
+        break;
+    }
+
+    if (string_op &&
+        (ir1_prefix(pir1) == dt_X86_PREFIX_REP ||
+         ir1_prefix(pir1) == dt_X86_PREFIX_REPNE)) {
+        imm_cache_mark_gpr_updated(cache, ecx_index, curr_ir1_index);
     }
 }
 
@@ -478,7 +612,24 @@ IMM_CACHE_RES imm_cache_allocate(IMM_CACHE *cache, int base, int index,
             stop_opt = true;
         }
     }
-    const char *prefix = (base == -100) ? "rip" : "complex";
+    bool is_rip = base == IMM_CACHE_RIP_BASE;
+    int complex_kind = -1;
+
+    if (!is_rip) {
+        if (base >= 0 && index >= 0) {
+            complex_kind = IMM_CACHE_COMPLEX_BASE_INDEX_DISP;
+        } else if (base >= 0) {
+            complex_kind = IMM_CACHE_COMPLEX_BASE_DISP;
+        } else if (index >= 0) {
+            complex_kind = IMM_CACHE_COMPLEX_INDEX_DISP;
+        }
+    }
+    const char *prefix = is_rip ? "rip" : "complex";
+    if (is_rip) {
+        cache->rip_stats.calls++;
+    } else if (complex_kind >= 0) {
+        cache->complex_stats.calls[complex_kind]++;
+    }
     imm_log("[allocate %s]>>>>>>>>>> start >>>>>>>>>>>\n"
             "[allocate %s] b:%d\ti:%d\ts:%d\toffset:0x%lx\n",
             prefix, prefix, base, index, scale, offset);
@@ -489,8 +640,14 @@ IMM_CACHE_RES imm_cache_allocate(IMM_CACHE *cache, int base, int index,
     // dead cache auto free
     // imm_cache_free_dead_cache(cache);
 
-    IMM_CACHE_RES res;
-    res.pre_cache = false;
+    IMM_CACHE_RES res = {
+        .diff = 0,
+        .offset = offset,
+        .itemp_num = -1,
+        .cache_id = -1,
+        .pre_cache = false,
+        .cached = false,
+    };
     int cache_id = -1;
 
     if (likely(!stop_opt)) {
@@ -499,6 +656,17 @@ IMM_CACHE_RES imm_cache_allocate(IMM_CACHE *cache, int base, int index,
     if (cache_id == -1) {
         // a new cache
         imm_log("[new]\t\n");
+        if (is_rip) {
+            cache->rip_stats.misses++;
+            if (cache->free_count == 0) {
+                cache->rip_stats.replacements++;
+            }
+        } else if (complex_kind >= 0) {
+            cache->complex_stats.misses[complex_kind]++;
+            if (cache->free_count == 0) {
+                cache->complex_stats.replacements[complex_kind]++;
+            }
+        }
         cache_id = imm_cache_put(cache, base, index, scale, offset);
         res.cached = false;
     } else {
@@ -518,6 +686,11 @@ IMM_CACHE_RES imm_cache_allocate(IMM_CACHE *cache, int base, int index,
             res.cached = true;
             cache->bucket[cache_id].use_count++;
             cache_hit++;
+            if (is_rip) {
+                cache->rip_stats.hits++;
+            } else if (complex_kind >= 0) {
+                cache->complex_stats.hits[complex_kind]++;
+            }
         } else {
             // repace cache
             imm_log("[cache cannot use] replace cache_id:%d\n", cache_id);
@@ -526,6 +699,14 @@ IMM_CACHE_RES imm_cache_allocate(IMM_CACHE *cache, int base, int index,
                                      offset);
             res.offset = offset;
             res.cached = false;
+            if (is_rip) {
+                cache->rip_stats.misses++;
+                cache->rip_stats.replacements++;
+            } else if (complex_kind >= 0) {
+                cache->complex_stats.misses[complex_kind]++;
+                cache->complex_stats.replacements[complex_kind]++;
+                cache->complex_stats.base_index_invalidations++;
+            }
 
             // imm_cache_sort(cache);
         }
@@ -570,10 +751,14 @@ long imm_cache_diff(IMM_CACHE *cache, int cache_id, int64 new_offset)
 
 void imm_cache_update_by_diff(IMM_CACHE *cache, int cache_id, long diff)
 {
-    int64 old_offset = cache->bucket[cache_id].offset;
+    IMM_CACHE_BUCKET *bucket = &cache->bucket[cache_id];
+    int64 old_offset =
+        bucket->avg_offset == 0 ? bucket->offset : bucket->avg_offset;
+
     qemu_log_mask(LAT_IMM_REG, "[update by diff]new:%lx+%lx=%lx\n", old_offset,
                   diff, old_offset + diff);
-    cache->bucket[cache_id].offset += diff;
+    bucket->offset = old_offset + diff;
+    bucket->avg_offset = 0;
 }
 
 void imm_cache_update_by_offset(IMM_CACHE *cache, int cache_id,
@@ -663,10 +848,121 @@ void imm_cache_free(IMM_CACHE *cache, int id)
 
 void imm_cache_free_all(IMM_CACHE *cache)
 {
+    if (!cache) {
+        return;
+    }
     for (int i = 0; i < cache->cache_count; i++) {
-        imm_cache_free(cache, i);
+        if (!cache->bucket[i].free) {
+            imm_cache_free(cache, i);
+        }
     }
     cache->free_count = cache->cache_count;
+    cache->itemp_allocated = false;
+}
+
+void imm_cache_invalidate_for_helper(void)
+{
+    IMM_CACHE *cache;
+    bool has_rip = false;
+
+    if (!option_imm_reg || !lsenv || !lsenv->tr_data) {
+        return;
+    }
+    cache = lsenv->tr_data->imm_cache;
+    if (!cache) {
+        return;
+    }
+    for (int i = 0; i < cache->cache_count; i++) {
+        if (!cache->bucket[i].free &&
+            cache->bucket[i].base == IMM_CACHE_RIP_BASE) {
+            has_rip = true;
+            break;
+        }
+    }
+    if (has_rip) {
+        cache->rip_stats.helper_invalidations++;
+    }
+    imm_cache_free_all(cache);
+}
+
+void imm_cache_print_rip_stats(IMM_CACHE *cache, uint64_t tb_pc)
+{
+    IMM_CACHE_RIP_STATS *stats;
+
+    if (!option_imm_rip_stats || !cache) {
+        return;
+    }
+    stats = &cache->rip_stats;
+    if (!stats->calls) {
+        return;
+    }
+    fprintf(stderr,
+            "[LATX][imm-rip] tb=0x%" PRIx64
+            " calls=%" PRIu64 " hits=%" PRIu64 " misses=%" PRIu64
+            " replacements=%" PRIu64 " itemp-fallbacks=%" PRIu64
+            " direct-hits=%" PRIu64 " host-offset-hits=%" PRIu64
+            " addi-hits=%" PRIu64 " full-loads=%" PRIu64
+            " helper-invalidations=%" PRIu64 "\n",
+            tb_pc, stats->calls, stats->hits, stats->misses,
+            stats->replacements, stats->itemp_fallbacks,
+            stats->direct_hits, stats->host_offset_hits, stats->addi_hits,
+            stats->full_loads, stats->helper_invalidations);
+}
+
+void imm_cache_print_complex_stats(IMM_CACHE *cache, uint64_t tb_pc)
+{
+    static const char * const kind_names[] = {
+        "base-disp", "index-disp", "base-index-disp",
+    };
+    IMM_CACHE_COMPLEX_STATS *stats;
+    uint64_t activity = 0;
+
+    if (!option_imm_complex_stats || !cache) {
+        return;
+    }
+    stats = &cache->complex_stats;
+    for (int i = 0; i < IMM_CACHE_COMPLEX_KIND_COUNT; i++) {
+        activity += stats->calls[i];
+    }
+    for (int i = 0; i < IMM_CACHE_COMPLEX_SKIP_COUNT; i++) {
+        activity += stats->skips[i];
+    }
+    if (!activity) {
+        return;
+    }
+
+    for (int i = 0; i < IMM_CACHE_COMPLEX_KIND_COUNT; i++) {
+        fprintf(stderr,
+                "[LATX][imm-complex] tb=0x%" PRIx64 " mode=%s"
+                " calls=%" PRIu64 " hits=%" PRIu64 " misses=%" PRIu64
+                " replacements=%" PRIu64 " itemp-conflicts=%" PRIu64
+                " direct-hits=%" PRIu64 " host-offset-hits=%" PRIu64
+                " addi-hits=%" PRIu64 " full-generations=%" PRIu64 "\n",
+                tb_pc, kind_names[i], stats->calls[i], stats->hits[i],
+                stats->misses[i], stats->replacements[i],
+                stats->itemp_conflicts[i], stats->direct_hits[i],
+                stats->host_offset_hits[i], stats->addi_hits[i],
+                stats->full_generations[i]);
+    }
+    fprintf(stderr,
+            "[LATX][imm-complex-skip] tb=0x%" PRIx64
+            " disabled=%" PRIu64 " not-code64=%" PRIu64
+            " addr-size=%" PRIu64 " segment=%" PRIu64
+            " unsupported-form=%" PRIu64 " invalid-scale=%" PRIu64
+            " no-benefit=%" PRIu64 " instruction=%" PRIu64
+            " fixed-dest=%" PRIu64 " base-index-invalidations=%" PRIu64
+            " use-def-fallbacks=%" PRIu64 "\n",
+            tb_pc,
+            stats->skips[IMM_CACHE_COMPLEX_SKIP_DISABLED],
+            stats->skips[IMM_CACHE_COMPLEX_SKIP_NOT_CODE64],
+            stats->skips[IMM_CACHE_COMPLEX_SKIP_ADDR_SIZE],
+            stats->skips[IMM_CACHE_COMPLEX_SKIP_SEGMENT],
+            stats->skips[IMM_CACHE_COMPLEX_SKIP_UNSUPPORTED_FORM],
+            stats->skips[IMM_CACHE_COMPLEX_SKIP_INVALID_SCALE],
+            stats->skips[IMM_CACHE_COMPLEX_SKIP_NO_BENEFIT],
+            stats->skips[IMM_CACHE_COMPLEX_SKIP_INSTRUCTION],
+            stats->skips[IMM_CACHE_COMPLEX_SKIP_FIXED_DEST],
+            stats->base_index_invalidations, stats->use_def_fallbacks);
 }
 
 void imm_cache_print_bucket(IMM_CACHE_BUCKET *bucket, int index)
