@@ -25,6 +25,99 @@
 #include "ts.h"
 #include "aot_recover_tb.h"
 #include "loongarch-extcontext.h"
+#include <sys/mman.h>
+
+#if defined(TARGET_X86_64) && defined(CONFIG_LATX_JRRA)
+struct SignalReturnBridge {
+    target_ulong guest_restorer;
+    struct SignalReturnBridge *next;
+    uint32_t code[];
+};
+
+/*
+ * Protected by mmap_lock(), including publication. Published code is immutable
+ * and retained for the process lifetime: a handler can return much later, or
+ * leave through a non-local jump without notifying us. Do not put these entries
+ * in the flushable TB code buffer. Each distinct restorer currently costs one
+ * host page containing both metadata and instructions; repeated and nested
+ * deliveries reuse the same entry. Initialize the entire entry before making
+ * the page read-only and executable.
+ */
+static struct SignalReturnBridge *signal_return_bridges;
+
+uintptr_t get_signal_return_bridge(target_ulong guest_restorer)
+{
+    struct SignalReturnBridge *bridge;
+    TRANSLATION_DATA *lat_ctx;
+    IR2_OPND next_pc, exit_target;
+    uintptr_t result = 0;
+    size_t code_size, page_size = qemu_host_page_size;
+    size_t code_offset = offsetof(struct SignalReturnBridge, code);
+    int insns, assembled;
+
+    mmap_lock();
+    for (bridge = signal_return_bridges; bridge; bridge = bridge->next) {
+        if (bridge->guest_restorer == guest_restorer) {
+            result = (uintptr_t)bridge->code;
+            goto out;
+        }
+    }
+
+    /* Called from guest signal delivery, not from an active translation. */
+    if (!context_switch_native_to_bt_ret_0 || !lsenv || !lsenv->tr_data) {
+        goto out;
+    }
+    lat_ctx = lsenv->tr_data;
+    if (lat_ctx->curr_tb) {
+        goto out;
+    }
+    bridge = mmap(NULL, page_size, PROT_READ | PROT_WRITE,
+                  MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (bridge == MAP_FAILED) {
+        goto out;
+    }
+
+    tr_init(NULL);
+    next_pc = ra_alloc_dbt_arg2();
+    exit_target = ra_alloc_itemp();
+    /* RET already popped the guest stack. Only replace its host target with
+     * the real guest PC, then use the existing full state-save exit path.
+     */
+    li_d(next_pc, guest_restorer);
+    li_d(exit_target, context_switch_native_to_bt_ret_0);
+    la_jirl(zero_ir2_opnd, exit_target, 0);
+    insns = label_dispose(NULL, lat_ctx);
+    if (insns <= 0 ||
+        (size_t)insns > (page_size - code_offset) / sizeof(bridge->code[0])) {
+        tr_fini(false);
+        goto fail;
+    }
+    assembled = tr_ir2_assemble(bridge->code, lat_ctx->first_ir2);
+    tr_fini(false);
+    if (assembled != insns) {
+        goto fail;
+    }
+    code_size = (size_t)insns * sizeof(uint32_t);
+    flush_idcache_range((uintptr_t)bridge->code, (uintptr_t)bridge->code,
+                       code_size);
+    bridge->guest_restorer = guest_restorer;
+    bridge->next = signal_return_bridges;
+    if (mprotect(bridge, page_size, PROT_READ | PROT_EXEC) != 0) {
+        goto fail;
+    }
+
+    /* No caller can observe a partially generated or non-executable entry. */
+    signal_return_bridges = bridge;
+    result = (uintptr_t)bridge->code;
+    goto out;
+
+fail:
+    munmap(bridge, page_size);
+out:
+    mmap_unlock();
+    return result;
+}
+#endif
 
 #ifdef CONFIG_LATX_JRRA
 static bool tb_ending_with_call(TranslationBlock *tb)

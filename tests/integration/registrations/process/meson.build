@@ -1,5 +1,13 @@
 if 'x86_64-linux-user' in target_dirs
   latx_integration_tests += [{
+    'name': 'test-signal-return-bridge',
+    'runner': find_program('../../test-signal-return-bridge.sh'),
+    'args': [
+      emulators['latx-x86_64'],
+      files('../../signal-return-bridge.S'),
+    ],
+  }]
+  latx_integration_tests += [{
     'name': 'test-x87-signal-mode',
     'runner': find_program('../../test-x87-signal-mode.sh'),
     'args': [
