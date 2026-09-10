@@ -222,7 +222,12 @@ void options_init(void)
     latx_runtime_reset();
 #if defined(CONFIG_LATX_KZT)
     option_kzt = 0;
+#ifdef CONFIG_BUILD_LIBLAT
+    /* A native embedding process may enter the Guest from any Host thread. */
+    option_kzt_guest_tls = 1;
+#else
     option_kzt_guest_tls = 0;
+#endif
     g_clear_pointer(&option_kzt_guest_tls_error, g_free);
     option_kzt_log = 0;
     g_clear_pointer(&option_kzt_libs, g_free);

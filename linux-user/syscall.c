@@ -263,7 +263,6 @@ out_marker:
 
 #include <linux/netfilter_ipv4.h>
 #include <linux/dma-buf.h>
-
 #include <sys/syscall.h>
 
 /* Generic prctl constants that may be absent from old host headers. */
@@ -1483,6 +1482,10 @@ static struct shm_region {
     abi_ulong start;
     abi_ulong size;
     bool in_use;
+#ifdef CONFIG_BUILD_LIBLAT
+    dev_t dev;
+    ino_t inode;
+#endif
 } shm_regions[N_SHM_REGIONS];
 
 static abi_ulong target_brk;
@@ -5946,6 +5949,47 @@ abi_ulong latx_is_shm(abi_ulong maddr)
 #ifdef TARGET_I386
 static abi_long guest_mdwe_mmap(CPUState *cpu, abi_ulong len, int prot);
 #endif
+#ifdef CONFIG_BUILD_LIBLAT
+static bool liblat_shm_map_matches(const struct shm_region *region,
+                                   const MapInfo *map)
+{
+    return !map->is_priv && map->dev == region->dev &&
+           map->inode == region->inode;
+}
+
+static bool liblat_refresh_shm_regions(void)
+{
+    IntervalTreeRoot *maps = read_self_maps();
+
+    if (!maps) {
+        return false;
+    }
+    for (int i = 0; i < N_SHM_REGIONS; i++) {
+        struct shm_region *region = &shm_regions[i];
+        IntervalTreeNode *node;
+        uintptr_t start, last;
+        bool present = false;
+
+        if (!region->in_use) {
+            continue;
+        }
+        start = (uintptr_t)g2h_untagged(region->start);
+        last = start + region->size - 1;
+        for (node = interval_tree_iter_first(maps, start, last); node;
+             node = interval_tree_iter_next(node, start, last)) {
+            if (liblat_shm_map_matches(region,
+                                      container_of(node, MapInfo, itree))) {
+                present = true;
+                break;
+            }
+        }
+        region->in_use = present;
+    }
+    free_self_maps(maps);
+    return true;
+}
+#endif
+
 static inline abi_ulong do_shmat(CPUArchState *cpu_env,
                                  int shmid, abi_ulong shmaddr, int shmflg)
 {
@@ -5955,6 +5999,10 @@ static inline abi_ulong do_shmat(CPUArchState *cpu_env,
     struct shmid_ds shm_info;
     int i,ret;
     abi_ulong shmlba;
+#ifdef CONFIG_BUILD_LIBLAT
+    GArray *reservations = NULL;
+    int region_slot = -1;
+#endif
 
     /* shmat pointers are always untagged */
 
@@ -5979,6 +6027,33 @@ static inline abi_ulong do_shmat(CPUArchState *cpu_env,
     }
 
     mmap_lock();
+#ifdef CONFIG_BUILD_LIBLAT
+    if (!liblat_refresh_shm_regions()) {
+        mmap_unlock();
+        return -TARGET_ENOMEM;
+    }
+    for (i = 0; i < N_SHM_REGIONS; i++) {
+        if (!shm_regions[i].in_use) {
+            if (region_slot < 0) {
+                region_slot = i;
+            }
+        } else if (shmaddr &&
+                   shmaddr < shm_regions[i].start + shm_regions[i].size &&
+                   shm_regions[i].start < shmaddr + shm_info.shm_segsz) {
+            if (!(shmflg & SHM_REMAP) || shm_regions[i].start != shmaddr ||
+                shm_regions[i].size != shm_info.shm_segsz) {
+                mmap_unlock();
+                return -TARGET_EINVAL;
+            }
+            region_slot = i;
+            break;
+        }
+    }
+    if (region_slot < 0) {
+        mmap_unlock();
+        return -TARGET_ENOMEM;
+    }
+#endif
 
 #ifdef TARGET_I386
     ret = guest_mdwe_mmap(cpu, shm_info.shm_segsz,
@@ -6006,7 +6081,30 @@ static inline abi_ulong do_shmat(CPUArchState *cpu_env,
 #ifdef LATX_DEBUG
         fprintf(stderr, "[LATX-WARNING] %s:%d\n", __func__, __LINE__);
 #endif
-	    shmflg |= SHM_REMAP;
+#ifdef CONFIG_BUILD_LIBLAT
+        /* shmat replaces whole Host pages, unlike mmap's subpage emulation. */
+        for (abi_ulong page = shmaddr + TARGET_PAGE_ALIGN(shm_info.shm_segsz);
+             page < HOST_PAGE_ALIGN(shmaddr + shm_info.shm_segsz);
+             page += TARGET_PAGE_SIZE) {
+            if (page_get_flags(page) & PAGE_VALID) {
+                mmap_unlock();
+                return -TARGET_EINVAL;
+            }
+        }
+        if (!(shmflg & SHM_REMAP) &&
+            page_find_range_empty(shmaddr, shmaddr + shm_info.shm_segsz - 1,
+                                  shm_info.shm_segsz, TARGET_PAGE_SIZE) != shmaddr) {
+            mmap_unlock();
+            return -TARGET_EINVAL;
+        }
+        reservations = latx_liblat_reserve_fixed(shmaddr, shm_info.shm_segsz);
+        if (!reservations) {
+            ret = get_errno(-1);
+            mmap_unlock();
+            return ret;
+        }
+#endif
+        shmflg |= SHM_REMAP;
         host_raddr = shmat(shmid, (void *)g2h_untagged(shmaddr), shmflg);
     } else {
         abi_ulong mmap_start;
@@ -6017,11 +6115,23 @@ static inline abi_ulong do_shmat(CPUArchState *cpu_env,
         if (mmap_start == -1) {
             errno = ENOMEM;
             host_raddr = (void *)-1;
-        } else
+        } else {
+#ifdef CONFIG_BUILD_LIBLAT
+            reservations = latx_liblat_reserve_fixed(mmap_start, shm_info.shm_segsz);
+            if (!reservations) {
+                ret = get_errno(-1);
+                mmap_unlock();
+                return ret;
+            }
+#endif
             host_raddr = shmat(shmid, g2h_untagged(mmap_start),
                                shmflg | SHM_REMAP);
+        }
     }
 
+#ifdef CONFIG_BUILD_LIBLAT
+    latx_liblat_finish_reservations(reservations, host_raddr == (void *)-1);
+#endif
     if (host_raddr == (void *)-1) {
         mmap_unlock();
         return get_errno((long)host_raddr);
@@ -6037,6 +6147,27 @@ static inline abi_ulong do_shmat(CPUArchState *cpu_env,
                    (shmflg & SHM_RDONLY ? 0 : PAGE_WRITE) |
                    (shmflg & SHM_EXEC ? PAGE_EXEC : 0));
 
+#ifdef CONFIG_BUILD_LIBLAT
+    {
+        IntervalTreeRoot *maps = read_self_maps();
+        uintptr_t host = (uintptr_t)host_raddr;
+        IntervalTreeNode *node = maps
+            ? interval_tree_iter_first(maps, host, host) : NULL;
+        MapInfo *map = node ? container_of(node, MapInfo, itree) : NULL;
+
+        /* Record the backing object, not PAGE_MEMSHARE (also used by mmap). */
+        if (!map || map->is_priv || !map->inode) {
+            g_error("liblat cannot identify the attached SysV mapping");
+        }
+        i = region_slot;
+        shm_regions[i].in_use = true;
+        shm_regions[i].start = raddr;
+        shm_regions[i].size = shm_info.shm_segsz;
+        shm_regions[i].dev = map->dev;
+        shm_regions[i].inode = map->inode;
+        free_self_maps(maps);
+    }
+#else
     for (i = 0; i < N_SHM_REGIONS; i++) {
         if (!shm_regions[i].in_use) {
             shm_regions[i].in_use = true;
@@ -6046,6 +6177,7 @@ static inline abi_ulong do_shmat(CPUArchState *cpu_env,
         }
     }
 
+#endif
     mmap_unlock();
     return raddr;
 
@@ -6055,25 +6187,69 @@ static inline abi_long do_shmdt(abi_ulong shmaddr)
 {
     int i;
     abi_long rv;
+#ifdef CONFIG_BUILD_LIBLAT
+    IntervalTreeRoot *maps;
+#endif
 
     /* shmdt pointers are always untagged */
 
     mmap_lock();
 
+#ifdef CONFIG_BUILD_LIBLAT
+    for (i = 0; i < N_SHM_REGIONS; i++) {
+        if (shm_regions[i].in_use && shm_regions[i].start == shmaddr) {
+            break;
+        }
+    }
+    if (i == N_SHM_REGIONS ||
+        !latx_liblat_range_has_no_host_mapping(shmaddr, shm_regions[i].size)) {
+        mmap_unlock();
+        return -TARGET_EINVAL;
+    }
+    /* Snapshot before detaching while Guest mapping mutations are locked. */
+    maps = read_self_maps();
+    if (!maps) {
+        mmap_unlock();
+        return -TARGET_ENOMEM;
+    }
+#endif
     rv = get_errno(shmdt(g2h_untagged(shmaddr)));
     if (!is_error(rv)) {
         for (i = 0; i < N_SHM_REGIONS; ++i) {
             if (shm_regions[i].in_use && shm_regions[i].start == shmaddr) {
-#ifdef TARGET_I386
+#if defined(TARGET_I386) && !defined(CONFIG_BUILD_LIBLAT)
                 guest_vma_name_reset(shmaddr, shm_regions[i].size);
 #endif
+#ifdef CONFIG_BUILD_LIBLAT
+                uintptr_t start = (uintptr_t)g2h_untagged(shmaddr);
+                uintptr_t last = start + shm_regions[i].size - 1;
+                IntervalTreeNode *node;
+
+                for (node = interval_tree_iter_first(maps, start, last); node;
+                     node = interval_tree_iter_next(node, start, last)) {
+                    if (liblat_shm_map_matches(&shm_regions[i],
+                            container_of(node, MapInfo, itree))) {
+                        abi_ulong first = h2g_nocheck(
+                            (void *)MAX(start, node->start));
+                        abi_ulong end = h2g_nocheck(
+                            (void *)(MIN(last, node->last) + 1));
+
+                        guest_vma_name_reset(first, end - first);
+                        page_set_flags(first, end, 0);
+                    }
+                }
+#else
                 page_set_flags(shmaddr, shmaddr + shm_regions[i].size, 0);
+#endif
                 shm_regions[i].in_use = false;
                 break;
             }
         }
     }
 
+#ifdef CONFIG_BUILD_LIBLAT
+    free_self_maps(maps);
+#endif
     mmap_unlock();
 
     return rv;
@@ -17603,6 +17779,13 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
 #ifdef __NR_exit_group
         /* new thread calls */
     case TARGET_NR_exit_group:
+#ifdef CONFIG_LIBLAT_INITBIN
+        if (((CPUX86State *)cpu_env)->liblat_bootstrap_active) {
+            ((CPUX86State *)cpu_env)->liblat_bootstrap_status = arg1;
+            ((CPUX86State *)cpu_env)->liblat_bootstrap_complete = true;
+            return 0;
+        }
+#endif
         preexit_cleanup(cpu_env, arg1);
         /* dump basic block here. TODO */
 #ifdef CONFIG_LATX_AOT

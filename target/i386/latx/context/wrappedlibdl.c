@@ -1206,6 +1206,61 @@ EXPORT int my_dlinfo(void* handle, int request, void* info)
     return ret;
 }
 
+#ifdef CONFIG_LIBLAT
+static __thread char latx_loader_attach_error[] =
+    "KZT cannot attach the current Host thread to the Guest loader";
+
+static int latx_attach_loader_thread(void)
+{
+    if (lsenv && lsenv->cpu_state) {
+        return 0;
+    }
+    return latx_attach_current_host_thread();
+}
+
+
+EXPORT void *lat_dlopen(void *filename, int flags)
+{
+    if (latx_attach_loader_thread() != 0) {
+        return NULL;
+    }
+    return my_dlopen(filename, flags);
+}
+
+EXPORT void *lat_dlsym(void *handle, void *symbol)
+{
+    if (latx_attach_loader_thread() != 0) {
+        return NULL;
+    }
+    return my_dlsym(handle, symbol);
+}
+
+EXPORT int lat_dlinfo(void *handle, int request, void *info)
+{
+    if (latx_attach_loader_thread() != 0) {
+        return -1;
+    }
+    return my_dlinfo(handle, request, info);
+}
+
+EXPORT int lat_dlclose(void *handle)
+{
+    if (latx_attach_loader_thread() != 0) {
+        return -1;
+    }
+    __MY_CPU;
+    cpu->regs[R_EDI] = (uintptr_t)handle;
+    return my_dlclose(handle);
+}
+
+EXPORT char *lat_dlerror(void)
+{
+    if (latx_attach_loader_thread() != 0) {
+        return latx_loader_attach_error;
+    }
+    return my_dlerror();
+}
+#endif
 
 #ifndef CONFIG_LOONGARCH_NEW_WORLD
 #include "wrappedlib_init.h"

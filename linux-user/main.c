@@ -18,6 +18,7 @@
  */
 
 #include "library_private.h"
+#include "kzt-libc-semantic.h"
 #include "qemu/osdep.h"
 #include "qemu-common.h"
 #include "qemu/units.h"
@@ -80,6 +81,10 @@ int mydebug = 1;
 #include "kzt-groups.h"
 #include "kzt-guest-tls.h"
 #include "kzt-libc-semantic.h"
+#ifdef CONFIG_LIBLAT
+#include "latx/liblat.h"
+#include "cleanup.h"
+#endif
 #include "wrappertbbridge.h"
 box64context_t* my_context = NULL;
 elfheader_t* elf_header = NULL;
@@ -222,6 +227,9 @@ void fork_start(void)
     sigact_fork_start();
     path_fork_start();
     fd_trans_fork_start();
+#ifdef CONFIG_LIBLAT
+    cleanup_fork_start();
+#endif
     cpu_list_lock();
 }
 
@@ -231,6 +239,9 @@ void fork_end(int child)
     sigact_fork_end(child);
     path_fork_end(child);
     fd_trans_fork_end();
+#ifdef CONFIG_LIBLAT
+    cleanup_fork_end();
+#endif
     if (child) {
         CPUState *cpu, *next_cpu;
         /* Child processes created by fork() only have a single thread.
@@ -327,6 +338,11 @@ static CPUArchState *cpu_copy_into(CPUArchState *env, CPUState *new_cpu)
 
     new_cpu->tcg_cflags = cpu->tcg_cflags;
     memcpy(new_env, env, sizeof(CPUArchState));
+#ifdef CONFIG_LIBLAT_INITBIN
+    new_env->liblat_bootstrap_active = false;
+    new_env->liblat_bootstrap_complete = false;
+    new_env->liblat_bootstrap_status = 0;
+#endif
 #ifdef CONFIG_LATX_KZT
     /* Managed resources belong to one CPU and must not be inherited. */
     new_env->kzt_guest_stack_base = 0;
@@ -1373,11 +1389,25 @@ static int parse_args(int argc, char **argv)
 
     return optind;
 }
-
+#ifdef CONFIG_LIBLAT_INITBIN
+int lat_main(bool host_dispatch_signal, int argc, char **argv, char **envp);
+int lat_main(bool host_dispatch_signal, int argc, char **argv, char **envp)
+#else
 int main(int argc, char **argv, char **envp)
+#endif
 {
     struct target_pt_regs regs1, *regs = &regs1;
+#ifdef CONFIG_LIBLAT_INITBIN
+    /*
+     * TaskState outlives lat_main() when liblat is embedded in a host
+     * process.  Keep the binprm referenced by TaskState alive as well;
+     * a stack object becomes dangling as soon as the initial cpu_loop
+     * yields back to lat_init().
+     */
+    struct linux_binprm *bprm = g_new0(struct linux_binprm, 1);
+#else
     struct linux_binprm bprm;
+#endif
     TaskState *ts;
     CPUArchState *env;
     CPUState *cpu;
@@ -1569,7 +1599,11 @@ int main(int argc, char **argv, char **envp)
     /* Zero out image_info */
     memset(info, 0, sizeof(struct image_info));
 
+#ifdef CONFIG_LIBLAT_INITBIN
+    memset(bprm, 0, sizeof(*bprm));
+#else
     memset(&bprm, 0, sizeof (bprm));
+#endif
 
     init_qemu_uname_release();
 
@@ -1795,7 +1829,11 @@ int main(int argc, char **argv, char **envp)
     init_task_state(ts);
     /* build Task State */
     ts->info = info;
+#ifdef CONFIG_LIBLAT_INITBIN
+    ts->bprm = bprm;
+#else
     ts->bprm = &bprm;
+#endif
 #ifdef TARGET_I386
     info->prctl_mdwe = inherited_guest_mdwe;
 #endif
@@ -1813,8 +1851,13 @@ int main(int argc, char **argv, char **envp)
         _exit(EXIT_FAILURE);
     }
 #endif
+#ifdef CONFIG_LIBLAT_INITBIN
     ret = loader_exec(execfd, exec_path, target_argv, target_environ, regs,
+        info, bprm);
+#else
+     ret = loader_exec(execfd, exec_path, target_argv, target_environ, regs,
         info, &bprm);
+#endif
     if (ret != 0) {
         printf("Error while loading %s: %s\n", exec_path, strerror(-ret));
         _exit(EXIT_FAILURE);
@@ -1851,7 +1894,11 @@ int main(int argc, char **argv, char **envp)
         }
 #endif
 #if defined(CONFIG_LATX_KZT) && defined(TARGET_X86_64)
+#ifdef CONFIG_LIBLAT_INITBIN
+    kzt_init(argv, argc, target_argv, target_argc, bprm);
+#else
     kzt_init(argv, argc, target_argv, target_argc, &bprm);
+#endif
 #endif
     for (wrk = target_environ; *wrk; wrk++) {
         g_free(*wrk);
@@ -1879,6 +1926,9 @@ int main(int argc, char **argv, char **envp)
 
     target_set_brk(info->brk);
     syscall_init();
+#ifdef CONFIG_LIBLAT_INITBIN
+    my_context->host_dispatch_signal = host_dispatch_signal;
+#endif
     signal_init();
 
 #ifndef CONFIG_LATX
@@ -1908,7 +1958,100 @@ int main(int argc, char **argv, char **envp)
 #ifdef CONFIG_LATX_PERF
     latx_timer_start(TIMER_PROCESS);
 #endif
+#ifdef CONFIG_LIBLAT_INITBIN
+    env->liblat_bootstrap_active = true;
+#endif
     cpu_loop(env);
+#ifdef CONFIG_LIBLAT_INITBIN
+    env->liblat_bootstrap_active = false;
+    if (!env->liblat_bootstrap_complete) {
+        return -1;
+    }
+    env->liblat_bootstrap_complete = false;
+    return env->liblat_bootstrap_status == 0 ? 0 : -1;
+#else
     /* never exits */
     return 0;
+#endif
 }
+
+#ifdef CONFIG_LIBLAT
+#ifdef CONFIG_LIBLAT_INITBIN
+static GMutex liblat_init_lock;
+static bool liblat_started;
+#endif
+
+int lat_init(bool host_dispatch_signal, int argc, char **argv,
+             LatHostSymbolQuery check_host_fun,
+             LatHostSymbolOffsetQuery get_host_symbol_offs)
+{
+    int ret = 0;
+#ifdef CONFIG_LIBLAT_INITBIN
+    Elf64_Ehdr header;
+    struct stat file_info;
+    int fd;
+    ssize_t count;
+    bool valid_file;
+
+    if (argc != 2 || !argv || !argv[0] || !argv[1]) {
+        return -EINVAL;
+    }
+    if (host_dispatch_signal) {
+        /* signal_init currently owns the process handlers in this profile. */
+        return -ENOTSUP;
+    }
+    fd = open(argv[1], O_RDONLY | O_CLOEXEC | O_NONBLOCK);
+    if (fd < 0) {
+        return -errno;
+    }
+    count = read(fd, &header, sizeof(header));
+    valid_file = fstat(fd, &file_info) == 0 && S_ISREG(file_info.st_mode);
+    close(fd);
+    if (count != (ssize_t)sizeof(header) || !valid_file ||
+        memcmp(header.e_ident, ELFMAG, SELFMAG) ||
+        header.e_ident[EI_CLASS] != ELFCLASS64 ||
+        header.e_ident[EI_DATA] != ELFDATA2LSB ||
+        header.e_ident[EI_VERSION] != EV_CURRENT ||
+        le32_to_cpu(header.e_version) != EV_CURRENT ||
+        le16_to_cpu(header.e_machine) != EM_X86_64 ||
+        (le16_to_cpu(header.e_type) != ET_EXEC &&
+         le16_to_cpu(header.e_type) != ET_DYN) ||
+        le16_to_cpu(header.e_ehsize) != sizeof(header) ||
+        le16_to_cpu(header.e_phentsize) != sizeof(Elf64_Phdr) ||
+        le16_to_cpu(header.e_phnum) == 0 ||
+        le64_to_cpu(header.e_phoff) > (uint64_t)file_info.st_size ||
+        le16_to_cpu(header.e_phnum) >
+            ((uint64_t)file_info.st_size - le64_to_cpu(header.e_phoff)) /
+                sizeof(Elf64_Phdr)) {
+        return -ENOEXEC;
+    }
+    g_mutex_lock(&liblat_init_lock);
+    if (liblat_started) {
+        g_mutex_unlock(&liblat_init_lock);
+        return -EALREADY;
+    }
+    liblat_started = true;
+    g_mutex_unlock(&liblat_init_lock);
+
+    ret = lat_main(host_dispatch_signal, argc, argv, environ);
+    if (ret || !my_context || !thread_cpu) {
+        return -EIO;
+    }
+    if (latx_kzt_guest_tls_enabled()) {
+        CPUX86State *env = thread_cpu->env_ptr;
+
+        if (kzt_libc_semantic_initialize(env) != 0 ||
+            (!kzt_libc_semantic_process_ready() &&
+             kzt_libc_semantic_prepare_process_locale(env) != 0)) {
+            return -EIO;
+        }
+    }
+#endif
+    if (!my_context) {
+        return -EINVAL;
+    }
+    my_context->check_host_fun = check_host_fun;
+    my_context->get_host_symbol_offs = get_host_symbol_offs;
+    return ret;
+}
+#endif

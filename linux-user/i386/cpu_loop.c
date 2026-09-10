@@ -203,7 +203,6 @@ int syscall_64_to_32[TARGET32_TARGET_NR_LATX_LAST + 1] = {0};
 #include "syscall_64_to_32_map.h"
 #include "lsenv.h"
 #endif
-
 void cpu_loop(CPUX86State *env)
 {
     CPUState *cs = env_cpu(env);
@@ -216,6 +215,12 @@ void cpu_loop(CPUX86State *env)
      INIT_SYSCALL_64_TO_32();
  #endif
     for(;;) {
+#ifdef CONFIG_LIBLAT_INITBIN
+        if (env->liblat_bootstrap_active &&
+            env->liblat_bootstrap_complete) {
+            break;
+        }
+#endif
         cpu_exec_start(cs);
         trapnr = cpu_exec(cs);
         cpu_exec_end(cs);

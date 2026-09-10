@@ -95,6 +95,9 @@ my_file = files(
   'wrappertbbridge.c'
   )
 
+if 'CONFIG_LIBLAT' in config_host
+  my_file += files('cleanup.c')
+endif
 
 i386_ss.add(when: 'CONFIG_LATX', if_true: my_file)
 i386_ss.add(when: 'CONFIG_LATX_KZT', if_true: files('kzt-guest-tls.c'))

@@ -3,6 +3,10 @@
 
 typedef struct library_s library_t;
 typedef struct needed_libs_s needed_libs_t;
+#include "config-host.h"
+#ifdef CONFIG_LIBLAT
+typedef struct cleanup_s cleanup_t;
+#endif
 
 #include "elf.h"
 #include "elfloader.h"
@@ -102,6 +106,12 @@ struct elfheader_s {
     int         had_RelocateElf;
     int         latx_type;
     int         latx_hasfix;
+#ifdef CONFIG_LIBLAT
+    uintptr_t           link_map_addr;
+    cleanup_t           *cleanups;          // atexit functions
+    int                 clean_sz;
+    int                 clean_cap;
+#endif
 };
 int LoadSHNative(int fd, Elf64_Shdr *s, void** SH, const char* name, uint32_t type);
 int LoadSH(FILE *f, Elf64_Shdr *s, void** SH, const char* name, uint32_t type);

@@ -457,10 +457,17 @@ void EXPORT my___gmon_start__(void)
     printf_log(LOG_DEBUG, "__gmon_start__ called (dummy call)\n");
 }
 
-#if 0
+#ifdef CONFIG_LIBLAT
+#include "cleanup.h"
 int EXPORT my___cxa_atexit(void* p, void* a, void* dso_handle)
 {
-    AddCleanup1Arg(p, a, dso_handle);
+    elfheader_t *head = dso_handle
+        ? FindElfAddress(my_context, (uintptr_t)dso_handle) : NULL;
+
+    if (!p || (dso_handle && !head)) {
+        return -1;
+    }
+    AddCleanup1Arg(p, a, head);
     return 0;
 }
 void EXPORT my___cxa_finalize(void* p)
@@ -470,11 +477,11 @@ void EXPORT my___cxa_finalize(void* p)
         CallAllCleanup();
         return;
     }
-    CallCleanup(p);
+    CallCleanup(FindElfAddress(my_context, (uintptr_t)p));
 }
 int EXPORT my_atexit(void *p)
 {
-    AddCleanup(p, NULL);   // should grab current dso_handle?
+    AddCleanup(p);
     return 0;
 }
 #endif

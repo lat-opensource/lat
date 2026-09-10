@@ -20,6 +20,8 @@ sh = find_program('sh')
 cc = meson.get_compiler('c')
 config_host = keyval.load(meson.current_build_dir() / 'config-host.mak')
 enable_static = 'CONFIG_STATIC' in config_host
+latx_build_liblat = 'CONFIG_BUILD_LIBLAT' in config_host
+
 # Allow both shared and static libraries unless --enable-static
 static_kwargs = enable_static ? {'static': true} : {}
 
@@ -434,9 +436,16 @@ stub_ss = stub_ss.apply(config_all, strict: false)
 
 util_ss.add_all(trace_ss)
 util_ss = util_ss.apply(config_all, strict: false)
+if latx_build_liblat
+libqemuutil = static_library('qemuutil',
+                             sources: util_ss.sources() + stub_ss.sources() + genh,
+                             dependencies: [util_ss.dependencies(), m, glib, socket, malloc],
+                             pic: true)
+else
 libqemuutil = static_library('qemuutil',
                              sources: util_ss.sources() + stub_ss.sources() + genh,
                              dependencies: [util_ss.dependencies(), m, glib, socket, malloc])
+endif
 qemuutil = declare_dependency(link_with: libqemuutil,
                               sources: genh + version_res)
 
@@ -494,15 +503,34 @@ specific_ss.add_all(when: 'CONFIG_LINUX_USER', if_true: linux_user_ss)
 
 nm = find_program('nm')
 qom_ss = qom_ss.apply(config_host, strict: false)
+if latx_build_liblat
+libqom = static_library('qom', qom_ss.sources() + genh,
+                        dependencies: [qom_ss.dependencies()],
+                        name_suffix: 'fa',
+                        pic: true)
+else
 libqom = static_library('qom', qom_ss.sources() + genh,
                         dependencies: [qom_ss.dependencies()],
                         name_suffix: 'fa')
+endif
 
 qom = declare_dependency(link_whole: libqom)
 
+if latx_build_liblat
+libhwcore = static_library('hwcore', sources: hwcore_files + genh,
+                           name_suffix: 'fa',
+                           build_by_default: false,
+                           pic: true)
+libhwcore_shared_library = shared_library('hwcore', sources: hwcore_files + genh,
+                           build_by_default: true,
+                           install: true,
+                           c_args: '-DCONFIG_LIBLAT',
+                           link_with: [libqom, libqemuutil])
+else
 libhwcore = static_library('hwcore', sources: hwcore_files + genh,
                            name_suffix: 'fa',
                            build_by_default: false)
+endif
 hwcore = declare_dependency(link_whole: libhwcore)
 common_ss.add(hwcore)
 
@@ -515,11 +543,20 @@ common_ss.add(qom, qemuutil)
 common_ss.add_all(when: 'CONFIG_USER_ONLY', if_true: user_ss)
 
 common_all = common_ss.apply(config_all, strict: false)
+if latx_build_liblat
+common_all = static_library('common',
+                            build_by_default: false,
+                            sources: common_all.sources() + genh,
+                            dependencies: common_all.dependencies(),
+                            name_suffix: 'fa',
+                            pic: true)
+else
 common_all = static_library('common',
                             build_by_default: false,
                             sources: common_all.sources() + genh,
                             dependencies: common_all.dependencies(),
                             name_suffix: 'fa')
+endif
 
 feature_to_c = find_program('scripts/feature_to_c.sh')
 
@@ -576,6 +613,17 @@ foreach target : target_dirs
   arch_srcs += target_specific.sources()
   arch_deps += target_specific.dependencies()
 
+  if latx_build_liblat
+  lib = static_library('qemu-' + target,
+                 sources: arch_srcs + genh,
+                 dependencies: arch_deps,
+                 objects: objects,
+                 include_directories: target_inc,
+                 c_args: c_args,
+                 build_by_default: false,
+                 name_suffix: 'fa',
+                 pic: true)
+  else
   lib = static_library('qemu-' + target,
                  sources: arch_srcs + genh,
                  dependencies: arch_deps,
@@ -584,6 +632,7 @@ foreach target : target_dirs
                  c_args: c_args,
                  build_by_default: false,
                  name_suffix: 'fa')
+  endif
 
   if get_option('tests').enabled() and \
      target in ['x86_64-linux-user', 'i386-linux-user'] and \
@@ -753,6 +802,20 @@ foreach target : target_dirs
     )
   endif
 
+if 'CONFIG_BUILD_LIBLAT' in config_host
+  install_headers('include/latx/liblat.h', subdir: 'latx')
+  liblat = shared_library('lat-' + target,
+                 sources: arch_srcs + genh,
+                 dependencies: arch_deps,
+                 objects: objects,
+                 include_directories: target_inc,
+                 c_args: c_args,
+                 build_by_default: true,
+                 install: true,
+                 link_with: [libhwcore_shared_library, libqom, libqemuutil],
+                 link_args: ['-Wl,-z,nodelete'],
+                 install_rpath: get_option('prefix') / get_option('libdir'))
+else
     execs = [{
       'name': 'latx-' + target_name,
       'sources': [],
@@ -786,6 +849,7 @@ foreach target : target_dirs
     endif
 
   endforeach
+endif
 endforeach
 
 # Other build targets
