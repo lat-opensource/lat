@@ -99,8 +99,24 @@ if 'x86_64-linux-user' in target_dirs and \
     'timeout': 120,
   }]
 
+  latx_integration_tests += [{
+    'name': 'test-kzt-host-thread-tls',
+    'runner': find_program('../../test-kzt-host-thread-tls.sh'),
+    'args': [
+      emulators['latx-x86_64'],
+      files('../../kzt-host-thread-tls-guest.c'),
+      files('../../kzt-host-thread-tls-guest-plugin.c'),
+      files('../../kzt-host-thread-tls-probe.c'),
+      files('../../x11-async-bridge-dummy.c'),
+      files('../../kzt-host-thread-tls-ie-plugin.c'),
+      files('../../kzt-host-thread-cxx-tls-plugin.cpp'),
+      files('../../kzt-host-thread-tls-guest-plugin-b.c'),
+      files('../../kzt-host-thread-tls-tlsdesc-plugin.c'),
+    ],
+    'timeout': 120,
+  }]
 
-    foreach mode : ['dtv', 'read', 'futex', 'seccomp', 'seccomp-restart-code',
+  foreach mode : ['dtv', 'read', 'futex', 'seccomp', 'seccomp-restart-code',
                   'attached-seccomp',
                   'attached-seccomp-restart-code', 'flush']
     latx_integration_tests += [{
@@ -114,6 +130,6 @@ if 'x86_64-linux-user' in target_dirs and \
         files('../../x11-async-bridge-dummy.c'),
       ],
       'timeout': 60,
-    }]
+  }]
   endforeach
 endif

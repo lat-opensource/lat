@@ -1,6 +1,7 @@
 latx_integration_tests = []
 
-if host_machine.cpu_family() == 'loongarch64'
+if host_machine.cpu_family() == 'loongarch64' and \
+   'CONFIG_BUILD_LIBLAT' not in config_host
   subdir('registrations/x11-kzt')
   subdir('registrations/sandbox')
   subdir('registrations/process')
@@ -11,4 +12,5 @@ if host_machine.cpu_family() == 'loongarch64'
   subdir('registrations/hbr')
 endif
 
+subdir('registrations/liblat')
 subdir('registrations')
