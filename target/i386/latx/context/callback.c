@@ -452,7 +452,8 @@ static int run_guest_callback_impl(uintptr_t entry, const long *gpr_args,
                       int xmm_count, const long *stack_args,
                       int stack_count, long *rax, long *rdx,
                       long *xmm0, long *xmm1,
-                      unsigned __int128 *st0, LatxGuestCallKind kind)
+                      unsigned __int128 *st0, LatxGuestCallKind kind,
+                      bool allow_existing_cpu)
 {
 #ifndef TARGET_X86_64
     return -1;
@@ -468,7 +469,8 @@ static int run_guest_callback_impl(uintptr_t entry, const long *gpr_args,
         (xmm_count && !xmm_args) || (stack_count && !stack_args)) {
         return -1;
     }
-    if (!latx_kzt_guest_tls_enabled() ||
+    if ((!latx_kzt_guest_tls_enabled() &&
+         !(allow_existing_cpu && lsenv && lsenv->cpu_state)) ||
         callback_scope_enter(&scope, kind) != 0) {
         return -1;
     }
@@ -521,7 +523,7 @@ int latx_run_guest_callback(uintptr_t entry, const long *gpr_args,
 {
     return run_guest_callback_impl(entry, gpr_args, gpr_count, xmm_args,
         xmm_count, stack_args, stack_count, rax, rdx, xmm0, xmm1, st0,
-        LATX_GUEST_USER_CALLBACK);
+        LATX_GUEST_USER_CALLBACK, false);
 }
 
 int latx_run_guest_callback_with_libc(uintptr_t entry, const long *gpr_args,
@@ -533,5 +535,77 @@ int latx_run_guest_callback_with_libc(uintptr_t entry, const long *gpr_args,
 {
     return run_guest_callback_impl(entry, gpr_args, gpr_count, xmm_args,
         xmm_count, stack_args, stack_count, rax, rdx, xmm0, xmm1, st0,
-        LATX_GUEST_LIBC_CALLBACK);
+        LATX_GUEST_LIBC_CALLBACK, false);
 }
+
+#ifdef CONFIG_LIBLAT
+#include <string.h>
+
+void call_loongarch64_fun(const char *signature, uintptr_t entry,
+                          latx_native_callback_stub_t callback_stub,
+                          uintptr_t variadic_adapter,
+                          const char *variadic_signature)
+{
+    CPUX86State *cpu = (CPUX86State *)lsenv->cpu_state;
+    CPUState *cs = env_cpu(cpu);
+    int old_running = qatomic_read(&cs->running);
+    uint64_t gpr_args[LATX_CALLBACK_GPR_ARGS] = {
+        cpu->regs[R_EDI], cpu->regs[R_ESI], cpu->regs[R_EDX],
+        cpu->regs[R_ECX], cpu->regs[R_R8], cpu->regs[R_R9],
+    };
+    uint64_t xmm_args[LATX_CALLBACK_XMM_ARGS] = {
+        cpu->xmm_regs[0].ZMM_Q(0), cpu->xmm_regs[1].ZMM_Q(0),
+        cpu->xmm_regs[2].ZMM_Q(0), cpu->xmm_regs[3].ZMM_Q(0),
+        cpu->xmm_regs[4].ZMM_Q(0), cpu->xmm_regs[5].ZMM_Q(0),
+        cpu->xmm_regs[6].ZMM_Q(0), cpu->xmm_regs[7].ZMM_Q(0),
+    };
+    (void)variadic_signature;
+
+    kzt_libc_semantic_guest_to_host_enter(cpu);
+    qatomic_set(&cs->running, false);
+    callback_stub(signature, entry, (long *)gpr_args,
+                  (long *)xmm_args,
+                  (char *)(uintptr_t)(cpu->regs[R_ESP] + 8),
+                  (long *)&cpu->regs[R_EAX],
+                  (long *)&cpu->regs[R_EDX],
+                  (long *)&cpu->xmm_regs[0].ZMM_Q(0),
+                  (double *)&cpu->fpregs[(cpu->fpstt) & 7].d.low,
+                  variadic_adapter);
+    qatomic_set(&cs->running, old_running);
+    kzt_libc_semantic_guest_to_host_leave(cpu);
+}
+
+void lat_dlrun_method(uintptr_t entry, const long *gpr_args,
+                      int gpr_count, const long *xmm_args,
+                      int xmm_count, const long *stack_args,
+                      int stack_count, long *rax, long *rdx,
+                      long *xmm0, long *xmm1,
+                      unsigned __int128 *st0)
+{
+#ifdef CONFIG_BUILD_LIBLAT
+    /*
+     * Standalone liblat initializes a Guest CPU through init.bin. Its calls
+     * remain valid without the optional Host-thread Guest TLS projection.
+     * TLS-enabled calls still enter the normal scope and semantic guards.
+     */
+    if (run_guest_callback_impl(entry, gpr_args, gpr_count, xmm_args,
+                                xmm_count, stack_args, stack_count,
+                                rax, rdx, xmm0, xmm1, st0,
+                                LATX_GUEST_LIBC_CALLBACK, true) != 0) {
+        fprintf(stderr, "liblat cannot execute Guest callback\n");
+        abort();
+    }
+#else
+    latx_run_guest_callback_with_libc(entry, gpr_args, gpr_count, xmm_args,
+                            xmm_count, stack_args, stack_count,
+                            rax, rdx, xmm0, xmm1, st0);
+#endif
+}
+
+uintptr_t get_next_pc(void)
+{
+    CPUX86State *cpu = (CPUX86State *)lsenv->cpu_state;
+
+    return Pop64(cpu);
+}
+#endif

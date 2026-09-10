@@ -31,7 +31,9 @@
 #include "trace/mem.h"
 #include <dlfcn.h>
 #include "loongarch-extcontext.h"
-
+#ifdef CONFIG_LIBLAT
+#include "box64context.h"
+#endif
 #ifdef CONFIG_LATX
 #include "qemu.h"
 #include "latx-options.h"
@@ -1344,6 +1346,18 @@ int cpu_signal_handler(int host_signum, void *pinfo,
     insn = *(uint32_t *)pc;     \
 } while (0)
 
+#ifdef CONFIG_LIBLAT
+    if (current_cpu == NULL) {
+#ifndef CONFIG_LOONGARCH_NEW_WORLD
+        sigset_t *puc_sigmask =
+            (sigset_t *)((void *)&uc->uc_mcontext + 0x1540);
+
+        return handle_cpu_signal(pc, info, false, puc_sigmask);
+#else
+        return handle_cpu_signal(pc, info, false, &uc->uc_sigmask);
+#endif
+    }
+#endif
 #ifndef CONFIG_SOFTMMU
     if (info->si_signo == SIGSEGV &&
         info->si_code == SEGV_MAPERR &&

@@ -57,6 +57,8 @@ typedef struct kzt_libc_semantic_state {
      */
     kzt_libc_locale_projection_t *locale_projections;
     kzt_libc_semantic_frame_t frames[KZT_LIBC_SEMANTIC_MAX_DEPTH];
+    kzt_libc_semantic_frame_t *extra_frames;
+    size_t extra_capacity;
     size_t depth;
     size_t internal_depth;
     size_t internal_overflow_depth;
@@ -824,6 +826,11 @@ void kzt_libc_semantic_process_reset(CPUX86State *env)
         /* A replacement Guest image cannot execute the old allocator. */
         kzt_libc_release_locale_projections(env->kzt_libc_semantic_state,
                                            false);
+        if (env->kzt_libc_semantic_state) {
+            kzt_libc_semantic_state_t *state = env->kzt_libc_semantic_state;
+
+            g_free(state->extra_frames);
+        }
         g_free(env->kzt_libc_semantic_state);
         env->kzt_libc_semantic_state = NULL;
     }
@@ -897,6 +904,11 @@ void kzt_libc_semantic_destroy(CPUX86State *env)
 {
     if (env) {
         kzt_libc_release_locale_projections(env->kzt_libc_semantic_state, true);
+        if (env->kzt_libc_semantic_state) {
+            kzt_libc_semantic_state_t *state = env->kzt_libc_semantic_state;
+
+            g_free(state->extra_frames);
+        }
         g_free(env->kzt_libc_semantic_state);
         env->kzt_libc_semantic_state = NULL;
     }
@@ -951,6 +963,14 @@ void kzt_libc_semantic_internal_leave(CPUX86State *env)
     }
 }
 
+static kzt_libc_semantic_frame_t *kzt_libc_semantic_frame_at(
+    kzt_libc_semantic_state_t *state, size_t index)
+{
+    return index < KZT_LIBC_SEMANTIC_MAX_DEPTH
+        ? &state->frames[index]
+        : &state->extra_frames[index - KZT_LIBC_SEMANTIC_MAX_DEPTH];
+}
+
 static kzt_libc_semantic_frame_t *kzt_libc_semantic_push(
     kzt_libc_semantic_state_t *state,
     kzt_libc_semantic_direction_t direction)
@@ -958,10 +978,27 @@ static kzt_libc_semantic_frame_t *kzt_libc_semantic_push(
     kzt_libc_semantic_frame_t *frame;
 
     if (!state || state->internal_depth || state->internal_overflow_depth ||
-        state->depth == KZT_LIBC_SEMANTIC_MAX_DEPTH) {
+        state->depth == SIZE_MAX) {
         return NULL;
     }
-    frame = &state->frames[state->depth++];
+    if (state->depth >= KZT_LIBC_SEMANTIC_MAX_DEPTH &&
+        state->depth - KZT_LIBC_SEMANTIC_MAX_DEPTH == state->extra_capacity) {
+        size_t capacity;
+        kzt_libc_semantic_frame_t *extra;
+
+        if (state->extra_capacity > SIZE_MAX / sizeof(*extra) / 2) {
+            return NULL;
+        }
+        capacity = state->extra_capacity ? state->extra_capacity * 2
+                                        : KZT_LIBC_SEMANTIC_MAX_DEPTH;
+        extra = g_try_realloc_n(state->extra_frames, capacity, sizeof(*extra));
+        if (!extra) {
+            return NULL;
+        }
+        state->extra_frames = extra;
+        state->extra_capacity = capacity;
+    }
+    frame = kzt_libc_semantic_frame_at(state, state->depth++);
     memset(frame, 0, sizeof(*frame));
     frame->direction = direction;
     return frame;
@@ -972,7 +1009,8 @@ static int kzt_libc_semantic_pop(
     kzt_libc_semantic_direction_t direction)
 {
     if (!state || !state->depth ||
-        state->frames[state->depth - 1].direction != direction) {
+        kzt_libc_semantic_frame_at(state, state->depth - 1)->direction !=
+            direction) {
         return -1;
     }
     --state->depth;
@@ -1037,7 +1075,7 @@ void kzt_libc_semantic_host_to_guest_leave(CPUX86State *env)
         return;
     }
     if (!state || !state->depth ||
-        state->frames[state->depth - 1].direction !=
+        kzt_libc_semantic_frame_at(state, state->depth - 1)->direction !=
             KZT_LIBC_HOST_TO_GUEST) {
         return;
     }
@@ -1115,7 +1153,7 @@ void kzt_libc_semantic_guest_to_host_enter(CPUX86State *env)
     }
     if (!kzt_libc_semantic_push(state, KZT_LIBC_GUEST_TO_HOST)) {
         kzt_libc_semantic_abort_boundary(
-            "Guest-to-Host call-frame depth exceeded");
+            "cannot allocate Guest-to-Host call frame");
     }
     g_mutex_lock(&kzt_libc_locale_sync_lock);
     locale_result =
@@ -1155,7 +1193,7 @@ void kzt_libc_semantic_guest_to_host_leave(CPUX86State *env)
         return;
     }
     if (!state->depth ||
-        state->frames[state->depth - 1].direction !=
+        kzt_libc_semantic_frame_at(state, state->depth - 1)->direction !=
             KZT_LIBC_GUEST_TO_HOST) {
         return;
     }

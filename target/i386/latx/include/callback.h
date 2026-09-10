@@ -24,5 +24,18 @@ int latx_run_guest_callback_with_libc(
     int stack_count, long *rax, long *rdx, long *xmm0, long *xmm1,
     unsigned __int128 *st0);
 
+#ifdef CONFIG_LIBLAT
+#include "latx/liblat.h"
+typedef uint64_t (*latx_native_callback_stub_t)(
+    const char *signature, uintptr_t entry, long *gpr_args,
+    long *xmm_args, char *stack_args, long *rax, long *rdx,
+    long *xmm0, double *st0, uintptr_t variadic_adapter);
+
+void call_loongarch64_fun(const char *signature, uintptr_t entry,
+                          latx_native_callback_stub_t callback_stub,
+                          uintptr_t variadic_adapter,
+                          const char *variadic_signature);
+uintptr_t get_next_pc(void);
+#endif
 
 #endif //__CALLBACK_H__

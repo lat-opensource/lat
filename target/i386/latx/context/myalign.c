@@ -3445,6 +3445,9 @@ static int kzt_try_bind_loaded_object(
 
     kzt_report_object_recovery_if_needed(object, name_copy);
     AddElfHeader(my_context, h);
+#ifdef CONFIG_LIBLAT
+    h->link_map_addr = (uintptr_t)object->link_map_addr;
+#endif
     collectX86free(h);
     if (!x86free && !strcmp(rbasename, libcName)) {
         struct malloc_map *m = SearchMallocMap(my_context, (char *)libcName);
@@ -4117,3 +4120,28 @@ elfheader_t* loadElfFromFile(const char* name)
     return h;
 }
 #pragma GCC diagnostic pop
+
+#ifdef CONFIG_LIBLAT
+#include <myalign.h>
+
+bool is_lat_signal(const void *pc)
+{
+    uintptr_t target = (uintptr_t)pc;
+    uintptr_t start = (uintptr_t)tcg_init_ctx.code_gen_buffer;
+    uintptr_t size = tcg_init_ctx.code_gen_buffer_size;
+
+    return target && start && size <= UINTPTR_MAX - start &&
+           target >= start && target < start + size;
+}
+
+bool is_lat_symbol(const void *addr)
+{
+    return addr && kzt_find_guest_link_map_by_address((uintptr_t)addr) != 0;
+}
+
+/* Keep the entry point used by existing libnbl binaries. */
+bool is_lat_method(const void *addr)
+{
+    return is_lat_symbol(addr);
+}
+#endif

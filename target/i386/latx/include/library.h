@@ -50,5 +50,8 @@ lib_t* GetMaplib(library_t* lib);
 int GetElfIndex(library_t* lib);    // -1 if no elf (i.e. native)
 void* GetHandle(library_t* lib);    // NULL if not native
 int IsEmuLib(library_t* lib);
+#ifdef CONFIG_LIBLAT_CALLBACK
+int isEssentialLib(const char* name);
+#endif
 
 #endif //__LIBRARY_H_

@@ -64,7 +64,6 @@ extern struct elfheader_s * elf_header;
 #include "jrra.h"
 #endif
 /* -icount align implementation. */
-
 typedef struct SyncClocks {
     int64_t diff_clk;
     int64_t last_cpu_icount;
@@ -733,6 +732,11 @@ inline void tb_add_jump(TranslationBlock *tb, int n,
 #include "tu.h"
 #endif
 
+#ifdef CONFIG_LIBLAT
+#include "callback.h"
+#include "box64context.h"
+#endif
+
 static inline TranslationBlock *tb_find(CPUState *cpu,
                                         TranslationBlock *last_tb,
                                         int tb_exit, uint32_t cflags)
@@ -744,6 +748,33 @@ static inline TranslationBlock *tb_find(CPUState *cpu,
 
     cpu_get_tb_cpu_state(env, &pc, &cs_base, &flags);
 
+#ifdef CONFIG_LIBLAT
+    const char *method_signature = NULL;
+    char v_signature[1024] = {0};
+    uintptr_t callback_stub = 0;
+    uintptr_t variadic_adapter = 0;
+
+    if (pc == (uintptr_t)&RunFunctionWithState) {
+        env->eip = pc;
+        return NULL;
+    }
+    if (my_context && my_context->check_host_fun) {
+        method_signature = my_context->check_host_fun(
+            (uintptr_t)pc, &callback_stub, &variadic_adapter,
+            v_signature);
+    }
+    if (method_signature && callback_stub) {
+        call_loongarch64_fun(
+            method_signature, (uintptr_t)pc,
+            (latx_native_callback_stub_t)callback_stub,
+            variadic_adapter, v_signature);
+        pc = get_next_pc();
+        env->eip = pc;
+        if (pc == (uintptr_t)&RunFunctionWithState) {
+            return NULL;
+        }
+    }
+#endif
     tb = tb_lookup(cpu, pc, cs_base, flags, cflags);
 #ifdef CONFIG_LATX_AOT
     if (tb == NULL && option_aot) {
@@ -1205,6 +1236,11 @@ int cpu_exec(CPUState *cpu)
             }
 
             tb = tb_find(cpu, last_tb, tb_exit, cflags);
+#ifdef CONFIG_LIBLAT
+            if (tb == NULL) {
+                break;
+            }
+#endif
 #ifdef CONFIG_LATX_DEBUG
             trace_tb_execution(tb);
 #endif
