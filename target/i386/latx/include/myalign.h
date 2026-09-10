@@ -187,4 +187,7 @@ int kzt_materialize_guest_tls_image(
     void *destination,
     size_t destination_size);
 elfheader_t* loadElfFromFile(const char* name);
+#ifdef CONFIG_LIBLAT
+#include "latx/liblat.h"
+#endif
 #endif  //__MY_ALIGN__H_

@@ -29,6 +29,12 @@ typedef void* (*vkprocaddess_t)(void* instance, const char* name);
 
 #define MAX_SIGNAL 64
 
+#ifdef CONFIG_LIBLAT
+typedef const char *(*latx_check_host_fun_t)(
+    uintptr_t entry, void *callback_stub,
+    void *variadic_adapter, char *variadic_signature);
+#endif
+
 typedef struct needed_libs_s {
     int         cap;
     int         size;
@@ -346,6 +352,11 @@ typedef struct box64context_s {
     struct latx_kzt_debug **latx_kzt_debugs;
     int                 latx_kzt_debugcap;
     int                 latx_kzt_debugsize;        // number of latx_kzt_debug
+#endif
+#ifdef CONFIG_LIBLAT
+    latx_check_host_fun_t check_host_fun;
+    bool host_dispatch_signal;
+    void (*get_host_symbol_offs)(const char* symname, uintptr_t* offs);
 #endif
 } box64context_t;
 
