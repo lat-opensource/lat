@@ -71,6 +71,7 @@ static void tr_generate_exit_tb_for_bridge(void)
     TranslationBlock *tb = lsenv->tr_data->curr_tb;
     IR2_OPND base = ra_alloc_data();
     IR2_OPND target = ra_alloc_data();
+    materialize_deferred_ymmh_zeros_for_exit();
     la_data_li(base, (ADDR)tb->tc.ptr);
     if (!qemu_loglevel_mask(CPU_LOG_TB_NOCHAIN)) {
         la_data_li(target, indirect_jmp_glue);

@@ -34,8 +34,8 @@ bool translate_vcvtps2pd(IR1_INST * pir1) {
         IR2_OPND temp = ra_alloc_ftemp();
 
         la_vfcvtl_d_s(temp, src);
-        set_high128_xreg_to_zero(temp);
         la_xvori_b(dest, temp, 0);
+        set_high128_xreg_to_zero(dest);
     }
     return true;
 }
@@ -60,8 +60,8 @@ bool translate_vcvtpd2ps(IR1_INST * pir1) {
 
         la_xvpermi_q(temp, src, XVPERMI_Q_4_0(1, 1));
         la_vfcvt_s_d(temp, temp, src);
-        set_high128_xreg_to_zero(temp);
         la_xvori_b(dest, temp, 0);
+        set_high128_xreg_to_zero(dest);
     } else {
         lsassert(0);
     }
@@ -87,8 +87,8 @@ bool translate_vcvtdq2ps(IR1_INST * pir1) {
         IR2_OPND temp = ra_alloc_ftemp();
 
         la_vffint_s_w(temp, src);
-        set_high128_xreg_to_zero(temp);
         la_xvori_b(dest, temp, 0);
+        set_high128_xreg_to_zero(dest);
     }
     return true;
 }
@@ -102,26 +102,38 @@ static bool translate_vcvtps2dq_opt(IR1_INST * pir1) {
 
     IR2_OPND dest = load_freg256_from_ir1(opnd0);
     IR2_OPND src = load_freg256_from_ir1(opnd1);
-    IR2_OPND temp_f = ra_alloc_ftemp();
     IR2_OPND sse_invalid = ra_alloc_ftemp();
     IR2_OPND overflow = ra_alloc_ftemp();
     IR2_OPND comp_mask = ra_alloc_ftemp();
+    bool same_reg = ir1_opnd_is_same_reg(opnd0, opnd1);
 
     if (ir1_opnd_is_xmm(opnd0)) {
-        la_vftint_w_s(temp_f, src);
-        la_vldi(sse_invalid, 0b1001110000000); // broadcast 0x80000000 to all 0x1380
-        la_vldi(overflow, (0b10011 << 8) | 0x4f); //0x134f
-        la_vfcmp_cond_s(comp_mask, overflow, src, 0xE); // get Nan mark 0xE=cULE
-        la_vbitsel_v(temp_f, temp_f, sse_invalid, comp_mask);
-        la_vand_v(dest, temp_f, temp_f);
+        if (same_reg) {
+            la_vldi(sse_invalid, 0b1001110000000);
+            la_vldi(overflow, (0b10011 << 8) | 0x4f);
+            la_vfcmp_cond_s(comp_mask, overflow, src, 0xE);
+            la_vftint_w_s(dest, src);
+        } else {
+            la_vftint_w_s(dest, src);
+            la_vldi(sse_invalid, 0b1001110000000);
+            la_vldi(overflow, (0b10011 << 8) | 0x4f);
+            la_vfcmp_cond_s(comp_mask, overflow, src, 0xE);
+        }
+        la_vbitsel_v(dest, dest, sse_invalid, comp_mask);
         set_high128_xreg_to_zero(dest);
     } else {
-        la_xvftint_w_s(temp_f, src);
-        la_xvldi(sse_invalid, 0b1001110000000); // broadcast 0x80000000 to all 0x1380
-        la_xvldi(overflow, (0b10011 << 8) | 0x4f); //0x134f
-        la_xvfcmp_cond_s(comp_mask, overflow, src, 0xE); // get Nan mark 0xE=cULE
-        la_xvbitsel_v(temp_f, temp_f, sse_invalid, comp_mask);
-        la_xvand_v(dest, temp_f, temp_f);
+        if (same_reg) {
+            la_xvldi(sse_invalid, 0b1001110000000);
+            la_xvldi(overflow, (0b10011 << 8) | 0x4f);
+            la_xvfcmp_cond_s(comp_mask, overflow, src, 0xE);
+            la_xvftint_w_s(dest, src);
+        } else {
+            la_xvftint_w_s(dest, src);
+            la_xvldi(sse_invalid, 0b1001110000000);
+            la_xvldi(overflow, (0b10011 << 8) | 0x4f);
+            la_xvfcmp_cond_s(comp_mask, overflow, src, 0xE);
+        }
+        la_xvbitsel_v(dest, dest, sse_invalid, comp_mask);
     }
     return true;
 }
@@ -324,8 +336,8 @@ bool translate_vcvtps2dq(IR1_INST * pir1) {
         la_vinsgr2vr_w(temp, temp_int, 3);
 
         la_label(label_over);
-        set_high128_xreg_to_zero(temp);
         la_xvori_b(dest, temp, 0);
+        set_high128_xreg_to_zero(dest);
         ra_free_temp(temp_fcsr);
         ra_free_temp(temp_int);
         ra_free_temp(temp_operand_count);
@@ -359,8 +371,8 @@ bool translate_vcvtdq2pd(IR1_INST * pir1) {
         IR2_OPND temp = ra_alloc_ftemp();
 
         la_vffintl_d_w(temp, src);
-        set_high128_xreg_to_zero(temp);
         la_xvori_b(dest, temp, 0);
+        set_high128_xreg_to_zero(dest);
     }
     set_fpu_rounding_mode(fcsr_opnd);
     return true;
@@ -499,8 +511,8 @@ bool translate_vcvtpd2dq(IR1_INST * pir1) {
         la_vinsgr2vr_w(temp, temp_int, 3);
 
         la_label(label_over);
-        set_high128_xreg_to_zero(temp);
         la_xvori_b(dest, temp, 0);
+        set_high128_xreg_to_zero(dest);
         ra_free_temp(temp_fcsr);
         ra_free_temp(temp_int);
         ra_free_temp(ftemp_src_temp1);
@@ -572,8 +584,8 @@ bool translate_vcvtsd2ss(IR1_INST * pir1) {
     la_fcvt_s_d(temp, src2);
     la_vori_b(dest_temp, src1, 0);
     la_xvinsve0_w(dest_temp, temp, 0);
-    set_high128_xreg_to_zero(dest_temp);
     la_xvori_b(dest, dest_temp, 0);
+    set_high128_xreg_to_zero(dest);
     set_fpu_rounding_mode(fcsr_opnd);
     return true;
 }
@@ -598,8 +610,8 @@ bool translate_vcvtsi2sd(IR1_INST * pir1) {
         lsassert(0);
     }
     la_vshuf4i_d(temp, src1, 0xc);
-    set_high128_xreg_to_zero(temp);
     la_xvori_b(dest, temp, 0);
+    set_high128_xreg_to_zero(dest);
     return true;
 }
 
@@ -616,8 +628,8 @@ bool translate_vcvtss2sd(IR1_INST * pir1) {
     IR2_OPND temp = ra_alloc_ftemp();
     la_fcvt_d_s(temp, src2);
     la_vshuf4i_d(temp, src1, 0xc);
-    set_high128_xreg_to_zero(temp);
     la_xvori_b(dest, temp, 0);
+    set_high128_xreg_to_zero(dest);
     return true;
 }
 
@@ -762,8 +774,8 @@ bool translate_vcvttpd2dq(IR1_INST * pir1) {
         la_vinsgr2vr_w(temp, temp_int, 3);
 
         la_label(label_over);
-        set_high128_xreg_to_zero(temp);
         la_xvori_b(dest, temp, 0);
+        set_high128_xreg_to_zero(dest);
         ra_free_temp(temp_fcsr);
         ra_free_temp(temp_int);
         ra_free_temp(ftemp_src_temp1);
@@ -829,26 +841,38 @@ static bool translate_vcvttps2dq_opt(IR1_INST * pir1) {
 
     IR2_OPND dest =  load_freg256_from_ir1(opnd0);
     IR2_OPND src = load_freg256_from_ir1(opnd1);
-    IR2_OPND temp_f = ra_alloc_ftemp();
     IR2_OPND sse_invalid = ra_alloc_ftemp();
     IR2_OPND overflow = ra_alloc_ftemp();
     IR2_OPND comp_mask = ra_alloc_ftemp();
+    bool same_reg = ir1_opnd_is_same_reg(opnd0, opnd1);
 
     if (ir1_opnd_is_xmm(opnd0)) {
-        la_vftintrz_w_s(temp_f, src);
-        la_vldi(sse_invalid, 0b1001110000000); // broadcast 0x80000000 to all 0x1380
-        la_vldi(overflow, (0b10011 << 8) | 0x4f); //0x134f 2^31
-        la_vfcmp_cond_s(comp_mask, overflow, src, 0xE); // get Nan mark 0xE=cULE
-        la_vbitsel_v(temp_f, temp_f, sse_invalid, comp_mask);
-        la_vand_v(dest, temp_f, temp_f);
+        if (same_reg) {
+            la_vldi(sse_invalid, 0b1001110000000);
+            la_vldi(overflow, (0b10011 << 8) | 0x4f);
+            la_vfcmp_cond_s(comp_mask, overflow, src, 0xE);
+            la_vftintrz_w_s(dest, src);
+        } else {
+            la_vftintrz_w_s(dest, src);
+            la_vldi(sse_invalid, 0b1001110000000);
+            la_vldi(overflow, (0b10011 << 8) | 0x4f);
+            la_vfcmp_cond_s(comp_mask, overflow, src, 0xE);
+        }
+        la_vbitsel_v(dest, dest, sse_invalid, comp_mask);
         set_high128_xreg_to_zero(dest);
     } else {
-        la_xvftintrz_w_s(temp_f, src);
-        la_xvldi(sse_invalid, 0b1001110000000); // broadcast 0x80000000 to all 0x1380
-        la_xvldi(overflow, (0b10011 << 8) | 0x4f); //0x134f 2^31
-        la_xvfcmp_cond_s(comp_mask, overflow, src, 0xE); // get Nan mark 0xE=cULE
-        la_xvbitsel_v(temp_f, temp_f, sse_invalid, comp_mask);
-        la_xvand_v(dest, temp_f, temp_f);
+        if (same_reg) {
+            la_xvldi(sse_invalid, 0b1001110000000);
+            la_xvldi(overflow, (0b10011 << 8) | 0x4f);
+            la_xvfcmp_cond_s(comp_mask, overflow, src, 0xE);
+            la_xvftintrz_w_s(dest, src);
+        } else {
+            la_xvftintrz_w_s(dest, src);
+            la_xvldi(sse_invalid, 0b1001110000000);
+            la_xvldi(overflow, (0b10011 << 8) | 0x4f);
+            la_xvfcmp_cond_s(comp_mask, overflow, src, 0xE);
+        }
+        la_xvbitsel_v(dest, dest, sse_invalid, comp_mask);
     }
     return true;
 }
@@ -1052,8 +1076,8 @@ bool translate_vcvttps2dq(IR1_INST * pir1) {
         la_vinsgr2vr_w(temp, temp_int, 3);
 
         la_label(label_over);
-        set_high128_xreg_to_zero(temp);
         la_xvori_b(dest, temp, 0);
+        set_high128_xreg_to_zero(dest);
         ra_free_temp(temp_fcsr);
         ra_free_temp(temp_int);
         ra_free_temp(temp_operand_count);

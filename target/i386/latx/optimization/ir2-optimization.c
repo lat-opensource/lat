@@ -215,6 +215,123 @@ void tri_avoid_leading_label(void)
 #endif
 }
 
+static bool ir2_is_scalar_arith_s(const IR2_INST *ir2)
+{
+    IR2_OPCODE opc = ir2_opcode(ir2);
+
+    return opc == LISA_FADD_S || opc == LISA_FSUB_S || opc == LISA_FMUL_S;
+}
+
+static bool ir2_is_scalar_fma_s(const IR2_INST *ir2)
+{
+    IR2_OPCODE opc = ir2_opcode(ir2);
+
+    return opc == LISA_FMADD_S || opc == LISA_FMSUB_S;
+}
+
+static void ir2_opt_scalar_fma_forward(void)
+{
+    IR2_INST *arith = lsenv->tr_data->first_ir2;
+
+    while (arith) {
+        IR2_INST *copy = NULL;
+        IR2_INST *insert;
+        IR2_INST *fma;
+        IR2_INST *final_insert;
+        IR2_INST *next;
+
+        if (!ir2_is_scalar_arith_s(arith)) {
+            arith = ir2_next(arith);
+            continue;
+        }
+        insert = ir2_next(arith);
+        if (insert && ir2_opcode(insert) == LISA_VORI_B) {
+            copy = insert;
+            insert = ir2_next(insert);
+        }
+        if (!insert || ir2_opcode(insert) != LISA_VEXTRINS_W ||
+            !ir2_opnd_cmp(&insert->_opnd[1], &arith->_opnd[0]) ||
+            insert->_opnd[2]._imm32 != 0 ||
+            (copy &&
+             (!ir2_opnd_cmp(&copy->_opnd[0], &insert->_opnd[0]) ||
+              copy->_opnd[2]._imm32 != 0))) {
+            arith = ir2_next(arith);
+            continue;
+        }
+        fma = ir2_next(insert);
+        while (fma && la_ir2_opcode_is_x86_inst(ir2_opcode(fma))) {
+            fma = ir2_next(fma);
+        }
+        if (!fma || !ir2_is_scalar_fma_s(fma) ||
+            !ir2_opnd_cmp(&fma->_opnd[3], &insert->_opnd[0])) {
+            arith = ir2_next(arith);
+            continue;
+        }
+        final_insert = ir2_next(fma);
+        if (!final_insert || ir2_opcode(final_insert) != LISA_VEXTRINS_W ||
+            !ir2_opnd_cmp(&final_insert->_opnd[0], &insert->_opnd[0]) ||
+            !ir2_opnd_cmp(&final_insert->_opnd[1], &fma->_opnd[0]) ||
+            final_insert->_opnd[2]._imm32 != 0) {
+            arith = ir2_next(arith);
+            continue;
+        }
+
+        /* Keep the scalar result in the temporary until the fused operation. */
+        fma->_opnd[3] = arith->_opnd[0];
+        next = ir2_next(insert);
+        ir2_remove(ir2_get_id(insert));
+        arith = next;
+    }
+}
+
+/*
+ * Temporary vector registers are released at each x86 instruction boundary.
+ * Consecutive translations can therefore allocate the same physical register
+ * and reload the same LASX immediate even though the earlier value is still
+ * live in that register.  Keep the value across the boundary until an actual
+ * write or a control-flow join invalidates it.
+ */
+static void ir2_opt_redundant_xvldi(void)
+{
+    bool valid[32] = { false };
+    int imm[32] = { 0 };
+    IR2_INST *ir2 = lsenv->tr_data->first_ir2;
+
+    while (ir2) {
+        IR2_INST *next = ir2_next(ir2);
+        IR2_OPCODE opc = ir2_opcode(ir2);
+
+        if (opc == LISA_XVLDI) {
+            int reg = ir2->_opnd[0]._reg_num;
+            int value = ir2->_opnd[1]._imm32;
+
+            if (reg >= 0 && reg < ARRAY_SIZE(valid)) {
+                if (valid[reg] && imm[reg] == value) {
+                    ir2_remove(ir2_get_id(ir2));
+                    ir2 = next;
+                    continue;
+                }
+                valid[reg] = true;
+                imm[reg] = value;
+            }
+        } else {
+            if (ir2_opcode_is_branch(opc) || ir2_opcode_is_jirl(opc) ||
+                la_ir2_opcode_is_label(opc)) {
+                memset(valid, 0, sizeof(valid));
+            }
+            if (!la_ir2_opcode_is_store(opc) && ir2->op_count > 0 &&
+                ir2_opnd_is_freg(&ir2->_opnd[0])) {
+                int reg = ir2->_opnd[0]._reg_num;
+
+                if (reg >= 0 && reg < ARRAY_SIZE(valid)) {
+                    valid[reg] = false;
+                }
+            }
+        }
+        ir2 = next;
+    }
+}
+
 static int ir2_get_addi_rsp_offs(IR2_INST *ir2)
 {
     int rsp = reg_gpr_map[esp_index];
@@ -528,6 +645,8 @@ static void ir2_opt_push_pop(TranslationBlock *tb)
 
 void tr_ir2_optimize(TranslationBlock *tb)
 {
+    ir2_opt_scalar_fma_forward();
+    ir2_opt_redundant_xvldi();
 #ifdef CONFIG_LATX_OPT_PUSH_POP
     CPUX86State *env = (CPUX86State*)lsenv->cpu_state;
     CPUState *cpu = env_cpu(env);
