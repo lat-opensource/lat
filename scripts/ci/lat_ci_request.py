@@ -47,14 +47,13 @@ def get_json(path, token, opener=urllib.request.urlopen):
         return json.load(response)
 
 
-def resolve_pull_request(pr_number_value, expected_head_sha, target, fetch_json):
+def resolve_pull_request(pr_number_value, target, fetch_json):
     """Return immutable dispatch values after validating a GitHub PR response."""
     if not isinstance(pr_number_value, str) or not POSITIVE_INTEGER_PATTERN.fullmatch(pr_number_value.strip()):
         raise LatCIRequestError("pr_number must be a positive integer")
     pr_number = int(pr_number_value)
     if target != EXPECTED_TARGET_REPOSITORY:
         raise LatCIRequestError(f"This workflow must run in {EXPECTED_TARGET_REPOSITORY}")
-    expected_head_sha = _sha(expected_head_sha, "expected_head_sha")
 
     pr = fetch_json(f"repos/{target}/pulls/{pr_number}")
     if not isinstance(pr, dict):
@@ -86,13 +85,6 @@ def resolve_pull_request(pr_number_value, expected_head_sha, target, fetch_json)
     base_sha = _sha(base.get("sha"), "The PR base SHA")
     head_ref = _one_line_string(head.get("ref"), "The PR head ref")
 
-    # The maintainer approves a concrete (PR number, head SHA) pair.  A force
-    # push after review must require a fresh approval and dispatch.
-    if head_sha != expected_head_sha:
-        raise LatCIRequestError(
-            "PR head changed since approval; review the new commit and dispatch again"
-        )
-
     return {
         "should_dispatch": "true",
         "source_repository": source_repository,
@@ -115,7 +107,6 @@ def write_github_output(values, output_path):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--pr-number", required=True)
-    parser.add_argument("--expected-head-sha", required=True)
     parser.add_argument("--target-repository", required=True)
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
@@ -123,7 +114,6 @@ def main():
     try:
         values = resolve_pull_request(
             args.pr_number,
-            args.expected_head_sha,
             args.target_repository,
             lambda path: get_json(path, os.environ.get("GITHUB_TOKEN", "")),
         )

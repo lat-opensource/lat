@@ -8,12 +8,8 @@ on:
         description: "Open pull request number in lat-opensource/lat"
         required: true
         type: string
-      expected_head_sha:
-        description: "Exact current PR head SHA approved for this test"
-        required: true
-        type: string
       test_request:
-        description: 'Optional JSON, e.g. {"schema_version":1,"suites":[{"suite_key":"spec2000","parameters":{"input_size":"ref","runs_per_invocation":3,"test_set":"197","times":2,"performance_analysis":true},"environment":{"LATX_AOT":"0"}}]}'
+        description: 'Optional JSON. Blank runs SPEC2000 ref 3 all twice in serialized performance mode, with no user environment variables.'
         required: false
         type: string
         default: ""
@@ -49,13 +45,11 @@ jobs:
         id: resolve
         env:
           MANUAL_PR_NUMBER: ${{ inputs.pr_number }}
-          EXPECTED_HEAD_SHA: ${{ inputs.expected_head_sha }}
           MANUAL_TARGET_REPOSITORY: ${{ github.repository }}
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           python3 scripts/ci/lat_ci_request.py \
             --pr-number "$MANUAL_PR_NUMBER" \
-            --expected-head-sha "$EXPECTED_HEAD_SHA" \
             --target-repository "$MANUAL_TARGET_REPOSITORY" \
             --output "$GITHUB_OUTPUT"
 
@@ -98,7 +92,20 @@ jobs:
                   "head_sha": os.environ["HEAD_SHA"],
                   "base_sha": os.environ["BASE_SHA"],
                   "head_ref": os.environ["HEAD_REF"],
-                  "test_request": os.environ["TEST_REQUEST"],
+                  "test_request": os.environ["TEST_REQUEST"].strip() or json.dumps({
+                      "schema_version": 1,
+                      "suites": [{
+                          "suite_key": "spec2000",
+                          "parameters": {
+                              "input_size": "ref",
+                              "runs_per_invocation": 3,
+                              "test_set": "all",
+                              "times": 2,
+                              "performance_analysis": True,
+                          },
+                          "environment": {},
+                      }],
+                  }),
                   "requester": os.environ["REQUESTER"],
               },
           }))
