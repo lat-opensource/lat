@@ -63,7 +63,9 @@
 //GO(__assert, vFppi)
 //GO(__assert_fail, vFppup)
 //GO(__assert_perror_fail, vFipup)
-//GOM(atexit, iFEp)
+#ifdef CONFIG_BUILD_LIBLAT
+GOM(atexit, iFEp)
+#endif
 //GO(atof, dFp)
 //GO(atoi, iFp)
 //GO(atol, lFp)
@@ -185,7 +187,10 @@
 //GO(__ctype_toupper_loc, pFv)
 ////DATAB(__curbrk,
 //GO(cuserid, pFp)
-//GOM(__cxa_atexit, iFEppp)
+#ifdef CONFIG_BUILD_LIBLAT
+GOM(__cxa_atexit, iFEppp)
+GOM(__cxa_finalize, vFEp)
+#endif
 ////GO(__cxa_at_quick_exit, /* at_quick_exit has signature iF@ -> */ iF@pp)
 //GOM(__cxa_finalize, vFEp)
 #ifdef CONFIG_LATX_KZT
@@ -1552,7 +1557,9 @@ GOM(pthread_key_delete, iFu)
 ////GO(putmsg, // Deprecated
 ////GO(putpmsg, // Deprecated
 //GO(putpwent, iFpp)
-//GOW(puts, iFp)
+#ifdef CONFIG_BUILD_LIBLAT
+GOW(puts, iFp)
+#endif
 ////GO(putsgent,
 //GO(putspent, iFpp)
 //GOW(pututline, pFp)
@@ -1938,7 +1945,9 @@ GOM(realloc, pFpL)
 //GO(__strndup, pFpL)
 //GO(strndup, pFpL)
 //GO(strnlen, LFpL)
-//GO(strpbrk, pFpp)
+#ifdef CONFIG_BUILD_LIBLAT
+GO(strpbrk, pFpp)
+#endif
 ////GO(__strpbrk_c2,
 ////GO(__strpbrk_c3,
 //GO(strptime, pFppp)

@@ -1089,6 +1089,12 @@ static void Emulate_FTZ(ucontext_t *uc)
 static void host_signal_handler(int host_signum, siginfo_t *info,
                                 void *puc)
 {
+#ifdef CONFIG_LIBLAT
+    if (thread_cpu == NULL) {
+        cpu_signal_handler(host_signum, info, puc);
+        return;
+    }
+#endif
     CPUArchState *env = thread_cpu->env_ptr;
     CPUState *cpu = env_cpu(env);
     TaskState *ts = cpu->opaque;
@@ -1356,6 +1362,13 @@ static void host_signal_handler(int host_signum, siginfo_t *info,
     }
 #endif
 }
+
+#ifdef CONFIG_LIBLAT
+void my_signalhandler(int signal, siginfo_t *info, void *ucontext)
+{
+    host_signal_handler(signal, info, ucontext);
+}
+#endif
 
 /* do_sigaltstack() returns target values and errnos. */
 /* compare linux/kernel/signal.c:do_sigaltstack() */

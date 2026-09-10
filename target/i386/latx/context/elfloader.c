@@ -37,6 +37,10 @@
 #include "kzt-guest-tls.h"
 #include "kzt_relocation_transaction.h"
 
+#ifdef CONFIG_LIBLAT
+#include "myalign.h"
+#endif
+
 static int kzt_relocation_slot_fits_page(uintptr_t slot_addr)
 {
     uintptr_t slot_last;
@@ -382,7 +386,10 @@ void ElfHeadReFix (elfheader_t* head, uintptr_t delta)
     #undef GO
 }
 
+#ifdef CONFIG_LIBLAT
+#else
 extern struct elfheader_s * elf_header;
+#endif
 
 void FreeElfHeader(elfheader_t** head)
 {
@@ -922,6 +929,9 @@ static int relocate_elf_rela(
     kzt_relocation_transaction_t *transaction)
 {
 //    int ret_ok = 0;
+#ifdef CONFIG_LIBLAT_CALLBACK
+    int essential = isEssentialLib(basename(head->name));
+#endif
     for (int i=0; i<cnt; ++i) {
         int t = ELF64_R_TYPE(rela[i].r_info);
         //we only process the type of R_X86_64_GLOB_DAT and R_X86_64_JUMP_SLO
@@ -995,6 +1005,16 @@ static int relocate_elf_rela(
                     }
                 break;
             case R_X86_64_JUMP_SLOT:
+#ifdef CONFIG_LIBLAT_CALLBACK
+                // Expected the offset `*p` is might in the <.plt> section range, for example, `*p` is 0x4027b6,
+                // is in the <.plt> section range [0x402520, 0x402cd0], head->plt is 0x402520 and head->plt_end is 0x402cd0.
+                // But actually there is the base address AKA head->delta in the `*p`, for example, head->delta is 0x5508000000,
+                // then `*p` became 0x55084027b6 is not in the <.plt> section range [0x402520, 0x402cd0].
+                // So if the elf is not essential library, then minus the base AKA head->delta AKA l_map_start AKA load_bias.
+                if (!essential) {
+                    *p -= head->delta;
+                }
+#endif
                 // apply immediatly for gobject closure marshal or for LOCAL binding. Also, apply immediatly if it doesn't jump in the got
                 tmp = (uintptr_t)(*p);
                 if (bind==STB_LOCAL 
@@ -1020,6 +1040,11 @@ static int relocate_elf_rela(
                                        symname);
                         }
                     }
+#ifdef CONFIG_LIBLAT_CALLBACK
+                    else if (!offs && !essential) {
+                        *p += head->delta; // base + offset
+                    }
+#endif
                 } else {
                     printf_log(LOG_INFO, "Preparing (if needed) %s R_X86_64_JUMP_SLOT @%p (0x%lx->0x%0lx) with sym=%s to be apply later (addend=%ld)\n", 
                         (bind==STB_LOCAL)?"Local":"Global", p, *p, *p+head->delta, symname, rela[i].r_addend);
@@ -1527,9 +1552,21 @@ int IsAddressInElfSpace(const elfheader_t* h, uintptr_t addr)
 
 elfheader_t* FindElfAddress(box64context_t *context, uintptr_t addr)
 {
+#ifdef CONFIG_LIBLAT
+    uintptr_t link_map = kzt_find_guest_link_map_by_address(addr);
+
+    if (!context || !link_map) {
+        return NULL;
+    }
+    for (int idx = 0; idx < context->elfsize; idx++) {
+        if (context->elfs[idx] && context->elfs[idx]->link_map_addr == link_map)
+            return context->elfs[idx];
+    }
+#else
     for (int i=0; i<context->elfsize; ++i)
         if(IsAddressInElfSpace(context->elfs[i], addr))
             return context->elfs[i];
+#endif
     return NULL;
 }
 
@@ -1759,6 +1796,11 @@ void PltResolver(void)
     if(!offs && !end && !version)
         GetGlobalSymbolStartEnd(my_context->maplib, symname, &offs, &end, h, -1, NULL);
 
+#ifdef CONFIG_LIBLAT_CALLBACK
+    if (!offs && my_context->get_host_symbol_offs) {
+        my_context->get_host_symbol_offs(symname, &offs);
+    }
+#endif
     if (!offs) {
 //        printf_log(LOG_INFO, "Error: PltResolver: Symbol %s(ver %d: %s%s%s) not found, cannot apply R_X86_64_JUMP_SLOT %p (%p) in %s\n", symname, version, symname, vername?"@":"", vername?vername:"", p, *(void**)p, h->name);
         //return to __dl_runtime_resolver

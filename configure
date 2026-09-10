@@ -370,6 +370,7 @@ profiler="no"
 mimalloc="no"
 latx="no"
 latx_kzt="no"
+latx_liblat="no"
 latx_new_world="no"
 latx_profiler="no"
 latx_perf="no"
@@ -1180,6 +1181,10 @@ for opt do
   ;;
   --enable-kzt) latx_kzt="yes"
   ;;
+  --enable-liblat) latx_liblat="yes"
+  ;;
+  --disable-liblat) latx_liblat="no"
+  ;;
   --enable-latx) latx="yes"
                  capstone="disabled"
   ;;
@@ -1940,6 +1945,8 @@ Advanced options (experts only):
   --enable-gprof           QEMU profiling with gprof
   --enable-profiler        profiler support
   --enable-latx            loongarch fast x86-transaction support
+  --enable-kzt             enable KZT direct library execution
+  --enable-liblat          build the embedded x86-64 runtime (requires KZT)
   --disable-guest-base     set guest base to zero
   --enable-ptrace-debug    enable ptrace debug
   --enable-debug-stack-usage
@@ -2473,6 +2480,18 @@ else
                 ;;
         esac
     done
+fi
+
+if test "$latx_liblat" = "yes"; then
+    if test "$latx" != "yes" || test "$latx_kzt" != "yes"; then
+        error_exit "--enable-liblat requires --enable-latx and --enable-kzt"
+    fi
+    if test "$target_list" != "x86_64-linux-user"; then
+        error_exit "liblat requires --target-list=x86_64-linux-user"
+    fi
+    if test "$static" = "yes"; then
+        error_exit "--enable-liblat cannot be combined with --static"
+    fi
 fi
 
 for target in $target_list; do
@@ -5683,6 +5702,12 @@ fi
 if test "$latx" = "yes" ; then
   if test "$latx_kzt" = "yes" ; then
     echo "CONFIG_LATX_KZT=y" >> $config_host_mak
+    if test "$latx_liblat" = "yes" ; then
+      echo "CONFIG_BUILD_LIBLAT=y" >> $config_host_mak
+      echo "CONFIG_LIBLAT=y" >> $config_host_mak
+      echo "CONFIG_LIBLAT_INITBIN=y" >> $config_host_mak
+      echo "CONFIG_LIBLAT_CALLBACK=y" >> $config_host_mak
+    fi
   fi
   echo "CONFIG_LATX=y" >> $config_host_mak
   if test "$debug" = "yes" ; then
