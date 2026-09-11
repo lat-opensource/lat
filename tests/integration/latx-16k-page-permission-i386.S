@@ -58,7 +58,48 @@ _start:
     je valid_access
     cmpb $'p', (%eax)
     je read_after_push
+    cmpb $'x', (%eax)
+    je xchg32_protected
+    cmpb $'h', (%eax)
+    je xchg16_protected
+    cmpb $'a', (%eax)
+    je xchg_allowed
     jmp fail_args
+
+xchg32_protected:
+    lea 4096(%edi), %eax
+    mov %eax, expected_address
+    movl $fault_xchg32, expected_pc
+    mov $0x12345678, %eax
+fault_xchg32:
+    xchgl %eax, 4094(%edi)
+    jmp fail_access
+
+xchg16_protected:
+    lea 4096(%edi), %eax
+    mov %eax, expected_address
+    movl $fault_xchg16, expected_pc
+    mov $0x1234, %eax
+fault_xchg16:
+    xchgw %ax, 4095(%edi)
+    jmp fail_access
+
+xchg_allowed:
+    movl $123, 4092(%edi)
+    mov $456, %eax
+    xchgl %eax, 4092(%edi)
+    cmp $123, %eax
+    jne fail_access
+    cmpl $456, 4092(%edi)
+    jne fail_access
+    mov $789, %eax
+    xchgw %ax, 4092(%edi)
+    cmp $456, %ax
+    jne fail_access
+    cmpw $789, 4092(%edi)
+    jne fail_access
+    xor %ebx, %ebx
+    jmp exit
 
 read_protected:
     lea 4096(%edi), %eax

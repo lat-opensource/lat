@@ -383,6 +383,8 @@ bool translate_lock_xchg_fast_atomic(IR1_INST *pir1)
     }
 
     IR2_INST *(*amswap_inst)(IR2_OPND, IR2_OPND, IR2_OPND);
+    gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG,
+                       opnd0_size / 8);
     amswap_inst = ATO_AMSWAP(opnd0_size);
 
     amswap_inst(src0, src1, mem_opnd);

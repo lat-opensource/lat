@@ -41,8 +41,9 @@ run_fault_case()
     mode=$1
     case_name=$2
     set +e
-    LATX_AOT=0 LATX_KZT=0 LATX_MT="$mode" timeout -s KILL 10 \
-        "$emulator" "$fixture" "$case_name"
+    # Disable the single-thread XCHG load/store shortcut to test atomics.
+    LATX_AOT=0 LATX_KZT=0 LATX_CLOSE_PARALLEL=1 LATX_MT="$mode" \
+        timeout -s KILL 10 "$emulator" "$fixture" "$case_name"
     ret=$?
     set -e
 
@@ -67,4 +68,7 @@ for mode in 1 2; do
     run_fault_case "$mode" c
     run_fault_case "$mode" v
     run_fault_case "$mode" p
+    run_fault_case "$mode" x
+    run_fault_case "$mode" h
+    run_fault_case "$mode" a
 done
