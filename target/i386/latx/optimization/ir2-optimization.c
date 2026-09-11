@@ -619,13 +619,14 @@ void ir2_opt_push_pop_fix(TranslationBlock *tb, CPUState *cpu, int i)
                     op, curr_id, end_id, skip_count);
                 break;
             case LISA_ALIGN: {
-                if (!((curr_id - skip_count) & 0x1)) {
-                    skip_count++;
-                    end_id++;
-                    qemu_log_mask(LAT_IR2_SCHED,
-                        "\n[LAT_PUSH_FIX] op %d curr_id %d end_id %d skip_count %d\n",
-                        op, curr_id, end_id, skip_count);
-                }
+                int align = ir2_opnd_val(&curr->_opnd[0]);
+                /* Account for all preceding pseudo and optimized instructions. */
+                int host_offset = curr_id - end_id + i;
+                int padding = (align - host_offset % align) % align;
+
+                /* One pseudo instruction expands to padding host instructions. */
+                skip_count += 1 - padding;
+                end_id += 1 - padding;
                 break;
             }
             case LISA_FAR_JUMP:
