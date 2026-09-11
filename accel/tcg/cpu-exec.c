@@ -1169,7 +1169,8 @@ int cpu_exec(CPUState *cpu)
          */
         if (!option_softfpu && (env->fcsr & LBT_FCSR_TOP_MODE_MASK)) {
             env->fcsr &= ~LBT_FCSR_TOP_MODE_MASK;
-            __asm__ volatile("x86clrtm" : : : "memory");
+            /* x86clrtm: use its encoding for older assemblers. */
+            __asm__ volatile(".word 0x00008028" : : : "memory");
         }
 #endif
 
