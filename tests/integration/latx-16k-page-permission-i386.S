@@ -98,6 +98,35 @@ xchg_allowed:
     jne fail_access
     cmpw $789, 4092(%edi)
     jne fail_access
+    /* Exercise the unaligned LL/SC path and its wider-atomic fallback. */
+    movl $123, 4089(%edi)
+    mov $456, %eax
+    xchgl %eax, 4089(%edi)
+    cmp $123, %eax
+    jne fail_access
+    cmpl $456, 4089(%edi)
+    jne fail_access
+    movw $123, 4091(%edi)
+    mov $456, %eax
+    xchgw %ax, 4091(%edi)
+    cmp $123, %ax
+    jne fail_access
+    cmpw $456, 4091(%edi)
+    jne fail_access
+    movl $123, 4086(%edi)
+    mov $456, %eax
+    xchgl %eax, 4086(%edi)
+    cmp $123, %eax
+    jne fail_access
+    cmpl $456, 4086(%edi)
+    jne fail_access
+    movw $123, 4087(%edi)
+    mov $456, %eax
+    xchgw %ax, 4087(%edi)
+    cmp $123, %ax
+    jne fail_access
+    cmpw $456, 4087(%edi)
+    jne fail_access
     xor %ebx, %ebx
     jmp exit
 
