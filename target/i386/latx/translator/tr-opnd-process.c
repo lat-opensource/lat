@@ -1254,11 +1254,25 @@ void store_freg_to_ir1(IR2_OPND opnd2, IR1_OPND *opnd1, bool is_xmm_hi,
     }
 }
 
-/* save old fcsr in fcsr_opnd temporary register  for reload , then set fcsr
- * according to x86 MXCSR register */
+/*
+ * Prepare native FCSR for a legacy RM-dependent operation.
+ *
+ * Softfpu modes use the TB-local SSE preparation path and keep FCSR0 live for
+ * SSE/AVX operations.  Hard-float mode retains the historical temporary
+ * save/set/restore protocol below.
+ */
 
 IR2_OPND set_fpu_fcsr_rounding_field_by_x86(void)
 {
+    /*
+     * Softfpu modes use native FCSR0 for SSE/AVX.  Use the TB-local
+     * synchronization path instead of the legacy save/restore sequence.
+     */
+    if (option_softfpu) {
+        prepare_sse_rounding_mode();
+        return zero_ir2_opnd;
+    }
+
     if (option_set_rounding_opt) return zero_ir2_opnd;
 
     IR2_OPND fcsr_opnd = ra_alloc_itemp_internal();
@@ -1288,6 +1302,8 @@ IR2_OPND set_fpu_fcsr_rounding_field_by_x86(void)
 
 void set_fpu_rounding_mode(IR2_OPND rm)
 {
+    /* Softfpu paths keep the SSE RM and sticky flags live in FCSR0. */
+    if (option_softfpu) return;
     if (option_set_rounding_opt) return;
     la_movgr2fcsr(fcsr3_ir2_opnd, rm);
 }

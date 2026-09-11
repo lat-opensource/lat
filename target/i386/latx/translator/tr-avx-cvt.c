@@ -45,6 +45,7 @@ bool translate_vcvtpd2ps(IR1_INST * pir1) {
         return translate_vcvtpd2ps_lsx(pir1);
     }
 
+    prepare_sse_rounding_mode();
     lsassert(ir1_opnd_is_xmm(ir1_get_opnd(pir1, 0)));
 
     if (ir1_opnd_size(ir1_get_opnd(pir1, 1)) == 128) {
@@ -73,6 +74,7 @@ bool translate_vcvtdq2ps(IR1_INST * pir1) {
         return translate_vcvtdq2ps_lsx(pir1);
     }
 
+    prepare_sse_rounding_mode();
     lsassert(ir1_opnd_is_xmm(ir1_get_opnd(pir1, 0)) ||
         ir1_opnd_is_ymm(ir1_get_opnd(pir1, 0)));
 
@@ -130,6 +132,7 @@ bool translate_vcvtps2dq(IR1_INST * pir1) {
     if (!option_enable_lasx) {
         return translate_vcvtps2dq_lsx(pir1);
     }
+    prepare_sse_rounding_mode();
 
     if (option_cvt_opt) {
         return translate_vcvtps2dq_opt(pir1);
@@ -429,6 +432,7 @@ bool translate_vcvtpd2dq(IR1_INST * pir1) {
     if (!option_enable_lasx) {
         return translate_vcvtpd2dq_lsx(pir1);
     }
+    prepare_sse_rounding_mode();
 
     if (option_cvt_opt) {
         return translate_vcvtpd2dq_opt(pir1);
@@ -585,6 +589,9 @@ bool translate_vcvtsi2sd(IR1_INST * pir1) {
     lsassert(ir1_opnd_is_xmm(ir1_get_opnd(pir1, 0)) &&
         ir1_opnd_is_xmm(ir1_get_opnd(pir1, 1)));
     IR1_OPND * opnd2 = ir1_get_opnd(pir1, 2);
+    if (ir1_opnd_size(opnd2) == 64) {
+        prepare_sse_rounding_mode();
+    }
     IR2_OPND dest = load_freg128_from_ir1(ir1_get_opnd(pir1, 0));
     IR2_OPND src1 = load_freg128_from_ir1(ir1_get_opnd(pir1, 1));
     IR2_OPND src2 = load_ireg_from_ir1(opnd2, UNKNOWN_EXTENSION, false);

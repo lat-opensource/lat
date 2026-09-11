@@ -14,11 +14,9 @@
 bool translate_cvtdq2pd(IR1_INST *pir1)
 {
     lsassert(ir1_opnd_is_xmm(ir1_get_opnd(pir1, 0)));
-    IR2_OPND fcsr_opnd = set_fpu_fcsr_rounding_field_by_x86();
     IR2_OPND dest = load_freg128_from_ir1(ir1_get_opnd(pir1, 0));
     IR2_OPND src = load_freg128_from_ir1(ir1_get_opnd(pir1, 1));
     la_vffintl_d_w(dest, src);
-    set_fpu_rounding_mode(fcsr_opnd);
     return true;
 }
 
@@ -27,6 +25,7 @@ bool translate_cvtdq2ps(IR1_INST *pir1)
     lsassert(ir1_opnd_is_xmm(ir1_get_opnd(pir1, 0)));
     IR2_OPND dest = load_freg128_from_ir1(ir1_get_opnd(pir1, 0));
     IR2_OPND src = load_freg128_from_ir1(ir1_get_opnd(pir1, 1));
+    prepare_sse_rounding_mode();
     la_vffint_s_w(dest, src);
     return true;
 }
@@ -279,6 +278,7 @@ static bool translate_cvtpd2dq_opt(IR1_INST *pir1)
 
 bool translate_cvtpd2dq(IR1_INST *pir1)
 {
+    prepare_sse_rounding_mode();
     if (option_cvt_opt) {
         return translate_cvtpd2dq_opt(pir1);
     }
@@ -409,6 +409,7 @@ static bool translate_cvtps2dq_opt(IR1_INST *pir1)
 
 bool translate_cvtps2dq(IR1_INST *pir1)
 {
+    prepare_sse_rounding_mode();
     if (option_cvt_opt) {
         return translate_cvtps2dq_opt(pir1);
     }
@@ -535,6 +536,7 @@ static bool translate_cvtpd2pi_opt(IR1_INST *pir1)
 /* refer to cvtps2pi */
 bool translate_cvtpd2pi(IR1_INST *pir1)
 {
+    prepare_sse_rounding_mode();
     if (option_cvt_opt) {
         return translate_cvtpd2pi_opt(pir1);
     }
@@ -739,6 +741,7 @@ bool translate_cvttpd2pi(IR1_INST *pir1)
 bool translate_cvtpd2ps(IR1_INST *pir1)
 {
     lsassert(ir1_opnd_is_xmm(ir1_get_opnd(pir1, 0)));
+    prepare_sse_rounding_mode();
     IR2_OPND dest = load_freg128_from_ir1(ir1_get_opnd(pir1, 0));
     IR2_OPND src = load_freg128_from_ir1(ir1_get_opnd(pir1, 1));
     la_vfcvt_s_d(dest, src, src);
@@ -771,7 +774,6 @@ bool translate_cvtpi2pd(IR1_INST *pir1)
 {
     lsassert(ir1_opnd_is_xmm(ir1_get_opnd(pir1, 0)));
     tr_x87_to_mmx();
-    IR2_OPND fcsr_opnd = set_fpu_fcsr_rounding_field_by_x86();
     IR2_OPND dest = load_freg128_from_ir1(ir1_get_opnd(pir1, 0));
     IR2_OPND src =
         load_freg_from_ir1_1(ir1_get_opnd(pir1, 1), false, IS_INTEGER);
@@ -788,7 +790,6 @@ bool translate_cvtpi2pd(IR1_INST *pir1)
         la_vextrins_d(dest, temp, 1 << 4);
         la_vextrins_d(dest, temp0, 0);
     }
-    set_fpu_rounding_mode(fcsr_opnd);
     return true;
 }
 
@@ -827,6 +828,7 @@ static bool translate_cvtps2pi_opt(IR1_INST *pir1)
 
 bool translate_cvtps2pi(IR1_INST *pir1)
 {
+    prepare_sse_rounding_mode();
     if (option_cvt_opt) {
         return translate_cvtps2pi_opt(pir1);
     }
@@ -1057,6 +1059,9 @@ bool translate_cvtsi2sd(IR1_INST *pir1)
     IR1_OPND *opnd2 = ir1_get_opnd(pir1, 1);
     /* For si2sd, 32-bit int can convert to FP64 without Round */
     lsassert(ir1_opnd_is_xmm(opnd1));
+    if (ir1_opnd_size(opnd2) == 64) {
+        prepare_sse_rounding_mode();
+    }
     IR2_OPND dest = load_freg128_from_ir1(opnd1);
     IR2_OPND src = load_ireg_from_ir1(opnd2, UNKNOWN_EXTENSION, false);
     IR2_OPND temp_src = ra_alloc_ftemp();
@@ -1174,6 +1179,8 @@ static bool translate_cvtsx2si_opt(IR1_INST *pir1)
     IR2_OPND temp_f = ra_alloc_ftemp();
     IR2_OPND temp_i = ra_alloc_itemp();
     IR2_OPND overflow = ra_alloc_ftemp();
+
+    prepare_sse_rounding_mode();
 
     if (ir1_opcode(pir1) == dt_X86_INS_CVTSD2SI
 #ifdef CONFIG_LATX_AVX_OPT
