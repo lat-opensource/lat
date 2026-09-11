@@ -12,6 +12,11 @@ if [ "$(getconf PAGESIZE)" != 16384 ]; then
 fi
 
 fixture=${LATX_16K_PERMISSION_FIXTURE:-}
+fallback=${LATX_16K_XCHG_FALLBACK:-0}
+if [ "$fallback" = 1 ] && ! command -v gdb >/dev/null 2>&1; then
+    echo "SKIP: gdb is required to select the XCHG fallback"
+    exit 77
+fi
 if [ -n "$fixture" ]; then
     if [ ! -f "$fixture" ] || [ ! -x "$fixture" ]; then
         echo "FAIL: prebuilt i386 fixture is not executable: $fixture" >&2
@@ -42,8 +47,20 @@ run_fault_case()
     case_name=$2
     set +e
     # Disable the single-thread XCHG load/store shortcut to test atomics.
-    LATX_AOT=0 LATX_KZT=0 LATX_CLOSE_PARALLEL=1 LATX_MT="$mode" \
-        timeout -s KILL 10 "$emulator" "$fixture" "$case_name"
+    if [ "$fallback" = 1 ]; then
+        # Select the fallback after hardware-dependent options are initialized.
+        LATX_AOT=0 LATX_KZT=0 LATX_CLOSE_PARALLEL=1 LATX_MT="$mode" \
+            timeout -s KILL 30 gdb -q -batch --return-child-result \
+            -ex 'handle SIGBUS nostop noprint pass' \
+            -ex 'handle SIGSEGV nostop noprint pass' \
+            -ex 'break translate_xchg' -ex run \
+            -ex 'set {int}&option_fast_atomic = 0' \
+            -ex 'disable breakpoints' -ex continue \
+            --args "$emulator" "$fixture" "$case_name"
+    else
+        LATX_AOT=0 LATX_KZT=0 LATX_CLOSE_PARALLEL=1 LATX_MT="$mode" \
+            timeout -s KILL 10 "$emulator" "$fixture" "$case_name"
+    fi
     ret=$?
     set -e
 
@@ -62,6 +79,12 @@ run_fault_case()
 }
 
 for mode in 1 2; do
+    if [ "$fallback" = 1 ]; then
+        run_fault_case "$mode" x
+        run_fault_case "$mode" h
+        run_fault_case "$mode" a
+        continue
+    fi
     run_fault_case "$mode" r
     run_fault_case "$mode" w
     run_fault_case "$mode" s

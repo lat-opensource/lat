@@ -1417,6 +1417,8 @@ static bool translate_xchg_spinlock(IR1_INST *pir1)
         mem_opnd = convert_mem(opnd1, &imm);
     }
     ir2_set_opnd_type(&mem_opnd, IR2_OPND_GPR);
+    gen_test_page_flag(mem_opnd, imm, PAGE_WRITE | PAGE_WRITE_ORG,
+                       ir1_opnd_size(opnd0) / 8);
     IR2_OPND lat_lock_addr = tr_lat_spin_lock(mem_opnd, imm);
 
     if (ir1_opnd_is_mem(opnd0)) {
@@ -1550,6 +1552,10 @@ bool translate_xchg(IR1_INST *pir1)
         src1 = load_ireg_from_ir1(opnd0, UNKNOWN_EXTENSION, false);
         reg_opnd = opnd0;
     }
+
+    /* Check the original address before alignment or an atomic fallback. */
+    gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG,
+                       opnd0_size / 8);
 
 #ifdef TARGET_X86_64
     if (CODEIS64 && opnd0_size == 64) {
