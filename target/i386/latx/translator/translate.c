@@ -4322,7 +4322,23 @@ void gen_test_page_flag(IR2_OPND mem_opnd, int mem_imm, uint32_t flag)
     uint32_t required_flag = flag & PAGE_WRITE ? PAGE_WRITE : PAGE_READ;
 
     if (!option_mem_test) {
+#if TARGET_ABI_BITS == 32
+        TranslationBlock *current_tb;
+
+        if (!option_minke_16k_page_check) {
+            return;
+        }
+        current_tb = (TranslationBlock *)lsenv->tr_data->curr_tb;
+        if (!current_tb ||
+            !latx_minke_16k_write_check_pc(current_tb->pc)) {
+            return;
+        }
+        if (!(flag & PAGE_WRITE)) {
+            return;
+        }
+#else
         return;
+#endif
     }
     TranslationBlock *tb __attribute__((unused)) = NULL;
     if (option_aot) {
