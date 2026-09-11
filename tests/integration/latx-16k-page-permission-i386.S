@@ -64,7 +64,88 @@ _start:
     je xchg16_protected
     cmpb $'a', (%eax)
     je xchg_allowed
+    cmpb $'b', (%eax)
+    je cmpxchg_plain
+    cmpb $'l', (%eax)
+    je cmpxchg_locked
     jmp fail_args
+
+/* 0: crossing, 1: protected, 2: read-only unequal, 3/4: valid equal/unequal. */
+.macro cmpxchg_cases name, locked
+cmpxchg_\name:
+    movzbl 1(%eax), %esi
+    sub $'0', %esi
+    cmp $4, %esi
+    ja fail_args
+    cmp $2, %esi
+    jne 1f
+    /* Unequal comparisons still require write permission. */
+    mov $__NR_mprotect, %eax
+    lea 4096(%edi), %ebx
+    mov $4096, %ecx
+    mov $PROT_READ, %edx
+    int $0x80
+    test %eax, %eax
+    js fail_protect
+1:
+    lea 4092(%edi), %ebp
+    lea 4096(%edi), %eax
+    cmp $1, %esi
+    jne 2f
+    lea 4104(%edi), %ebp
+    mov %ebp, %eax
+2:
+    mov %eax, expected_address
+    cmp $3, %esi
+    jb 3f
+    lea 4080(%edi), %ebp
+3:
+    xor %eax, %eax
+    xor %edx, %edx
+    cmp $2, %esi
+    je 4f
+    cmp $4, %esi
+    jne 5f
+4:
+    inc %eax
+5:
+    mov $1, %ebx
+    mov $2, %ecx
+    movl $fault_cmpxchg_\name, expected_pc
+fault_cmpxchg_\name:
+.if \locked
+    lock cmpxchg8b (%ebp)
+.else
+    cmpxchg8b (%ebp)
+.endif
+    setz %cl
+    cmp $3, %esi
+    jb fail_access
+    cmp $4, %esi
+    je 6f
+    cmp $1, %cl
+    jne fail_access
+    cmpl $1, (%ebp)
+    jne fail_access
+    cmpl $2, 4(%ebp)
+    jne fail_access
+    jmp 7f
+6:
+    test %cl, %cl
+    jnz fail_access
+    cmpl $0, (%ebp)
+    jne fail_access
+    cmpl $0, 4(%ebp)
+    jne fail_access
+7:
+    or %edx, %eax
+    jnz fail_access
+    xor %ebx, %ebx
+    jmp exit
+.endm
+
+cmpxchg_cases plain, 0
+cmpxchg_cases locked, 1
 
 xchg32_protected:
     lea 4096(%edi), %eax

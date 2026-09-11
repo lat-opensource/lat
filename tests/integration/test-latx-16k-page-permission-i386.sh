@@ -94,4 +94,7 @@ for mode in 1 2; do
     run_fault_case "$mode" x
     run_fault_case "$mode" h
     run_fault_case "$mode" a
+    for case_name in b0 b1 b2 b3 b4 l0 l1 l2 l3 l4; do
+        run_fault_case "$mode" "$case_name"
+    done
 done
