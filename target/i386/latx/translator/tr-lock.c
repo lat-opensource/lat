@@ -80,7 +80,8 @@ bool translate_lock_sbb(IR1_INST *pir1)
     mem_opnd = convert_mem_to_itemp(opnd0);
 #endif
 
-    gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG);
+    gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG,
+                       opnd0_size / 8);
 
     if (CODEIS64 && opnd0_size == 64) {
         la_sbc_d(dest, zero_ir2_opnd, src1);
@@ -220,7 +221,8 @@ bool translate_lock_add(IR1_INST *pir1)
     mem_opnd = convert_mem_to_itemp(opnd0);
 #endif
 
-    gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG);
+    gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG,
+                       opnd0_size / 8);
 
 #ifdef TARGET_X86_64
     if (CODEIS64 && opnd0_size == 64) {
@@ -355,7 +357,8 @@ bool translate_lock_adc(IR1_INST *pir1)
 #else
     mem_opnd = convert_mem_to_itemp(opnd0);
 #endif
-    gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG);
+    gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG,
+                       opnd0_size / 8);
 
 #ifdef TARGET_X86_64
     if (CODEIS64 && opnd0_size == 64) {
@@ -494,7 +497,8 @@ bool translate_lock_and(IR1_INST *pir1)
 #else
     mem_opnd = convert_mem_to_itemp(opnd0);
 #endif
-    gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG);
+    gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG,
+                       opnd0_size / 8);
 
 #ifdef TARGET_X86_64
     if (CODEIS64 && opnd0_size == 64) {
@@ -625,7 +629,8 @@ bool translate_lock_inc(IR1_INST *pir1)
 #else
     mem_opnd = convert_mem_to_itemp(opnd0);
 #endif
-    gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG);
+    gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG,
+                       opnd0_size / 8);
 
 #ifdef TARGET_X86_64
     if (CODEIS64 && opnd0_size == 64) {
@@ -762,7 +767,8 @@ bool translate_lock_dec(IR1_INST *pir1)
 #else
     mem_opnd = convert_mem_to_itemp(opnd0);
 #endif
-    gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG);
+    gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG,
+                       opnd0_size / 8);
 
 #ifdef TARGET_X86_64
     if (CODEIS64 && opnd0_size == 64) {
@@ -904,7 +910,8 @@ bool translate_lock_sub(IR1_INST *pir1)
 #else
     mem_opnd = convert_mem_to_itemp(opnd0);
 #endif
-    gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG);
+    gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG,
+                       opnd0_size / 8);
 
 #ifdef TARGET_X86_64
     if (CODEIS64 && opnd0_size == 64) {
@@ -1036,7 +1043,8 @@ bool translate_lock_neg(IR1_INST *pir1)
 #else
     mem_opnd = convert_mem_to_itemp(opnd0);
 #endif
-    gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG);
+    gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG,
+                       opnd0_size / 8);
 
 #ifdef TARGET_X86_64
     IR2_OPND label_ll_d = ra_alloc_label();
@@ -1185,7 +1193,8 @@ bool translate_lock_or(IR1_INST *pir1)
 #else
     mem_opnd = convert_mem_to_itemp(opnd0);
 #endif
-    gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG);
+    gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG,
+                       opnd0_size / 8);
 
 #ifdef TARGET_X86_64
     if (CODEIS64 && opnd0_size == 64) {
@@ -1317,7 +1326,8 @@ bool translate_lock_not(IR1_INST *pir1)
 #else
     mem_opnd = convert_mem_to_itemp(opnd0);
 #endif
-    gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG);
+    gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG,
+                       opnd0_size / 8);
 
 #ifdef TARGET_X86_64
     if (CODEIS64 && opnd0_size == 64) {
@@ -1456,7 +1466,8 @@ bool translate_lock_xor(IR1_INST *pir1)
 #else
     mem_opnd = convert_mem_to_itemp(opnd0);
 #endif
-    gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG);
+    gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG,
+                       opnd0_size / 8);
 
 #ifdef TARGET_X86_64
     if (CODEIS64 && opnd0_size == 64) {
@@ -1596,7 +1607,8 @@ bool translate_lock_xadd(IR1_INST *pir1)
 #else
     mem_opnd = convert_mem_to_itemp(opnd0);
 #endif
-    gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG);
+    gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG,
+                       opnd0_size / 8);
 
 #ifdef TARGET_X86_64
     if (CODEIS64 && opnd0_size == 64) {
@@ -1753,7 +1765,8 @@ bool translate_lock_cmpxchg(IR1_INST *pir1)
 #else
     mem_opnd = convert_mem_to_itemp(opnd0);
 #endif
-    gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG);
+    gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG,
+                       opnd0_size / 8);
 
 #ifdef TARGET_X86_64
     IR2_OPND label_ll_d = ra_alloc_label();

@@ -1734,7 +1734,8 @@ void update_fcsr_rm(IR2_OPND control_word, IR2_OPND fcsr);
 bool ir1_need_reserve_h128(IR1_INST *ir1);
 IR2_OPND save_h128_of_ymm(IR1_INST *ir1);
 void restore_h128_of_ymm(IR1_INST *ir1, IR2_OPND temp);
-void gen_test_page_flag(IR2_OPND mem_opnd, int mem_imm, uint32_t flag);
+void gen_test_page_flag(IR2_OPND mem_opnd, int mem_imm, uint32_t flag,
+                        unsigned int mem_size);
 
 void clear_h32(IR2_OPND *opnd);
 

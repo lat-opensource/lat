@@ -4317,7 +4317,8 @@ static inline void helper_restore_reg(IR2_OPND opnd)
             lsenv_offset_of_all_gpr(lsenv, ir2_opnd_base_reg_num(&opnd)));
 }
 
-void gen_test_page_flag(IR2_OPND mem_opnd, int mem_imm, uint32_t flag)
+void gen_test_page_flag(IR2_OPND mem_opnd, int mem_imm, uint32_t flag,
+                        unsigned int mem_size)
 {
     uint32_t required_flag = flag & PAGE_WRITE ? PAGE_WRITE : PAGE_READ;
 
@@ -4350,6 +4351,7 @@ void gen_test_page_flag(IR2_OPND mem_opnd, int mem_imm, uint32_t flag)
     IR2_OPND label1 = ra_alloc_label();
     IR2_OPND label2 = ra_alloc_label();
     IR2_OPND label_fault = ra_alloc_label();
+    IR2_OPND label_check_end = ra_alloc_label();
     bool need_restore0 = false;
     bool need_restore1 = false;
     bool need_restore2 = false;
@@ -4389,15 +4391,38 @@ void gen_test_page_flag(IR2_OPND mem_opnd, int mem_imm, uint32_t flag)
                           LATX_HOST_16K_PAGE_BITS);
             la_ldx_bu(itemp2, itemp0, itemp1);
             la_andi(itemp2, itemp2, required_flag);
-            la_beq(itemp2, zero_ir2_opnd, label_exit);
+            la_beq(itemp2, zero_ir2_opnd,
+                   mem_size > 1 ? label_check_end : label_exit);
         }
         li_d(itemp0, (ADDR)latx_4k_page_flags);
         la_bstrpick_d(itemp1, mem_addr, TARGET_ABI_BITS - 1,
                       TARGET_PAGE_BITS);
         la_ldx_bu(itemp2, itemp0, itemp1);
         la_andi(itemp2, itemp2, required_flag);
-        la_bne(itemp2, zero_ir2_opnd, label_exit);
+        la_bne(itemp2, zero_ir2_opnd,
+               mem_size > 1 ? label_check_end : label_exit);
         la_b(label_fault);
+        if (mem_size > 1) {
+            la_label(label_check_end);
+            la_addi_d(mem_addr, mem_addr, mem_size - 1);
+            if (option_mem_test != 2) {
+                li_d(itemp0, (ADDR)latx_16k_page_mixed);
+                la_bstrpick_d(itemp1, mem_addr, TARGET_ABI_BITS - 1,
+                              LATX_HOST_16K_PAGE_BITS);
+                la_ldx_bu(itemp2, itemp0, itemp1);
+                la_andi(itemp2, itemp2, required_flag);
+                la_beq(itemp2, zero_ir2_opnd, label_exit);
+            }
+            li_d(itemp0, (ADDR)latx_4k_page_flags);
+            la_bstrpick_d(itemp1, mem_addr, TARGET_ABI_BITS - 1,
+                          TARGET_PAGE_BITS);
+            la_ldx_bu(itemp2, itemp0, itemp1);
+            la_andi(itemp2, itemp2, required_flag);
+            la_bne(itemp2, zero_ir2_opnd, label_exit);
+            /* The first inaccessible byte is the start of the final page. */
+            la_bstrins_d(mem_addr, zero_ir2_opnd, TARGET_PAGE_BITS - 1, 0);
+            /* Fall through to label_fault. */
+        }
     } else
 #endif
     {
