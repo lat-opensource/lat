@@ -4,6 +4,7 @@ foreach test_def : latx_integration_tests
     test_def['name'],
     test_def['runner'],
     args: test_def['args'],
+    env: test_def.get('env', {}),
     protocol: 'exitcode',
     suite: 'latx-integration',
     timeout: test_def.get('timeout', 30),
