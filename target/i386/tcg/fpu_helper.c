@@ -1326,6 +1326,8 @@ void helper_f2xm1(CPUX86State *env)
 void helper_fptan(CPUX86State *env)
 {
 #ifdef CONFIG_LATX
+    fenv_t saved_host_env;
+    fegetenv(&saved_host_env);
     long double fptemp = floatx80_to_longdouble(env, ST0);
 
     if ((fptemp > MAXTAN) || (fptemp < -MAXTAN)) {
@@ -1338,6 +1340,7 @@ void helper_fptan(CPUX86State *env)
         env->fpus &= ~0x400; /* C2 <-- 0 */
         /* the above code is for |arg| < 2**52 only */
     }
+    fesetenv(&saved_host_env);
 #else
     double fptemp = floatx80_to_double(env, ST0);
 
@@ -2350,6 +2353,8 @@ void helper_fsqrt(CPUX86State *env)
 void helper_fsincos(CPUX86State *env)
 {
 #ifdef CONFIG_LATX
+    fenv_t saved_host_env;
+    fegetenv(&saved_host_env);
     long double fptemp = floatx80_to_longdouble(env, ST0);
 
     if ((fptemp > MAXTAN) || (fptemp < -MAXTAN)) {
@@ -2361,6 +2366,7 @@ void helper_fsincos(CPUX86State *env)
         env->fpus &= ~0x400;  /* C2 <-- 0 */
         /* the above code is for |arg| < 2**63 only */
     }
+    fesetenv(&saved_host_env);
 #else
     double fptemp = floatx80_to_double(env, ST0);
 
@@ -2443,6 +2449,8 @@ void helper_fscale(CPUX86State *env)
 void helper_fsin(CPUX86State *env)
 {
 #ifdef CONFIG_LATX
+    fenv_t saved_host_env;
+    fegetenv(&saved_host_env);
     long double fptemp = floatx80_to_longdouble(env, ST0);
 
     if ((fptemp > MAXTAN) || (fptemp < -MAXTAN)) {
@@ -2452,6 +2460,7 @@ void helper_fsin(CPUX86State *env)
         env->fpus &= ~0x400;  /* C2 <-- 0 */
         /* the above code is for |arg| < 2**53 only */
     }
+    fesetenv(&saved_host_env);
 #else
     double fptemp = floatx80_to_double(env, ST0);
 
@@ -2468,6 +2477,8 @@ void helper_fsin(CPUX86State *env)
 void helper_fcos(CPUX86State *env)
 {
 #ifdef CONFIG_LATX
+    fenv_t saved_host_env;
+    fegetenv(&saved_host_env);
     long double fptemp = floatx80_to_longdouble(env, ST0);
 
     if ((fptemp > MAXTAN) || (fptemp < -MAXTAN)) {
@@ -2477,6 +2488,7 @@ void helper_fcos(CPUX86State *env)
         env->fpus &= ~0x400;  /* C2 <-- 0 */
         /* the above code is for |arg| < 2**63 only */
     }
+    fesetenv(&saved_host_env);
 #else
     double fptemp = floatx80_to_double(env, ST0);
 

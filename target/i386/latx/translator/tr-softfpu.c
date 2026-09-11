@@ -1967,6 +1967,9 @@ static bool translate_fldcw_softfpu(IR1_INST *pir1)
     la_st_h(new_cw, env_ir2_opnd, lsenv_offset_of_control_word(lsenv));
     la_update_fp_status(new_cw);
     ra_free_temp(new_cw);
+    if (option_softfpu) {
+        lsenv->tr_data->sse_rounding_prepared = false;
+    }
     return true;
 }
 
@@ -2053,6 +2056,9 @@ static bool translate_fldenv_softfpu(IR1_INST *pir1)
     } else {
         gen_softfpu_helper3i((ADDR)helper_fldenv, mem_opnd, data32);
         la_update_fp_status_from_env();
+    }
+    if (option_softfpu) {
+        lsenv->tr_data->sse_rounding_prepared = false;
     }
     return true;
 }
@@ -2360,6 +2366,9 @@ static bool translate_fninit_softfpu(IR1_INST *pir1)
         gen_softfpu_helper1((ADDR)helper_fninit);
         la_update_fp_status_from_env();
     }
+    if (option_softfpu) {
+        lsenv->tr_data->sse_rounding_prepared = false;
+    }
     return true;
 }
 
@@ -2510,6 +2519,9 @@ static bool translate_fnsave_softfpu(IR1_INST *pir1)
         gen_softfpu_helper3i((ADDR)helper_fsave, mem_opnd, data32);
         la_update_fp_status_from_env();
     }
+    if (option_softfpu) {
+        lsenv->tr_data->sse_rounding_prepared = false;
+    }
     return true;
 }
 
@@ -2654,7 +2666,9 @@ static bool translate_frstor_softfpu(IR1_INST *pir1)
         IR2_OPND mem_opnd = convert_mem_no_offset(opnd0);
         gen_softfpu_helper3i((ADDR)helper_frstor, mem_opnd, data32);
         la_update_fp_status_from_env();
-
+    }
+    if (option_softfpu) {
+        lsenv->tr_data->sse_rounding_prepared = false;
     }
     return true;
 }
@@ -2687,6 +2701,9 @@ static bool translate_fsetpm_softfpu(IR1_INST *pir1)
 static bool translate_fsin_softfpu(IR1_INST *pir1)
 {
     gen_softfpu_helper1((ADDR)helper_fsin);
+    if (option_softfpu) {
+        lsenv->tr_data->sse_rounding_prepared = false;
+    }
     return true;
 }
 
@@ -3168,6 +3185,13 @@ static bool translate_fxrstor_softfpu(IR1_INST *pir1)
 
     gen_softfpu_helper2m_ptr((ADDR)helper_fxrstor, mem_opnd);
     la_update_fp_status_from_env();
+
+    if (option_softfpu) {
+        /* Discard old flags only after the restore succeeds. */
+        clear_sse_fcsr_flags();
+        lsenv->tr_data->sse_rounding_prepared = false;
+    }
+
     return true;
 }
 
@@ -3175,6 +3199,13 @@ static bool translate_fxsave_softfpu(IR1_INST *pir1)
 {
     IR1_OPND *opnd0 = ir1_get_opnd(pir1, 0);
     IR2_OPND mem_opnd = convert_mem_no_offset(opnd0);
+
+    if (option_softfpu) {
+        /* helper_fxsave stores the merged env->mxcsr after alignment check. */
+        IR2_OPND mxcsr = ra_alloc_itemp();
+        submit_sse_flags_to_mxcsr(mxcsr);
+        ra_free_temp(mxcsr);
+    }
 
     gen_softfpu_helper2m_ptr((ADDR)helper_fxsave, mem_opnd);
     return true;
@@ -3235,6 +3266,13 @@ static bool translate_xsave_softfpu(IR1_INST *pir1)
 
     la_bstrins_d(temp_rfbm, eax_opnd, 31, 0);
     la_bstrins_d(temp_rfbm, edx_opnd, 63, 32);
+
+    if (option_softfpu) {
+        IR2_OPND mxcsr = ra_alloc_itemp();
+
+        submit_sse_flags_to_mxcsr(mxcsr);
+        ra_free_temp(mxcsr);
+    }
     gen_softfpu_helper3_ll((ADDR)helper_xsave, mem_opnd, temp_rfbm);
     return true;
 }
@@ -3249,12 +3287,28 @@ static bool translate_xsaveopt_softfpu(IR1_INST *pir1)
 
     la_bstrins_d(temp_rfbm, eax_opnd, 31, 0);
     la_bstrins_d(temp_rfbm, edx_opnd, 63, 32);
+
+    if (option_softfpu) {
+        IR2_OPND mxcsr = ra_alloc_itemp();
+
+        submit_sse_flags_to_mxcsr(mxcsr);
+        ra_free_temp(mxcsr);
+    }
     gen_softfpu_helper3_ll((ADDR)helper_xsaveopt, mem_opnd, temp_rfbm);
     return true;
 }
 
 static bool translate_xrstor_softfpu(IR1_INST *pir1)
 {
+    if (option_softfpu) {
+        IR2_OPND mxcsr = ra_alloc_itemp();
+
+        /* Preserve pending flags if RFBM excludes SSE.  If SSE is selected,
+         * helper_xrstor replaces this value with the restored MXCSR. */
+        submit_sse_flags_to_mxcsr(mxcsr);
+        ra_free_temp(mxcsr);
+    }
+
     IR2_OPND eax_opnd = ra_alloc_gpr(eax_index);
     IR2_OPND edx_opnd = ra_alloc_gpr(edx_index);
     IR2_OPND temp_rfbm = ra_alloc_itemp();
@@ -3265,6 +3319,11 @@ static bool translate_xrstor_softfpu(IR1_INST *pir1)
     la_bstrins_d(temp_rfbm, edx_opnd, 63, 32);
     gen_softfpu_helper3_ll((ADDR)helper_xrstor, mem_opnd, temp_rfbm);
     gen_softfpu_x87_fcsr_exit();
+
+    if (option_softfpu) {
+        clear_sse_fcsr_flags();
+        lsenv->tr_data->sse_rounding_prepared = false;
+    }
     return true;
 }
 #endif
