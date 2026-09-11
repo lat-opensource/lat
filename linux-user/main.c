@@ -779,7 +779,13 @@ static void handle_arg_latx_unimp_dump(const char *arg)
 
 static void handle_arg_latx_mem_test(const char *arg)
 {
-    option_mem_test = strtol(arg, NULL, 0);
+    long value;
+
+    if (qemu_strtol(arg, NULL, 0, &value) || value < 0 || value > 2) {
+        option_mem_test = 0;
+    } else {
+        option_mem_test = value;
+    }
     if (option_mem_test) {
         if (qemu_real_host_page_size != LATX_HOST_16K_PAGE_SIZE) {
             option_mem_test = 0;
@@ -978,7 +984,7 @@ static const struct qemu_argument arg_table[] = {
     {"latx-imm-reg",    "LATX_IMM_REG",     true,  handle_arg_latx_imm_reg,
     "",           "enable imm reg optimization"},
     {"latx-mem-test",    "LATX_MT",     true,  handle_arg_latx_mem_test,
-    "",           "test memory right when memory access"},
+    "0|1|2",      "16K checks: sparse fast or strict fast"},
     {"latx-minke-16k-page-check", "LATX_MINKE_16K_PAGE_CHECK", true,
     handle_arg_latx_minke_16k_page_check, "0|1",
     "enable Minke-specific mixed 16K write checks"},

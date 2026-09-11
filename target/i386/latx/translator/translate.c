@@ -4375,13 +4375,22 @@ void gen_test_page_flag(IR2_OPND mem_opnd, int mem_imm, uint32_t flag)
     IR2_OPND mem_addr = ra_alloc_statics(S_UD1);
     la_addi_d(mem_addr, mem_opnd, mem_imm);
 #if TARGET_ABI_BITS == 32
-    if (qemu_host_page_size == LATX_HOST_16K_PAGE_SIZE) {
-        li_d(itemp0, (ADDR)latx_16k_page_mixed);
-        la_bstrpick_d(itemp1, mem_addr, TARGET_ABI_BITS - 1,
-                      LATX_HOST_16K_PAGE_BITS);
-        la_ldx_bu(itemp2, itemp0, itemp1);
-        la_andi(itemp2, itemp2, required_flag);
-        la_beq(itemp2, zero_ir2_opnd, label_exit);
+    if (qemu_host_page_size == LATX_HOST_16K_PAGE_SIZE &&
+        (option_mem_test > 0 || option_minke_16k_page_check)) {
+        /*
+         * LATX_MT=1 checks a guest 4K page only when the surrounding host
+         * 16K page has mixed permissions. LATX_MT=2 always checks the cached
+         * guest-page flags. Both avoid the interval-tree walk while preserving
+         * guest read and write permissions.
+         */
+        if (option_mem_test != 2) {
+            li_d(itemp0, (ADDR)latx_16k_page_mixed);
+            la_bstrpick_d(itemp1, mem_addr, TARGET_ABI_BITS - 1,
+                          LATX_HOST_16K_PAGE_BITS);
+            la_ldx_bu(itemp2, itemp0, itemp1);
+            la_andi(itemp2, itemp2, required_flag);
+            la_beq(itemp2, zero_ir2_opnd, label_exit);
+        }
         li_d(itemp0, (ADDR)latx_4k_page_flags);
         la_bstrpick_d(itemp1, mem_addr, TARGET_ABI_BITS - 1,
                       TARGET_PAGE_BITS);
