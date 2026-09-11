@@ -3246,7 +3246,11 @@ static bool latx_x87_state_is_mmx(const CPUX86State *env)
 {
     int i;
 
-    /* MMX sets every x87 tag valid and every physical exponent to 0xffff. */
+    /* MMX resets TOP, sets all tags valid and every exponent to 0xffff. */
+    if (env->fpstt != 0) {
+        return false;
+    }
+
     for (i = 0; i < 8; i++) {
         CPU_LDoubleU reg = { .d = env->fpregs[i].d };
 
