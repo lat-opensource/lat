@@ -1741,6 +1741,7 @@ bool translate_cmpxchg8b(IR1_INST *pir1)
         mem_opnd = convert_mem(opnd0, &imm);
     }
     ir2_set_opnd_type(&mem_opnd, IR2_OPND_GPR);
+    gen_test_page_flag(mem_opnd, imm, PAGE_WRITE | PAGE_WRITE_ORG, 8);
 
     /*
      * There is only one parameter from IR1.
