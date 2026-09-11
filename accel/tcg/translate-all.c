@@ -7071,8 +7071,11 @@ static int interpret_xchg(ucontext_t *uc, uint32_t* inst,
         return LOCKINT_SEGV; /* send segv to guest */
     }
 
-    int opnd0_size = (inst[-1] & 0xffc003ff) == 0x03400000 ?
-                ((inst[-1] << 10)) >> 20 : size;
+    int encoded_size = (inst[-1] << 10) >> 20;
+    bool narrow_swap = (inst[0] & 0xffff8000) == 0x38608000 &&
+                       (inst[-1] & 0xffc003ff) == 0x03400000 &&
+                       (encoded_size == 16 || encoded_size == 32);
+    int opnd0_size = narrow_swap ? encoded_size : size;
     if (page_addr != ((siaddr + (opnd0_size >> 3)) & qemu_host_page_mask)) {
         page_num = 2;
     } else {
@@ -7092,9 +7095,8 @@ static int interpret_xchg(ucontext_t *uc, uint32_t* inst,
     /*
      * amswap.d
      */
-    if ((inst[-1] & 0xffc003ff) == 0x03400000) {
+    if (narrow_swap) {
         /* andi 0, 0, opnd0_size */
-        int opnd0_size = (inst[-1] << 10) >> 20;
         qemu_log_mask(LAT_LOG_MEM, "[LATX_LOCK] %s opnd0_size %d\n",
                     __func__, opnd0_size);
         if (opnd0_size == 32) {
