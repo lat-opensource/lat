@@ -408,6 +408,40 @@ static void sync_ymm_high_from_xmm(CPUX86State *env)
 #endif
 #endif
 
+#ifdef CONFIG_LATX
+enum {
+    LATX_FCSR_FLAGS_SHIFT = 16,
+    LATX_FCSR_FLAG_I = 1u << 0,
+    LATX_FCSR_FLAG_U = 1u << 1,
+    LATX_FCSR_FLAG_O = 1u << 2,
+    LATX_FCSR_FLAG_Z = 1u << 3,
+    LATX_FCSR_FLAG_V = 1u << 4,
+    LATX_FCSR_FLAGS_MASK = 0x1f,
+    LATX_MXCSR_IE = 1u << 0,
+    LATX_MXCSR_ZE = 1u << 2,
+    LATX_MXCSR_OE = 1u << 3,
+    LATX_MXCSR_UE = 1u << 4,
+    LATX_MXCSR_PE = 1u << 5,
+};
+
+static uint32_t latx_fcsr_flags_to_mxcsr(uint32_t fcsr)
+{
+    uint32_t flags = (fcsr >> LATX_FCSR_FLAGS_SHIFT) &
+                     LATX_FCSR_FLAGS_MASK;
+
+    return (flags & LATX_FCSR_FLAG_V ? LATX_MXCSR_IE : 0) |
+           (flags & LATX_FCSR_FLAG_Z ? LATX_MXCSR_ZE : 0) |
+           (flags & LATX_FCSR_FLAG_O ? LATX_MXCSR_OE : 0) |
+           (flags & LATX_FCSR_FLAG_U ? LATX_MXCSR_UE : 0) |
+           (flags & LATX_FCSR_FLAG_I ? LATX_MXCSR_PE : 0);
+}
+
+static void latx_clear_saved_fcsr_flags(CPUX86State *env)
+{
+    env->fcsr &= ~(LATX_FCSR_FLAGS_MASK << LATX_FCSR_FLAGS_SHIFT);
+}
+#endif
+
 /*
  * Set up a signal frame.
  */
@@ -415,6 +449,15 @@ static void sync_ymm_high_from_xmm(CPUX86State *env)
 static void xsave_sigcontext(CPUX86State *env, struct target_fpstate_fxsave *fxsave,
                               abi_ulong fxsave_addr)
 {
+#ifdef CONFIG_LATX
+    if (option_softfpu) {
+        /*
+         * Merge pending native SSE exceptions before saving the guest
+         * signal frame.  Use the saved FCSR, not the live host register.
+         */
+        env->mxcsr |= latx_fcsr_flags_to_mxcsr(env->fcsr);
+    }
+#endif
     if (!(env->features[FEAT_1_ECX] & CPUID_EXT_XSAVE)) {
         /* fxsave_addr must be 16 byte aligned for fxsave */
         assert(!(fxsave_addr & 0xf));
@@ -751,6 +794,12 @@ static int xrstor_sigcontext(CPUX86State *env, struct target_fpstate_fxsave *fxs
             }
             if (tswapl(*(uint32_t *) &fxsave->xfeatures[xfeatures_size]) == TARGET_FP_XSTATE_MAGIC2) {
                 cpu_x86_xrstor(env, fxsave_addr);
+#ifdef CONFIG_LATX
+                if (option_softfpu) {
+                    /* Discard stale flags after restoring guest state. */
+                    latx_clear_saved_fcsr_flags(env);
+                }
+#endif
 #ifdef CONFIG_LATX_AVX_OPT
                 sync_ymm_high_from_xmm(env);
 #endif
@@ -761,6 +810,12 @@ static int xrstor_sigcontext(CPUX86State *env, struct target_fpstate_fxsave *fxs
     }
 
     cpu_x86_fxrstor(env, fxsave_addr);
+#ifdef CONFIG_LATX
+    if (option_softfpu) {
+        /* Discard stale flags after restoring guest state. */
+        latx_clear_saved_fcsr_flags(env);
+    }
+#endif
     return 0;
 }
 

@@ -10,6 +10,118 @@
 #include "latx-options.h"
 #include "translate.h"
 
+/*
+ * Map LoongArch FCSR0 sticky Flags V/Z/O/U/I to the common x86
+ * exception-status layout IE/ZE/OE/UE/PE.  Bit 1 (DE) remains clear
+ * because FCSR0 has no directly corresponding flag.
+ *
+ * This only emits register operations.  It neither accesses guest
+ * shadow state nor clears FCSR0.
+ */
+static void fcsr_flags_to_x86_exceptions(IR2_OPND dest, IR2_OPND fcsr)
+{
+    /* After bit reversal and shifting: dest[4:0] = I/U/O/Z/V. */
+    la_bitrev_w(dest, fcsr);
+    la_srli_d(dest, dest, 31 - FCSR_OFF_FLAGS_V);
+
+    /* Preserve V as x86 IE at bit 0.  fcsr is scratch from here on. */
+    la_bstrpick_d(fcsr, dest, 0, 0);
+
+    /* I/U/O/Z move from dest[4:1] to x86 PE/UE/OE/ZE at bits 5:2.
+     * Bit 1, x86 DE, deliberately remains clear. */
+    la_bstrpick_d(dest, dest, 4, 1);
+    la_slli_d(dest, dest, 2);
+    la_or(dest, dest, fcsr);
+}
+
+/* Merge the native FCSR sticky flags into an x86 flag-bearing value. */
+static void merge_fcsr_flags(IR2_OPND value)
+{
+    IR2_OPND fcsr = ra_alloc_itemp();
+    IR2_OPND x86_exceptions = ra_alloc_itemp();
+
+    la_movfcsr2gr(fcsr, fcsr_ir2_opnd);
+    fcsr_flags_to_x86_exceptions(x86_exceptions, fcsr);
+    la_or(value, value, x86_exceptions);
+
+    ra_free_temp(x86_exceptions);
+    ra_free_temp(fcsr);
+}
+
+/*
+ * Merge the native FCSR sticky flags into the SSE/MXCSR shadow.  The merged
+ * value is left in mxcsr_opnd and also written back to env->mxcsr.
+ */
+void submit_sse_flags_to_mxcsr(IR2_OPND mxcsr_opnd)
+{
+    int mxcsr_offset = lsenv_offset_of_mxcsr(lsenv);
+
+    lsassert(mxcsr_offset <= 0x7ff);
+    la_ld_wu(mxcsr_opnd, env_ir2_opnd, mxcsr_offset);
+    merge_fcsr_flags(mxcsr_opnd);
+    la_st_w(mxcsr_opnd, env_ir2_opnd, mxcsr_offset);
+}
+
+/* Clear only the native sticky exception flags, preserving FCSR controls. */
+void clear_sse_fcsr_flags(void)
+{
+    IR2_OPND fcsr = ra_alloc_itemp();
+
+    la_movfcsr2gr(fcsr, fcsr_ir2_opnd);
+    la_bstrins_w(fcsr, zero_ir2_opnd,
+                 FCSR_OFF_FLAGS_V, FCSR_OFF_FLAGS_I);
+    la_movgr2fcsr(fcsr_ir2_opnd, fcsr);
+
+    ra_free_temp(fcsr);
+}
+
+/*
+ * Load the SSE rounding mode (MXCSR.RC) into FCSR0.RM.
+ *
+ * In softfpu modes the native FCSR0 carries pending SSE/AVX state, so its RM
+ * must follow MXCSR.RC before a native SSE/AVX operation.  A TB-local cache
+ * suppresses redundant loads for consecutive operations; state restore paths
+ * reset it because they may change MXCSR.RC.
+ */
+void prepare_sse_rounding_mode(void)
+{
+    TRANSLATION_DATA *tr_data = lsenv->tr_data;
+    IR2_OPND mxcsr;
+    IR2_OPND fcsr;
+    IR2_OPND no_toggle;
+
+    if (!option_softfpu) {
+        return;
+    }
+
+    if (tr_data->sse_rounding_prepared) {
+        return;
+    }
+
+    mxcsr = ra_alloc_itemp();
+    fcsr = ra_alloc_itemp();
+    no_toggle = ra_alloc_label();
+
+    /* x86 RC -> LoongArch RM:
+     * 00 RN -> 00, 01 RD -> 11, 10 RU -> 10, 11 RZ -> 01.
+     * Toggle bit 1 when the low bit is set. */
+    la_ld_wu(mxcsr, env_ir2_opnd, lsenv_offset_of_mxcsr(lsenv));
+    la_bstrpick_w(mxcsr, mxcsr, 14, 13);
+    la_andi(fcsr, mxcsr, 1);
+    la_beqz(fcsr, no_toggle);
+    la_xori(mxcsr, mxcsr, 2);
+    la_label(no_toggle);
+
+    la_movfcsr2gr(fcsr, fcsr_ir2_opnd);
+    la_bstrins_w(fcsr, mxcsr, FCSR_OFF_RM + 1, FCSR_OFF_RM);
+    la_movgr2fcsr(fcsr_ir2_opnd, fcsr);
+
+    ra_free_temp(fcsr);
+    ra_free_temp(mxcsr);
+
+    tr_data->sse_rounding_prepared = true;
+}
+
 static void update_fcsr_flag(IR2_OPND status_word, IR2_OPND fcsr)
 {
     IR2_OPND temp = ra_alloc_itemp();
@@ -209,10 +321,18 @@ bool translate_stmxcsr(IR1_INST *pir1)
 {
     /* 1. load the value of the mxcsr register state from env */
     IR2_OPND mxcsr_opnd = ra_alloc_itemp();
-    int offset = lsenv_offset_of_mxcsr(lsenv);
 
-    lsassert(offset <= 0x7ff);
-    la_ld_wu(mxcsr_opnd, env_ir2_opnd, offset);
+    if (option_softfpu) {
+        /* Merge the pending SSE native FCSR flags into env->mxcsr, then
+         * clear the native sticky flags so they are not re-merged. */
+        submit_sse_flags_to_mxcsr(mxcsr_opnd);
+        clear_sse_fcsr_flags();
+    } else {
+        int offset = lsenv_offset_of_mxcsr(lsenv);
+
+        lsassert(offset <= 0x7ff);
+        la_ld_wu(mxcsr_opnd, env_ir2_opnd, offset);
+    }
 
     /* 2. store  the value of the mxcsr register state to the dest_opnd */
     store_ireg_to_ir1(mxcsr_opnd, ir1_get_opnd(pir1, 0), false);
@@ -231,6 +351,14 @@ bool translate_ldmxcsr(IR1_INST *pir1)
     /* 2. store the value into the env->mxcsr */
     lsassert(offset <= 0x7ff);
     la_st_w(new_mxcsr, env_ir2_opnd, offset);
+
+    if (option_softfpu) {
+        /* LDMXCSR replaces the architectural MXCSR, discarding the pending
+         * native FCSR flags and possibly changing MXCSR.RC.  The next SSE
+         * instruction re-syncs FCSR0.RM from the new value. */
+        clear_sse_fcsr_flags();
+        lsenv->tr_data->sse_rounding_prepared = false;
+    }
 
     tr_gen_call_to_helper1((ADDR)update_mxcsr_status, 1,
                            LOAD_HELPER_UPDATE_MXCSR_STATUS);
