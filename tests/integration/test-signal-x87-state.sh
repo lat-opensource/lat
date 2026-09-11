@@ -88,6 +88,7 @@ run_case()
     52) reason="sigreturn corrupted MXCSR" ;;
     53) reason="handler inherited interrupted vector state" ;;
     54) reason="sigreturn corrupted vector state" ;;
+    61) reason="sigreturn misclassified nonzero x87 TOP as MMX" ;;
     124) reason="test timed out" ;;
     *) reason="unexpected exit status $ret" ;;
     esac
@@ -100,6 +101,9 @@ compile_case x87-rounding 2
 compile_case mmx-restore 3
 compile_case sse-entry 4
 compile_case avx-entry 5
+if [ "$signal_flags" != -DTEST_LEGACY_SIGNAL ]; then
+    compile_case x87-nonzero-top 6
+fi
 
 for mode in 0 1 2; do
     run_case x87-entry "$mode"
@@ -107,4 +111,7 @@ for mode in 0 1 2; do
     run_case mmx-restore "$mode"
     run_case sse-entry "$mode"
     run_case avx-entry "$mode"
+    if [ "$signal_flags" != -DTEST_LEGACY_SIGNAL ]; then
+        run_case x87-nonzero-top "$mode"
+    fi
 done

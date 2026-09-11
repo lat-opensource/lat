@@ -4,6 +4,7 @@
 #define TEST_MMX_RESTORE 3
 #define TEST_SSE_ENTRY 4
 #define TEST_AVX_ENTRY 5
+#define TEST_X87_NONZERO_TOP 6
 
 #ifndef TEST_CASE
 #error TEST_CASE must select an x87 signal regression
@@ -45,7 +46,7 @@ typedef unsigned int uint32_t;
 typedef unsigned long long uint64_t;
 
 struct target_sigaction {
-    void (*handler)(int);
+    void (*handler)(int, void *, void *);
     unsigned long flags;
     void (*restorer)(void);
     uint64_t mask;
@@ -79,6 +80,7 @@ static const uint64_t vector_value[4] __attribute__((aligned(32))) = {
 static uint64_t handler_vector[4] __attribute__((aligned(32)));
 static uint64_t restored_vector[4] __attribute__((aligned(32)));
 static uint32_t handler_mxcsr;
+static uint16_t restored_top;
 
 static inline long target_syscall4(long nr, long arg1, long arg2,
                                    long arg3, long arg4)
@@ -117,11 +119,49 @@ static void __attribute__((naked)) signal_restorer(void)
     __asm__ volatile(SIGNAL_RETURN);
 }
 
-static void signal_handler(int sig)
+static void signal_handler(int sig, void *info, void *context)
 {
     (void)sig;
+    (void)info;
+    (void)context;
 
-#if TEST_CASE == TEST_SSE_ENTRY || TEST_CASE == TEST_AVX_ENTRY
+#if TEST_CASE == TEST_X87_NONZERO_TOP
+    /* Linux UAPI ucontext: mcontext.fpregs at 224 (64-bit), 96 (32-bit). */
+    unsigned long address = *(unsigned long *)((uint8_t *)context +
+                                              (sizeof(long) == 8 ? 224 : 96));
+    struct fxsave_area *state = (void *)(address +
+                                       (sizeof(long) == 8 ? 0 : 112));
+    int i;
+
+    if (!handler_ran) {
+        /* Valid x87 NaNs with nonzero TOP must not become LATX MMX mode. */
+        state->fsw = 3 << 11;
+        state->ftw = 0xff;
+        for (i = 0; i < 8; i++) {
+            state->st_space[i][7] = 0xc0;
+            state->st_space[i][8] = 0xff;
+            state->st_space[i][9] = 0xff;
+        }
+#ifndef __x86_64__
+        /* Native i386 sigreturn folds the legacy x87 image into FXSAVE. */
+        *(uint32_t *)(address + 4) = 3 << 11;
+        *(uint32_t *)(address + 8) = 0xaaaa; /* All tags special, not empty. */
+        for (i = 0; i < 8; i++) {
+            uint8_t *reg = (uint8_t *)(address + 28 + 10 * i);
+
+            reg[7] = 0xc0;
+            reg[8] = 0xff;
+            reg[9] = 0xff;
+        }
+#endif
+        /* Mark the x87 component present when this is an XSAVE frame. */
+        if (*(uint32_t *)((uint8_t *)state + 464) == 0x46505853) {
+            *(uint64_t *)((uint8_t *)state + 512) |= 1;
+        }
+    } else {
+        restored_top = (state->fsw >> 11) & 7;
+    }
+#elif TEST_CASE == TEST_SSE_ENTRY || TEST_CASE == TEST_AVX_ENTRY
     /* Compiler-generated FP/vector instructions are disabled for this file. */
     __asm__ volatile("stmxcsr %0" : "=m"(handler_mxcsr));
 #if TEST_CASE == TEST_AVX_ENTRY
@@ -299,6 +339,20 @@ static int run_test(void)
         }
     }
     return 0;
+}
+#elif TEST_CASE == TEST_X87_NONZERO_TOP
+static int run_test(void)
+{
+    __asm__ volatile("fninit; fld1" : : : "st", "memory");
+    if (send_signal() < 0 || handler_ran != 1) {
+        return 11;
+    }
+    /* No FP instruction between sigreturn and the second frame save. */
+    if (send_signal() < 0 || handler_ran != 2) {
+        return 11;
+    }
+    __asm__ volatile("fninit" : : : "memory");
+    return restored_top == 3 ? 0 : 61;
 }
 #else
 #error unknown TEST_CASE
