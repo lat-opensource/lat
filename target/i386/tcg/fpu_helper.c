@@ -3275,7 +3275,8 @@ void cpu_x86_sync_latx_fcsr(CPUX86State *env)
     for (i = 0; i < 5; i++) {
         uint32_t x87_mask = 1 << exception_map[i];
 
-        if ((!option_enable_fcsr_exc || i != 0) && !(fpuc & x87_mask)) {
+        if ((option_enable_fcsr_exc && i != 0) ||
+            (!option_enable_fcsr_exc && !(fpuc & x87_mask))) {
             fcsr |= 1 << i;
         }
         if (fpus & x87_mask) {
