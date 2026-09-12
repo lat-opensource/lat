@@ -184,5 +184,49 @@ class ClangImageSelectionTest(unittest.TestCase):
         self.assertNotIn("\ntag ", log)
 
 
+class ReleaseValidationGateTest(unittest.TestCase):
+    def run_gate(self, **overrides):
+        workflow = (ROOT / ".github/workflows/release.yml").read_text()
+        code = textwrap.dedent(workflow.split("<<'PY'\n", 1)[1].split(
+            "\n          PY", 1)[0])
+        outputs = MATRIX.matrix_outputs(True)
+        with tempfile.TemporaryDirectory() as directory:
+            summary = Path(directory) / "summary.md"
+            environment = dict(os.environ, SELECT_RESULT="success",
+                               BUILD_RESULT="success", TEST_RESULT="success",
+                               CLANG_RESULT="success", GITHUB_SHA="a" * 40,
+                               BUILD_TYPES=json.dumps(outputs["build_types"]),
+                               TEST_CONTAINERS=json.dumps(outputs["test_containers"]),
+                               GITHUB_STEP_SUMMARY=str(summary))
+            environment.update(overrides)
+            result = subprocess.run(["python3", "-c", code], env=environment,
+                                    capture_output=True, text=True)
+            return result, summary.read_text() if summary.exists() else ""
+
+    def test_success_records_exact_commit_and_full_coverage(self):
+        result, summary = self.run_gate()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("a" * 40, summary)
+        self.assertIn("15 GCC builds, 3 lat-pr-fast jobs and 1 Clang build", summary)
+
+    def test_failed_cancelled_or_skipped_dependencies_cannot_pass(self):
+        for key in ("SELECT_RESULT", "BUILD_RESULT", "TEST_RESULT", "CLANG_RESULT"):
+            for value in ("failure", "cancelled", "skipped"):
+                with self.subTest(key=key, value=value):
+                    result, summary = self.run_gate(**{key: value})
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertEqual(summary, "")
+
+    def test_reduced_gcc_matrix_cannot_pass(self):
+        result, _ = self.run_gate(BUILD_TYPES=json.dumps(
+            MATRIX.matrix_outputs(False)["build_types"]))
+        self.assertNotEqual(result.returncode, 0)
+
+    def test_reduced_test_matrix_cannot_pass(self):
+        result, _ = self.run_gate(TEST_CONTAINERS=json.dumps(
+            MATRIX.matrix_outputs(False)["test_containers"]))
+        self.assertNotEqual(result.returncode, 0)
+
+
 if __name__ == "__main__":
     unittest.main()

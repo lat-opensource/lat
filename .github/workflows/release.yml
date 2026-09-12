@@ -12,6 +12,13 @@ on:
   push:
     branches:
       - master
+    # Existing LAT tags use 1.6.7; also accept v-prefixed and RC tags.
+    # GitHub does not apply path filters to tag pushes.
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+'
+      - '[0-9]+.[0-9]+.[0-9]+-*'
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-*'
     paths:
       - "**/*.c"
       - "**/*.h"
@@ -67,11 +74,11 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # A manual candidate run covers all three workflows together.
-  # Automatic runs trigger tests.yml and clang.yml directly.
+  # Tag pushes and manual candidate runs cover all three workflows together.
+  # Branch pushes, schedules and release events trigger each workflow directly.
   candidate-tests:
     needs: select-matrix
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/'))
     permissions:
       contents: read
       pull-requests: read
@@ -79,10 +86,74 @@ jobs:
 
   candidate-clang:
     needs: select-matrix
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/'))
     permissions:
       contents: read
     uses: ./.github/workflows/clang.yml
+
+  release-validation:
+    name: Full release validation
+    needs: [select-matrix, build, candidate-tests, candidate-clang]
+    if: always() && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require the complete candidate matrix
+        env:
+          SELECT_RESULT: ${{ needs.select-matrix.result }}
+          BUILD_RESULT: ${{ needs.build.result }}
+          TEST_RESULT: ${{ needs.candidate-tests.result }}
+          CLANG_RESULT: ${{ needs.candidate-clang.result }}
+          BUILD_TYPES: ${{ needs.select-matrix.outputs.build_types }}
+          TEST_CONTAINERS: ${{ needs.select-matrix.outputs.test_containers }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+
+          for key in ("SELECT_RESULT", "BUILD_RESULT", "TEST_RESULT", "CLANG_RESULT"):
+              if os.environ[key] != "success":
+                  raise SystemExit(f"Full validation did not pass: {key}={os.environ[key]}")
+          builds = json.loads(os.environ["BUILD_TYPES"])
+          containers = json.loads(os.environ["TEST_CONTAINERS"])
+          if len(builds) != 5 or {item["NAME"] for item in builds} != {
+              "build-release", "build32", "build32-dbg", "build64", "build64-dbg"
+          }:
+              raise SystemExit("Release validation requires all five GCC build configurations")
+          if len(containers) != 3 or {item["name"] for item in containers} != {
+              "latx-runner-aosc", "latx-runner-debian", "latx-runner-fedora"
+          }:
+              raise SystemExit("Release validation requires all three test containers")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+              summary.write("## Full release validation passed\n\n")
+              summary.write(f"Commit: `{os.environ['GITHUB_SHA']}`\n\n")
+              summary.write("15 GCC builds, 3 lat-pr-fast jobs and 1 Clang build passed.\n")
+          PY
+
+  publish-release:
+    name: Publish verified release
+    needs: release-validation
+    if: github.repository == 'lat-opensource/lat' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Download this run's release packages
+        uses: actions/download-artifact@v8
+        with:
+          pattern: latx-runner-*-build-release-*
+          path: release-artifacts
+          merge-multiple: false
+      - name: Publish packages after full validation
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 scripts/ci/lat_ci_release.py publish
 
   select-matrix:
     name: Select CI coverage
@@ -98,6 +169,9 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+      - name: Check version tag before building
+        if: startsWith(github.ref, 'refs/tags/')
+        run: python3 scripts/ci/lat_ci_release.py check-version
       - name: Select PR or full matrix
         id: matrix
         env:
