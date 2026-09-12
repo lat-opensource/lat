@@ -108,3 +108,31 @@ Before submitting a new test target, verify both of these:
 
 1. A normal product build without `--enable-tests` does not build the test.
 2. A build configured with `--enable-tests` builds and runs the selected suite.
+
+## RCU fork queue regression
+
+`test-rcu-fork-queue` runs on POSIX hosts with `--enable-tests`, including
+non-KZT and non-LATX configurations. It covers empty forks, callbacks that
+queue another callback, and forks with concurrently published callbacks still
+queued. A blocking callback pauses the consumer outside the grace-period lock,
+so the ordinary atfork lock path can proceed. The blocker itself has already
+been dequeued and is outside the queue-preservation contract.
+
+LATX/KZT configurations also register `test-rcu-fork-queue-held-reader`, which
+holds a reader across fork and covers lazy and deferred child startup. This
+scenario depends on KZT's atfork path not waiting for the parent's grace period.
+Both cases check each callback marked published after `call_rcu1()` returns:
+after the child drains, every published callback in its snapshot must have run
+exactly once. Producers remain active during the forks.
+
+Run the common case explicitly (the binary is not part of the default build):
+
+```sh
+meson test -C build64-tests test-rcu-fork-queue --print-errorlogs
+```
+
+With LATX/KZT enabled, also run:
+
+```sh
+meson test -C build64-tests test-rcu-fork-queue-held-reader --print-errorlogs
+```
