@@ -160,13 +160,13 @@ void unlink_indirect_jmp(CPUArchState *env, TranslationBlock *tb, ucontext_t *uc
 
 #ifdef CONFIG_LATX_FAST_JMPCACHE
 #ifdef CONFIG_LATX_GLUE_MASK
-    /* Glue-masked fast jmpcache lands in jirl after 12 instructions. */
-    insn = qatomic_read((uint32_t *)(jmp_rx + INS_SIZE * 11));
-    jmp_rw += INS_SIZE * 11;
+    insn = qatomic_read((uint32_t *)(jmp_rx +
+                INS_SIZE * TB_JMP_CACHE_FAST_MASK_JIRL_OFFSET));
+    jmp_rw += INS_SIZE * TB_JMP_CACHE_FAST_MASK_JIRL_OFFSET;
 #else
-    /* Unmasked fast jmpcache reaches jirl after the eight-instruction hit path. */
-    insn = qatomic_read((uint32_t *)(jmp_rx + INS_SIZE * 7));
-    jmp_rw += INS_SIZE * 7;
+    insn = qatomic_read((uint32_t *)(jmp_rx +
+                INS_SIZE * TB_JMP_CACHE_FAST_JIRL_OFFSET));
+    jmp_rw += INS_SIZE * TB_JMP_CACHE_FAST_JIRL_OFFSET;
 #endif
 #else
     CPUState *cpu = env_cpu(env);

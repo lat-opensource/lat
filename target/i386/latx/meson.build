@@ -72,6 +72,7 @@ i386_ss.add(when: 'CONFIG_LATX', if_true: files(
   'error.c',
   'mem.c',
   'latx-config.c',
+  'shadow-jmp-cache.c',
   'latx-options.c',
   'latx-perf.c',
   'latx-name-demangling.cpp',
