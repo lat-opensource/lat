@@ -185,6 +185,24 @@ if 'CONFIG_LATX' in config_host
   )
 endif
 
+test_kzt_path_collection = executable(
+  'test-kzt-path-collection',
+  files(
+    'kzt/test_kzt_path_collection.c',
+    '../../target/i386/latx/context/pathcoll.c',
+  ) + genh,
+  include_directories: include_directories('../../target/i386/latx/include'),
+  dependencies: [glib],
+)
+test('test-kzt-path-collection', test_kzt_path_collection, suite: 'lat-pr-fast')
+
+test(
+  'test-kzt-elf-lifecycle',
+  python,
+  args: [files('kzt/test-kzt-elf-lifecycle.py'), project_source_root],
+  suite: 'lat-pr-fast',
+)
+
 test_kzt_public_loader_observer = executable(
   'test-kzt-public-loader-observer',
   files(

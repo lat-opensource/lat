@@ -2131,6 +2131,7 @@ static kzt_public_loader_observer_t kzt_public_loader_observer;
 static int kzt_main_relocated_before_relro;
 static int kzt_main_fallback_reported;
 static int kzt_observer_failure_reported;
+static bool kzt_header_cleanup_pending;
 static uint32 kzt_public_r_brk_inst[2];
 extern void* x86free;
 extern void* x86realloc;
@@ -2371,6 +2372,121 @@ static int kzt_loader_snapshot_visit(
     (void)object;
     (void)opaque;
     return 0;
+}
+
+static bool kzt_public_header_is_unmapped(const elfheader_t *head)
+{
+    bool has_load = false;
+
+    for (size_t i = 0; i < head->numPHEntries; i++) {
+        const Elf64_Phdr *phdr = &head->PHEntries[i];
+        uintptr_t start, last, address;
+
+        if (phdr->p_type != PT_LOAD || !phdr->p_memsz) {
+            continue;
+        }
+        has_load = true;
+        if (phdr->p_vaddr > UINTPTR_MAX - head->public_load_bias) {
+            return false;
+        }
+        start = head->public_load_bias + phdr->p_vaddr;
+        if (phdr->p_memsz - 1 > UINTPTR_MAX - start) {
+            return false;
+        }
+        last = (start + phdr->p_memsz - 1) & TARGET_PAGE_MASK;
+        for (address = start & TARGET_PAGE_MASK; ;
+             address += TARGET_PAGE_SIZE) {
+            if (page_get_flags(address) & PAGE_VALID) {
+                return false;
+            }
+            if (address == last) {
+                break;
+            }
+        }
+    }
+    return has_load;
+}
+
+static bool kzt_public_header_can_retire(
+    const elfheader_t *head,
+    const kzt_public_loader_observer_t *snapshot)
+{
+    if (!head || !head->public_link_map || head == elf_header || head->lib ||
+        kzt_public_loader_observer_has_map(snapshot, head->public_link_map)) {
+        return false;
+    }
+    for (int i = 0; i < my_context->mallocmapsize; i++) {
+        if (my_context->mallocmaps[i]->h == head) {
+            return false;
+        }
+    }
+    return kzt_public_header_is_unmapped(head);
+}
+
+typedef struct KZTRetiredElfHeader {
+    struct rcu_head rcu;
+    elfheader_t *head;
+} KZTRetiredElfHeader;
+
+static void kzt_free_retired_header(KZTRetiredElfHeader *retired)
+{
+    FreeElfHeader(&retired->head);
+    g_free(retired);
+}
+
+/* Called outside cpu_exec, with no mmap lock held. */
+void kzt_reclaim_unloaded_headers(void)
+{
+    kzt_public_loader_observer_t snapshot;
+    kzt_public_loader_result_t result;
+
+    if (!qatomic_read(&kzt_header_cleanup_pending) ||
+        !qatomic_xchg(&kzt_header_cleanup_pending, false)) {
+        return;
+    }
+    /* Native calls can wait indefinitely. Retry after a later loader event
+     * rather than blocking guest execution for optional reclamation. */
+    if (!start_exclusive_timeout(10)) {
+        return;
+    }
+    mmap_lock();
+    snapshot = kzt_public_loader_observer;
+    result = kzt_public_loader_observer_refresh(
+        &snapshot, &kzt_public_loader_reader, kzt_loader_snapshot_visit, NULL);
+    if (result == KZT_PUBLIC_LOADER_OK) {
+        for (int i = 0; i < my_context->elfsize; i++) {
+            elfheader_t *head = my_context->elfs[i];
+
+            if (kzt_public_header_can_retire(head, &snapshot)) {
+                KZTRetiredElfHeader *retired = g_new(KZTRetiredElfHeader, 1);
+
+                retired->head = head;
+                my_context->elfs[i] = NULL;
+                /* A nested guest callback can leave an outer native frame
+                 * borrowing the header. Its cpu_exec RCU read section must
+                 * finish before the ELF metadata itself is freed. */
+                call_rcu(retired, kzt_free_retired_header, rcu);
+            }
+        }
+        while (my_context->elfsize > 0 &&
+               !my_context->elfs[my_context->elfsize - 1]) {
+            my_context->elfsize--;
+        }
+    }
+    mmap_unlock();
+    end_exclusive();
+}
+
+static void kzt_request_header_cleanup(CPUX86State *env)
+{
+    for (int i = 0; i < my_context->elfsize; i++) {
+        if (kzt_public_header_can_retire(
+                my_context->elfs[i], &kzt_public_loader_observer)) {
+            qatomic_set(&kzt_header_cleanup_pending, true);
+            cpu_exit(env_cpu(env));
+            break;
+        }
+    }
 }
 
 uintptr_t kzt_resolve_guest_symbol(const char *name)
@@ -2714,6 +2830,8 @@ static int kzt_try_bind_loaded_object(
     box_free(writes);
 
     kzt_report_object_recovery_if_needed(object, name_copy);
+    h->public_link_map = object->link_map_addr;
+    h->public_load_bias = object->load_bias;
     AddElfHeader(my_context, h);
     collectX86free(h);
     if (!x86free && !strcmp(rbasename, libcName)) {
@@ -2970,6 +3088,9 @@ static void kzt_dynamic_library_change_callback(CPUX86State *env)
     result = kzt_public_loader_observer_refresh(
         &kzt_public_loader_observer, &kzt_public_loader_reader,
         kzt_try_bind_observed_object, NULL);
+    if (result == KZT_PUBLIC_LOADER_OK) {
+        kzt_request_header_cleanup(env);
+    }
     mmap_unlock();
     if (result != KZT_PUBLIC_LOADER_OK &&
         result != KZT_PUBLIC_LOADER_BUSY) {
