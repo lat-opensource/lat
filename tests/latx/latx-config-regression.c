@@ -10,6 +10,9 @@
 #include "latx-string-utils.h"
 #include "latx-options.h"
 #include "latx-runtime.h"
+#ifdef CONFIG_LATX_INSTS_PATTERN
+#include "insts-pattern.h"
+#endif
 
 static bool config_option_registered(const char *expected)
 {
@@ -38,6 +41,21 @@ static void test_release_loader_prefix_config(void)
 {
     g_assert_true(config_option_registered("LAT_LD_PREFIX"));
 }
+
+#ifdef CONFIG_LATX_INSTS_PATTERN
+static void test_instptn_option_contract(void)
+{
+    g_assert_true(config_option_registered("LATX_INSTPTN_MASK"));
+    g_assert_true(config_option_registered("LATX_INSTPTN_STATS"));
+    g_assert_cmpuint(INSTPTN_DEFAULT_OPTIONS, ==, UINT64_C(0x3ffffff));
+    g_assert_cmpint(INSTPTN_OPT_ADD_JCC, ==, 26);
+    g_assert_cmpint(INSTPTN_OPT_OR_XX_JCC, <, 64);
+    g_assert_cmpuint(INSTPTN_OPTION_BIT(INSTPTN_OPT_ADD_JCC) &
+                     INSTPTN_OPTION_BIT(INSTPTN_OPT_OR_JCC), ==, 0);
+    g_assert_cmpuint(INSTPTN_DEFAULT_OPTIONS &
+                     INSTPTN_OPTION_BIT(INSTPTN_OPT_ADD_JCC), ==, 0);
+}
+#endif
 
 static void test_runtime_prefix_source(void)
 {
@@ -187,6 +205,10 @@ int main(int argc, char **argv)
                     test_target_config_files);
     g_test_add_func("/latx/config/release-loader-prefix",
                     test_release_loader_prefix_config);
+#ifdef CONFIG_LATX_INSTS_PATTERN
+    g_test_add_func("/latx/config/instptn-option-contract",
+                    test_instptn_option_contract);
+#endif
     g_test_add_func("/latx/config/runtime-prefix-source",
                     test_runtime_prefix_source);
     g_test_add_func("/latx/config/user-config-path",

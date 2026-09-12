@@ -1,5 +1,69 @@
 if 'x86_64-linux-user' in target_dirs
   latx_integration_tests += [{
+    'name': 'test-add-jcc',
+    'runner': find_program('../../test-add-jcc.sh'),
+    'args': [
+      emulators['latx-x86_64'],
+      files('../../add-jcc.S'),
+    ],
+  }]
+  latx_integration_tests += [{
+    'name': 'test-dec-jcc',
+    'runner': find_program('../../test-dec-jcc.sh'),
+    'args': [
+      emulators['latx-x86_64'],
+      files('../../dec-jcc.S'),
+    ],
+  }]
+  latx_integration_tests += [{
+    'name': 'test-shift-jcc',
+    'runner': find_program('../../test-shift-jcc.sh'),
+    'args': [
+      emulators['latx-x86_64'],
+      files('../../shift-jcc.S'),
+    ],
+  }]
+  latx_integration_tests += [{
+    'name': 'test-or-jcc',
+    'runner': find_program('../../test-or-jcc.sh'),
+    'args': [
+      emulators['latx-x86_64'],
+      files('../../or-jcc.S'),
+    ],
+  }]
+  latx_integration_tests += [{
+    'name': 'test-xor-jcc',
+    'runner': find_program('../../test-xor-jcc.sh'),
+    'args': [
+      emulators['latx-x86_64'],
+      files('../../xor-jcc.S'),
+    ],
+  }]
+  latx_integration_tests += [{
+    'name': 'test-or-xx-jcc',
+    'runner': find_program('../../test-or-xx-jcc.sh'),
+    'args': [
+      emulators['latx-x86_64'],
+      files('../../or-xx-jcc.S'),
+    ],
+  }]
+  latx_integration_tests += [{
+    'name': 'test-jcc-conditions',
+    'runner': find_program('../../test-jcc-conditions.sh'),
+    'args': [
+      emulators['latx-x86_64'],
+      files('../../jcc-conditions.S'),
+    ],
+  }]
+  latx_integration_tests += [{
+    'name': 'test-instptn-options',
+    'runner': find_program('../../test-instptn-options.sh'),
+    'args': [
+      emulators['latx-x86_64'],
+      files('../../instptn-options-fork.S'),
+    ],
+  }]
+  latx_integration_tests += [{
     'name': 'test-proc-readdir',
     'runner': find_program('../../test-proc-readdir.sh'),
     'args': [

@@ -36,6 +36,10 @@ extern void __gcov_dump(void);
 #include "latx-perf.h"
 #endif
 
+#ifdef CONFIG_LATX_INSTS_PATTERN
+#include "insts-pattern.h"
+#endif
+
 void preexit_cleanup(CPUArchState *env, int code)
 {
 #ifdef CONFIG_LATX_PERF
@@ -43,6 +47,9 @@ void preexit_cleanup(CPUArchState *env, int code)
 #endif
 #ifdef CONFIG_LATX_PERF
     latx_print_all_timers();
+#endif
+#ifdef CONFIG_LATX_INSTS_PATTERN
+    instptn_stats_dump();
 #endif
 
 #ifdef CONFIG_GPROF

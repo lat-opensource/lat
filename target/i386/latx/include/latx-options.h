@@ -22,7 +22,10 @@
 #endif
 
 #ifdef CONFIG_LATX_INSTS_PATTERN
-extern int option_instptn;
+extern uint64_t option_instptn;
+extern int option_instptn_stats;
+extern char *option_instptn_mask_error;
+extern char *option_instptn_stats_error;
 #endif
 #ifdef CONFIG_LATX_FLAG_REDUCTION
 extern int option_flag_reduction;
@@ -178,6 +181,14 @@ extern unsigned long long counter_mips_tr;
 #define ENVSUP_LATX
 #endif
 
+#if defined(CONFIG_LATX) && defined(CONFIG_LATX_INSTS_PATTERN)
+#define ENVSUP_INSTPTN \
+    ENVFUN(LATX_INSTPTN_MASK, handle_arg_latx_instptn_mask) \
+    ENVFUN(LATX_INSTPTN_STATS, handle_arg_latx_instptn_stats)
+#else
+#define ENVSUP_INSTPTN
+#endif
+
 #if defined(CONFIG_LATX) && defined(CONFIG_LATX_AVX_OPT)
 #define ENVSUP_AVX \
     ENVFUN(LATX_AVX_CPUID, handle_arg_latx_avx_cpuid)
@@ -258,6 +269,7 @@ extern unsigned long long counter_mips_tr;
 
 #define ENVS \
     ENVSUP_LATX \
+    ENVSUP_INSTPTN \
     ENVSUP_AVX \
     ENVSUP_KZT \
     ENVSUP_AOT \
@@ -269,6 +281,10 @@ extern unsigned long long counter_mips_tr;
 void options_init(void);
 bool latx_options_finalize(void);
 void options_parse_opt(const char *opt);
+#ifdef CONFIG_LATX_INSTS_PATTERN
+void options_parse_instptn_mask(const char *arg);
+void options_parse_instptn_stats(const char *arg);
+#endif
 void options_parse_imm_reg(const char *bits);
 void options_parse_dump(const char *bits);
 void options_parse_show_tb(const char *pc);
