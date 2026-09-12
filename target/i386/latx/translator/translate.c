@@ -3870,8 +3870,14 @@ void tr_load_registers_from_env(uint8 gpr_to_load, uint8 fpr_to_load,
 
     /* check current mode(mmx/fpu) */
     if (option_softfpu == 2) {
-        la_ld_wu(mode_fpu, env_ir2_opnd, lsenv_offset_of_mode_fpu(lsenv));
-        la_bne(mode_fpu, zero_ir2_opnd, label_fpu);
+        la_ld_bu(mode_fpu, env_ir2_opnd, lsenv_offset_of_mode_fpu(lsenv));
+        if (fpr_to_load == 0xff) {
+            /* A signal restore must initialize MMX without selecting it. */
+            la_xori(mode_fpu, mode_fpu, LATX_FPU_MODE_X87);
+            la_beq(mode_fpu, zero_ir2_opnd, label_fpu);
+        } else {
+            la_bne(mode_fpu, zero_ir2_opnd, label_fpu);
+        }
     }
 
     for (i = 0; i < 8; i++) {

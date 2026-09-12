@@ -104,6 +104,33 @@ and then run tests with the bundled `meson/meson.py`, or vice versa.
 To run the integration suite, replace `lat-pr-fast` with
 `latx-integration`.
 
+The `test-x87-signal-mode` integration test builds five static x86-64 guests
+with Clang/LLD only when explicitly run. On a target without that compiler,
+build the same source on an x86-64 Linux host:
+
+```sh
+mkdir -p x87-guests
+for case_id in 0 1 2 3 4; do
+  gcc -nostdlib -static -no-pie -DCASE=$case_id \
+    tests/integration/x87-signal-mode.S \
+    -o x87-guests/x87-signal-mode-$case_id
+done
+```
+
+Copy `x87-guests` to the LoongArch target, then run:
+
+```sh
+LATX_X87_SIGNAL_GUEST_DIR=/absolute/path/to/x87-guests \
+  meson test -C build64-tests --suite latx-integration \
+  test-x87-signal-mode --print-errorlogs
+```
+
+The cases cover full x87 stacks of negative NaNs and infinities, a second
+signal after an x87 write, MMX restoration, and x87 handler initialization
+and rounding restoration. Each runs in hard-float and softfpu=1/2, with
+both TB and TU translation. Compile the fixtures from the same checkout
+being tested; a supplied directory with a missing executable is a failure.
+
 Before submitting a new test target, verify both of these:
 
 1. A normal product build without `--enable-tests` does not build the test.

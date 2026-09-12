@@ -1,5 +1,14 @@
 if 'x86_64-linux-user' in target_dirs
   latx_integration_tests += [{
+    'name': 'test-x87-signal-mode',
+    'runner': find_program('../../test-x87-signal-mode.sh'),
+    'args': [
+      emulators['latx-x86_64'],
+      files('../../x87-signal-mode.S'),
+    ],
+    'timeout': 120,
+  }]
+  latx_integration_tests += [{
     'name': 'test-proc-readdir',
     'runner': find_program('../../test-proc-readdir.sh'),
     'args': [

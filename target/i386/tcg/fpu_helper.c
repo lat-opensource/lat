@@ -3284,7 +3284,21 @@ void cpu_x86_sync_latx_fcsr(CPUX86State *env)
 
 void cpu_x86_sync_latx_fpu_mode(CPUX86State *env)
 {
-    env->mode_fpu = !latx_x87_state_is_mmx(env);
+    /*
+     * MMX and a full x87 stack of negative NaNs/infinities have identical
+     * tag/exponent encodings.  In softfpu=2 the architectural state lives
+     * in env, whereas MMX uses host registers.  Load the latter on reentry
+     * without allowing their stale contents to overwrite subsequent x87
+     * writes.  Keep this state until MMX/EMMS explicitly selects a mode:
+     * translation/dispatch may clobber host MMX before the first guest use.
+     * Softfpu=1 already reloads MMX on every reentry, but must also avoid
+     * canonicalizing a negative-NaN x87 stack on a subsequent signal.
+     */
+    if (option_softfpu) {
+        env->mode_fpu = LATX_FPU_MODE_RESTORED;
+    } else {
+        env->mode_fpu = !latx_x87_state_is_mmx(env);
+    }
 }
 #endif
 
