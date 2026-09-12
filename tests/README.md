@@ -3,6 +3,9 @@
 LAT tests are registered with Meson and are configured only when
 `--enable-tests` is passed to `configure`.
 
+See [CI validation tiers](../docs/devel/ci-validation.md) for PR coverage,
+daily full matrices and the pre-release validation entry point.
+
 ## Choose a test suite
 
 - `lat-pr-fast`: deterministic, self-contained regression tests that need no

@@ -1,7 +1,14 @@
 name: LAT Tests
 
 on:
+  workflow_call:
+  # Select the exact release-candidate ref when running manually before release.
   workflow_dispatch:
+  schedule:
+    # Daily at 02:00 China Standard Time.
+    - cron: "0 18 * * *"
+  release:
+    types: [published]
   push:
     branches:
       - master
@@ -13,11 +20,20 @@ on:
       - "**/*.py"
       - "**/meson.build"
       - "meson_options.txt"
+      - "meson.options"
+      - "latxbuild/**"
+      - "configs/**"
+      - "**/*.mak"
+      - ".gitmodules"
       - "configure"
+      - "Makefile"
+      - "GNUmakefile"
+      - "meson"
+      - "meson/**"
       - "runtime/**"
       - "tests/runtime/**"
       - ".github/.ci/**"
-      - ".github/workflows/tests.yml"
+      - ".github/workflows/**"
   pull_request:
     paths:
       - "**/*.c"
@@ -27,18 +43,53 @@ on:
       - "**/*.py"
       - "**/meson.build"
       - "meson_options.txt"
+      - "meson.options"
+      - "latxbuild/**"
+      - "configs/**"
+      - "**/*.mak"
+      - ".gitmodules"
       - "configure"
+      - "Makefile"
+      - "GNUmakefile"
+      - "meson"
+      - "meson/**"
       - "runtime/**"
       - "tests/runtime/**"
       - ".github/.ci/**"
-      - ".github/workflows/tests.yml"
+      - ".github/workflows/**"
 
 permissions:
   contents: read
 
 # Test registration and suite selection rules are documented in tests/README.md.
+concurrency:
+  # Keep reusable calls separate from the caller and from Clang.
+  group: lat-tests-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  select-matrix:
+    name: Select CI coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      build_types: ${{ steps.matrix.outputs.build_types }}
+      test_containers: ${{ steps.matrix.outputs.test_containers }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Select PR or full matrix
+        id: matrix
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 scripts/ci/lat_ci_matrix.py
+
   meson-fast:
+    needs: select-matrix
     name: "test (${{ matrix.container.name }}, lat-pr-fast)"
     runs-on: ubuntu-latest
     timeout-minutes: 40
@@ -46,24 +97,20 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        container:
-          - name: "latx-runner-aosc"
-            tag: "loong64"
-            sanitizers: false
-            prepare_meson: "command -v meson >/dev/null || oma install -y meson"
-          - name: "latx-runner-debian"
-            tag: "loong64"
-            sanitizers: true
-            prepare_meson: "command -v meson >/dev/null || { apt-get update && apt-get install -y meson; }"
-          - name: "latx-runner-fedora"
-            tag: "loongarch64"
-            sanitizers: false
-            prepare_meson: "command -v meson >/dev/null"
+        container: ${{ fromJSON(needs.select-matrix.outputs.test_containers) }}
 
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+
+      - name: Cache test compilation
+        uses: actions/cache@v6
+        with:
+          path: /tmp/lat-test-cache
+          key: tests-v1-${{ matrix.container.name }}-${{ matrix.container.sanitizers }}-${{ hashFiles('.github/.ci/**/Dockerfile') }}-${{ github.sha }}
+          restore-keys: |
+            tests-v1-${{ matrix.container.name }}-${{ matrix.container.sanitizers }}-${{ hashFiles('.github/.ci/**/Dockerfile') }}-
 
       - name: Setup QEMU
         uses: docker/setup-qemu-action@v4
@@ -72,12 +119,19 @@ jobs:
         run: |
           docker run --rm \
             --platform linux/loong64 \
+            --env CCACHE_DIR=/root/.cache/ccache \
+            --volume /tmp/lat-test-cache:/root/.cache \
             --volume "$(pwd):/io" \
             --workdir /io \
             "ghcr.io/${{ github.repository_owner }}/${{ matrix.container.name }}:${{ matrix.container.tag }}" \
             sh -eux -c '
               ${{ matrix.container.prepare_meson }}
               meson --version
+              # Older Fedora images did not include ccache; keep the first
+              # full run working while the updated image is being published.
+              command -v ccache >/dev/null || dnf install -y ccache
+              ccache --zero-stats
+              trap "ccache --show-stats" EXIT
               export CFLAGS="-Wno-error=unused-but-set-variable -Wno-error=unused-function -Wformat -Werror=format-y2k"
               mkdir -p build64-tests
               cd build64-tests

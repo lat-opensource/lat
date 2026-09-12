@@ -1,7 +1,14 @@
 name: Clang Compile
 
 on:
+  workflow_call:
+  # Select the exact release-candidate ref when running manually before release.
   workflow_dispatch:
+  schedule:
+    # Daily at 02:00 China Standard Time.
+    - cron: "0 18 * * *"
+  release:
+    types: [published]
   push:
     branches:
       - master
@@ -13,11 +20,18 @@ on:
       - "**/*.py"
       - "**/meson.build"
       - "meson.options"
+      - "meson_options.txt"
+      - "configs/**"
+      - "**/*.mak"
+      - ".gitmodules"
       - "configure"
+      - "Makefile"
+      - "GNUmakefile"
+      - "meson"
+      - "meson/**"
       - "latxbuild/**"
       - ".github/.ci/clang/**"
-      - ".github/workflows/build-docker-images.yml"
-      - ".github/workflows/clang.yml"
+      - ".github/workflows/**"
   pull_request:
     paths:
       - "**/*.c"
@@ -27,19 +41,30 @@ on:
       - "**/*.py"
       - "**/meson.build"
       - "meson.options"
+      - "meson_options.txt"
+      - "configs/**"
+      - "**/*.mak"
+      - ".gitmodules"
       - "configure"
+      - "Makefile"
+      - "GNUmakefile"
+      - "meson"
+      - "meson/**"
       - "latxbuild/**"
       - ".github/.ci/clang/**"
-      - ".github/workflows/build-docker-images.yml"
-      - ".github/workflows/clang.yml"
+      - ".github/workflows/**"
 
 permissions:
   contents: read
 
+concurrency:
+  # github.workflow is the caller's name in a reusable workflow.
+  group: lat-clang-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   compile:
-    # Native LoongArch clang coverage.  The existing GCC release matrix stays
-    # in release.yml and is intentionally not part of this job.
+    # LoongArch clang runs under QEMU; GCC coverage lives in release.yml.
     name: "compile (Fedora, clang)"
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -53,10 +78,35 @@ jobs:
       - name: Setup QEMU
         uses: docker/setup-qemu-action@v4
 
-      - name: Set up Docker Buildx
+      - name: Cache clang compilation
+        uses: actions/cache@v6
+        with:
+          path: /tmp/lat-clang-cache
+          key: clang-v1-${{ hashFiles('.github/.ci/clang/Dockerfile') }}-${{ github.sha }}
+          restore-keys: |
+            clang-v1-${{ hashFiles('.github/.ci/clang/Dockerfile') }}-
+
+      - name: Pull matching clang image
+        id: clang-image
+        env:
+          REPOSITORY_OWNER: ${{ github.repository_owner }}
+        run: |
+          DOCKERFILE_HASH=$(sha256sum .github/.ci/clang/Dockerfile | cut -d ' ' -f 1)
+          IMAGE="ghcr.io/${REPOSITORY_OWNER}/latx-runner-fedora-clang:loongarch64-${DOCKERFILE_HASH}"
+          if docker pull --platform linux/loong64 "$IMAGE"; then
+            docker tag "$IMAGE" lat-ci-clang:local
+            echo "build_local=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Matching image unavailable; building the checked-out Dockerfile."
+            echo "build_local=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Docker Buildx for a new image
+        if: steps.clang-image.outputs.build_local == 'true'
         uses: docker/setup-buildx-action@v4
 
       - name: Build dedicated clang image
+        if: steps.clang-image.outputs.build_local == 'true'
         run: |
           docker buildx build \
             --platform linux/loong64 \
@@ -68,14 +118,22 @@ jobs:
         run: |
           docker run --rm \
             --platform linux/loong64 \
-            --env CC=clang \
-            --env CXX=clang++ \
+            --env "CC=ccache clang" \
+            --env "CXX=ccache clang++" \
+            --env CCACHE_DIR=/root/.cache/ccache \
+            --volume /tmp/lat-clang-cache:/root/.cache \
             --volume "$(pwd):/io" \
             --workdir /io \
             lat-ci-clang:local \
             sh -eux -c '
               clang --version
               clang++ --version
+              # The compiler on PATH is a wrapper. Include the real compiler
+              # as well so a toolchain upgrade cannot reuse stale objects.
+              compiler_hash=$(sha256sum /usr/bin/clang /usr/bin/clang++ /usr/local/bin/clang | sha256sum | cut -d " " -f 1)
+              export CCACHE_COMPILERCHECK="string:$compiler_hash"
+              ccache --zero-stats
+              trap "ccache --show-stats" EXIT
               mkdir build-clang
               cd build-clang
               ../configure \

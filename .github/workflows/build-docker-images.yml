@@ -16,6 +16,10 @@ on:
       - '.github/.ci/**'
       - '.github/workflows/build-docker-images.yml'
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   build:
     runs-on: ${{ matrix.IMAGE.RUNNER }}
@@ -50,6 +54,8 @@ jobs:
         run: |
           ATTEST_IMAGE=$(echo "${{ matrix.IMAGE.TAG_NAME }}" | cut -d ':' -f 1)
           echo "ATTEST_IMAGE=${ATTEST_IMAGE}" | tee -a "$GITHUB_OUTPUT"
+          DOCKERFILE_HASH=$(sha256sum "${{ matrix.IMAGE.DOCKERFILE_PATH }}/Dockerfile" | cut -d ' ' -f 1)
+          echo "CONTENT_TAG=${{ matrix.IMAGE.TAG_NAME }}-${DOCKERFILE_HASH}" >> "$GITHUB_OUTPUT"
 
       - name: Setup QEMU
         uses: docker/setup-qemu-action@v4
@@ -73,7 +79,9 @@ jobs:
         with:
           context: ${{ matrix.IMAGE.DOCKERFILE_PATH }}
           cache-from: ghcr.io/${{ github.repository_owner }}/${{ matrix.IMAGE.TAG_NAME }}
-          tags: ghcr.io/${{ github.repository_owner }}/${{ matrix.IMAGE.TAG_NAME }}
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/${{ matrix.IMAGE.TAG_NAME }}
+            ghcr.io/${{ github.repository_owner }}/${{ steps.image-name.outputs.CONTENT_TAG }}
           platforms: ${{ matrix.IMAGE.DOCKER_PLATFORM }}
           pull: true
           push: ${{ (github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/master' }}

@@ -2,6 +2,7 @@ FROM ghcr.io/fedora-remix-loongarch/mini-image:f43
 ARG TARGETARCH
 
 ARG DEPENDENCIES="         \
+        ccache             \
         gcc                \
         g++                \
         make               \
