@@ -205,11 +205,7 @@ void segment_tree_insert(char *name, target_ulong offset, target_ulong begin,
     if (is_elf_file(name)) {
        seg->seg_flag = IS_ELF_SEG;
     }
-    seg_info * old_seg_info = segment_tree_lookup2(begin, end);
-    while(old_seg_info) {
-       segment_tree_remove(old_seg_info);
-       old_seg_info = segment_tree_lookup2(begin, end);
-    }
+    segment_tree_remove_range(begin, end);
     /* Now insert this new segment into segment_tree */
     g_tree_replace(segment_tree, seg, seg);
 }
@@ -387,6 +383,20 @@ seg_info *segment_tree_lookup2(target_ulong begin, target_ulong end)
 void segment_tree_remove(seg_info* val)
 {
     g_tree_remove(segment_tree, val);
+}
+
+void segment_tree_remove_range(target_ulong begin, target_ulong end)
+{
+    seg_info *seg;
+
+    if (begin >= end) {
+        return;
+    }
+    /* A segment describes one mapping identity; partial replacement also
+     * invalidates that identity, as in segment_tree_insert(). */
+    while ((seg = segment_tree_lookup2(begin, end))) {
+        segment_tree_remove(seg);
+    }
 }
 
 static bool check_winepe_segment(seg_info * res) {

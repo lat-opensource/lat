@@ -751,6 +751,41 @@ foreach target : target_dirs
       aot_pe_load_address_test,
       suite: 'lat-pr-fast',
     )
+
+    aot_segment_unmap_test = executable(
+      'test-latx-aot-segment-unmap',
+      files(
+        'target/i386/latx/sbt/tests/aot-segment-unmap-test.c',
+        'target/i386/latx/sbt/segment.c',
+        'target/i386/latx/sbt/aot_lib.c'
+      ) + genh + tcg_trace_genh + [syscall_nr_generated],
+      c_args: smc_reload_test_c_args,
+      dependencies: [glib],
+      include_directories: target_inc,
+      link_args: smc_reload_test_link_args
+    )
+    test('latx-aot-segment-unmap', aot_segment_unmap_test,
+         suite: 'lat-pr-fast')
+
+    foreach variant : ['', '-no-tu']
+      aot_merge_memory_test = executable(
+        'test-latx-aot-merge-memory' + variant,
+        files(
+          'target/i386/latx/sbt/tests/aot-merge-memory-test.c',
+          'target/i386/latx/sbt/file_ctx.c'
+        ) + genh + tcg_trace_genh + [syscall_nr_generated],
+        c_args: smc_reload_test_c_args +
+                (variant == '' ? [] : ['-DAOT_MERGE_TEST_NO_TU']),
+        dependencies: [glib],
+        include_directories: target_inc,
+        link_args: smc_reload_test_link_args + [
+          '-Wl,--wrap=malloc', '-Wl,--wrap=free',
+          '-Wl,--wrap=get_aot_path', '-Wl,--wrap=opendir'
+        ]
+      )
+      test('latx-aot-merge-memory' + variant, aot_merge_memory_test,
+           suite: 'lat-pr-fast')
+    endforeach
   endif
 
     execs = [{

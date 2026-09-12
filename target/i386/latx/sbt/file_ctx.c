@@ -417,6 +417,8 @@ int aot_file_ctx(uint64_t maxSize, uint64_t leftMinSize)
     p_dir = opendir(aot_dir);
     if (p_dir == NULL) {
         qemu_log_mask(LAT_LOG_AOT, "---->can\'t open %s\n", aot_dir);
+        free(f_info);
+        free(aot_dir);
         return -1;
     }
     while ((p_dirent = readdir(p_dir))) {
