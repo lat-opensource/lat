@@ -174,7 +174,7 @@ class WorkflowDefinitionTest(unittest.TestCase):
         self.assertNotIn("EXPECTED_HEAD_SHA", workflow)
         self.assertIn("GITHUB_TOKEN: ${{ github.token }}", workflow)
         self.assertIn("scripts/ci/lat_ci_request.py", workflow)
-        self.assertIn("actions/checkout@v5", workflow)
+        self.assertIn("actions/checkout@v7", workflow)
         self.assertNotIn("[^/\\\\s]+/[^/\\\\s]+", workflow)
 
     def test_callback_workflow_authenticates_before_creating_a_check_run(self):
