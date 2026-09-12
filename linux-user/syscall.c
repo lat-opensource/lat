@@ -11056,31 +11056,40 @@ static int sanitize_private_futex_fault(int ret, int *uaddr, int op)
 {
 #if defined(CONFIG_LATX) && defined(TARGET_I386) && !defined(TARGET_X86_64)
     int base_op;
-    bool mapped = false;
+    bool mapped;
 
     /*
      * The i386 lock-instruction interpreter transiently moves a complete
      * host page.  A private futex in that page can observe the short gap as
      * EFAULT, including when host and target pages are both 4 KiB.  The guest
-     * mapping metadata persists across that host-only move.  Check it under
-     * mmap_lock so unmapped or unreadable guest futex addresses retain
-     * EFAULT.  For a mapped private WAIT, return EAGAIN so userspace reloads
-     * the futex word and retries.
+     * mapping metadata persists across that host-only move.  Taking
+     * mmap_lock waits for relocation to finish.  Also probe the actual
+     * word: readable guest metadata can survive truncation of a mapped
+     * file.  Only a successful read permits returning EAGAIN.
      */
     if (ret != -TARGET_EFAULT || !(op & FUTEX_PRIVATE_FLAG)) {
         return ret;
     }
     base_op = op & FUTEX_CMD_MASK;
-    if (!h2g_valid(uaddr)) {
+    if ((base_op != FUTEX_WAIT && base_op != FUTEX_WAIT_BITSET) ||
+        !h2g_valid(uaddr)) {
         return ret;
     }
     mmap_lock();
     mapped = (page_get_flags(h2g(uaddr)) & (PAGE_VALID | PAGE_READ)) ==
              (PAGE_VALID | PAGE_READ);
-    mmap_unlock();
-    if ((base_op == FUTEX_WAIT || base_op == FUTEX_WAIT_BITSET) && mapped) {
-        return -TARGET_EAGAIN;
+    if (mapped) {
+        uint32_t word;
+        struct iovec local = { .iov_base = &word, .iov_len = sizeof(word) };
+        struct iovec remote = { .iov_base = uaddr, .iov_len = sizeof(word) };
+
+        /* Let the kernel report inaccessible backing memory as an error. */
+        if (process_vm_readv(getpid(), &local, 1, &remote, 1, 0) ==
+            sizeof(word)) {
+            ret = -TARGET_EAGAIN;
+        }
     }
+    mmap_unlock();
 #endif
     return ret;
 }
