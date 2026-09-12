@@ -326,7 +326,16 @@ IR2_OPND ra_alloc_itemp(void)
 IR2_OPND ra_alloc_ftemp(void)
 {
     IR2_OPND ir2_opnd;
-    ir2_opnd_build(&ir2_opnd, IR2_OPND_FPR, ra_alloc_ftemp_num());
+    int ftemp_reg_num;
+
+    ftemp_reg_num = ra_alloc_ftemp_num();
+    if (unlikely(ftemp_reg_num < 0)) {
+        fprintf(stderr,
+                "[LATX] ftemp register exhausted, status=0x%x\n",
+                lsenv->tr_data->ftemp_status);
+        abort();
+    }
+    ir2_opnd_build(&ir2_opnd, IR2_OPND_FPR, ftemp_reg_num);
     return ir2_opnd;
 }
 
