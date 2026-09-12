@@ -22,9 +22,29 @@ typedef struct GuestSeccompData {
 
 typedef struct GuestSeccompFilter {
     struct GuestSeccompFilter *previous;
+    gint references;
     unsigned int len;
     struct sock_filter insns[];
 } GuestSeccompFilter;
+
+GuestSeccompFilter *guest_seccomp_filter_ref(GuestSeccompFilter *filter)
+{
+    if (filter) {
+        g_atomic_int_inc(&filter->references);
+    }
+    return filter;
+}
+
+void guest_seccomp_filter_unref(GuestSeccompFilter *filter)
+{
+    /* Each task root and each immutable previous edge owns a reference. */
+    while (filter && g_atomic_int_dec_and_test(&filter->references)) {
+        GuestSeccompFilter *previous = filter->previous;
+
+        g_free(filter);
+        filter = previous;
+    }
+}
 
 static bool seccomp_jump_valid(unsigned int pc, uint32_t offset,
                                unsigned int len)
@@ -284,6 +304,7 @@ static abi_long seccomp_load_filter(abi_ulong target_filter,
 
     filter = g_malloc(sizeof(*filter) + len * sizeof(filter->insns[0]));
     filter->previous = NULL;
+    filter->references = 1;
     filter->len = len;
     for (i = 0; i < len; i++) {
         filter->insns[i].code = tswap16(target_insns[i].code);
@@ -329,8 +350,6 @@ static abi_long seccomp_install_filter(CPUArchState *env, abi_ulong flags,
     if (ret) {
         return ret;
     }
-    filter->previous = task->seccomp_filter;
-
     if (flags & SECCOMP_FILTER_FLAG_TSYNC) {
         CPUState *other_cpu;
 
@@ -339,27 +358,41 @@ static abi_long seccomp_install_filter(CPUArchState *env, abi_ulong flags,
         CPU_FOREACH(other_cpu) {
             TaskState *other_task = other_cpu->opaque;
 
+            /* A CPU under construction inherits the root when published. */
+            if (!other_task || other_task->seccomp_exiting) {
+                continue;
+            }
             if (other_task->seccomp_filter != task->seccomp_filter) {
-                ret = other_task->ts_tid;
+                ret = other_task->ts_tid ? other_task->ts_tid : -TARGET_EAGAIN;
                 break;
             }
         }
         if (ret == 0) {
+            filter->previous = guest_seccomp_filter_ref(task->seccomp_filter);
             CPU_FOREACH(other_cpu) {
                 TaskState *other_task = other_cpu->opaque;
+                GuestSeccompFilter *previous;
 
-                other_task->seccomp_filter = filter;
+                if (!other_task || other_task->seccomp_exiting) {
+                    continue;
+                }
+                previous = other_task->seccomp_filter;
+                qatomic_store_release(&other_task->seccomp_filter,
+                                       guest_seccomp_filter_ref(filter));
+                guest_seccomp_filter_unref(previous);
             }
         }
+        guest_seccomp_filter_unref(filter);
         cpu_list_unlock();
         end_exclusive();
-        if (ret != 0) {
-            g_free(filter);
-        }
         return ret;
     }
 
-    task->seccomp_filter = filter;
+    /* Transfer the task's old root reference to the new node's edge. */
+    cpu_list_lock();
+    filter->previous = task->seccomp_filter;
+    qatomic_store_release(&task->seccomp_filter, filter);
+    cpu_list_unlock();
     return 0;
 }
 
@@ -369,8 +402,8 @@ abi_long guest_seccomp_prctl(CPUArchState *env, abi_long option,
     TaskState *task = env_cpu(env)->opaque;
 
     if (option == PR_GET_SECCOMP) {
-        return task->seccomp_filter ? SECCOMP_MODE_FILTER :
-                                      SECCOMP_MODE_DISABLED;
+        return qatomic_read(&task->seccomp_filter) ? SECCOMP_MODE_FILTER :
+                                                    SECCOMP_MODE_DISABLED;
     }
     if (mode != SECCOMP_MODE_FILTER) {
         return -TARGET_EINVAL;
@@ -427,7 +460,10 @@ GuestSeccompAction guest_seccomp_filter_syscall(CPUArchState *env, int num,
                                                 abi_long *result)
 {
     TaskState *task = env_cpu(env)->opaque;
-    GuestSeccompFilter *filter = task->seccomp_filter;
+    /* TSYNC stops cpu_exec, not other threads already handling syscalls.
+     * Publish/read the immutable chain with release/acquire ordering. Old
+     * chains remain alive through the new chain's owning previous edge. */
+    GuestSeccompFilter *filter = qatomic_load_acquire(&task->seccomp_filter);
     GuestSeccompData data;
     uint32_t decision = SECCOMP_RET_ALLOW;
     unsigned int i;

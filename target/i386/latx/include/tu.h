@@ -93,6 +93,7 @@ void tu_enough_space(CPUState *cpu);
 void tu_trees_reset(void);
 TranslationBlock *tu_tree_lookup(target_ulong pc);
 void tu_control_init(void);
+void tu_control_destroy(void);
 TranslationBlock* tb_create(CPUState *cpu, target_ulong pc,
         target_ulong cs_base, uint32_t flags, int cflags,
         int max_insns, uint16_t bool_flags, TU_TB_START_TYPE mode);

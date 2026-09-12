@@ -1,6 +1,11 @@
 #ifndef LINUX_USER_GUEST_SECCOMP_H
 #define LINUX_USER_GUEST_SECCOMP_H
 
+struct GuestSeccompFilter;
+struct GuestSeccompFilter *guest_seccomp_filter_ref(
+    struct GuestSeccompFilter *filter);
+void guest_seccomp_filter_unref(struct GuestSeccompFilter *filter);
+
 typedef enum GuestSeccompAction {
     GUEST_SECCOMP_CONTINUE,
     GUEST_SECCOMP_RETURN,
