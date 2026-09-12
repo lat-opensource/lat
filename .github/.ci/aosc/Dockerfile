@@ -1,4 +1,5 @@
-FROM aosc/aosc-os:container
+# The floating container tag may omit LoongArch from its manifest.
+FROM aosc/aosc-os:container-20260909-loongarch64@sha256:40fe33ba8393bc4420ad88cd3eedf40ff09531e430e58895609da4769a8ad1d2
 ARG TARGETARCH
 
 ARG DEPENDENCIES="         \

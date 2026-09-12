@@ -2,9 +2,16 @@
 name: Build and Release LAT
 
 on:
+  # Select the exact release-candidate ref when running manually before release.
   workflow_dispatch:
+  schedule:
+    # Daily at 02:00 China Standard Time.
+    - cron: "0 18 * * *"
   release:
+    types: [published]
   push:
+    branches:
+      - master
     paths:
       - "**/*.c"
       - "**/*.h"
@@ -12,12 +19,23 @@ on:
       - "**/*.py"
       - "**/meson.build"
       - "meson.options"
+      - "meson_options.txt"
+      - "configure"
+      - "Makefile"
+      - "GNUmakefile"
+      - "meson"
+      - "meson/**"
+      - "latxbuild/**"
+      - "configs/**"
+      - "**/*.mak"
+      - ".gitmodules"
+      - ".github/.ci/**"
       - "**/*.inc"
       - "**/*.yml"
       - "runtime/**"
       - "tests/runtime/**"
   pull_request:
-    types: [assigned, opened, synchronize, reopened]
+    types: [opened, synchronize, reopened]
     paths:
       - "**/*.c"
       - "**/*.h"
@@ -25,13 +43,70 @@ on:
       - "**/*.py"
       - "**/meson.build"
       - "meson.options"
+      - "meson_options.txt"
+      - "configure"
+      - "Makefile"
+      - "GNUmakefile"
+      - "meson"
+      - "meson/**"
+      - "latxbuild/**"
+      - "configs/**"
+      - "**/*.mak"
+      - ".gitmodules"
+      - ".github/.ci/**"
       - "**/*.inc"
       - "**/*.yml"
       - "runtime/**"
       - "tests/runtime/**"
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  # A manual candidate run covers all three workflows together.
+  # Automatic runs trigger tests.yml and clang.yml directly.
+  candidate-tests:
+    needs: select-matrix
+    if: github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: read
+      pull-requests: read
+    uses: ./.github/workflows/tests.yml
+
+  candidate-clang:
+    needs: select-matrix
+    if: github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/clang.yml
+
+  select-matrix:
+    name: Select CI coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      build_types: ${{ steps.matrix.outputs.build_types }}
+      test_containers: ${{ steps.matrix.outputs.test_containers }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Select PR or full matrix
+        id: matrix
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 scripts/ci/lat_ci_matrix.py
+
   build:
+    needs: select-matrix
+    timeout-minutes: 45
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -40,16 +115,12 @@ jobs:
           - { NAME: 'latx-runner-aosc', ARCH_NAME: 'loong64' }
           - { NAME: 'latx-runner-debian', ARCH_NAME: 'loong64' }
           - { NAME: 'latx-runner-fedora', ARCH_NAME: 'loongarch64' }
-        type:
-          - { NAME: 'build-release', OPT: '' }
-          - { NAME: 'build32', OPT: '-c -a' }
-          - { NAME: 'build32-dbg', OPT: '-c' }
-          - { NAME: 'build64', OPT: '-c -a' }
-          - { NAME: 'build64-dbg', OPT: '-c' }
+        type: ${{ fromJSON(needs.select-matrix.outputs.build_types) }}
 
     steps:
       - uses: actions/checkout@v7
         with:
+          persist-credentials: false
           submodules: true
 
       - name: Setup Cache
@@ -61,9 +132,6 @@ jobs:
 
       - name: Setup QEMU
         uses: docker/setup-qemu-action@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
 
       - name: "Build LATX"
         run: |
@@ -90,4 +158,6 @@ jobs:
             ${{ matrix.type.NAME }}/latx-x86_64
             *.tar.xz
           retention-days: 7
-
+          # Allow retrying this build job within the same workflow run.
+          overwrite: true
+          if-no-files-found: error
