@@ -233,3 +233,16 @@ test(
   test_kzt_address_policy,
   suite: 'lat-pr-fast',
 )
+
+if 'CONFIG_LATX_CAPSTONE_GIT' in config_host and 'CONFIG_LATX_DEBUG' not in config_host
+  test_ir1_decode = executable(
+    'test-ir1-decode',
+    files('test-ir1-decode.c') + genh,
+    include_directories: include_directories(
+      '../..', '../../target/i386/latx/include',
+    ),
+    dependencies: [glib, qemuutil, capstone_git],
+    build_by_default: false,
+  )
+  test('test-ir1-decode', test_ir1_decode, suite: 'lat-pr-fast', timeout: 30)
+endif
