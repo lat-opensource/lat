@@ -1390,11 +1390,14 @@ bool translate_lea(IR1_INST *pir1)
 {
     IR1_OPND *op0 = ir1_get_opnd(pir1, 0);
     IR1_OPND *op1 = ir1_get_opnd(pir1, 1);
+    IR1_OPND addr = *op1;
     int op0_size = ir1_opnd_size(op0);
     int op0_gpr_num = ir1_opnd_base_reg_num(op0);
     IR2_OPND dest_op = ra_alloc_gpr(op0_gpr_num);
 
-    convert_mem_to_specific_gpr(op1, dest_op, op0_size);
+    /* LEA computes only the effective offset; segment bases are ignored. */
+    addr.mem.segment = dt_X86_REG_INVALID;
+    convert_mem_to_specific_gpr(&addr, dest_op, op0_size);
 
     return true;
 }
@@ -1414,6 +1417,8 @@ static bool translate_xchg_spinlock(IR1_INST *pir1)
         mem_opnd = convert_mem(opnd1, &imm);
     }
     ir2_set_opnd_type(&mem_opnd, IR2_OPND_GPR);
+    gen_test_page_flag(mem_opnd, imm, PAGE_WRITE | PAGE_WRITE_ORG,
+                       ir1_opnd_size(opnd0) / 8);
     IR2_OPND lat_lock_addr = tr_lat_spin_lock(mem_opnd, imm);
 
     if (ir1_opnd_is_mem(opnd0)) {
@@ -1547,6 +1552,10 @@ bool translate_xchg(IR1_INST *pir1)
         src1 = load_ireg_from_ir1(opnd0, UNKNOWN_EXTENSION, false);
         reg_opnd = opnd0;
     }
+
+    /* Check the original address before alignment or an atomic fallback. */
+    gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG,
+                       opnd0_size / 8);
 
 #ifdef TARGET_X86_64
     if (CODEIS64 && opnd0_size == 64) {
@@ -1732,6 +1741,7 @@ bool translate_cmpxchg8b(IR1_INST *pir1)
         mem_opnd = convert_mem(opnd0, &imm);
     }
     ir2_set_opnd_type(&mem_opnd, IR2_OPND_GPR);
+    gen_test_page_flag(mem_opnd, imm, PAGE_WRITE | PAGE_WRITE_ORG, 8);
 
     /*
      * There is only one parameter from IR1.

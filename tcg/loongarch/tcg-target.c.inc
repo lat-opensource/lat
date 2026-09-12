@@ -38,6 +38,9 @@
   */
 
 #include "../tcg-pool.c.inc"
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+#include "exec/fasttb.h"
+#endif
 
 //#define LOONGARCH_DEBUG
 
@@ -1894,6 +1897,39 @@ void tb_target_set_nop(uintptr_t tc_ptr, uintptr_t jmp_rx,
 }
 #endif
 
+void tb_target_set_jmp_pair(uintptr_t jmp_rx, uintptr_t jmp_rw,
+                            uint64_t pair)
+{
+    tcg_insn_unit i1 = pair;
+    tcg_insn_unit i2 = pair >> 32;
+
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+    if ((i1 >> 26) == OPC_B) {
+        /* Stop an old first instruction from using a partially updated pair. */
+        qatomic_set((uint32_t *)(jmp_rw + 4), FASTTB_ILLINST_MAGIC);
+        flush_idcache_range(jmp_rx + 4, jmp_rw + 4, 4);
+        qatomic_set((uint32_t *)jmp_rw, i1);
+        flush_idcache_range(jmp_rx, jmp_rw, 4);
+    } else {
+        /* The old direct branch hides i2 until i1 is published. */
+        qatomic_set((uint32_t *)(jmp_rw + 4), i2);
+        flush_idcache_range(jmp_rx + 4, jmp_rw + 4, 4);
+        qatomic_set((uint32_t *)jmp_rw, i1);
+        flush_idcache_range(jmp_rx, jmp_rw, 4);
+    }
+#else
+    *(uint64_t *)jmp_rw = pair;
+    flush_idcache_range(jmp_rx, jmp_rw, 8);
+#endif
+}
+
+bool tb_target_jmp_in_range(uintptr_t jmp_rx, uintptr_t addr)
+{
+    ptrdiff_t offset = addr - jmp_rx;
+
+    return offset == sextreg(offset, 0, 28);
+}
+
 void tb_target_set_jmp_target(uintptr_t tc_ptr, uintptr_t jmp_rx,
                               uintptr_t jmp_rw, uintptr_t addr)
 {
@@ -1916,8 +1952,7 @@ void tb_target_set_jmp_target(uintptr_t tc_ptr, uintptr_t jmp_rx,
         i2 = 0x4c000000 | lower << 10 | TCG_REG_T0 << 5;
     }
     uint64_t pair = (uint64_t)i2 << 32 | i1;
-    *(uint64_t *)jmp_rw = pair;
-    flush_idcache_range(jmp_rx, jmp_rw, 8);
+    tb_target_set_jmp_pair(jmp_rx, jmp_rw, pair);
 #else
     tcg_insn_unit insn;
 

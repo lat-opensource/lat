@@ -8,6 +8,7 @@
 #include <dirent.h>
 #include "qemu/cutils.h"
 #include "qemu/path.h"
+#include "qemu/pressure-vessel.h"
 #include "qemu/thread.h"
 
 static const char *base;
@@ -101,18 +102,29 @@ const char *path(const char *name)
         ret = value ? value : name;
     } else {
         char *save = g_strdup(name);
-        char *full = path_get_prefixed(name);
 
-        /* Look for the path; record the result, pass or fail.  */
-        if (access(full, F_OK) == 0) {
-            /* Exists.  */
-            g_hash_table_insert(hash, save, full);
-            ret = full;
-        } else {
-            /* Does not exist.  */
-            g_free(full);
-            g_hash_table_insert(hash, save, NULL);
-            ret = name;
+#ifdef CONFIG_LATX
+        char *runtime_file = latx_pressure_vessel_runtime_resolve_path(name);
+
+        if (runtime_file) {
+            g_hash_table_insert(hash, save, runtime_file);
+            ret = runtime_file;
+        } else
+#endif
+        {
+            char *full = path_get_prefixed(name);
+
+            /* Look for the path; record the result, pass or fail.  */
+            if (access(full, F_OK) == 0) {
+                /* Exists.  */
+                g_hash_table_insert(hash, save, full);
+                ret = full;
+            } else {
+                /* Does not exist.  */
+                g_free(full);
+                g_hash_table_insert(hash, save, NULL);
+                ret = name;
+            }
         }
     }
 

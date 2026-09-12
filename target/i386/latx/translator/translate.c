@@ -2095,6 +2095,201 @@ static void tr_check_x86ins_change(struct TranslationBlock *tb)
 }
 #endif
 
+typedef enum SoftFPURegionClass {
+    SOFTFPU_REGION_NONE,
+    SOFTFPU_REGION_REQUIRED,
+    SOFTFPU_REGION_TRANSPARENT,
+} SoftFPURegionClass;
+
+static uint32_t softfpu_fast_mask(IR1_OPCODE opcode)
+{
+    switch (opcode) {
+    case dt_X86_INS_FADDP:
+        return LATX_SOFTFPU_FAST_FADDP;
+    case dt_X86_INS_FADD:
+        return LATX_SOFTFPU_FAST_FADD;
+    case dt_X86_INS_FDIV:
+        return LATX_SOFTFPU_FAST_FDIV;
+    case dt_X86_INS_FDIVP:
+        return LATX_SOFTFPU_FAST_FDIVP;
+    case dt_X86_INS_FDIVR:
+        return LATX_SOFTFPU_FAST_FDIVR;
+    case dt_X86_INS_FDIVRP:
+        return LATX_SOFTFPU_FAST_FDIVRP;
+    case dt_X86_INS_FIADD:
+        return LATX_SOFTFPU_FAST_FIADD;
+    case dt_X86_INS_FIDIV:
+        return LATX_SOFTFPU_FAST_FIDIV;
+    case dt_X86_INS_FIDIVR:
+        return LATX_SOFTFPU_FAST_FIDIVR;
+    case dt_X86_INS_FIMUL:
+        return LATX_SOFTFPU_FAST_FIMUL;
+    case dt_X86_INS_FISUB:
+        return LATX_SOFTFPU_FAST_FISUB;
+    case dt_X86_INS_FISUBR:
+        return LATX_SOFTFPU_FAST_FISUBR;
+    case dt_X86_INS_FMUL:
+        return LATX_SOFTFPU_FAST_FMUL;
+    case dt_X86_INS_FMULP:
+        return LATX_SOFTFPU_FAST_FMULP;
+    case dt_X86_INS_FRNDINT:
+        return LATX_SOFTFPU_FAST_FRNDINT;
+    case dt_X86_INS_FSCALE:
+        return LATX_SOFTFPU_FAST_FSCALE;
+    case dt_X86_INS_FSQRT:
+        return LATX_SOFTFPU_FAST_FSQRT;
+    case dt_X86_INS_FSUB:
+        return LATX_SOFTFPU_FAST_FSUB;
+    case dt_X86_INS_FSUBP:
+        return LATX_SOFTFPU_FAST_FSUBP;
+    case dt_X86_INS_FSUBR:
+        return LATX_SOFTFPU_FAST_FSUBR;
+    case dt_X86_INS_FSUBRP:
+        return LATX_SOFTFPU_FAST_FSUBRP;
+    case dt_X86_INS_FIST:
+        return LATX_SOFTFPU_FAST_FIST;
+    case dt_X86_INS_FISTP:
+        return LATX_SOFTFPU_FAST_FISTP;
+    case dt_X86_INS_FST:
+    case dt_X86_INS_FSTP:
+        return LATX_SOFTFPU_FAST_FST;
+    default:
+        return 0;
+    }
+}
+
+/*
+ * REQUIRED instructions need a shared helper wrapper. TRANSPARENT
+ * instructions need no wrapper on their common path, but may remain inside
+ * a region that joins required instructions on both sides.
+ */
+static SoftFPURegionClass softfpu_region_class(IR1_OPCODE opcode)
+{
+    uint32_t fast_mask = softfpu_fast_mask(opcode);
+
+    if (fast_mask && (option_softfpu_fast & fast_mask)) {
+        return SOFTFPU_REGION_TRANSPARENT;
+    }
+
+    switch (opcode) {
+    case dt_X86_INS_F2XM1:
+    case dt_X86_INS_WAIT:
+    case dt_X86_INS_FADD:
+    case dt_X86_INS_FADDP:
+    case dt_X86_INS_FBLD:
+    case dt_X86_INS_FBSTP:
+    case dt_X86_INS_FCOM:
+    case dt_X86_INS_FCOMI:
+    case dt_X86_INS_FCOMIP:
+    case dt_X86_INS_FCOMP:
+    case dt_X86_INS_FCOMPP:
+    case dt_X86_INS_FCOS:
+    case dt_X86_INS_FDIV:
+    case dt_X86_INS_FDIVP:
+    case dt_X86_INS_FDIVR:
+    case dt_X86_INS_FDIVRP:
+    case dt_X86_INS_FIADD:
+    case dt_X86_INS_FICOM:
+    case dt_X86_INS_FICOMP:
+    case dt_X86_INS_FIDIV:
+    case dt_X86_INS_FIDIVR:
+    case dt_X86_INS_FIMUL:
+    case dt_X86_INS_FISTTP:
+    case dt_X86_INS_FISUB:
+    case dt_X86_INS_FISUBR:
+    case dt_X86_INS_FMUL:
+    case dt_X86_INS_FMULP:
+    case dt_X86_INS_FNOP:
+    case dt_X86_INS_FPATAN:
+    case dt_X86_INS_FPREM1:
+    case dt_X86_INS_FPREM:
+    case dt_X86_INS_FPTAN:
+    case dt_X86_INS_FRNDINT:
+    case dt_X86_INS_FSCALE:
+    case dt_X86_INS_FSETPM:
+    case dt_X86_INS_FSIN:
+    case dt_X86_INS_FSINCOS:
+    case dt_X86_INS_FSQRT:
+    case dt_X86_INS_FSUB:
+    case dt_X86_INS_FSUBP:
+    case dt_X86_INS_FSUBR:
+    case dt_X86_INS_FSUBRP:
+    case dt_X86_INS_FTST:
+    case dt_X86_INS_FUCOM:
+    case dt_X86_INS_FUCOMI:
+    case dt_X86_INS_FUCOMIP:
+    case dt_X86_INS_FUCOMP:
+    case dt_X86_INS_FUCOMPP:
+    case dt_X86_INS_FXRSTOR:
+    case dt_X86_INS_FXSAVE:
+    case dt_X86_INS_FXTRACT:
+    case dt_X86_INS_FYL2X:
+    case dt_X86_INS_FYL2XP1:
+    case dt_X86_INS_FIST:
+    case dt_X86_INS_FISTP:
+    case dt_X86_INS_FST:
+    case dt_X86_INS_FSTP:
+    case dt_X86_INS_FXRSTOR64:
+    case dt_X86_INS_FXSAVE64:
+#ifdef CONFIG_LATX_AVX_OPT
+    case dt_X86_INS_XGETBV:
+    case dt_X86_INS_XSETBV:
+    case dt_X86_INS_XSAVE:
+    case dt_X86_INS_XSAVEOPT:
+    case dt_X86_INS_XRSTOR:
+#endif
+        return SOFTFPU_REGION_REQUIRED;
+    case dt_X86_INS_FILD:
+        return SOFTFPU_REGION_TRANSPARENT;
+    default:
+        return SOFTFPU_REGION_NONE;
+    }
+}
+
+/*
+ * These helpers update the x86 condition flags through env->eflags.  Keep
+ * them in a one-instruction region so the prologue reads the incoming flags
+ * and the matching epilogue writes the helper result back to LBT flags.
+ */
+static bool is_softfpu_eflags_insn(IR1_OPCODE opcode)
+{
+    switch (opcode) {
+    case dt_X86_INS_FCOMI:
+    case dt_X86_INS_FCOMIP:
+    case dt_X86_INS_FUCOMI:
+    case dt_X86_INS_FUCOMIP:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static int softfpu_region_last_required(IR1_INST *first, int count)
+{
+    int last_required = 0;
+
+    lsassert(softfpu_region_class(ir1_opcode(first)) ==
+             SOFTFPU_REGION_REQUIRED);
+    if (is_softfpu_eflags_insn(ir1_opcode(first))) {
+        return 0;
+    }
+
+    for (int i = 1; i < count; i++) {
+        IR1_OPCODE opcode = ir1_opcode(first + i);
+        SoftFPURegionClass class = softfpu_region_class(opcode);
+
+        if (class == SOFTFPU_REGION_NONE ||
+            is_softfpu_eflags_insn(opcode)) {
+            break;
+        }
+        if (class == SOFTFPU_REGION_REQUIRED) {
+            last_required = i;
+        }
+    }
+
+    return last_required;
+}
+
 int tr_ir2_generate(struct TranslationBlock *tb)
 {
     int i;
@@ -2115,7 +2310,9 @@ int tr_ir2_generate(struct TranslationBlock *tb)
     IR1_INST *pir1 = tb_ir1_inst(tb, 0);
 
     bool reduce_proepo = false;
-    int tr_func_idx;
+    int softfpu_region_end = -1;
+
+    lsenv->tr_data->softfpu_region_active = false;
 
 #ifdef CONFIG_LATX_MONITOR_SHARED_MEM
     if (option_monitor_shared_mem && tb->checksum) {
@@ -2222,12 +2419,14 @@ int tr_ir2_generate(struct TranslationBlock *tb)
         }
 #endif
 
-        if (option_softfpu == 2 && !reduce_proepo) {
-            tr_func_idx = ir1_opcode(pir1) - dt_X86_INS_INVALID;
-            if (tr_func_idx <= dt_X86_INS_FYL2XP1) {
-                reduce_proepo = true;
-                gen_softfpu_helper_prologue(pir1);
-            }
+        if (option_softfpu == 2 && !reduce_proepo &&
+            softfpu_region_class(ir1_opcode(pir1)) ==
+                SOFTFPU_REGION_REQUIRED) {
+            reduce_proepo = true;
+            softfpu_region_end = i +
+                softfpu_region_last_required(pir1, ir1_nr - i);
+            lsenv->tr_data->softfpu_region_active = true;
+            gen_softfpu_helper_prologue(pir1);
         }
 
         bool translation_success = ir1_translate(pir1);
@@ -2239,15 +2438,11 @@ int tr_ir2_generate(struct TranslationBlock *tb)
 #endif
         }
 
-        if (option_softfpu == 2 && reduce_proepo) {
-            if (i < ir1_nr - 1) {
-                IR1_INST *pir1_next = pir1 + 1;
-                tr_func_idx = ir1_opcode(pir1_next) - dt_X86_INS_INVALID;
-                if (tr_func_idx > dt_X86_INS_FYL2XP1) {
-                    reduce_proepo = false;
-                    gen_softfpu_helper_epilogue(pir1);
-                }
-            }
+        if (option_softfpu == 2 && reduce_proepo &&
+            i == softfpu_region_end) {
+            reduce_proepo = false;
+            lsenv->tr_data->softfpu_region_active = false;
+            gen_softfpu_helper_epilogue(pir1);
         }
 
 #ifdef CONFIG_LATX_IMM_REG
@@ -3294,6 +3489,12 @@ void latx_tb_set_jmp_target(TranslationBlock *tb, int n,
                                    TranslationBlock *next_tb)
 {
     assert(!use_tu_jmp(tb));
+    tb_set_jmp_target(tb, n, (uintptr_t)next_tb->tc.ptr);
+#ifdef CONFIG_LATX_LAZYLINK
+    if (tb->lazylink[n] != 2) {
+        return;
+    }
+#endif
 #ifdef CONFIG_LATX_INSTS_PATTERN
     if (n) {
         if (next_tb->eflag_use) {
@@ -3302,9 +3503,6 @@ void latx_tb_set_jmp_target(TranslationBlock *tb, int n,
             tb->bool_flags |= TARGET1_ELIMINATE;
         }
     }
-#endif
-    tb_set_jmp_target(tb, n, (uintptr_t)next_tb->tc.ptr);
-#ifdef CONFIG_LATX_INSTS_PATTERN
     /* TODO: TU */
     /* Eflags elimination */
     if (!next_tb->eflag_use &&
@@ -4125,10 +4323,29 @@ static inline void helper_restore_reg(IR2_OPND opnd)
             lsenv_offset_of_all_gpr(lsenv, ir2_opnd_base_reg_num(&opnd)));
 }
 
-void gen_test_page_flag(IR2_OPND mem_opnd, int mem_imm, uint32_t flag)
+void gen_test_page_flag(IR2_OPND mem_opnd, int mem_imm, uint32_t flag,
+                        unsigned int mem_size)
 {
+    uint32_t required_flag = flag & PAGE_WRITE ? PAGE_WRITE : PAGE_READ;
+
     if (!option_mem_test) {
+#if TARGET_ABI_BITS == 32
+        TranslationBlock *current_tb;
+
+        if (!option_minke_16k_page_check) {
+            return;
+        }
+        current_tb = (TranslationBlock *)lsenv->tr_data->curr_tb;
+        if (!current_tb ||
+            !latx_minke_16k_write_check_pc(current_tb->pc)) {
+            return;
+        }
+        if (!(flag & PAGE_WRITE)) {
+            return;
+        }
+#else
         return;
+#endif
     }
     TranslationBlock *tb __attribute__((unused)) = NULL;
     if (option_aot) {
@@ -4139,6 +4356,8 @@ void gen_test_page_flag(IR2_OPND mem_opnd, int mem_imm, uint32_t flag)
     IR2_OPND label0 = ra_alloc_label();
     IR2_OPND label1 = ra_alloc_label();
     IR2_OPND label2 = ra_alloc_label();
+    IR2_OPND label_fault = ra_alloc_label();
+    IR2_OPND label_check_end = ra_alloc_label();
     bool need_restore0 = false;
     bool need_restore1 = false;
     bool need_restore2 = false;
@@ -4163,37 +4382,90 @@ void gen_test_page_flag(IR2_OPND mem_opnd, int mem_imm, uint32_t flag)
 
     IR2_OPND mem_addr = ra_alloc_statics(S_UD1);
     la_addi_d(mem_addr, mem_opnd, mem_imm);
-    aot_load_host_addr(itemp0, (ADDR)&pageflags_root,
-        LOAD_PAGEFLAGS_ROOT, 0);
-    la_addi_d(itemp0, itemp0,
-            offsetof(IntervalTreeRoot, rb_root) + offsetof(RBRoot, rb_node));
-    la_ld_d(itemp0, itemp0, 0);
-    la_beq(itemp0, zero_ir2_opnd, label_exit);
+#if TARGET_ABI_BITS == 32
+    if (qemu_host_page_size == LATX_HOST_16K_PAGE_SIZE &&
+        (option_mem_test > 0 || option_minke_16k_page_check)) {
+        /*
+         * LATX_MT=1 checks a guest 4K page only when the surrounding host
+         * 16K page has mixed permissions. LATX_MT=2 always checks the cached
+         * guest-page flags. Both avoid the interval-tree walk while preserving
+         * guest read and write permissions.
+         */
+        if (option_mem_test != 2) {
+            li_d(itemp0, (ADDR)latx_16k_page_mixed);
+            la_bstrpick_d(itemp1, mem_addr, TARGET_ABI_BITS - 1,
+                          LATX_HOST_16K_PAGE_BITS);
+            la_ldx_bu(itemp2, itemp0, itemp1);
+            la_andi(itemp2, itemp2, required_flag);
+            la_beq(itemp2, zero_ir2_opnd,
+                   mem_size > 1 ? label_check_end : label_exit);
+        }
+        li_d(itemp0, (ADDR)latx_4k_page_flags);
+        la_bstrpick_d(itemp1, mem_addr, TARGET_ABI_BITS - 1,
+                      TARGET_PAGE_BITS);
+        la_ldx_bu(itemp2, itemp0, itemp1);
+        la_andi(itemp2, itemp2, required_flag);
+        la_bne(itemp2, zero_ir2_opnd,
+               mem_size > 1 ? label_check_end : label_exit);
+        la_b(label_fault);
+        if (mem_size > 1) {
+            la_label(label_check_end);
+            la_addi_d(mem_addr, mem_addr, mem_size - 1);
+            if (option_mem_test != 2) {
+                li_d(itemp0, (ADDR)latx_16k_page_mixed);
+                la_bstrpick_d(itemp1, mem_addr, TARGET_ABI_BITS - 1,
+                              LATX_HOST_16K_PAGE_BITS);
+                la_ldx_bu(itemp2, itemp0, itemp1);
+                la_andi(itemp2, itemp2, required_flag);
+                la_beq(itemp2, zero_ir2_opnd, label_exit);
+            }
+            li_d(itemp0, (ADDR)latx_4k_page_flags);
+            la_bstrpick_d(itemp1, mem_addr, TARGET_ABI_BITS - 1,
+                          TARGET_PAGE_BITS);
+            la_ldx_bu(itemp2, itemp0, itemp1);
+            la_andi(itemp2, itemp2, required_flag);
+            la_bne(itemp2, zero_ir2_opnd, label_exit);
+            /* The first inaccessible byte is the start of the final page. */
+            la_bstrins_d(mem_addr, zero_ir2_opnd, TARGET_PAGE_BITS - 1, 0);
+            /* Fall through to label_fault. */
+        }
+    } else
+#endif
+    {
+        aot_load_host_addr(itemp0, (ADDR) (&pageflags_root),
+                           LOAD_PAGEFLAGS_ROOT, 0);
+        la_addi_d(itemp0, itemp0,
+                 offsetof(IntervalTreeRoot, rb_root) +
+                 offsetof(RBRoot, rb_node));
+        la_ld_d(itemp0, itemp0, 0);
+        la_beq(itemp0, zero_ir2_opnd, label_exit);
 
-    la_label(label0);
-    la_ld_d(itemp1, itemp0, 0x10);
-    la_beq(itemp1, zero_ir2_opnd, label1);
-    la_ld_d(itemp2, itemp1, 0x28);
-    la_bltu(itemp2, mem_addr, label1);
-    la_mov64(itemp0, itemp1);
-    la_b(label0);
+        la_label(label0);
+        la_ld_d(itemp1, itemp0, 0x10);
+        la_beq(itemp1, zero_ir2_opnd, label1);
+        la_ld_d(itemp2, itemp1, 0x28);
+        la_bltu(itemp2, mem_addr, label1);
+        la_mov64(itemp0, itemp1);
+        la_b(label0);
 
-    la_label(label1);
-    la_ld_d(itemp1, itemp0, 0x18);
-    la_bltu(mem_addr, itemp1, label_exit);
-    la_ld_d(itemp1, itemp0, 0x20);
-    la_bgeu(itemp1, mem_addr, label2);
-    la_ld_d(itemp0, itemp0, 0x8);
-    la_beq(itemp0, zero_ir2_opnd, label_exit);
-    la_ld_d(itemp1, itemp0, 0x28);
-    la_bgeu(itemp1, mem_addr, label0);
-    la_b(label_exit);
+        la_label(label1);
+        la_ld_d(itemp1, itemp0, 0x18);
+        la_bltu(mem_addr, itemp1, label_exit);
+        la_ld_d(itemp1, itemp0, 0x20);
+        la_bgeu(itemp1, mem_addr, label2);
+        la_ld_d(itemp0, itemp0, 0x8);
+        la_beq(itemp0, zero_ir2_opnd, label_exit);
+        la_ld_d(itemp1, itemp0, 0x28);
+        la_bgeu(itemp1, mem_addr, label0);
+        la_b(label_exit);
 
-    la_label(label2);
-    la_ld_w(itemp0, itemp0, 0x30);
-    la_andi(itemp0, itemp0, flag & 0xff);
-    la_bne(itemp0, zero_ir2_opnd, label_exit);
+        la_label(label2);
+        la_ld_w(itemp0, itemp0, 0x30);
+        la_andi(itemp0, itemp0, flag & 0xff);
+        la_bne(itemp0, zero_ir2_opnd, label_exit);
+    }
 
+    la_label(label_fault);
     IR2_OPND s_env = ra_alloc_statics(S_ENV);
 #ifdef TARGET_X86_64
     la_st_d(mem_addr, s_env, offsetof(CPUX86State, cr[2]));

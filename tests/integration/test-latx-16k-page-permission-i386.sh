@@ -1,0 +1,100 @@
+#!/bin/sh
+set -eu
+
+emulator=$1
+source_file=$2
+workdir=$(mktemp -d)
+trap 'rm -rf "$workdir"' EXIT HUP INT TERM
+
+if [ "$(getconf PAGESIZE)" != 16384 ]; then
+    echo "SKIP: the guest permission test requires a 16K host page"
+    exit 77
+fi
+
+fixture=${LATX_16K_PERMISSION_FIXTURE:-}
+fallback=${LATX_16K_XCHG_FALLBACK:-0}
+if [ "$fallback" = 1 ] && ! command -v gdb >/dev/null 2>&1; then
+    echo "SKIP: gdb is required to select the XCHG fallback"
+    exit 77
+fi
+if [ -n "$fixture" ]; then
+    if [ ! -f "$fixture" ] || [ ! -x "$fixture" ]; then
+        echo "FAIL: prebuilt i386 fixture is not executable: $fixture" >&2
+        exit 1
+    fi
+else
+    if command -v clang-19 >/dev/null 2>&1; then
+        clang=clang-19
+    elif command -v clang >/dev/null 2>&1; then
+        clang=clang
+    else
+        echo "SKIP: clang is required; alternatively set LATX_16K_PERMISSION_FIXTURE"
+        exit 77
+    fi
+    if ! command -v ld.lld >/dev/null 2>&1; then
+        echo "SKIP: ld.lld is required; alternatively set LATX_16K_PERMISSION_FIXTURE"
+        exit 77
+    fi
+    fixture=$workdir/latx-16k-page-permission
+    # Toolchain availability was checked above. Compilation errors must fail.
+    "$clang" --target=i386-linux-gnu -fuse-ld=lld -nostdlib -static -no-pie \
+        -Wl,--build-id=none "$source_file" -o "$fixture"
+fi
+
+run_fault_case()
+{
+    mode=$1
+    case_name=$2
+    set +e
+    # Disable the single-thread XCHG load/store shortcut to test atomics.
+    if [ "$fallback" = 1 ]; then
+        # Select the fallback after hardware-dependent options are initialized.
+        LATX_AOT=0 LATX_KZT=0 LATX_CLOSE_PARALLEL=1 LATX_MT="$mode" \
+            timeout -s KILL 30 gdb -q -batch --return-child-result \
+            -ex 'handle SIGBUS nostop noprint pass' \
+            -ex 'handle SIGSEGV nostop noprint pass' \
+            -ex 'break translate_xchg' -ex run \
+            -ex 'set {int}&option_fast_atomic = 0' \
+            -ex 'disable breakpoints' -ex continue \
+            --args "$emulator" "$fixture" "$case_name"
+    else
+        LATX_AOT=0 LATX_KZT=0 LATX_CLOSE_PARALLEL=1 LATX_MT="$mode" \
+            timeout -s KILL 10 "$emulator" "$fixture" "$case_name"
+    fi
+    ret=$?
+    set -e
+
+    case $ret in
+    0) echo "PASS: LATX_MT=$mode $case_name signal context or valid access" ;;
+    10) echo "FAIL: guest mmap failed" >&2; exit 1 ;;
+    11) echo "FAIL: guest mprotect failed" >&2; exit 1 ;;
+    12) echo "FAIL: $case_name access bypassed guest permissions" >&2; exit 1 ;;
+    14) echo "FAIL: wrong signal or signal setup failed" >&2; exit 1 ;;
+    15) echo "FAIL: incorrect fault address" >&2; exit 1 ;;
+    16) echo "FAIL: incorrect fault instruction address" >&2; exit 1 ;;
+    17) echo "FAIL: incorrect fault stack pointer" >&2; exit 1 ;;
+    124|137) echo "FAIL: $case_name access timed out" >&2; exit 1 ;;
+    *) echo "FAIL: unexpected $case_name status $ret" >&2; exit 1 ;;
+    esac
+}
+
+for mode in 1 2; do
+    if [ "$fallback" = 1 ]; then
+        run_fault_case "$mode" x
+        run_fault_case "$mode" h
+        run_fault_case "$mode" a
+        continue
+    fi
+    run_fault_case "$mode" r
+    run_fault_case "$mode" w
+    run_fault_case "$mode" s
+    run_fault_case "$mode" c
+    run_fault_case "$mode" v
+    run_fault_case "$mode" p
+    run_fault_case "$mode" x
+    run_fault_case "$mode" h
+    run_fault_case "$mode" a
+    for case_name in b0 b1 b2 b3 b4 l0 l1 l2 l3 l4; do
+        run_fault_case "$mode" "$case_name"
+    done
+done

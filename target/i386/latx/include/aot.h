@@ -290,13 +290,22 @@ typedef struct aot_rel {
 
 extern aot_rel *rel_table;
 extern seg_info **seg_info_vector;
+typedef enum AOTTBOrigin {
+    AOT_TB_DYNAMIC,
+    AOT_TB_RECOVERED,
+} AOTTBOrigin;
+
 void mk_aot_dir(char * pathname);
 void aot_set_process_profile(int argc, char **argv);
 void dump_aot_buffer(aot_header *p_header);
 void dump_seg(aot_segment *p_segment, aot_header *p_header);
 lib_info *aot_load(char *lib_name, char *aot_file_name,
                    void **curr_aot_buffer);
-void aot_tb_register(TranslationBlock *tb);
+void aot_tb_register(TranslationBlock *tb, AOTTBOrigin origin);
+void aot_mark_dynamic_tb(TranslationBlock *tb);
+void aot_mark_recovered_tb(TranslationBlock *tb);
+void aot_unmark_tb(TranslationBlock *tb);
+void aot_reset_tb_stats(void);
 void aot_do_tb_reloc(TranslationBlock *tb, struct aot_tb *stb,
     target_ulong seg_begin, target_ulong seg_end);
 int aot_get_file_name(char *aot_file, char *buff, int index);

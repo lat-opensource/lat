@@ -48,6 +48,40 @@ if 'x86_64-linux-user' in target_dirs
       files('../../guest-fatal-signal-status.S'),
     ],
   }]
+  latx_integration_tests += [{
+    'name': 'test-softfpu-helper-store-gpr-x86_64',
+    'runner': find_program('../../test-softfpu-helper-store-gpr-x86_64.sh'),
+    'args': [
+      emulators['latx-x86_64'],
+      files('../../softfpu-helper-store-gpr-x86_64.S'),
+    ],
+  }]
+  latx_integration_tests += [{
+    'name': 'test-softfpu-shared-region-gpr-x86_64',
+    'runner': find_program('../../test-softfpu-shared-region-gpr-x86_64.sh'),
+    'args': [
+      emulators['latx-x86_64'],
+      files('../../softfpu-shared-region-gpr-x86_64.S'),
+    ],
+  }]
+  latx_integration_tests += [{
+    'name': 'test-softfpu-region-planner-x86_64',
+    'runner': find_program('../../test-softfpu-region-planner-x86_64.sh'),
+    'args': [
+      emulators['latx-x86_64'],
+      files('../../softfpu-region-planner-x86_64.S'),
+    ],
+  }]
+  if 'CONFIG_LATX_AVX_OPT' in config_host
+    latx_integration_tests += [{
+      'name': 'test-softfpu-xgetbv-gpr-x86_64',
+      'runner': find_program('../../test-softfpu-xgetbv-gpr-x86_64.sh'),
+      'args': [
+        emulators['latx-x86_64'],
+        files('../../softfpu-xgetbv-gpr-x86_64.S'),
+      ],
+    }]
+  endif
   if 'CONFIG_LATX_KZT' in config_host
     latx_integration_tests += [{
       'name': 'test-int3-sigtrap-rip',
@@ -61,6 +95,22 @@ if 'x86_64-linux-user' in target_dirs
 endif
 
 if 'i386-linux-user' in target_dirs
+  latx_integration_tests += [{
+    'name': 'test-softfpu-eflags-region-i386',
+    'runner': find_program('../../test-softfpu-eflags-region-i386.sh'),
+    'args': [
+      emulators['latx-i386'],
+      files('../../softfpu-eflags-region-i386.S'),
+    ],
+  }]
+  latx_integration_tests += [{
+    'name': 'test-latx-16k-page-permission-i386',
+    'runner': find_program('../../test-latx-16k-page-permission-i386.sh'),
+    'args': [
+      emulators['latx-i386'],
+      files('../../latx-16k-page-permission-i386.S'),
+    ],
+  }]
   latx_integration_tests += [{
     'name': 'test-fd-transform-race-i386',
     'runner': find_program('../../test-fd-transform-race-i386.sh'),

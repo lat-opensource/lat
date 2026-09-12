@@ -68,7 +68,7 @@ int smc_page_reload(target_ulong page_addr, uint32_t cflags)
             tb->jmp_list_next[1] = 0;
             tb->jmp_dest[0] = 0;
             tb->jmp_dest[1] = 0;
-            aot_tb_register(tb);
+            aot_tb_register(tb, AOT_TB_DYNAMIC);
         }
         ir1_offset += tb->size;
     }

@@ -51,6 +51,9 @@
 #include "target_elf.h"
 #include "cpu_loop-common.h"
 #include "crypto/init.h"
+#ifdef CONFIG_LATX
+#include "pressure-vessel.h"
+#endif
 int mydebug = 1;
 
 #ifdef CONFIG_LATX
@@ -776,13 +779,40 @@ static void handle_arg_latx_unimp_dump(const char *arg)
 
 static void handle_arg_latx_mem_test(const char *arg)
 {
-    option_mem_test = strtol(arg, NULL, 0);
+    long value;
+
+    if (qemu_strtol(arg, NULL, 0, &value) || value < 0 || value > 2) {
+        option_mem_test = 0;
+    } else {
+        option_mem_test = value;
+    }
     if (option_mem_test) {
-        if (sysconf(_SC_PAGESIZE) != 16384) {
+        if (qemu_real_host_page_size != LATX_HOST_16K_PAGE_SIZE) {
             option_mem_test = 0;
         } else {
             option_aot = 0;
         }
+    }
+}
+
+#define LATX_MINKE_PROGRAM_NAME "Minke.MI.Organ.exe"
+
+static void handle_arg_latx_minke_16k_page_check(const char *arg)
+{
+    long value;
+
+    if (qemu_strtol(arg, NULL, 0, &value)) {
+        value = 0;
+    }
+    option_minke_16k_page_check = value != 0;
+    if (option_minke_16k_page_check) {
+#if TARGET_ABI_BITS == 32
+        if (qemu_real_host_page_size != LATX_HOST_16K_PAGE_SIZE) {
+            option_minke_16k_page_check = 0;
+        }
+#else
+        option_minke_16k_page_check = 0;
+#endif
     }
 }
 
@@ -837,6 +867,17 @@ static void handle_arg_latx_aot(const char *arg)
     if (option_softfpu || option_mem_test) {
         option_aot = 0;
     }
+}
+
+static void handle_arg_latx_aot_generate(const char *arg)
+{
+    long value;
+
+    if (qemu_strtol(arg, NULL, 0, &value) < 0 || value < -1 || value > 1) {
+        fprintf(stderr, "LATX_AOT_GENERATE must be -1, 0, or 1\n");
+        exit(EXIT_FAILURE);
+    }
+    option_aot_generate = value;
 }
 
 static void handle_arg_latx_aot_pe_profile(const char *arg)
@@ -943,7 +984,10 @@ static const struct qemu_argument arg_table[] = {
     {"latx-imm-reg",    "LATX_IMM_REG",     true,  handle_arg_latx_imm_reg,
     "",           "enable imm reg optimization"},
     {"latx-mem-test",    "LATX_MT",     true,  handle_arg_latx_mem_test,
-    "",           "test memory right when memory access"},
+    "0|1|2",      "16K checks: sparse fast or strict fast"},
+    {"latx-minke-16k-page-check", "LATX_MINKE_16K_PAGE_CHECK", true,
+    handle_arg_latx_minke_16k_page_check, "0|1",
+    "enable Minke-specific mixed 16K write checks"},
     {"latx-real-maps",    "LATX_REAL_MAPS",     true,  handle_arg_latx_real_maps,
     "",           "enable get real self maps"},
     {"latx-monitor-shared-mem",    "LATX_MONITOR_SHARED_MEM",     true,  handle_arg_latx_monitor_shared_mem,
@@ -964,6 +1008,9 @@ static const struct qemu_argument arg_table[] = {
 #ifdef CONFIG_LATX_AOT
     {"latx-aot",    "LATX_AOT",     true,  handle_arg_latx_aot,
     "",           "enable aot"},
+    {"latx-aot-generate", "LATX_AOT_GENERATE", true,
+    handle_arg_latx_aot_generate, "",
+    "AOT generation: auto (-1), off (0), or force (1)"},
     {"latx-aot-pe-profile", "LATX_AOT_PE_PROFILE", true,
     handle_arg_latx_aot_pe_profile, "", "split libcef PE AOT by process role"},
     {"latx-aot-file-size", "LAT_AOT_FILE_SIZE", false,
@@ -1448,6 +1495,25 @@ int main(int argc, char **argv, char **envp)
     /* set environment variables */
     options_set(target_argv);
 
+#if defined(CONFIG_LATX) && defined(TARGET_I386) && TARGET_ABI_BITS == 32
+    if (option_mem_test) {
+        latx_init_16k_page_checks();
+    }
+    if (option_minke_16k_page_check) {
+        const char *program = guest_program(target_argv);
+        bool enable_minke_checks = program &&
+            !strcasecmp(program, LATX_MINKE_PROGRAM_NAME);
+
+        option_minke_16k_page_check = enable_minke_checks;
+        if (enable_minke_checks) {
+#ifdef CONFIG_LATX_AOT
+            option_aot = 0;
+#endif
+            latx_enable_minke_16k_write_checks();
+        }
+    }
+#endif
+
     if (!latx_options_finalize()) {
 #if defined(CONFIG_LATX_KZT)
         error_report("invalid KZT configuration: %s; KZT disabled",
@@ -1459,6 +1525,13 @@ int main(int argc, char **argv, char **envp)
         print_runtime_info();
         return EXIT_SUCCESS;
     }
+
+    /* Scan interp_prefix dir for replacement files. */
+    init_paths(interp_prefix);
+
+#ifdef CONFIG_LATX
+    latx_pressure_vessel_prepare(exec_path, target_argv, envlist);
+#endif
 
     error_init(argv[0]);
     module_call_init(MODULE_INIT_TRACE);
@@ -1503,9 +1576,6 @@ int main(int argc, char **argv, char **envp)
     memset(info, 0, sizeof(struct image_info));
 
     memset(&bprm, 0, sizeof (bprm));
-
-    /* Scan interp_prefix dir for replacement files. */
-    init_paths(interp_prefix);
 
     init_qemu_uname_release();
 
@@ -1604,6 +1674,10 @@ int main(int argc, char **argv, char **envp)
 
     target_environ = envlist_to_environ(envlist, NULL);
     envlist_free(envlist);
+
+#ifdef CONFIG_LATX
+    latx_pressure_vessel_exec_payload(target_environ);
+#endif
 
 #define KERNEL_CONFIG_LSM_MMAP_MIN_ADDR 65536
     /*

@@ -1,6 +1,7 @@
 cs_git = 'CONFIG_LATX_CAPSTONE_GIT' in config_host
 cs_latx_debug = 'CONFIG_LATX_DEBUG' in config_host
 cs_diet = 'CONFIG_CAPSTONE_DIET' in config_host
+cs_op_access = 'CONFIG_LATX_CAPSTONE_OP_ACCESS' in config_host
 latx_kzt = 'CONFIG_LATX_KZT' in config_host
 
 capStone_data = configuration_data()
@@ -9,6 +10,9 @@ capStone_data.set('CAPSTONE_USE_SYS_DYN_MEM', '1')
 capStone_data.set('LA_CAPSTONE', '1')
 if cs_diet
   capStone_data.set('CAPSTONE_DIET', '1')
+endif
+if cs_op_access
+  capStone_data.set('LATX_CAPSTONE_OP_ACCESS', '1')
 endif
 
 

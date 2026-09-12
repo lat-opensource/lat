@@ -169,6 +169,8 @@ static void init_delay_params(SyncClocks *sc, const CPUState *cpu)
 #include "latx-options.h"
 #include "latx-signal.h"
 #include "reg-map.h"
+
+#define LBT_FCSR_TOP_MODE_MASK (1U << 6)
 #endif
 
 /* Execute a TB, and fix up the CPU state afterwards if necessary */
@@ -632,11 +634,14 @@ void tb_set_jmp_target(TranslationBlock *tb, int n, uintptr_t addr)
             if (tb->lazylink[n] == 2) {
                 /* TB unlink */
                 tb->lazylink[n] = 1;
-                *(uint64_t*)jmp_rw = tb->lazylinkinst[n];
-                flush_idcache_range(jmp_rx, jmp_rw, 8);
+                tb_target_set_jmp_pair(jmp_rx, jmp_rw,
+                                       tb->lazylinkinst[n]);
             }
         } else {
             /* TB link */
+            if (!tb_target_jmp_in_range(jmp_rx, addr)) {
+                return;
+            }
             assert(tb->lazylink[n] == 1);
             tb->lazylink[n] = 2;
             tb->lazylinkinst[n] = *(uint64_t*)jmp_rx; /* save inst */
@@ -1152,6 +1157,20 @@ int cpu_exec(CPUState *cpu)
          * they have the correct value.
          */
         g_assert(cpu == current_cpu);
+#endif
+
+#ifdef CONFIG_LATX
+        CPUArchState *env = cpu->env_ptr;
+
+        /*
+         * Some exits bypass the translated cleanup and siglongjmp restores a
+         * possibly active LBT TOP mapping.  Clear both copies after the jump,
+         * before physical FPRs are loaded on the next entry.
+         */
+        if (!option_softfpu && (env->fcsr & LBT_FCSR_TOP_MODE_MASK)) {
+            env->fcsr &= ~LBT_FCSR_TOP_MODE_MASK;
+            __asm__ volatile("x86clrtm" : : : "memory");
+        }
 #endif
 
 #ifndef CONFIG_SOFTMMU

@@ -62,6 +62,8 @@ typedef struct TRANSLATION_DATA {
     uint8 curr_ir1_skipped_eflags; /* these eflag calculation can be skipped */
                                    /* (because of flag pattern, etc) */
 
+    bool softfpu_region_active;
+
     /* manage the immediate number cache */
     IMM_CACHE *imm_cache;
 } TRANSLATION_DATA;

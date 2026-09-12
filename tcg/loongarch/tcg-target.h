@@ -162,6 +162,10 @@ typedef enum {
 
 /* not defined -- call should be eliminated at compile time */
 void tb_target_set_jmp_target(uintptr_t, uintptr_t, uintptr_t, uintptr_t);
+#ifdef CONFIG_LATX_LAZYLINK
+void tb_target_set_jmp_pair(uintptr_t, uintptr_t, uint64_t);
+bool tb_target_jmp_in_range(uintptr_t, uintptr_t);
+#endif
 #ifdef CONFIG_LATX_XCOMISX_OPT
 void tb_target_set_nop(uintptr_t, uintptr_t, uintptr_t, uintptr_t);
 #endif

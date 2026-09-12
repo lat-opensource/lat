@@ -41,7 +41,8 @@ bool translate_lock_add_fast_atomic(IR1_INST *pir1)
     src0 = ra_alloc_itemp();
 
     mem_opnd = convert_mem_no_offset(opnd0);
-    gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG);
+    gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG,
+                       opnd0_size / 8);
 
     IR2_INST *(*amadd_inst)(IR2_OPND, IR2_OPND, IR2_OPND);
     amadd_inst = ATO_AMADD(opnd0_size);
@@ -69,7 +70,8 @@ bool translate_lock_and_fast_atomic(IR1_INST *pir1)
     src0 = ra_alloc_itemp();
 
     mem_opnd = convert_mem_no_offset(opnd0);
-    gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG);
+    gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG,
+                       opnd0_size / 8);
 
     src1 = load_ireg_from_ir1(opnd1, UNKNOWN_EXTENSION, false);
 
@@ -115,7 +117,8 @@ bool translate_lock_inc_fast_atomic(IR1_INST *pir1)
     src1 = ra_alloc_itemp();
 
     mem_opnd = convert_mem_no_offset(opnd0);
-    gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG);
+    gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG,
+                       opnd0_size / 8);
 
     IR2_INST *(*amadd_inst)(IR2_OPND, IR2_OPND, IR2_OPND);
     amadd_inst = ATO_AMADD(opnd0_size);
@@ -143,7 +146,8 @@ bool translate_lock_dec_fast_atomic(IR1_INST *pir1)
     src1 = ra_alloc_itemp();
 
     mem_opnd = convert_mem_no_offset(opnd0);
-    gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG);
+    gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG,
+                       opnd0_size / 8);
 
     IR2_INST *(*amadd_inst)(IR2_OPND, IR2_OPND, IR2_OPND);
     amadd_inst = ATO_AMADD(opnd0_size);
@@ -172,7 +176,8 @@ bool translate_lock_sub_fast_atomic(IR1_INST *pir1)
     temp = ra_alloc_itemp();
 
     mem_opnd = convert_mem_no_offset(opnd0);
-    gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG);
+    gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG,
+                       opnd0_size / 8);
 
     IR2_INST *(*amadd_inst)(IR2_OPND, IR2_OPND, IR2_OPND);
     amadd_inst = ATO_AMADD(opnd0_size);
@@ -201,7 +206,8 @@ bool translate_lock_or_fast_atomic(IR1_INST *pir1)
     src0 = ra_alloc_itemp();
 
     mem_opnd = convert_mem_no_offset(opnd0);
-    gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG);
+    gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG,
+                       opnd0_size / 8);
 
     src1 = load_ireg_from_ir1(opnd1, UNKNOWN_EXTENSION, false);
 
@@ -247,7 +253,8 @@ bool translate_lock_not_fast_atomic(IR1_INST *pir1)
     src1 = ra_alloc_itemp();
 
     mem_opnd = convert_mem_no_offset(opnd0);
-    gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG);
+    gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG,
+                       opnd0_size / 8);
 
     la_addi_d(src1, zero_ir2_opnd, -1);
 
@@ -291,7 +298,8 @@ bool translate_lock_xor_fast_atomic(IR1_INST *pir1)
     src0 = ra_alloc_itemp();
 
     mem_opnd = convert_mem_no_offset(opnd0);
-    gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG);
+    gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG,
+                       opnd0_size / 8);
 
     src1 = load_ireg_from_ir1(opnd1, UNKNOWN_EXTENSION, false);
 
@@ -337,7 +345,8 @@ bool translate_lock_xadd_fast_atomic(IR1_INST *pir1)
     src0 = ra_alloc_itemp();
 
     mem_opnd = convert_mem_no_offset(opnd0);
-    gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG);
+    gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG,
+                       opnd0_size / 8);
 
     IR2_INST *(*amadd_inst)(IR2_OPND, IR2_OPND, IR2_OPND);
     amadd_inst = ATO_AMADD(opnd0_size);
@@ -374,6 +383,8 @@ bool translate_lock_xchg_fast_atomic(IR1_INST *pir1)
     }
 
     IR2_INST *(*amswap_inst)(IR2_OPND, IR2_OPND, IR2_OPND);
+    gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG,
+                       opnd0_size / 8);
     amswap_inst = ATO_AMSWAP(opnd0_size);
 
     amswap_inst(src0, src1, mem_opnd);
@@ -407,7 +418,8 @@ bool translate_lock_cmpxchg_fast_atomic(IR1_INST *pir1)
     IR2_OPND gpr_eax_opnd = ra_alloc_gpr(eax_index);
 
     IR2_OPND mem_opnd = convert_mem_no_offset(opnd0);
-    gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG);
+    gen_test_page_flag(mem_opnd, 0, PAGE_WRITE | PAGE_WRITE_ORG,
+                       opnd0_size / 8);
 
 #ifdef TARGET_X86_64
     if (CODEIS64 && opnd0_size == 64) {

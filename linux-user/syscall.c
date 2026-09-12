@@ -66,6 +66,7 @@
 #include <linux/in6.h>
 #include <linux/errqueue.h>
 #include <linux/random.h>
+#include <linux/magic.h>
 #include <linux/sctp.h>
 #ifdef CONFIG_TIMERFD
 #include <sys/timerfd.h>
@@ -12641,12 +12642,65 @@ static int is_proc_myself(const char *filename, const char *entry)
     return 0;
 }
 #ifdef CONFIG_LATX
+static bool latx_stat_same_object(const struct stat *a, const struct stat *b)
+{
+    return a->st_dev == b->st_dev && a->st_ino == b->st_ino;
+}
+
 static bool latx_stat_is_proc_self_task(const struct stat *st)
 {
     struct stat task_st;
 
     return stat("/proc/self/task", &task_st) == 0 &&
-           st->st_dev == task_st.st_dev && st->st_ino == task_st.st_ino;
+           latx_stat_same_object(st, &task_st);
+}
+
+static bool latx_stat_is_proc_self_task_fd(int fd, const struct stat *st)
+{
+    struct stat fd_st;
+    struct stat task_st;
+    struct statfs fs;
+
+    /*
+     * A saved /proc/self/task fd remains usable after a shared chroot makes
+     * the absolute procfs path unreachable.  Verify both the filesystem and
+     * the directory's identity: ../../self/task resolves to the current
+     * process task directory, while another process's task fd does not.
+     */
+    return fd >= 0 && fstatfs(fd, &fs) == 0 &&
+           fs.f_type == PROC_SUPER_MAGIC && fstat(fd, &fd_st) == 0 &&
+           latx_stat_same_object(st, &fd_st) &&
+           fstatat(fd, "../../self/task", &task_st, 0) == 0 &&
+           latx_stat_same_object(st, &task_st);
+}
+
+static bool latx_stat_is_proc_self_task_at(int dirfd, const char *pathname,
+                                           int flags,
+                                           const struct stat *st)
+{
+    struct stat task_st;
+    struct statfs fs;
+
+    if (latx_stat_is_proc_self_task(st)) {
+        return true;
+    }
+
+    if (pathname && pathname[0] == '\0') {
+        return (flags & AT_EMPTY_PATH) &&
+               latx_stat_is_proc_self_task_fd(dirfd, st);
+    }
+
+    /*
+     * Chromium keeps an fd for the procfs root before sharing a sandbox
+     * chroot with CLONE_FS.  At that point /proc/self/task is no longer
+     * reachable by an absolute path, but self/task remains reachable through
+     * the saved procfd.  Verify that the dirfd is procfs before using that
+     * relative reference so an ordinary self/task directory is not rewritten.
+     */
+    return pathname && pathname[0] != '/' && dirfd >= 0 &&
+           fstatfs(dirfd, &fs) == 0 && fs.f_type == PROC_SUPER_MAGIC &&
+           fstatat(dirfd, "self/task", &task_st, 0) == 0 &&
+           latx_stat_same_object(st, &task_st);
 }
 
 static bool latx_statx_is_proc_self_task(const struct target_statx *stx)
@@ -12659,9 +12713,58 @@ static bool latx_statx_is_proc_self_task(const struct target_statx *stx)
            stx->stx_ino == task_st.st_ino;
 }
 
+static bool latx_statx_is_proc_self_task_at(int dirfd, const char *pathname,
+                                            int flags,
+                                            const struct target_statx *stx)
+{
+    struct stat task_st;
+    struct statfs fs;
+
+    if ((stx->stx_mask & STATX_TYPE) && !S_ISDIR(stx->stx_mode)) {
+        return false;
+    }
+
+    if (latx_statx_is_proc_self_task(stx)) {
+        return true;
+    }
+
+    if (pathname && pathname[0] == '\0') {
+        return (flags & AT_EMPTY_PATH) && fstat(dirfd, &task_st) == 0 &&
+               latx_stat_is_proc_self_task_fd(dirfd, &task_st) &&
+               stx->stx_dev_major == major(task_st.st_dev) &&
+               stx->stx_dev_minor == minor(task_st.st_dev) &&
+               stx->stx_ino == task_st.st_ino;
+    }
+
+    return pathname && pathname[0] != '/' && dirfd >= 0 &&
+           fstatfs(dirfd, &fs) == 0 && fs.f_type == PROC_SUPER_MAGIC &&
+           fstatat(dirfd, "self/task", &task_st, 0) == 0 &&
+           stx->stx_dev_major == major(task_st.st_dev) &&
+           stx->stx_dev_minor == minor(task_st.st_dev) &&
+           stx->stx_ino == task_st.st_ino;
+}
+
 static void latx_adjust_proc_self_task_stat(struct stat *st)
 {
-    if (latx_stat_is_proc_self_task(st)) {
+    if (S_ISDIR(st->st_mode) && latx_stat_is_proc_self_task(st)) {
+        st->st_nlink = latx_guest_thread_count() + 2;
+    }
+}
+static void latx_adjust_proc_self_task_fstat(int fd, struct stat *st)
+{
+    if (S_ISDIR(st->st_mode) &&
+        (latx_stat_is_proc_self_task(st) ||
+         latx_stat_is_proc_self_task_fd(fd, st))) {
+        st->st_nlink = latx_guest_thread_count() + 2;
+    }
+}
+
+static void latx_adjust_proc_self_task_stat_at(int dirfd, const char *pathname,
+                                               int flags,
+                                               struct stat *st)
+{
+    if (S_ISDIR(st->st_mode) &&
+        latx_stat_is_proc_self_task_at(dirfd, pathname, flags, st)) {
         st->st_nlink = latx_guest_thread_count() + 2;
     }
 }
@@ -16979,7 +17082,7 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
             }
 #ifdef CONFIG_LATX
             if (!is_error(ret)) {
-                latx_adjust_proc_self_task_stat(&st);
+                latx_adjust_proc_self_task_fstat(arg1, &st);
             }
 #endif
 #if defined(TARGET_NR_stat) || defined(TARGET_NR_lstat)
@@ -18531,7 +18634,7 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
         }
 #ifdef CONFIG_LATX
         if (!is_error(ret)) {
-            latx_adjust_proc_self_task_stat(&st);
+            latx_adjust_proc_self_task_fstat(arg1, &st);
         }
 #endif
         if (!is_error(ret))
@@ -18552,7 +18655,7 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
 
         if (!is_error(ret)) {
 #ifdef CONFIG_LATX
-            latx_adjust_proc_self_task_stat(&st);
+            latx_adjust_proc_self_task_stat_at(arg1, p, arg4, &st);
 #else
             if (rcu_call_thread_is_running() &&
                 (!strcmp((const char *)p, "self/task/") ||
@@ -18589,7 +18692,8 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
                 ret = get_errno(sys_statx(dirfd, p, flags, mask, &host_stx));
                 if (!is_error(ret)) {
 #ifdef CONFIG_LATX
-                    if (latx_statx_is_proc_self_task(&host_stx)) {
+                    if (latx_statx_is_proc_self_task_at(dirfd, p, flags,
+                                                        &host_stx)) {
                         host_stx.stx_nlink = latx_guest_thread_count() + 2;
                     }
 #endif
@@ -18609,7 +18713,7 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
 
 #ifdef CONFIG_LATX
             if (!is_error(ret)) {
-                latx_adjust_proc_self_task_stat(&st);
+                latx_adjust_proc_self_task_stat_at(dirfd, p, flags, &st);
             }
 #endif
             unlock_user(p, arg2, 0);

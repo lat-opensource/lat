@@ -525,24 +525,16 @@ struct separated_data{
     target_ulong target_pc;
 
 #ifdef CONFIG_LATX_HBR
-    union {
-        uint32_t xmm_in;
-        uint32_t gpr_in;
-    };
-    union {
-        uint32_t xmm_out;
-        uint32_t gpr_out;
-    };
-    union {
-        uint32_t xmm_use;
-        /* Need the previous TB to provide the correct GPR. */
-        uint32_t gpr_use;
-    };
-    union {
-        uint32_t xmm_def;
-        /* Can provide the correct GPR for the next TB. */
-        uint32_t gpr_def;
-    };
+    uint32_t xmm_in;
+    uint32_t xmm_out;
+    uint32_t xmm_use;
+    uint32_t xmm_def;
+    uint32_t gpr_in;
+    uint32_t gpr_out;
+    /* Need the previous TB to provide the correct GPR. */
+    uint32_t gpr_use;
+    /* Can provide the correct GPR for the next TB. */
+    uint32_t gpr_def;
     uint8_t shbr_type;
 #endif
 };
@@ -651,6 +643,7 @@ struct TranslationBlock {
 #define IS_CODE64         0x1000
 #define IS_TU_SPLIT       0x2000
 #define TBSMC_OPTED       0x4000
+#define AOT_STATS_COUNTED 0x8000
     uint16_t bool_flags;
     uint8_t  eflag_use;
 #ifdef CONFIG_LATX_INSTS_PATTERN

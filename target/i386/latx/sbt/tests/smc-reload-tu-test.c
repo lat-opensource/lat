@@ -7,6 +7,7 @@
 #include "exec/translate-all.h"
 
 static unsigned int aot_register_count;
+static AOTTBOrigin aot_register_origin;
 static int test_page_flags;
 
 __thread TCGContext *tcg_ctx;
@@ -42,10 +43,11 @@ void tb_target_set_nop(uintptr_t tc_ptr G_GNUC_UNUSED,
     g_assert_not_reached();
 }
 
-void aot_tb_register(TranslationBlock *tb)
+void aot_tb_register(TranslationBlock *tb, AOTTBOrigin origin)
 {
     assert(tb != NULL);
     aot_register_count++;
+    aot_register_origin = origin;
 }
 
 int page_get_flags(target_ulong address G_GNUC_UNUSED)
@@ -96,6 +98,7 @@ int main(void)
     smc_reload_tree_insert(reload);
     g_assert(smc_page_reload(reload->page_addr, 0) == 1);
     g_assert(aot_register_count == 1);
+    g_assert(aot_register_origin == AOT_TB_DYNAMIC);
     g_assert(tb.tu_jmp[TU_TB_INDEX_NEXT] == 4);
     g_assert(smc_reload_tree_get_node_count() == 0);
     tb.cflags = CF_INVALID;
@@ -111,6 +114,7 @@ int main(void)
     smc_reload_tree_insert(reload);
     g_assert(smc_page_reload(reload->page_addr, 0) == 1);
     g_assert(aot_register_count == 2);
+    g_assert(aot_register_origin == AOT_TB_DYNAMIC);
     g_assert(tb.tu_jmp[TU_TB_INDEX_NEXT] == 4);
     g_assert(smc_reload_tree_get_node_count() == 0);
     return 0;

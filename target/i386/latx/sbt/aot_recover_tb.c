@@ -158,7 +158,7 @@ static void recover_tb_range(target_ulong page, struct aot_tb *p_aot_tbs,
 #ifdef CONFIG_LATX_PROFILER
         CLN_TB_PROFILE(tb);
 #endif
-        aot_tb_register(tb);
+        aot_tb_register(tb, AOT_TB_RECOVERED);
 
 #ifdef CONFIG_LATX_DEBUG
         assert((tb->pc & TARGET_PAGE_MASK) == page);
@@ -264,7 +264,7 @@ static void recover_tb_range(target_ulong page, struct aot_tb *p_aot_tbs,
                 aot_link_tree_insert(tb, 0, 0);
             }
 #endif
-            aot_tb_register(tb);
+            aot_tb_register(tb, AOT_TB_RECOVERED);
         }
         i = j;
     }

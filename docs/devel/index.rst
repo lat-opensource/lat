@@ -35,6 +35,7 @@ Contents:
    tracing
    multi-thread-tcg
    tcg-plugins
+   latx/index
    bitops
    reset
    s390-dasd-ipl

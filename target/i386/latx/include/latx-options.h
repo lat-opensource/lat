@@ -68,6 +68,8 @@ extern int option_tunnel_lib;
 extern uint64_t option_end_trace_addr;
 extern uint64_t option_begin_trace_addr;
 extern int option_aot;
+/* -1 selects automatic generation, 0 disables it, 1 forces it. */
+extern int option_aot_generate;
 extern int option_smc_reload;
 extern int option_aot_wine;
 extern int option_load_aot;
@@ -82,6 +84,30 @@ extern uint64_t latx_trace_mem;
 extern uint64_t latx_break_insn;
 extern uint64_t latx_unlink_count;
 extern uint32_t latx_unlink_cpu;
+#define LATX_SOFTFPU_FAST_FADDP (1U << 0)
+#define LATX_SOFTFPU_FAST_FADD (1U << 1)
+#define LATX_SOFTFPU_FAST_FDIV (1U << 2)
+#define LATX_SOFTFPU_FAST_FDIVP (1U << 3)
+#define LATX_SOFTFPU_FAST_FDIVR (1U << 4)
+#define LATX_SOFTFPU_FAST_FDIVRP (1U << 5)
+#define LATX_SOFTFPU_FAST_FIADD (1U << 6)
+#define LATX_SOFTFPU_FAST_FIDIV (1U << 7)
+#define LATX_SOFTFPU_FAST_FIDIVR (1U << 8)
+#define LATX_SOFTFPU_FAST_FIMUL (1U << 9)
+#define LATX_SOFTFPU_FAST_FISUB (1U << 10)
+#define LATX_SOFTFPU_FAST_FISUBR (1U << 11)
+#define LATX_SOFTFPU_FAST_FMUL (1U << 12)
+#define LATX_SOFTFPU_FAST_FMULP (1U << 13)
+#define LATX_SOFTFPU_FAST_FRNDINT (1U << 14)
+#define LATX_SOFTFPU_FAST_FSCALE (1U << 15)
+#define LATX_SOFTFPU_FAST_FSQRT (1U << 16)
+#define LATX_SOFTFPU_FAST_FSUB (1U << 17)
+#define LATX_SOFTFPU_FAST_FSUBP (1U << 18)
+#define LATX_SOFTFPU_FAST_FSUBR (1U << 19)
+#define LATX_SOFTFPU_FAST_FSUBRP (1U << 20)
+#define LATX_SOFTFPU_FAST_FIST (1U << 21)
+#define LATX_SOFTFPU_FAST_FISTP (1U << 22)
+#define LATX_SOFTFPU_FAST_FST (1U << 23)
 extern int option_softfpu;
 extern int option_softfpu_fast;
 extern int option_prlimit;
@@ -98,6 +124,7 @@ extern int option_imm_complex;
 extern int option_debug_imm_reg;
 extern uint64_t imm_skip_pc;
 extern int option_mem_test;
+extern int option_minke_16k_page_check;
 extern int option_real_maps;
 extern int option_monitor_shared_mem;
 extern int option_private_mmap_shadow;
@@ -137,6 +164,8 @@ extern unsigned long long counter_mips_tr;
     ENVFUN(LATX_JRRA, handle_arg_latx_jrra) \
     ENVFUN(LATX_IMM_REG, handle_arg_latx_imm_reg) \
     ENVFUN(LATX_MT, handle_arg_latx_mem_test) \
+    ENVFUN(LATX_MINKE_16K_PAGE_CHECK, \
+           handle_arg_latx_minke_16k_page_check) \
     ENVFUN(LATX_REAL_MAPS, handle_arg_latx_real_maps) \
     ENVFUN(LATX_MONITOR_SHARED_MEM, handle_arg_latx_monitor_shared_mem) \
     ENVFUN(LATX_PRIVATE_MMAP_SHADOW, handle_arg_latx_private_mmap_shadow) \

@@ -111,6 +111,51 @@ test(
   suite: 'lat-pr-fast',
 )
 
+# Keep the SHBR semantic inventory and its static coverage contracts in the
+# ordinary PR suite.  These scripts inspect source files only, so they must
+# not require a LATX target binary or cause one to be built.
+hbr_python_env = environment()
+hbr_python_env.set('PYTHONPATH', project_source_root / 'scripts')
+
+test(
+  'test-latx-hbr-semantics-generated',
+  python,
+  args: [
+    project_source_root / 'scripts/generate_latx_hbr_semantics.py',
+    '--check',
+  ],
+  suite: 'lat-pr-fast',
+)
+
+test(
+  'test-latx-hbr-audit',
+  python,
+  args: [project_source_root / 'scripts/test_latx_hbr_audit.py'],
+  env: hbr_python_env,
+  suite: 'lat-pr-fast',
+)
+
+test(
+  'test-latx-hbr-metrics',
+  python,
+  args: [project_source_root / 'scripts/test_latx_hbr_metrics.py'],
+  env: hbr_python_env,
+  suite: 'lat-pr-fast',
+)
+
+test_hbr_live_transfer = executable(
+  'test-latx-hbr-live-transfer',
+  files('../../target/i386/latx/optimization/tests/hbr-live-transfer-test.c'),
+  include_directories: include_directories('../../target/i386/latx/include'),
+  build_by_default: false,
+)
+
+test(
+  'test-latx-hbr-live-transfer',
+  test_hbr_live_transfer,
+  suite: 'lat-pr-fast',
+)
+
 test_rcu_lazy_thread = executable(
   'test-rcu-lazy-thread',
   files('test-rcu-lazy-thread.c'),

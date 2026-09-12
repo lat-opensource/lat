@@ -1244,6 +1244,7 @@ bool translate_int_syscall(IR1_INST *pir1)
     la_label(label_traditionanl);
     /* 1. store gpr as they will be used in do_syscall */
     tr_save_registers_to_env(0xff, 0, 0, options_to_save());
+    tr_save_fcsr_to_env();
 
     /* 2. store intno to CPUState */
     IR2_OPND intno = ra_alloc_itemp();
@@ -1297,13 +1298,13 @@ bool translate_int(IR1_INST *pir1)
     tr_save_x64_8_registers_to_env(0xff, option_save_xmm);
     la_label(not_64);
 #endif
-    tr_save_fcsr_to_env();
 #ifdef CONFIG_LATX_SYSCALL_TUNNEL
     if (ir1_get_opnd(pir1, 0)->imm == 0x80) {
         return translate_int_syscall(pir1);
     }
 #endif
     tr_save_registers_to_env(0xff, 0xff, 0xff, options_to_save());
+    tr_save_fcsr_to_env();
 
     /* * store intno to CPUState */
     IR2_OPND intno = ra_alloc_itemp();
@@ -1342,9 +1343,9 @@ bool translate_syscall(IR1_INST *pir1)
 #else
 bool translate_syscall(IR1_INST *pir1)
 {
-    tr_save_fcsr_to_env();
     tr_save_registers_to_env(0xff, 0xff, 0xff, options_to_save());
     tr_save_x64_8_registers_to_env(0xff, 0xff);
+    tr_save_fcsr_to_env();
 
     /* store exception index(EXCP_SYSCALL) to CPUState */
     IR2_OPND exception_index = ra_alloc_itemp();

@@ -16,6 +16,7 @@
 static run_on_cpu_func queued_func;
 static run_on_cpu_data queued_data;
 static bool mmap_locked;
+static unsigned int aot_reset_count;
 
 TBContext tb_ctx;
 CPUTailQ cpus = QTAILQ_HEAD_INITIALIZER(cpus);
@@ -37,6 +38,12 @@ int qemu_log(const char *fmt G_GNUC_UNUSED, ...)
 void aot_exit_entry(CPUState *cpu G_GNUC_UNUSED,
                     AOTExitReason reason G_GNUC_UNUSED)
 {
+}
+
+void aot_reset_tb_stats(void)
+{
+    g_assert(mmap_locked);
+    aot_reset_count++;
 }
 
 #ifdef CONFIG_PLUGIN
@@ -126,6 +133,7 @@ int main(void)
     smc_reload_tree_insert(new_reload_node(0x1000));
     run_queued_flush(&cpu);
     g_assert(smc_reload_tree_get_node_count() == 0);
+    g_assert_cmpuint(aot_reset_count, ==, 1);
 
     smc_reload_tree_insert(new_reload_node(0x2000));
     tb_flush(&cpu);
@@ -133,6 +141,7 @@ int main(void)
     tb_ctx.tb_flush_count++;
     run_queued_flush(&cpu);
     g_assert(smc_reload_tree_get_node_count() == 1);
+    g_assert_cmpuint(aot_reset_count, ==, 1);
     smc_reload_tree_clear();
     return 0;
 }

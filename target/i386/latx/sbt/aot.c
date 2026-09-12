@@ -36,6 +36,9 @@
 static TranslationBlock **tb_vector;
 static int tb_num;
 static int curr_lib_tb_num;
+/* TB insertion/recovery is serialized; flush resets under exclusive. */
+static uint64_t aot_dynamic_tb_count;
+static uint64_t aot_total_tb_count;
 /* Compare function used to sort tb_vector. */
 static int tb_cmp(const void *a, const void *b)
 {
@@ -404,7 +407,9 @@ static inline int create_aot_tb(aot_tb *curr_aot_tb, TranslationBlock *tb,
     curr_aot_tb->rel_end_index = tb->s_data->rel_end;
     curr_aot_tb->first_jmp_align = tb->first_jmp_align;
     curr_aot_tb->last_ir1_type = tb->s_data->last_ir1_type;
-    curr_aot_tb->bool_flags = tb->bool_flags | IS_AOT_TB;
+    /* AOT_STATS_COUNTED is runtime-only state. */
+    curr_aot_tb->bool_flags =
+        (tb->bool_flags & ~AOT_STATS_COUNTED) | IS_AOT_TB;
     curr_aot_tb->eflag_use = tb->eflag_use;
     #ifdef CONFIG_LATX_INSTS_PATTERN
     curr_aot_tb->eflags_target_arg[0] = tb->eflags_target_arg[0];
@@ -1661,6 +1666,22 @@ static void creat_daemon(bool is_end)
 
 #define AOT_EXIT_EXCLUSIVE_TIMEOUT_MS 1000
 
+#define AOT_GENERATION_RATIO_DENOMINATOR 20
+
+static bool aot_should_generate(void)
+{
+    uint64_t dynamic_tbs = aot_dynamic_tb_count;
+    uint64_t total_tbs = aot_total_tb_count;
+    uint64_t threshold;
+
+    if (dynamic_tbs == 0 || total_tbs == 0) {
+        return false;
+    }
+    threshold = total_tbs / AOT_GENERATION_RATIO_DENOMINATOR;
+    threshold += total_tbs % AOT_GENERATION_RATIO_DENOMINATOR != 0;
+    return dynamic_tbs >= threshold;
+}
+
 void aot_exit_entry(CPUState *cpu, AOTExitReason reason)
 {
     TaskState *ts = cpu->opaque;
@@ -1668,6 +1689,12 @@ void aot_exit_entry(CPUState *cpu, AOTExitReason reason)
         ts && ts->ipc_namespace_isolated);
 
     if (!option_aot) {
+        return;
+    }
+    if (option_aot_generate == 0) {
+        return;
+    }
+    if (option_aot_generate < 0 && !aot_should_generate()) {
         return;
     }
     if (in_pre_translate) {
@@ -1758,6 +1785,54 @@ parent_exit:
 
     aot_generate(cpu);
     _exit(EXIT_SUCCESS);
+}
+
+void aot_mark_dynamic_tb(TranslationBlock *tb)
+{
+    if (!option_aot || option_aot_generate >= 0 || in_pre_translate ||
+        (tb->bool_flags & IS_TUNNEL_LIB) ||
+        page_get_page_state(tb->pc) == PAGE_SMC) {
+        return;
+    }
+    if (tb->bool_flags & AOT_STATS_COUNTED) {
+        return;
+    }
+    tb->bool_flags |= AOT_STATS_COUNTED;
+    aot_dynamic_tb_count++;
+    aot_total_tb_count++;
+}
+
+void aot_mark_recovered_tb(TranslationBlock *tb)
+{
+    (void)tb;
+    if (!option_aot || option_aot_generate >= 0 || in_pre_translate) {
+        return;
+    }
+    if (tb->bool_flags & AOT_STATS_COUNTED) {
+        return;
+    }
+    tb->bool_flags |= AOT_STATS_COUNTED;
+    aot_total_tb_count++;
+}
+
+void aot_unmark_tb(TranslationBlock *tb)
+{
+    if (!(tb->bool_flags & AOT_STATS_COUNTED)) {
+        return;
+    }
+    tb->bool_flags &= ~AOT_STATS_COUNTED;
+    assert(aot_total_tb_count > 0);
+    aot_total_tb_count--;
+    if (!(tb->bool_flags & IS_AOT_TB)) {
+        assert(aot_dynamic_tb_count > 0);
+        aot_dynamic_tb_count--;
+    }
+}
+
+void aot_reset_tb_stats(void)
+{
+    aot_dynamic_tb_count = 0;
+    aot_total_tb_count = 0;
 }
 
 void aot_init(void)

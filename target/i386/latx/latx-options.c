@@ -76,6 +76,7 @@ int option_latx_disassemble_trace_cmp;
 int option_debug_lative;
 int option_aot;
 int option_load_aot;
+int option_aot_generate;
 int option_aot_wine;
 int option_smc_reload;
 int option_debug_aot;
@@ -100,6 +101,7 @@ int option_vpaes;
 int option_split_tb;
 int option_anonym;
 int option_mem_test;
+int option_minke_16k_page_check;
 int option_real_maps;
 int option_monitor_shared_mem;
 int option_private_mmap_shadow;
@@ -250,6 +252,7 @@ void options_init(void)
 #ifdef CONFIG_LATX_AOT
     option_aot = 1;
     option_load_aot = 1;
+    option_aot_generate = -1;
     option_aot_wine = 0;
     option_debug_aot = 0;
 #endif
@@ -268,6 +271,7 @@ void options_init(void)
 #endif
     option_anonym = 0;
     option_mem_test = 0;
+    option_minke_16k_page_check = 0;
     option_real_maps = 0;
     option_monitor_shared_mem = 0;
     option_private_mmap_shadow = 0;

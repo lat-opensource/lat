@@ -85,6 +85,7 @@ struct la_dt_insn *nextcapstone_get_from_insn(cs_insn *inputinfo,
                 inputinfo->detail->x86.operands[i].mem.disp;
         }
         ret->x86.operands[i].size = inputinfo->detail->x86.operands[i].size;
+        ret->x86.operands[i].access = dt_CS_AC_INVALID;
         switch (inputinfo->detail->x86.operands[i].access) {
             default:
                 break;

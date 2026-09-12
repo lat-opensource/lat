@@ -26,6 +26,7 @@
 #include "signal-common.h"
 #include "hw/core/tcg-cpu-ops.h"
 #include "tcg/tcg.h"
+#include "exec/tb-hash.h"
 #include "fpu/softfloat.h"
 #ifdef CONFIG_LATX_AOT
 #include "aot.h"
@@ -1134,19 +1135,47 @@ static void host_signal_handler(int host_signum, siginfo_t *info,
     }
 
 #ifdef CONFIG_LATX_FAST_JMPCACHE
-    if (host_signum == SIGILL &&
-        *(unsigned int *)UC_PC(uc) == FASTTB_ILLINST_MAGIC) {
-            TranslationBlock *current_tb = tcg_tb_lookup(UC_PC(uc));
-            if (current_tb) {
+    if (host_signum == SIGILL) {
+        TranslationBlock *current_tb = tcg_tb_lookup(UC_PC(uc));
+        if (current_tb) {
+            for (int n = 0; n < 2; n++) {
+                if (current_tb->jmp_target_arg[n] !=
+                        TB_JMP_RESET_OFFSET_INVALID &&
+                    current_tb->jmp_reset_offset[n] !=
+                        TB_JMP_RESET_OFFSET_INVALID &&
+                    UC_PC(uc) == (uintptr_t)current_tb->tc.ptr +
+                        current_tb->jmp_target_arg[n] + 4) {
+                    /*
+                     * The sentinel may already have been overwritten by
+                     * the time its SIGILL is delivered.  Retry the pair to
+                     * recompute its scratch register from a consistent PC.
+                     */
+                    UC_PC(uc) = (uintptr_t)current_tb->tc.ptr +
+                        current_tb->jmp_target_arg[n];
+                    return;
+                }
+            }
+            if (*(unsigned int *)UC_PC(uc) == FASTTB_ILLINST_MAGIC) {
 #if defined(CONFIG_LATX_DEBUG)
                 fprintf(stderr, "[FAST_JMPCACHE] SIGILL handled\n");
 #endif
+                /*
+                 * The invalidating thread may have missed this CPU's fast
+                 * cache slot while another TB with the same hash occupied
+                 * the regular jump cache.  Clear it here before returning to
+                 * the dispatcher, otherwise it can select this sentinel
+                 * again indefinitely.
+                 */
+                uint32_t hash = tb_jmp_cache_hash_func(current_tb->pc);
+                qatomic_cmpxchg(&cpu->tb_jmp_cache[hash], current_tb, NULL);
+                latx_fast_jmp_cache_clear(cpu, hash);
                 /* set the next TB and point the epc to the epilogue */
                 UC_GR(uc)[reg_statics_map[S_UD1]] = current_tb->pc;
                 UC_PC(uc) = context_switch_native_to_bt_ret_0;
+                return;
             }
-            return;
         }
+    }
 #endif
 #ifdef CONFIG_LATX
     if (option_fork_unlink && host_signum == SIGRTMIN + 1 &&

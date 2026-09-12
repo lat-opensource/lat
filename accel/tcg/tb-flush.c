@@ -92,6 +92,9 @@ void do_tb_flush(CPUState *cpu, run_on_cpu_data tb_flush_count)
 
     qht_reset_size(&tb_ctx.htable, CODE_GEN_HTABLE_SIZE);
     tb_flush_remove_all();
+#ifdef CONFIG_LATX_AOT
+    aot_reset_tb_stats();
+#endif
 
     tcg_region_reset_all();
     /*

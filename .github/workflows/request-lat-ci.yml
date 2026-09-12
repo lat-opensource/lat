@@ -1,0 +1,121 @@
+name: Request LAT CI (manual)
+
+on:
+  # LAT CI is opt-in. Start it from the Actions page with an open PR number.
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "Open pull request number in lat-opensource/lat"
+        required: true
+        type: string
+      test_request:
+        description: 'Optional JSON. Blank runs SPEC2000 ref 3 all twice in serialized performance mode, with no user environment variables.'
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: request-lat-ci-${{ github.repository }}-${{ inputs.pr_number }}
+  cancel-in-progress: false
+
+jobs:
+  resolve-pr:
+    name: Resolve the pull request
+    runs-on: ubuntu-latest
+    outputs:
+      should_dispatch: ${{ steps.resolve.outputs.should_dispatch }}
+      source_repository: ${{ steps.resolve.outputs.source_repository }}
+      source_repository_id: ${{ steps.resolve.outputs.source_repository_id }}
+      pr_number: ${{ steps.resolve.outputs.pr_number }}
+      head_sha: ${{ steps.resolve.outputs.head_sha }}
+      base_sha: ${{ steps.resolve.outputs.base_sha }}
+      head_ref: ${{ steps.resolve.outputs.head_ref }}
+      target_repository: ${{ steps.resolve.outputs.target_repository }}
+
+    steps:
+      # This checks out only the trusted workflow revision on the default
+      # branch.  It never checks out pull request code.
+      - uses: actions/checkout@v5
+
+      - name: Find and validate the authoritative pull request
+        id: resolve
+        env:
+          MANUAL_PR_NUMBER: ${{ inputs.pr_number }}
+          MANUAL_TARGET_REPOSITORY: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python3 scripts/ci/lat_ci_request.py \
+            --pr-number "$MANUAL_PR_NUMBER" \
+            --target-repository "$MANUAL_TARGET_REPOSITORY" \
+            --output "$GITHUB_OUTPUT"
+
+  dispatch-lat-ci-hub:
+    name: Start LAT CI suite selection
+    needs: resolve-pr
+    if: needs.resolve-pr.outputs.should_dispatch == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch the lat-ci-hub workflow
+        env:
+          DISPATCH_TOKEN: ${{ secrets.LAT_CI_HUB_DISPATCH_TOKEN }}
+          REQUEST_KIND: manual
+          SOURCE_REPOSITORY: ${{ needs.resolve-pr.outputs.source_repository }}
+          SOURCE_REPOSITORY_ID: ${{ needs.resolve-pr.outputs.source_repository_id }}
+          PR_NUMBER: ${{ needs.resolve-pr.outputs.pr_number }}
+          HEAD_SHA: ${{ needs.resolve-pr.outputs.head_sha }}
+          BASE_SHA: ${{ needs.resolve-pr.outputs.base_sha }}
+          HEAD_REF: ${{ needs.resolve-pr.outputs.head_ref }}
+          TARGET_REPOSITORY: ${{ needs.resolve-pr.outputs.target_repository }}
+          TEST_REQUEST: ${{ inputs.test_request }}
+          REQUESTER: ${{ github.actor }}
+        run: |
+          if [ -z "$DISPATCH_TOKEN" ]; then
+            echo "LAT_CI_HUB_DISPATCH_TOKEN is not configured in this repository's Actions secrets." >&2
+            exit 1
+          fi
+          payload=$(python3 - <<'PY'
+          import json
+          import os
+
+          print(json.dumps({
+              "ref": "master",
+              "inputs": {
+                  "request_kind": os.environ["REQUEST_KIND"],
+                  "source_repository": os.environ["SOURCE_REPOSITORY"],
+                  "source_repository_id": os.environ["SOURCE_REPOSITORY_ID"],
+                  "target_repository": os.environ["TARGET_REPOSITORY"],
+                  "pr_number": os.environ["PR_NUMBER"],
+                  "head_sha": os.environ["HEAD_SHA"],
+                  "base_sha": os.environ["BASE_SHA"],
+                  "head_ref": os.environ["HEAD_REF"],
+                  "test_request": os.environ["TEST_REQUEST"].strip() or json.dumps({
+                      "schema_version": 1,
+                      "suites": [{
+                          "suite_key": "spec2000",
+                          "parameters": {
+                              "input_size": "ref",
+                              "runs_per_invocation": 3,
+                              "test_set": "all",
+                              "times": 2,
+                              "performance_analysis": True,
+                          },
+                          "environment": {},
+                      }],
+                  }),
+                  "requester": os.environ["REQUESTER"],
+              },
+          }))
+          PY
+          )
+          curl --fail --silent --show-error --location \
+            --request POST \
+            --header "Authorization: Bearer $DISPATCH_TOKEN" \
+            --header 'Accept: application/vnd.github+json' \
+            --header 'X-GitHub-Api-Version: 2022-11-28' \
+            --header 'Content-Type: application/json' \
+            --data "$payload" \
+            https://api.github.com/repos/xiezyang/lat-ci-hub/actions/workflows/lat-ci-request.yml/dispatches
