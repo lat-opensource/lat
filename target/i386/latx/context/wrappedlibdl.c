@@ -28,8 +28,10 @@
 #include "elfloader.h"
 #include "elfloader_private.h"
 #include "callback.h"
+#include "kzt-guest-tls.h"
 #include "myalign.h"
 #include "fileutils.h"
+#include "qemu.h"
 #include "x86dlfun.h"
 
 #ifndef CONFIG_LOONGARCH_NEW_WORLD
@@ -38,6 +40,142 @@ const char *libdlName = "libdl.so.2";
 #endif
 
 #define FORWORDBACK 0
+
+#ifdef CONFIG_LATX_KZT
+static GRecMutex kzt_guest_loader_operation_lock;
+static GMutex kzt_dl_metadata_lock;
+static gsize kzt_guest_loader_operation_lock_initialized;
+static GThread *kzt_guest_loader_operation_owner;
+static gint kzt_guest_loader_operation_depth;
+
+static int kzt_guest_loader_operation_enter(void)
+{
+    if (!latx_kzt_guest_tls_enabled()) {
+        return 0;
+    }
+    CPUX86State *cpu = lsenv && lsenv->cpu_state
+        ? (CPUX86State *)lsenv->cpu_state : NULL;
+    int execution_paused =
+        kzt_guest_tls_execution_pause(cpu);
+
+    if (g_once_init_enter(
+            &kzt_guest_loader_operation_lock_initialized)) {
+        g_rec_mutex_init(&kzt_guest_loader_operation_lock);
+        g_once_init_leave(
+            &kzt_guest_loader_operation_lock_initialized, 1);
+    }
+    g_rec_mutex_lock(&kzt_guest_loader_operation_lock);
+    g_assert(!g_atomic_int_get(&kzt_guest_loader_operation_depth) ||
+             g_atomic_pointer_get(
+                 &kzt_guest_loader_operation_owner) == g_thread_self());
+    g_atomic_pointer_set(
+        &kzt_guest_loader_operation_owner, g_thread_self());
+    g_atomic_int_inc(&kzt_guest_loader_operation_depth);
+    kzt_guest_tls_execution_resume(cpu, execution_paused);
+    return 1;
+}
+
+static void kzt_guest_loader_operation_leave(int *locked)
+{
+    if (locked && *locked) {
+        g_assert(g_atomic_int_get(
+                     &kzt_guest_loader_operation_depth) > 0 &&
+                 g_atomic_pointer_get(
+                     &kzt_guest_loader_operation_owner) ==
+                     g_thread_self());
+        if (g_atomic_int_dec_and_test(
+                &kzt_guest_loader_operation_depth)) {
+            g_atomic_pointer_set(
+                &kzt_guest_loader_operation_owner, NULL);
+        }
+        g_rec_mutex_unlock(&kzt_guest_loader_operation_lock);
+    }
+}
+
+void kzt_guest_loader_after_fork_child(void)
+{
+    if (!latx_kzt_guest_tls_enabled()) {
+        return;
+    }
+    GThread *current = g_thread_self();
+    int depth = g_atomic_pointer_get(
+                    &kzt_guest_loader_operation_owner) == current
+        ? g_atomic_int_get(&kzt_guest_loader_operation_depth) : 0;
+
+    memset(&kzt_guest_loader_operation_lock, 0,
+           sizeof(kzt_guest_loader_operation_lock));
+    g_rec_mutex_init(&kzt_guest_loader_operation_lock);
+    memset(&kzt_dl_metadata_lock, 0,
+           sizeof(kzt_dl_metadata_lock));
+    g_mutex_init(&kzt_dl_metadata_lock);
+    kzt_guest_loader_operation_lock_initialized = 1;
+    g_atomic_pointer_set(&kzt_guest_loader_operation_owner,
+                         depth ? current : NULL);
+    g_atomic_int_set(&kzt_guest_loader_operation_depth, 0);
+    for (int index = 0; index < depth; ++index) {
+        g_rec_mutex_lock(&kzt_guest_loader_operation_lock);
+        g_atomic_int_inc(&kzt_guest_loader_operation_depth);
+    }
+}
+
+#define KZT_GUEST_LOADER_OPERATION_GUARD()                            \
+    int kzt_guest_loader_operation_guard                             \
+        __attribute__((cleanup(kzt_guest_loader_operation_leave),    \
+                       unused)) =                                    \
+            kzt_guest_loader_operation_enter()
+
+static void kzt_dl_metadata_lock_acquire(void)
+{
+    if (!latx_kzt_guest_tls_enabled()) {
+        return;
+    }
+    g_mutex_lock(&kzt_dl_metadata_lock);
+}
+
+static void kzt_dl_metadata_lock_release(void)
+{
+    if (!latx_kzt_guest_tls_enabled()) {
+        return;
+    }
+    g_mutex_unlock(&kzt_dl_metadata_lock);
+}
+#else
+#define KZT_GUEST_LOADER_OPERATION_GUARD() do { } while (0)
+static void kzt_dl_metadata_lock_acquire(void)
+{
+}
+
+static void kzt_dl_metadata_lock_release(void)
+{
+}
+#endif
+
+#ifdef CONFIG_LATX_KZT
+uintptr_t kzt_guest_loader_hold_open(uintptr_t guest_name)
+{
+    KZT_GUEST_LOADER_OPERATION_GUARD();
+    dlprivate_t *dl = my_context ? my_context->dlprivate : NULL;
+
+    if (!guest_name || !dl || !dl->x86dlopen) {
+        return 0;
+    }
+    return RunFunctionWithStateInternalNoRefresh(
+        (uintptr_t)dl->x86dlopen, 2,
+        guest_name, RTLD_LAZY | RTLD_NOLOAD);
+}
+
+void kzt_guest_loader_hold_close(uintptr_t handle)
+{
+    KZT_GUEST_LOADER_OPERATION_GUARD();
+    dlprivate_t *dl = my_context ? my_context->dlprivate : NULL;
+
+    if (handle && dl && dl->x86dlclose) {
+        (void)RunFunctionWithStateInternalNoRefresh(
+            (uintptr_t)dl->x86dlclose, 1, handle);
+    }
+}
+#endif
+
 dlprivate_t *NewDLPrivate(void) {
     dlprivate_t* dl =  (dlprivate_t*)box_calloc(1, sizeof(dlprivate_t));
     return dl;
@@ -52,7 +190,7 @@ static __thread int dl_error_pending;
 static void clear_dl_error(dlprivate_t *dl)
 {
     if (dl && dl->x86dlerror)
-        (void)RunFunctionWithState((uintptr_t)dl->x86dlerror, 0);
+        (void)RunFunctionWithStateInternal((uintptr_t)dl->x86dlerror, 0);
     dl_error_pending = 0;
 }
 
@@ -73,6 +211,77 @@ static void set_dl_errorf(dlprivate_t *dl, const char *format, ...)
     va_end(args);
     set_dl_error(dl, message);
 }
+
+static void *finish_dlopen_with_guest_tls(dlprivate_t *dl, void *result)
+{
+#ifdef CONFIG_LATX_KZT
+    if (!latx_kzt_guest_tls_enabled()) {
+        return result;
+    }
+    if (result) {
+        uintptr_t link_map_addr = (uintptr_t)result;
+        __MY_CPU;
+
+        if (link_map_addr <= dl->lib_sz && link_map_addr != 0) {
+            library_t *lib = dl->libs[link_map_addr - 1];
+
+            link_map_addr = lib ? (uintptr_t)lib->x86linkmap : 0;
+        }
+        if (link_map_addr &&
+            kzt_register_guest_tls_link_map(link_map_addr) != 0) {
+            fprintf(stderr,
+                    "KZT cannot register Guest TLS after a successful "
+                    "dlopen; refusing to continue\n");
+            _exit(EXIT_FAILURE);
+        }
+
+        if (kzt_guest_tls_refresh(cpu) != 0) {
+            fprintf(stderr,
+                    "KZT cannot refresh Guest TLS after a successful "
+                    "dlopen; refusing to run further callbacks\n");
+            _exit(EXIT_FAILURE);
+        }
+    }
+#else
+    (void)dl;
+#endif
+    return result;
+}
+
+#ifdef CONFIG_LATX_KZT
+static int call_guest_dlclose_with_guest_tls(void *handle)
+{
+    __MY_CPU;
+    int result;
+
+    if (kzt_guest_tls_refresh(cpu) != 0) {
+        fprintf(stderr,
+                "KZT cannot refresh Guest TLS before dlclose; "
+                "refusing to continue\n");
+        _exit(EXIT_FAILURE);
+    }
+    kzt_guest_tls_loader_event_begin();
+    kzt_unregister_guest_tls_link_map((uintptr_t)handle);
+    result = (int)RunFunctionWithStateInternalNoRefresh(
+        (uintptr_t)my_context->dlprivate->x86dlclose,
+        1, handle);
+    if (result == 0) {
+        if (kzt_guest_tls_refresh(cpu) != 0) {
+            fprintf(stderr,
+                    "KZT cannot refresh Guest TLS after dlclose; "
+                    "refusing to continue\n");
+            _exit(EXIT_FAILURE);
+        }
+    } else if (kzt_register_guest_tls_link_map(
+                   (uintptr_t)handle) != 0) {
+        fprintf(stderr,
+                "KZT cannot restore Guest TLS loader state after a "
+                "failed dlclose; refusing to continue\n");
+        _exit(EXIT_FAILURE);
+    }
+    return result;
+}
+#endif
 
 #define CLEARERR clear_dl_error(dl);
 
@@ -159,11 +368,50 @@ static int init_x86dlfun(void)
     return init_x86dlfun_from("libdl.so.2", "libc.so.6");
 #endif
 }
+
+static void *redlopen_guest_library(dlprivate_t *dl, library_t *lib)
+{
+    KZT_GUEST_LOADER_OPERATION_GUARD();
+    __MY_CPU;
+    void *guest_handle;
+
+    if (lib->x86linkmap) {
+        return lib->x86linkmap;
+    }
+
+    if (kzt_guest_tls_refresh(cpu) != 0) {
+        return NULL;
+    }
+    kzt_guest_tls_loader_event_begin();
+    guest_handle = (void *)(uintptr_t)RunFunctionWithStateInternalNoRefresh(
+        (uintptr_t)my_context->dlprivate->x86dlopen, 2,
+        lib->name, lib->x86dlopenflag);
+    if (!guest_handle) {
+        return NULL;
+    }
+
+    kzt_dl_metadata_lock_acquire();
+    lib->x86linkmap = guest_handle;
+    kzt_dl_metadata_lock_release();
+    return finish_dlopen_with_guest_tls(dl, guest_handle);
+}
+
 static int callx86dlopen(void *filename, int flag, elfheader_t * h, int is_local) {
-    struct link_map* ret = (struct link_map*)(uintptr_t)RunFunctionWithState((uintptr_t)my_context->dlprivate->x86dlopen, 2, filename, flag);
+    __MY_CPU;
+
+    if (kzt_guest_tls_refresh(cpu) != 0) {
+        return -1;
+    }
+    kzt_guest_tls_loader_event_begin();
+    struct link_map *ret =
+        (struct link_map *)(uintptr_t)RunFunctionWithStateInternalNoRefresh(
+            (uintptr_t)my_context->dlprivate->x86dlopen, 2,
+            filename, flag);
     if (ret) {
         printf_dlsym(LOG_DEBUG, "latx RunFunctionWithState dlopen %s addr %p\n", (char *)filename, (void *)ret->l_addr);
+        kzt_dl_metadata_lock_acquire();
         h->lib->x86linkmap = ret;
+        kzt_dl_metadata_lock_release();
     } else {
         //open error
         return -1;
@@ -190,6 +438,7 @@ static void LatxResetElf(elfheader_t * h)
     h->latx_hasfix = 0;
 }
 EXPORT void* my_dlopen(void *filename, int flag){
+    KZT_GUEST_LOADER_OPERATION_GUARD();
     // TODO, handling special values for filename, like RTLD_SELF?
     // TODO, handling flags?
     library_t *lib = NULL;
@@ -235,6 +484,12 @@ EXPORT void* my_dlopen(void *filename, int flag){
         for (size_t i=0; i<dl->lib_sz; ++i) {
             if(IsSameLib(dl->libs[i], rfilename)) {
                 if(dl->count[i]==0 && dl->dlopened[i]) {   // need to lauch init again!
+                    if (latx_kzt_guest_tls_enabled() && (flag & RTLD_NOLOAD)) {
+                        box_free(rfilename);
+                        set_dl_error(
+                            dl, "RTLD_NOLOAD object is not loaded");
+                        return NULL;
+                    }
                     int idx = GetElfIndex(dl->libs[i]);
                     if(idx!=-1) {
                         printf_dlsym(LOG_DEBUG, "dlopen: Recycling, calling Init for %p (%s)\n", (void*)(i+1), rfilename);
@@ -248,11 +503,15 @@ EXPORT void* my_dlopen(void *filename, int flag){
                         ReloadLibrary(dl->libs[i]);    // reset memory image, redo reloc, run inits
                     }
                 }
-                if(!(flag&0x4))
-                    dl->count[i] = dl->count[i]+1;
+                kzt_dl_metadata_lock_acquire();
+                if (latx_kzt_guest_tls_enabled() || !(flag & RTLD_NOLOAD)) {
+                    dl->count[i] += 1;
+                }
+                kzt_dl_metadata_lock_release();
                 printf_dlsym(LOG_DEBUG, "dlopen: Recycling %s/%p count=%ld (dlopened=%ld, elf_index=%d)\n", rfilename, (void*)(i+1), dl->count[i], dl->dlopened[i], GetElfIndex(dl->libs[i]));
                 box_free(rfilename);
-                return (void*)(i+1);
+                return finish_dlopen_with_guest_tls(
+                    dl, (void *)(i + 1));
             }
         }
         if(strstr(rfilename, "libGL.so")){
@@ -276,12 +535,21 @@ EXPORT void* my_dlopen(void *filename, int flag){
             printf_dlsym(LOG_DEBUG, "warning call x86dlopen filename is %s %x\n", (char *)filename, flag);
             return NULL;
 #else
-            uint64_t ret = RunFunctionWithState((uintptr_t)my_context->dlprivate->x86dlopen, 2, filename, flag);
+            __MY_CPU;
+            if (kzt_guest_tls_refresh(cpu) != 0) {
+                box_free(rfilename);
+                return NULL;
+            }
+            kzt_guest_tls_loader_event_begin();
+            uint64_t ret = RunFunctionWithStateInternalNoRefresh(
+                (uintptr_t)my_context->dlprivate->x86dlopen, 2,
+                filename, flag);
             printf_dlsym(LOG_DEBUG, "warning call call x86dlopen filename %s %x ret=0x%lx\n",  (char *)filename, flag, ret);
             //lsassert(0);
             if (ret) {
                 box_free(rfilename);
-                return (void *)ret;
+                return finish_dlopen_with_guest_tls(
+                    dl, (void *)(uintptr_t)ret);
             }
             set_dl_errorf(dl, "filename \"%s\" flag=%x\n",
                           (char *)filename, flag);
@@ -318,11 +586,16 @@ EXPORT void* my_dlopen(void *filename, int flag){
         // check if already dlopenned...
         for (size_t i=0; i<dl->lib_sz; ++i) {
             if(!dl->libs[i]) {
+                kzt_dl_metadata_lock_acquire();
                 dl->count[i] = dl->count[i]+1;
-                return (void*)(i+1);
+                kzt_dl_metadata_lock_release();
+                return finish_dlopen_with_guest_tls(
+                    dl, (void *)(i + 1));
             }
         }
-        printf_dlsym(LOG_DEBUG, "Call to dlopen(NULL, %X) forword call x86dlopen \n", flag);
+        printf_dlsym(LOG_DEBUG,
+                     "Call to dlopen(NULL, %X), forward to x86 dlopen\n",
+                     flag);
         lsassert(dl->x86dlopen);
         __MY_CPU;
         Push64(cpu, (uint64_t)dl->x86dlopen);
@@ -330,6 +603,7 @@ EXPORT void* my_dlopen(void *filename, int flag){
     }
     //get the lib and add it to the collection
 
+    kzt_dl_metadata_lock_acquire();
     if(dl->lib_sz == dl->lib_cap) {
         dl->lib_cap += 4;
         dl->libs = (library_t**)box_realloc(dl->libs, sizeof(library_t*)*dl->lib_cap);
@@ -342,15 +616,17 @@ EXPORT void* my_dlopen(void *filename, int flag){
     dl->libs[idx] = lib;
     dl->count[idx] = dl->count[idx]+1;
     dl->dlopened[idx] = dlopened;
+    kzt_dl_metadata_lock_release();
     printf_dlsym(LOG_DEBUG, "dlopen: New handle %p (%s), dlopened=%ld\n", (void*)(idx+1), (char*)filename, dlopened);
     if (lib && lib->type == LIB_EMULATED) {
-        return lib->x86linkmap;
+        return finish_dlopen_with_guest_tls(dl, lib->x86linkmap);
     }
-    return (void*)(idx+1);
+    return finish_dlopen_with_guest_tls(dl, (void *)(idx + 1));
 }
 
 EXPORT void* my_dlmopen(void* lmid, void *filename, int flag)
 {
+    KZT_GUEST_LOADER_OPERATION_GUARD();
     dlprivate_t *dl = my_context->dlprivate;
 
     if ((Lmid_t)lmid != LM_ID_BASE) {
@@ -418,8 +694,31 @@ static int find_dl_library_index(dlprivate_t *dl, void *handle, size_t *index)
     return 0;
 }
 
+typedef struct dl_handle_snapshot {
+    size_t index;
+    size_t count;
+    library_t *library;
+} dl_handle_snapshot_t;
+
+static int snapshot_dl_handle(dlprivate_t *dl, void *handle,
+                              dl_handle_snapshot_t *snapshot)
+{
+    int found;
+
+    kzt_dl_metadata_lock_acquire();
+    found = find_dl_library_index(dl, handle, &snapshot->index);
+    if (found) {
+        snapshot->count = dl->count[snapshot->index];
+        snapshot->library = dl->libs[snapshot->index];
+    }
+    kzt_dl_metadata_lock_release();
+    return found;
+}
+
 EXPORT void* my_dlsym(void *handle, void *symbol){
     dlprivate_t *dl = my_context->dlprivate;
+    dl_handle_snapshot_t handle_snapshot = { 0 };
+    int known_handle = 0;
     uintptr_t start = 0, end = 0;
     char* rsymbol = (char*)symbol;
     CLEARERR
@@ -431,10 +730,15 @@ EXPORT void* my_dlsym(void *handle, void *symbol){
     }
     printf_dlsym(LOG_DEBUG, "Call to dlsym(%p, \"%s\")%s\n", handle, rsymbol, dlsym_error?"":"\n");
     if (handle && handle != (void*)~0LL) {
-        size_t known_index;
-        if (!find_dl_library_index(dl, handle, &known_index)) {
-            uint64_t ret = RunFunctionWithState(
+        known_handle = snapshot_dl_handle(
+            dl, handle, &handle_snapshot);
+        if (!known_handle) {
+            uint64_t ret = RunFunctionWithStateInternal(
                 (uintptr_t)dl->x86dlsym, 2, handle, symbol);
+            if (!ret) {
+                ret = kzt_resolve_guest_link_map_symbol(
+                    (uintptr_t)handle, rsymbol);
+            }
             if (!ret)
                 set_dl_errorf(dl, "Symbol \"%s\" not found in %p\n",
                               rsymbol, handle);
@@ -457,7 +761,9 @@ EXPORT void* my_dlsym(void *handle, void *symbol){
         printf_dlsym(LOG_DEBUG, "warning call x86dlsym filename is NULL\n");
         return NULL;
 #else
-        uint64_t ret = RunFunctionWithState((uintptr_t)my_context->dlprivate->x86dlsym, 2, handle, symbol);
+        uint64_t ret = RunFunctionWithStateInternal(
+            (uintptr_t)my_context->dlprivate->x86dlsym, 2,
+            handle, symbol);
         printf_dlsym(LOG_DEBUG, "warning call x86dlsym filename is NULL ret=0x%lx\n", ret);
         if (ret) {
             return (void *)ret;
@@ -481,18 +787,7 @@ EXPORT void* my_dlsym(void *handle, void *symbol){
         printf_dlsym(LOG_DEBUG, "warning call x86dlsym filename is RTLD_NEXT\n");
         return NULL;
     }
-    size_t nlib = (size_t)handle;
-    if(nlib > dl->lib_sz) {
-        for (int i = 0; i < dl->lib_sz; i++) {
-            if (dl->libs[i] && dl->libs[i]->active && dl->libs[i]->type == LIB_EMULATED && ((size_t)dl->libs[i]->x86linkmap) == nlib) {
-                nlib = i + 1;
-                break;
-            } 
-        }
-    }
-    --nlib;
-    // size_t is unsigned
-    if(nlib>=dl->lib_sz) {
+    if (!known_handle) {
 #ifdef LATX_RELOCATION_SAVE_SYMBOLS
         if(GetGlobalSymbolStartEnd(my_context->maplib, rsymbol, &start, &end, NULL, -1, NULL)) {
             printf_dlsym(LOG_NEVER, "%p\n", (void*)start);
@@ -538,7 +833,7 @@ EXPORT void* my_dlsym(void *handle, void *symbol){
         printf_dlsym(LOG_DEBUG, "warning call x86dlsym filename is %s 0x%lx %s\n", strlen(lmfile)?lmfile:"NULL", cpu->regs[R_EDI], (char*)symbol);
         return NULL;
 #else
-        uint64_t ret = RunFunctionWithState(
+        uint64_t ret = RunFunctionWithStateInternal(
             (uintptr_t)my_context->dlprivate->x86dlsym, 2, handle,
             symbol);
         printf_dlsym(LOG_DEBUG, "warning call call x86dlsym filename is %s handle %p ret=0x%lx\n", strlen(lmfile)?lmfile:"NULL", handle, ret);
@@ -550,45 +845,64 @@ EXPORT void* my_dlsym(void *handle, void *symbol){
         return NULL;
 #endif
     }
-    if(dl->count[nlib]==0) {
+    if (handle_snapshot.count == 0) {
         set_dl_errorf(dl, "Bad handle %p (already closed))\n", handle);
         return NULL;
     }
-    if(dl->libs[nlib]) {
-        if(my_dlsym_lib(dl->libs[nlib], rsymbol, &start, &end, -1, NULL)==0) {
+    if (handle_snapshot.library) {
+        if (my_dlsym_lib(handle_snapshot.library, rsymbol,
+                         &start, &end, -1, NULL) == 0) {
             // not found
             __MY_CPU;
             #if 1
-            if(!dl->libs[nlib]->x86linkmap) {
+            if (!handle_snapshot.library->x86linkmap) {
                 //redlopen
-                uint64_t ret = RunFunctionWithState((uintptr_t)my_context->dlprivate->x86dlopen, 2, dl->libs[nlib]->name, dl->libs[nlib]->x86dlopenflag);
-                if (!ret) {//user sometime test for finding a func.
+                void *guest_handle = redlopen_guest_library(
+                    dl, handle_snapshot.library);
+                /* The caller may probe for an optional symbol. */
+                if (!guest_handle) {
                     printf_dlsym(LOG_NEVER, "redlopen %p return %p\n", rsymbol, (void*)NULL);
                     return NULL;
                 }
-                lsassert(ret);
-                dl->libs[nlib]->x86linkmap = (void *)ret;
-                ret = RunFunctionWithState(
+                uintptr_t ret = RunFunctionWithStateInternal(
                     (uintptr_t)my_context->dlprivate->x86dlsym, 2,
-                    dl->libs[nlib]->x86linkmap, symbol);
+                    guest_handle, symbol);
                 printf_dlsym(LOG_DEBUG, "call x86dlsym filename %s is wrapped but not find symbol, dlsym(%p, %s) ret=0x%lx\n",
-                dl->libs[nlib]->name, dl->libs[nlib]->x86linkmap, (char *)symbol, ret);
+                handle_snapshot.library->name,
+                handle_snapshot.library->x86linkmap,
+                (char *)symbol, ret);
                 return (void *)ret;
             }
             #endif
             lsassert(dl->x86dlsym);
-            if (dl->libs[nlib]->x86linkmap != handle) {
-                cpu->regs[R_EDI] = (uintptr_t)dl->libs[nlib]->x86linkmap;
+            if (handle_snapshot.library->x86linkmap != handle) {
+                cpu->regs[R_EDI] =
+                    (uintptr_t)handle_snapshot.library->x86linkmap;
             }
 #if FORWORDBACK
             Push64(cpu, (uint64_t)dl->x86dlsym);
-            printf_dlsym(LOG_DEBUG, "warning call x86dlsym filename is %s %lx\n", dl->libs[nlib]->x86linkmap->l_name, cpu->regs[R_EDI]);
+            printf_dlsym(
+                LOG_DEBUG,
+                "warning call x86dlsym filename is %s %lx\n",
+                handle_snapshot.library->x86linkmap->l_name,
+                cpu->regs[R_EDI]);
             return NULL;
 #else
-            uint64_t ret = RunFunctionWithState(
+            uint64_t ret = RunFunctionWithStateInternal(
                 (uintptr_t)my_context->dlprivate->x86dlsym, 2,
-                dl->libs[nlib]->x86linkmap, symbol);
-            printf_dlsym(LOG_DEBUG, "call x86dlsym filename is %s %s ret=0x%lx\n", dl->libs[nlib]->x86linkmap->l_name, (char *)symbol, ret);
+                handle_snapshot.library->x86linkmap, symbol);
+            printf_dlsym(
+                LOG_DEBUG,
+                "call x86dlsym filename is %s %s ret=0x%lx\n",
+                handle_snapshot.library->x86linkmap->l_name,
+                (char *)symbol, ret);
+            if (ret) {
+                return (void *)ret;
+            }
+            ret = latx_kzt_guest_tls_enabled()
+                ? kzt_resolve_guest_link_map_symbol(
+                    (uintptr_t)handle_snapshot.library->x86linkmap,
+                    rsymbol) : 0;
             if (ret) {
                 return (void *)ret;
             }
@@ -617,9 +931,11 @@ EXPORT void* my_dlsym(void *handle, void *symbol){
 
 EXPORT int my_dlclose(void *handle)
 {
+    KZT_GUEST_LOADER_OPERATION_GUARD();
     printf_dlsym(LOG_DEBUG, "Call to dlclose(%p)\n", handle);
     dlprivate_t *dl = my_context->dlprivate;
     CLEARERR
+    kzt_guest_tls_loader_event_begin();
     if (!dl->x86dlclose) {
         if (init_x86dlfun() != 0 || !dl->x86dlclose) {
             set_dl_error(dl, "Cannot resolve guest dlfcn entry points");
@@ -640,6 +956,11 @@ EXPORT int my_dlclose(void *handle)
     if(nlib>=dl->lib_sz) {
         int ret = -1;
         if (dl->x86dlclose) {
+#ifdef CONFIG_LATX_KZT
+            if (latx_kzt_guest_tls_enabled()) {
+                return call_guest_dlclose_with_guest_tls(handle);
+            }
+#endif
             __MY_CPU;
             Push64(cpu, (uint64_t)dl->x86dlclose);
             return 0;
@@ -651,7 +972,33 @@ EXPORT int my_dlclose(void *handle)
         set_dl_errorf(dl, "Bad handle %p (already closed))\n", handle);
         return -1;
     }
-    dl->count[nlib] = dl->count[nlib]-1;
+#ifdef CONFIG_LATX_KZT
+    if (latx_kzt_guest_tls_enabled() &&
+        dl->count[nlib] == 1 && dl->dlopened[nlib] &&
+        dl->libs[nlib] && dl->x86dlclose) {
+        int idx = GetElfIndex(dl->libs[nlib]);
+
+        if (idx != -1) {
+            void *guest_handle = dl->libs[nlib]->x86linkmap
+                ? (void *)dl->libs[nlib]->x86linkmap : handle;
+            int close_result =
+                call_guest_dlclose_with_guest_tls(guest_handle);
+
+            if (close_result != 0) {
+                return close_result;
+            }
+            kzt_dl_metadata_lock_acquire();
+            dl->count[nlib] = 0;
+            printf_dlsym(
+                LOG_DEBUG, "dlclose: Call to Fini for %p\n", handle);
+            InactiveLibrary(dl->libs[nlib]);
+            kzt_dl_metadata_lock_release();
+            return 0;
+        }
+    }
+#endif
+    kzt_dl_metadata_lock_acquire();
+    dl->count[nlib] -= 1;
     if(dl->count[nlib]==0 && dl->dlopened[nlib]) {   // need to call Fini...
         int idx = GetElfIndex(dl->libs[nlib]);
         if(idx!=-1) {
@@ -660,12 +1007,19 @@ EXPORT int my_dlclose(void *handle)
             if (dl->x86dlclose) {
                 __MY_CPU;
                 if (dl->libs[nlib]->x86linkmap != handle) {
-                    cpu->regs[R_EDI] = (uintptr_t)dl->libs[nlib]->x86linkmap;
+                    cpu->regs[R_EDI] =
+                        (uintptr_t)dl->libs[nlib]->x86linkmap;
                 }
                 Push64(cpu, (uint64_t)dl->x86dlclose);
+                kzt_dl_metadata_lock_release();
                 return 0;
             }
         }
+    }
+    kzt_dl_metadata_lock_release();
+    if (dl->libs[nlib]) {
+        kzt_unregister_guest_tls_link_map(
+            (uintptr_t)dl->libs[nlib]->x86linkmap);
     }
     return 0;
 }
@@ -678,13 +1032,13 @@ EXPORT char* my_dlerror(void)
         init_x86dlfun();
     if (dl_error_pending) {
         if (dl->x86dlerror)
-            (void)RunFunctionWithState((uintptr_t)dl->x86dlerror, 0);
+            (void)RunFunctionWithStateInternal((uintptr_t)dl->x86dlerror, 0);
         dl_error_pending = 0;
         return dl_error_buffer;
     }
     if (!dl->x86dlerror)
         return NULL;
-    return (char*)(uintptr_t)RunFunctionWithState(
+    return (char *)(uintptr_t)RunFunctionWithStateInternal(
         (uintptr_t)dl->x86dlerror, 0);
 }
 
@@ -704,9 +1058,14 @@ EXPORT int my_dladdr1(void *addr, void *i, void** extra_info, int flags)
      __MY_CPU;
     uint64_t ret = 0;
     if (extra_info == NULL && flags == 0) {
-        ret = RunFunctionWithState((uintptr_t)my_context->dlprivate->x86dladdr, 2, cpu->regs[R_EDI], cpu->regs[R_ESI]);
+        ret = RunFunctionWithStateInternal(
+            (uintptr_t)my_context->dlprivate->x86dladdr, 2,
+            cpu->regs[R_EDI], cpu->regs[R_ESI]);
     } else {
-        ret = RunFunctionWithState((uintptr_t)my_context->dlprivate->x86dladdr1, 4, cpu->regs[R_EDI], cpu->regs[R_ESI], cpu->regs[R_EDX], cpu->regs[R_ECX]);
+        ret = RunFunctionWithStateInternal(
+            (uintptr_t)my_context->dlprivate->x86dladdr1, 4,
+            cpu->regs[R_EDI], cpu->regs[R_ESI],
+            cpu->regs[R_EDX], cpu->regs[R_ECX]);
     }
     printf_dlsym(LOG_DEBUG, "     call to x86dladdr1 return saddr=%p, fname=\"%s\", sname=\"%s\" ret=%ld\n", info->dli_saddr, info->dli_sname?info->dli_sname:"", info->dli_fname?info->dli_fname:"", ret);
     if (ret == 1) {
@@ -741,7 +1100,9 @@ EXPORT int my_dladdr(void *addr, void *i)
 #endif
     printf_dlsym(LOG_DEBUG, "Warning: partially unimplement call to dladdr(%p, %p)\n", addr, info);
      __MY_CPU;
-    uint64_t ret = RunFunctionWithState((uintptr_t)my_context->dlprivate->x86dladdr, 2, cpu->regs[R_EDI], cpu->regs[R_ESI]);
+    uint64_t ret = RunFunctionWithStateInternal(
+        (uintptr_t)my_context->dlprivate->x86dladdr, 2,
+        cpu->regs[R_EDI], cpu->regs[R_ESI]);
     printf_dlsym(LOG_DEBUG, "     call to x86dladdr return saddr=%p, fname=\"%s\", sname=\"%s\" ret=%ld\n", info->dli_saddr, info->dli_sname?info->dli_sname:"", info->dli_fname?info->dli_fname:"", ret);
     if (ret == 1) {
         return ret;
@@ -752,7 +1113,7 @@ EXPORT void* my_dlvsym(void *handle, void *symbol, const char *vername)
 {
     printf_dlsym(LOG_DEBUG, "Call to dlvsym(%p, \"%s\", %s)", handle, (char *)symbol, vername?vername:"(nil)");
     dlprivate_t *dl = my_context->dlprivate;
-    size_t nlib;
+    dl_handle_snapshot_t handle_snapshot = { 0 };
     void *guest_handle = handle;
 
     clear_dl_error(dl);
@@ -768,23 +1129,21 @@ EXPORT void* my_dlvsym(void *handle, void *symbol, const char *vername)
         return NULL;
     }
     if (!handle)
-        return (void*)(uintptr_t)RunFunctionWithState(
+        return (void *)(uintptr_t)RunFunctionWithStateInternal(
             (uintptr_t)dl->x86dlvsym, 3, guest_handle, symbol, vername);
-    if (find_dl_library_index(dl, handle, &nlib)) {
-        if (!dl->count[nlib]) {
+    if (snapshot_dl_handle(dl, handle, &handle_snapshot)) {
+        if (!handle_snapshot.count) {
             set_dl_errorf(dl, "Bad handle %p (already closed)\n", handle);
             return NULL;
         }
-        if (!dl->libs[nlib]) {
-            return (void*)(uintptr_t)RunFunctionWithState(
+        if (!handle_snapshot.library) {
+            return (void *)(uintptr_t)RunFunctionWithStateInternal(
                 (uintptr_t)dl->x86dlvsym, 3, NULL, symbol, vername);
         }
-        guest_handle = dl->libs[nlib]->x86linkmap;
+        guest_handle = handle_snapshot.library->x86linkmap;
         if (!guest_handle) {
-            guest_handle = (void*)(uintptr_t)RunFunctionWithState(
-                (uintptr_t)dl->x86dlopen, 2, dl->libs[nlib]->name,
-                dl->libs[nlib]->x86dlopenflag);
-            dl->libs[nlib]->x86linkmap = guest_handle;
+            guest_handle = redlopen_guest_library(
+                dl, handle_snapshot.library);
             if (!guest_handle) {
                 set_dl_errorf(dl, "Missing guest link_map for handle %p\n",
                               handle);
@@ -792,7 +1151,7 @@ EXPORT void* my_dlvsym(void *handle, void *symbol, const char *vername)
             }
         }
     }
-    uintptr_t ret = RunFunctionWithState(
+    uintptr_t ret = RunFunctionWithStateInternal(
         (uintptr_t)dl->x86dlvsym, 3, guest_handle, symbol, vername);
     return (void*)ret;
 }
@@ -808,22 +1167,20 @@ EXPORT int my_dlinfo(void* handle, int request, void* info)
             return -1;
         }
     }
-    size_t nlib;
+    dl_handle_snapshot_t handle_snapshot = { 0 };
     void *guest_handle = handle;
-    if (find_dl_library_index(dl, handle, &nlib)) {
-        if (!dl->count[nlib]) {
+    if (snapshot_dl_handle(dl, handle, &handle_snapshot)) {
+        if (!handle_snapshot.count) {
             set_dl_errorf(dl, "Bad handle %p (already closed)\n", handle);
             return -1;
         }
-        if (!dl->libs[nlib]) {
+        if (!handle_snapshot.library) {
             guest_handle = NULL;
         } else {
-            guest_handle = dl->libs[nlib]->x86linkmap;
+            guest_handle = handle_snapshot.library->x86linkmap;
             if (!guest_handle) {
-                guest_handle = (void*)(uintptr_t)RunFunctionWithState(
-                    (uintptr_t)dl->x86dlopen, 2, dl->libs[nlib]->name,
-                    dl->libs[nlib]->x86dlopenflag);
-                dl->libs[nlib]->x86linkmap = guest_handle;
+                guest_handle = redlopen_guest_library(
+                    dl, handle_snapshot.library);
                 if (!guest_handle) {
                     set_dl_errorf(dl,
                                   "Cannot open guest library for handle %p\n",
@@ -843,11 +1200,12 @@ EXPORT int my_dlinfo(void* handle, int request, void* info)
             }
         }
     }
-    uint64_t ret = RunFunctionWithState(
+    uint64_t ret = RunFunctionWithStateInternal(
         (uintptr_t)my_context->dlprivate->x86dlinfo, 3,
         guest_handle, request, info);
     return ret;
 }
+
 
 #ifndef CONFIG_LOONGARCH_NEW_WORLD
 #include "wrappedlib_init.h"

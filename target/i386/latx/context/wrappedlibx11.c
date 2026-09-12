@@ -1266,7 +1266,7 @@ EXPORT int32_t my_XDestroyImage(void* image)
         void *la_data = malloc(len);
         memcpy(la_data, img->data, len);
         lsassert(x86free);
-        RunFunctionWithState((uintptr_t)x86free ,1, img->data);
+        RunFunctionWithStateInternal((uintptr_t)x86free, 1, img->data);
         img->data = la_data;
     }
     return my->XDestroyImage(image);
@@ -1653,9 +1653,12 @@ EXPORT int32_t my_XNextEvent(my_XDisplay_t *dpy, void* v2)
     int oldtype;
     int32_t ret;
     bridge_XInternalAsyncHandlers(dpy, bridge_XInternalAsyncHandler);
-    uint64_t callbackret = RunFunctionWithState((uintptr_t)x86pthread_setcanceltype ,2, PTHREAD_CANCEL_ASYNCHRONOUS, &oldtype);
+    uint64_t callbackret = RunFunctionWithStateInternal(
+        (uintptr_t)x86pthread_setcanceltype, 2,
+        PTHREAD_CANCEL_ASYNCHRONOUS, &oldtype);
     ret = my->XNextEvent(dpy,v2);
-    callbackret = RunFunctionWithState((uintptr_t)x86pthread_setcanceltype ,2, oldtype, NULL);
+    callbackret = RunFunctionWithStateInternal(
+        (uintptr_t)x86pthread_setcanceltype, 2, oldtype, NULL);
     (void)callbackret;
     return ret;
 }

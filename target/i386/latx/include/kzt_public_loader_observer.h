@@ -64,6 +64,25 @@ typedef struct kzt_public_loader_object {
     uintptr_t previous_addr;
 } kzt_public_loader_object_t;
 
+typedef struct kzt_public_loader_tls_object {
+    uintptr_t link_map_addr;
+    uintptr_t load_bias;
+    uintptr_t dynamic_addr;
+    uintptr_t image_addr;
+    size_t file_size;
+    size_t memory_size;
+    size_t alignment;
+    size_t first_byte_offset;
+    intptr_t static_tls_offset;
+    uintptr_t static_tls_symbol_value;
+    uintptr_t static_tls_symbol_name_addr;
+    size_t module_id;
+    uint64_t load_generation;
+    int static_tls_offset_valid;
+    int static_tls_offset_needs_validation;
+    int static_tls_offset_pending;
+} kzt_public_loader_tls_object_t;
+
 typedef int (*kzt_public_loader_visit_fn)(
     const kzt_public_loader_object_t *object,
     void *opaque);
@@ -85,7 +104,9 @@ typedef struct kzt_public_loader_observer {
     uintptr_t r_debug_addr;
     uintptr_t r_brk_addr;
     uintptr_t live_maps[KZT_PUBLIC_LOADER_MAX_OBJECTS];
+    uint64_t live_map_generations[KZT_PUBLIC_LOADER_MAX_OBJECTS];
     size_t live_map_count;
+    uint64_t next_load_generation;
     uintptr_t processed_maps[KZT_PUBLIC_LOADER_MAX_OBJECTS];
     size_t processed_map_count;
     uintptr_t fallback_reported_maps[KZT_PUBLIC_LOADER_MAX_OBJECTS];
@@ -178,12 +199,72 @@ kzt_public_loader_result_t kzt_public_loader_observer_refresh(
     kzt_public_loader_visit_fn visit,
     void *visit_opaque);
 
+/* Probe the current public loader state without walking the link_map chain. */
+kzt_public_loader_result_t kzt_public_loader_state_is_consistent(
+    const kzt_public_loader_observer_t *observer,
+    const kzt_public_loader_reader_t *reader);
+
 /* Resolve one unique defined symbol from the live in-memory link_map set. */
 kzt_public_loader_result_t kzt_public_loader_find_symbol(
     const kzt_public_loader_observer_t *observer,
     const kzt_public_loader_reader_t *reader,
     const char *symbol_name,
     uintptr_t *symbol_addr);
+
+kzt_public_loader_result_t kzt_public_loader_find_symbol_in_object(
+    const kzt_public_loader_object_t *object,
+    const kzt_public_loader_reader_t *reader,
+    const char *symbol_name,
+    uintptr_t *symbol_addr);
+
+/*
+ * Resolve one observed object whose exact, unaligned PT_LOAD memory range
+ * contains guest_addr.  A link_map already remembered by the pre-protection
+ * path may be resolved during RT_ADD; an address not found during RT_ADD stays
+ * BUSY until the loader publishes a complete snapshot.  RT_DELETE is rejected.
+ * PT_LOAD file-to-BSS gaps are included through p_memsz, while inter-segment
+ * gaps and segment end addresses are excluded.
+ */
+kzt_public_loader_result_t kzt_public_loader_find_object_by_address(
+    const kzt_public_loader_observer_t *observer,
+    const kzt_public_loader_reader_t *reader,
+    uintptr_t guest_addr,
+    kzt_public_loader_object_t *object);
+
+kzt_public_loader_result_t kzt_public_loader_object_contains_address(
+    const kzt_public_loader_object_t *object,
+    const kzt_public_loader_reader_t *reader,
+    uintptr_t guest_addr,
+    int *contains);
+
+kzt_public_loader_result_t kzt_public_loader_collect_tls(
+    const kzt_public_loader_observer_t *observer,
+    const kzt_public_loader_reader_t *reader,
+    kzt_public_loader_tls_object_t *objects,
+    size_t object_capacity,
+    size_t *object_count);
+
+kzt_public_loader_result_t kzt_public_loader_read_tls_object(
+    const kzt_public_loader_object_t *object,
+    const kzt_public_loader_reader_t *reader,
+    kzt_public_loader_tls_object_t *tls_object,
+    int *has_tls);
+kzt_public_loader_result_t kzt_public_loader_materialize_tls_image(
+    const kzt_public_loader_tls_object_t *object,
+    const kzt_public_loader_reader_t *reader,
+    void *destination,
+    size_t destination_size);
+
+/* Refresh a private observer copy and collect TLS without committing state. */
+kzt_public_loader_result_t kzt_public_loader_snapshot_tls(
+    const kzt_public_loader_observer_t *observer,
+    uintptr_t dynamic_addr,
+    size_t max_dynamic_entries,
+    const kzt_public_loader_reader_t *reader,
+    uintptr_t link_map_filter,
+    kzt_public_loader_tls_object_t *objects,
+    size_t object_capacity,
+    size_t *object_count);
 
 const char *kzt_public_loader_result_name(
     kzt_public_loader_result_t result);

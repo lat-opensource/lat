@@ -78,6 +78,8 @@ int mydebug = 1;
 #include "wrapper.h"
 #if defined(CONFIG_LATX_KZT)
 #include "kzt-groups.h"
+#include "kzt-guest-tls.h"
+#include "kzt-libc-semantic.h"
 #include "wrappertbbridge.h"
 box64context_t* my_context = NULL;
 elfheader_t* elf_header = NULL;
@@ -313,10 +315,9 @@ void init_task_state(TaskState *ts)
 #endif
 }
 
-CPUArchState *cpu_copy(CPUArchState *env)
+static CPUArchState *cpu_copy_into(CPUArchState *env, CPUState *new_cpu)
 {
     CPUState *cpu = env_cpu(env);
-    CPUState *new_cpu = cpu_create(cpu_type);
     CPUArchState *new_env = new_cpu->env_ptr;
     CPUBreakpoint *bp;
     CPUWatchpoint *wp;
@@ -326,6 +327,14 @@ CPUArchState *cpu_copy(CPUArchState *env)
 
     new_cpu->tcg_cflags = cpu->tcg_cflags;
     memcpy(new_env, env, sizeof(CPUArchState));
+#ifdef CONFIG_LATX_KZT
+    /* Managed resources belong to one CPU and must not be inherited. */
+    new_env->kzt_guest_stack_base = 0;
+    new_env->kzt_guest_tls_allocation = NULL;
+    new_env->kzt_guest_tls_parent_snapshot = NULL;
+    new_env->kzt_guest_thread_state = NULL;
+    new_env->kzt_libc_semantic_state = NULL;
+#endif
 
     /*
      * NOTE: Current QEMU only has one and only one gdt_table ptr.
@@ -357,6 +366,11 @@ CPUArchState *cpu_copy(CPUArchState *env)
     new_env->tb_jmp_cache_ptr = new_cpu->tb_jmp_cache;
 #endif
     return new_env;
+}
+
+CPUArchState *cpu_copy(CPUArchState *env)
+{
+    return cpu_copy_into(env, cpu_create(cpu_type));
 }
 
 #if defined(CONFIG_LATX_DEBUG) || defined(CONFIG_DEBUG_TCG)
@@ -425,6 +439,7 @@ static void handle_arg_latx_disassemble_trace_cmp(const char *arg)
 }
 
 #endif
+#endif /* CONFIG_LATX_DEBUG || CONFIG_DEBUG_TCG */
 
 static void handle_arg_imm_skip_pc(const char *arg) {
   imm_skip_pc = strtol(arg, NULL, 16);
@@ -601,7 +616,6 @@ static void handle_arg_plugin(const char *arg)
     qemu_plugin_opt_parse(arg, &plugins);
 }
 #endif
-#endif
 
 static void handle_arg_help(const char *arg)
 {
@@ -624,6 +638,12 @@ static void handle_arg_runtime_info(const char *arg)
 
 static void handle_arg_ld_prefix(const char *arg)
 {
+    g_autofree char *setting = g_strdup_printf(
+        "LAT_LD_PREFIX=%s", arg);
+
+    if (!setting || envlist_setenv(envlist, setting) != 0) {
+        usage(EXIT_FAILURE);
+    }
     interp_prefix = strdup(arg);
     latx_runtime_prefix_selected();
 }
@@ -683,6 +703,26 @@ static void handle_arg_latx_kzt(const char *arg)
         return;
     }
     option_kzt = value;
+}
+
+static void handle_arg_latx_kzt_guest_tls(const char *arg)
+{
+    g_clear_pointer(&option_kzt_guest_tls_error, g_free);
+    if (!strcmp(arg, "0") || !strcmp(arg, "1")) {
+#ifndef TARGET_X86_64
+        if (arg[0] == '1') {
+            option_kzt_guest_tls = 0;
+            option_kzt_guest_tls_error =
+                g_strdup("LATX_KZT_GUEST_TLS requires an x86-64 Guest");
+            return;
+        }
+#endif
+        option_kzt_guest_tls = arg[0] == '1';
+        return;
+    }
+    option_kzt_guest_tls = 0;
+    option_kzt_guest_tls_error = g_strdup_printf(
+        "LATX_KZT_GUEST_TLS must be exactly 0 or 1 (got '%s')", arg);
 }
 
 static void handle_arg_latx_kzt_libs(const char *arg)
@@ -941,6 +981,9 @@ static const struct qemu_argument arg_table[] = {
 #if defined(CONFIG_LATX_KZT)
     {"latx-kzt",    "LATX_KZT",     true,  handle_arg_latx_kzt,
     "",           "enable kuzhitong"},
+    {"latx-kzt-guest-tls", "LATX_KZT_GUEST_TLS", true,
+     handle_arg_latx_kzt_guest_tls, "0|1",
+     "Enable Guest TLS for native-thread callbacks (default: 0)"},
     {"latx-kzt-libs", "LATX_KZT_LIBS", true, handle_arg_latx_kzt_libs,
     "group,...",  "select KZT library groups"},
     {"latx-kzt-log", "LATX_KZT_LOG", true, handle_arg_latx_kzt_log,
@@ -1027,6 +1070,7 @@ static const struct qemu_argument arg_table[] = {
         true, handle_arg_latx_disassemble_trace_cmp,
         "", "LATX Compare different disassemble."},
 #endif
+#endif /* CONFIG_LATX_DEBUG || CONFIG_DEBUG_TCG */
     {"g",          "LAT_GDB",         true,  handle_arg_gdb,
      "port",       "wait gdb connection to 'port'"},
     {"s",          "LAT_STACK_SIZE",  true,  handle_arg_stack_size,
@@ -1069,7 +1113,6 @@ static const struct qemu_argument arg_table[] = {
 #ifdef CONFIG_PLUGIN
     {"plugin",     "LAT_PLUGIN",      true,  handle_arg_plugin,
      "",           "[file=]<file>[,arg=<string>]"},
-#endif
 #endif
     {"h",          NULL,               false, handle_arg_help,
      "",           "print this help"},
@@ -1574,6 +1617,9 @@ int main(int argc, char **argv, char **envp)
     latx_handle_args(exec_path);
 #endif
     thread_cpu = cpu;
+#ifdef CONFIG_LATX
+    latx_register_host_thread_template(env);
+#endif
 
     /*
      * Reserving too much vm space via mmap can run into problems

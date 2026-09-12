@@ -8,20 +8,26 @@
 
 #include "config-host.h"
 #include "qemu/path.h"
+
+#include "callback.h"
 #include "lsenv.h"
 #include "myalign.h"
 #include "elfloader.h"
 #include "elfloader_private.h"
 #include "kzt-groups.h"
 #include "kzt_public_loader_observer.h"
+#include "kzt-guest-tls.h"
+#include "kzt-libc-semantic.h"
 #include "kzt_relro_preprotect.h"
 #include "latx-options.h"
 #include "librarian_private.h"
 #include "library_private.h"
+#include <stdlib.h>
 #include <sys/epoll.h>
 #include <sys/mman.h>
 #include <sys/sem.h>
 #include <sys/syscall.h>
+#include <unistd.h>
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wmissing-prototypes"
@@ -32,6 +38,7 @@ int box64_x87_no80bits = 1;
 static TranslationBlock *kzt_install_guest_pc_callback(
     uint32_t *inst_old, CPUState *cpu, uintptr_t addr,
     void (*callback)(CPUX86State *));
+static void kzt_guest_fork_entry_callback(CPUX86State *env);
 
 #ifndef HUGE_VAL
 #define HUGE_VAL (1.0 / 0.0)
@@ -2094,6 +2101,7 @@ static void init_main_elf(elfheader_t* elf_header,int fd, uintptr_t load_addr,
     ResetSpecialCaseMainElf(elf_header);
 }
 int wine_option_kzt;
+
 int kzt_init(char** argv, int argc,char** target_argv, int target_argc,
         struct linux_binprm* bprm) {
     if (!option_kzt && !wine_option_kzt) {
@@ -2128,10 +2136,21 @@ int kzt_init(char** argv, int argc,char** target_argv, int target_argc,
 }
 
 static kzt_public_loader_observer_t kzt_public_loader_observer;
+typedef struct kzt_guest_tls_external_map {
+    uintptr_t link_map_addr;
+    uint64_t load_generation;
+    size_t references;
+} kzt_guest_tls_external_map_t;
+static kzt_guest_tls_external_map_t
+    kzt_guest_tls_external_maps[KZT_PUBLIC_LOADER_MAX_OBJECTS];
+static size_t kzt_guest_tls_external_map_count;
+static uint64_t kzt_guest_tls_external_generation;
+static int kzt_guest_tls_external_error;
 static int kzt_main_relocated_before_relro;
 static int kzt_main_fallback_reported;
 static int kzt_observer_failure_reported;
 static uint32 kzt_public_r_brk_inst[2];
+static uint32 kzt_guest_fork_inst[2];
 extern void* x86free;
 extern void* x86realloc;
 extern void* x86pthread_setcanceltype;
@@ -2265,6 +2284,712 @@ static const kzt_public_loader_reader_t kzt_public_loader_reader = {
     .opaque = NULL,
 };
 
+int kzt_guest_loader_state_is_consistent(void)
+{
+    kzt_public_loader_result_t result;
+
+    mmap_lock();
+    result = kzt_public_loader_state_is_consistent(
+        &kzt_public_loader_observer, &kzt_public_loader_reader);
+    mmap_unlock();
+    return result == KZT_PUBLIC_LOADER_OK;
+}
+
+static int kzt_find_main_dynamic_table(const elfheader_t *head,
+                                       uintptr_t *dynamic_addr,
+                                       size_t *dynamic_count);
+
+static int kzt_loader_snapshot_visit(
+    const kzt_public_loader_object_t *object, void *opaque);
+
+static kzt_public_loader_result_t kzt_read_guest_loader_object(
+    uintptr_t link_map_addr,
+    kzt_public_loader_object_t *object)
+{
+    kzt_x86_64_link_map_prefix_t map;
+
+    if (!link_map_addr || !object) {
+        return KZT_PUBLIC_LOADER_INVALID_INPUT;
+    }
+    if (kzt_public_loader_read_guest(
+            link_map_addr, &map, sizeof(map), NULL) != 0) {
+        return KZT_PUBLIC_LOADER_READ_ERROR;
+    }
+    *object = (kzt_public_loader_object_t) {
+        .link_map_addr = link_map_addr,
+        .load_bias = (uintptr_t)map.load_bias,
+        .name_addr = (uintptr_t)map.name,
+        .dynamic_addr = (uintptr_t)map.dynamic_addr,
+        .next_addr = (uintptr_t)map.next,
+        .previous_addr = (uintptr_t)map.previous,
+    };
+    return KZT_PUBLIC_LOADER_OK;
+}
+
+static kzt_public_loader_result_t kzt_read_guest_object_name(
+    uintptr_t name_addr, char *name, size_t capacity)
+{
+    if (!name_addr || !name || capacity < 2) {
+        return KZT_PUBLIC_LOADER_INVALID_INPUT;
+    }
+    for (size_t index = 0; index < capacity; ++index) {
+        if (name_addr > UINTPTR_MAX - index ||
+            kzt_public_loader_read_guest(
+                name_addr + index, &name[index], 1, NULL) != 0) {
+            return KZT_PUBLIC_LOADER_READ_ERROR;
+        }
+        if (!name[index]) {
+            return KZT_PUBLIC_LOADER_OK;
+        }
+    }
+    name[capacity - 1] = '\0';
+    return KZT_PUBLIC_LOADER_LIMIT;
+}
+
+static int kzt_guest_object_name_matches(const char *candidate,
+                                         const char *requested)
+{
+    const char *base;
+    const char *suffix;
+    size_t stem_length;
+
+    if (!candidate || !requested) {
+        return 0;
+    }
+    base = strrchr(candidate, '/');
+    base = base ? base + 1 : candidate;
+    if (strcmp(base, requested) == 0) {
+        return 1;
+    }
+    suffix = strstr(requested, ".so");
+    if (!suffix) {
+        return 0;
+    }
+    stem_length = (size_t)(suffix - requested);
+    return strncmp(base, requested, stem_length) == 0 &&
+           base[stem_length] == '-';
+}
+
+static kzt_public_loader_result_t
+kzt_resolve_guest_object_symbol_live(
+    const kzt_public_loader_observer_t *observer,
+    const char *object_name,
+    const char *symbol_name,
+    uintptr_t *address)
+{
+    enum { KZT_GUEST_OBJECT_NAME_MAX = 512 };
+    kzt_x86_64_r_debug_t debug;
+    kzt_x86_64_r_debug_t final_debug;
+    uintptr_t current;
+    uintptr_t previous = 0;
+    size_t count = 0;
+
+    if (!observer || !observer->active || !observer->r_debug_addr ||
+        !object_name || !symbol_name || !address) {
+        return KZT_PUBLIC_LOADER_INVALID_INPUT;
+    }
+    *address = 0;
+    if (kzt_public_loader_read_guest(
+            observer->r_debug_addr, &debug, sizeof(debug), NULL) != 0) {
+        return KZT_PUBLIC_LOADER_READ_ERROR;
+    }
+    if (debug.version < 1 ||
+        debug.state != KZT_LOADER_DEBUG_CONSISTENT ||
+        !debug.map || !debug.brk ||
+        (observer->r_brk_addr &&
+         observer->r_brk_addr != (uintptr_t)debug.brk)) {
+        return debug.state == KZT_LOADER_DEBUG_ADD ||
+               debug.state == KZT_LOADER_DEBUG_DELETE
+                   ? KZT_PUBLIC_LOADER_BUSY
+                   : KZT_PUBLIC_LOADER_INVALID_STATE;
+    }
+
+    current = (uintptr_t)debug.map;
+    while (current) {
+        kzt_public_loader_object_t object;
+        kzt_public_loader_result_t result;
+        uintptr_t candidate = 0;
+        char name[KZT_GUEST_OBJECT_NAME_MAX];
+
+        if (++count > UINT16_MAX) {
+            return KZT_PUBLIC_LOADER_LIMIT;
+        }
+        result = kzt_read_guest_loader_object(current, &object);
+        if (result != KZT_PUBLIC_LOADER_OK) {
+            return result;
+        }
+        if (object.previous_addr != previous) {
+            return KZT_PUBLIC_LOADER_INVALID_STATE;
+        }
+        if (object.name_addr) {
+            result = kzt_read_guest_object_name(
+                object.name_addr, name, sizeof(name));
+            if (result != KZT_PUBLIC_LOADER_OK) {
+                return result;
+            }
+            if (kzt_guest_object_name_matches(name, object_name)) {
+                result = kzt_public_loader_find_symbol_in_object(
+                    &object, &kzt_public_loader_reader,
+                    symbol_name, &candidate);
+                if (result != KZT_PUBLIC_LOADER_OK &&
+                    result != KZT_PUBLIC_LOADER_NOT_FOUND) {
+                    return result;
+                }
+                if (result == KZT_PUBLIC_LOADER_OK) {
+                    if (*address && *address != candidate) {
+                        return KZT_PUBLIC_LOADER_INVALID_STATE;
+                    }
+                    *address = candidate;
+                }
+            }
+        }
+        previous = current;
+        current = object.next_addr;
+    }
+    if (kzt_public_loader_read_guest(
+            observer->r_debug_addr, &final_debug,
+            sizeof(final_debug), NULL) != 0) {
+        return KZT_PUBLIC_LOADER_READ_ERROR;
+    }
+    if (memcmp(&debug, &final_debug, sizeof(debug)) != 0) {
+        return KZT_PUBLIC_LOADER_BUSY;
+    }
+    return *address ? KZT_PUBLIC_LOADER_OK
+                    : KZT_PUBLIC_LOADER_NOT_FOUND;
+}
+
+uintptr_t kzt_resolve_guest_object_symbol(
+    const char *object_name,
+    const char *symbol_name)
+{
+    enum { KZT_GUEST_OBJECT_NAME_MAX = 512 };
+    kzt_public_loader_observer_t snapshot;
+    kzt_public_loader_result_t result;
+    uintptr_t address = 0;
+    uintptr_t dynamic_addr = 0;
+    size_t dynamic_count = 0;
+
+    if (!object_name || !symbol_name) {
+        return 0;
+    }
+    mmap_lock();
+    snapshot = kzt_public_loader_observer;
+    if (snapshot.active) {
+        result = kzt_public_loader_observer_refresh(
+            &snapshot, &kzt_public_loader_reader,
+            kzt_loader_snapshot_visit, NULL);
+    } else if (kzt_find_main_dynamic_table(
+                   elf_header, &dynamic_addr, &dynamic_count) == 0) {
+        result = kzt_public_loader_observer_activate(
+            &snapshot, dynamic_addr, dynamic_count,
+            &kzt_public_loader_reader, kzt_loader_snapshot_visit, NULL);
+    } else {
+        result = KZT_PUBLIC_LOADER_NOT_FOUND;
+    }
+    if (result == KZT_PUBLIC_LOADER_LIMIT) {
+        result = kzt_resolve_guest_object_symbol_live(
+            &snapshot, object_name, symbol_name, &address);
+        goto out;
+    }
+    if (result != KZT_PUBLIC_LOADER_OK) {
+        goto out;
+    }
+    for (size_t index = 0; index < snapshot.live_map_count; ++index) {
+        kzt_public_loader_object_t object;
+        uintptr_t candidate = 0;
+        char name[KZT_GUEST_OBJECT_NAME_MAX];
+
+        result = kzt_read_guest_loader_object(
+            snapshot.live_maps[index], &object);
+        if (result != KZT_PUBLIC_LOADER_OK) {
+            goto out;
+        }
+        if (!object.name_addr) {
+            continue;
+        }
+        result = kzt_read_guest_object_name(
+            object.name_addr, name, sizeof(name));
+        if (result != KZT_PUBLIC_LOADER_OK) {
+            goto out;
+        }
+        if (!kzt_guest_object_name_matches(name, object_name)) {
+            continue;
+        }
+        result = kzt_public_loader_find_symbol_in_object(
+            &object, &kzt_public_loader_reader,
+            symbol_name, &candidate);
+        if (result == KZT_PUBLIC_LOADER_NOT_FOUND) {
+            continue;
+        }
+        if (result != KZT_PUBLIC_LOADER_OK ||
+            (address && address != candidate)) {
+            address = 0;
+            goto out;
+        }
+        address = candidate;
+    }
+
+out:
+    mmap_unlock();
+    return address;
+}
+
+uintptr_t kzt_resolve_guest_link_map_symbol(
+    uintptr_t link_map_addr,
+    const char *symbol_name)
+{
+    kzt_public_loader_object_t object;
+    kzt_public_loader_result_t result;
+    uintptr_t address = 0;
+
+    if (!link_map_addr || !symbol_name) {
+        return 0;
+    }
+    mmap_lock();
+    result = kzt_read_guest_loader_object(link_map_addr, &object);
+    if (result == KZT_PUBLIC_LOADER_OK) {
+        result = kzt_public_loader_find_symbol_in_object(
+            &object, &kzt_public_loader_reader,
+            symbol_name, &address);
+    }
+    mmap_unlock();
+    return result == KZT_PUBLIC_LOADER_OK ? address : 0;
+}
+
+static int kzt_main_elf_contains_address(uintptr_t guest_addr)
+{
+    uintptr_t load_bias;
+
+    if (!elf_header || !elf_header->PHEntries) {
+        return 0;
+    }
+    load_bias = (uintptr_t)elf_header->delta;
+    for (size_t index = 0; index < elf_header->numPHEntries; ++index) {
+        const Elf64_Phdr *phdr = &elf_header->PHEntries[index];
+        uintptr_t segment_start;
+        uintptr_t segment_end;
+
+        if (phdr->p_type != PT_LOAD || !phdr->p_memsz ||
+            phdr->p_vaddr > UINTPTR_MAX - load_bias) {
+            continue;
+        }
+        segment_start = load_bias + (uintptr_t)phdr->p_vaddr;
+        if (phdr->p_memsz > UINTPTR_MAX - segment_start) {
+            continue;
+        }
+        segment_end = segment_start + (uintptr_t)phdr->p_memsz;
+        if (guest_addr >= segment_start && guest_addr < segment_end) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static kzt_public_loader_result_t kzt_find_zero_bias_main_object(
+    const kzt_public_loader_observer_t *observer,
+    uintptr_t guest_addr,
+    kzt_public_loader_object_t *object)
+{
+    kzt_public_loader_object_t candidate = { 0 };
+    int found = 0;
+
+    if (!kzt_main_elf_contains_address(guest_addr)) {
+        return KZT_PUBLIC_LOADER_NOT_FOUND;
+    }
+    for (size_t index = 0; index < observer->live_map_count; ++index) {
+        kzt_public_loader_object_t current;
+        kzt_public_loader_result_t result =
+            kzt_read_guest_loader_object(
+                observer->live_maps[index], &current);
+
+        if (result != KZT_PUBLIC_LOADER_OK) {
+            return result;
+        }
+        if (current.load_bias) {
+            continue;
+        }
+        if (found) {
+            return KZT_PUBLIC_LOADER_INVALID_STATE;
+        }
+        candidate = current;
+        found = 1;
+    }
+    if (!found) {
+        return KZT_PUBLIC_LOADER_NOT_FOUND;
+    }
+    *object = candidate;
+    return KZT_PUBLIC_LOADER_OK;
+}
+
+static kzt_public_loader_result_t kzt_find_external_object_by_address(
+    uintptr_t guest_addr,
+    kzt_public_loader_object_t *object)
+{
+    kzt_public_loader_object_t candidate = { 0 };
+    int found = 0;
+
+    for (size_t index = 0;
+         index < kzt_guest_tls_external_map_count; ++index) {
+        kzt_public_loader_object_t current;
+        kzt_public_loader_result_t result =
+            kzt_read_guest_loader_object(
+                kzt_guest_tls_external_maps[index].link_map_addr,
+                &current);
+        int contains;
+
+        if (result != KZT_PUBLIC_LOADER_OK) {
+            return result;
+        }
+        result = kzt_public_loader_object_contains_address(
+            &current, &kzt_public_loader_reader,
+            guest_addr, &contains);
+        if (result != KZT_PUBLIC_LOADER_OK) {
+            return result;
+        }
+        if (!contains) {
+            continue;
+        }
+        if (found && candidate.link_map_addr != current.link_map_addr) {
+            return KZT_PUBLIC_LOADER_INVALID_STATE;
+        }
+        candidate = current;
+        found = 1;
+    }
+    if (!found) {
+        return KZT_PUBLIC_LOADER_NOT_FOUND;
+    }
+    *object = candidate;
+    return KZT_PUBLIC_LOADER_OK;
+}
+
+static kzt_public_loader_result_t kzt_find_guest_object_by_address(
+    uintptr_t guest_addr,
+    kzt_public_loader_object_t *object)
+{
+    kzt_public_loader_observer_t snapshot;
+    kzt_public_loader_object_t public_object = { 0 };
+    kzt_public_loader_object_t main_object = { 0 };
+    kzt_public_loader_object_t external_object = { 0 };
+    kzt_public_loader_result_t result;
+    kzt_public_loader_result_t refresh_result;
+    kzt_public_loader_result_t main_result;
+    kzt_public_loader_result_t external_result;
+    uintptr_t dynamic_addr = 0;
+    size_t dynamic_count = 0;
+
+    if (!guest_addr || !object) {
+        return KZT_PUBLIC_LOADER_INVALID_INPUT;
+    }
+    memset(object, 0, sizeof(*object));
+
+    mmap_lock();
+    snapshot = kzt_public_loader_observer;
+    if (snapshot.active) {
+        refresh_result = kzt_public_loader_observer_refresh(
+            &snapshot, &kzt_public_loader_reader,
+            kzt_loader_snapshot_visit, NULL);
+    } else if (kzt_find_main_dynamic_table(
+                   elf_header, &dynamic_addr, &dynamic_count) == 0) {
+        refresh_result = kzt_public_loader_observer_activate(
+            &snapshot, dynamic_addr, dynamic_count,
+            &kzt_public_loader_reader, kzt_loader_snapshot_visit, NULL);
+    } else {
+        refresh_result = KZT_PUBLIC_LOADER_NOT_FOUND;
+    }
+    result = refresh_result;
+    if (refresh_result == KZT_PUBLIC_LOADER_OK ||
+        refresh_result == KZT_PUBLIC_LOADER_BUSY ||
+        refresh_result == KZT_PUBLIC_LOADER_LIMIT) {
+        result = kzt_public_loader_find_object_by_address(
+            &snapshot, &kzt_public_loader_reader,
+            guest_addr, &public_object);
+    }
+    if (result != KZT_PUBLIC_LOADER_OK &&
+        result != KZT_PUBLIC_LOADER_NOT_FOUND &&
+        result != KZT_PUBLIC_LOADER_BUSY &&
+        result != KZT_PUBLIC_LOADER_LIMIT) {
+        goto out;
+    }
+    main_result = kzt_find_zero_bias_main_object(
+        &snapshot, guest_addr, &main_object);
+    if (main_result != KZT_PUBLIC_LOADER_OK &&
+        main_result != KZT_PUBLIC_LOADER_NOT_FOUND) {
+        result = main_result;
+        goto out;
+    }
+    external_result = kzt_find_external_object_by_address(
+        guest_addr, &external_object);
+    if (external_result != KZT_PUBLIC_LOADER_OK &&
+        external_result != KZT_PUBLIC_LOADER_NOT_FOUND) {
+        result = external_result;
+        goto out;
+    }
+    if ((result == KZT_PUBLIC_LOADER_OK &&
+         main_result == KZT_PUBLIC_LOADER_OK &&
+         public_object.link_map_addr != main_object.link_map_addr) ||
+        (result == KZT_PUBLIC_LOADER_OK &&
+         external_result == KZT_PUBLIC_LOADER_OK &&
+         public_object.link_map_addr != external_object.link_map_addr) ||
+        (main_result == KZT_PUBLIC_LOADER_OK &&
+         external_result == KZT_PUBLIC_LOADER_OK &&
+         main_object.link_map_addr != external_object.link_map_addr)) {
+        result = KZT_PUBLIC_LOADER_INVALID_STATE;
+        goto out;
+    }
+    if (result == KZT_PUBLIC_LOADER_OK) {
+        *object = public_object;
+    } else if (main_result == KZT_PUBLIC_LOADER_OK) {
+        *object = main_object;
+        result = KZT_PUBLIC_LOADER_OK;
+    } else if (external_result == KZT_PUBLIC_LOADER_OK) {
+        *object = external_object;
+        result = KZT_PUBLIC_LOADER_OK;
+    }
+out:
+    mmap_unlock();
+    return result;
+}
+
+uintptr_t kzt_find_guest_link_map_by_address_ex(
+    uintptr_t guest_addr,
+    kzt_public_loader_result_t *lookup_result)
+{
+    kzt_public_loader_object_t object;
+    kzt_public_loader_result_t result;
+
+    result = kzt_find_guest_object_by_address(guest_addr, &object);
+    if (lookup_result) {
+        *lookup_result = result;
+    }
+    if (result != KZT_PUBLIC_LOADER_OK) {
+        printf_log(LOG_DEBUG,
+                   "KZT cannot resolve Guest address %p to link_map: %s\n",
+                   (void *)guest_addr,
+                   kzt_public_loader_result_name(result));
+        return 0;
+    }
+    return object.link_map_addr;
+}
+
+uintptr_t kzt_find_guest_link_map_by_address(uintptr_t guest_addr)
+{
+    return kzt_find_guest_link_map_by_address_ex(guest_addr, NULL);
+}
+
+int kzt_collect_guest_tls_objects(
+    kzt_public_loader_tls_object_t *objects,
+    size_t object_capacity,
+    size_t *object_count)
+{
+    kzt_public_loader_result_t result;
+    uintptr_t dynamic_addr = 0;
+    size_t dynamic_count = 0;
+
+    mmap_lock();
+    if (kzt_guest_tls_external_error) {
+        mmap_unlock();
+        return -1;
+    }
+    if (!kzt_public_loader_observer.active) {
+        if (kzt_find_main_dynamic_table(
+                elf_header, &dynamic_addr, &dynamic_count) != 0) {
+            mmap_unlock();
+            return -1;
+        }
+    }
+    result = kzt_public_loader_snapshot_tls(
+        &kzt_public_loader_observer, dynamic_addr, dynamic_count,
+        &kzt_public_loader_reader, 0,
+        objects, object_capacity, object_count);
+    if (result == KZT_PUBLIC_LOADER_OK) {
+        for (size_t external_index = 0;
+             external_index < kzt_guest_tls_external_map_count;
+             ++external_index) {
+            kzt_x86_64_link_map_prefix_t map;
+            kzt_public_loader_object_t object;
+            kzt_public_loader_tls_object_t tls_object;
+            int duplicate = 0;
+            int has_tls = 0;
+
+            for (size_t object_index = 0;
+                 object_index < *object_count; ++object_index) {
+                if (objects[object_index].link_map_addr ==
+                    kzt_guest_tls_external_maps[external_index]
+                        .link_map_addr) {
+                    duplicate = 1;
+                    break;
+                }
+            }
+            if (duplicate) {
+                continue;
+            }
+            if (kzt_public_loader_read_guest(
+                    kzt_guest_tls_external_maps[external_index]
+                        .link_map_addr,
+                    &map, sizeof(map), NULL) != 0) {
+                result = KZT_PUBLIC_LOADER_READ_ERROR;
+                break;
+            }
+            object = (kzt_public_loader_object_t) {
+                .link_map_addr =
+                    kzt_guest_tls_external_maps[external_index]
+                        .link_map_addr,
+                .load_bias = (uintptr_t)map.load_bias,
+                .name_addr = (uintptr_t)map.name,
+                .dynamic_addr = (uintptr_t)map.dynamic_addr,
+                .next_addr = (uintptr_t)map.next,
+                .previous_addr = (uintptr_t)map.previous,
+            };
+            result = kzt_public_loader_read_tls_object(
+                &object, &kzt_public_loader_reader,
+                &tls_object, &has_tls);
+            if (result != KZT_PUBLIC_LOADER_OK) {
+                break;
+            }
+            if (!has_tls) {
+                continue;
+            }
+            if (*object_count == object_capacity) {
+                result = KZT_PUBLIC_LOADER_LIMIT;
+                break;
+            }
+            tls_object.load_generation =
+                kzt_guest_tls_external_maps[external_index]
+                    .load_generation;
+            objects[(*object_count)++] = tls_object;
+        }
+    }
+    mmap_unlock();
+    if (result == KZT_PUBLIC_LOADER_OK) {
+        return 0;
+    }
+    if (result != KZT_PUBLIC_LOADER_BUSY) {
+        fprintf(stderr,
+                "KZT Guest TLS collection failed: %s\n",
+                kzt_public_loader_result_name(result));
+    }
+    return result == KZT_PUBLIC_LOADER_BUSY
+               ? KZT_GUEST_TLS_REFRESH_BUSY : -1;
+}
+
+int kzt_collect_guest_tls_object(
+    uintptr_t link_map_addr,
+    kzt_public_loader_tls_object_t *object,
+    int *has_tls)
+{
+    kzt_public_loader_result_t result;
+    uintptr_t dynamic_addr = 0;
+    size_t dynamic_count = 0;
+    size_t object_count = 0;
+
+    if (!link_map_addr || !object || !has_tls) {
+        return -1;
+    }
+    *has_tls = 0;
+    mmap_lock();
+    if (kzt_guest_tls_external_error) {
+        mmap_unlock();
+        return -1;
+    }
+    if (!kzt_public_loader_observer.active &&
+        kzt_find_main_dynamic_table(
+            elf_header, &dynamic_addr, &dynamic_count) != 0) {
+        mmap_unlock();
+        return -1;
+    }
+    result = kzt_public_loader_snapshot_tls(
+        &kzt_public_loader_observer, dynamic_addr, dynamic_count,
+        &kzt_public_loader_reader, link_map_addr,
+        object, 1, &object_count);
+    mmap_unlock();
+    if (result == KZT_PUBLIC_LOADER_OK) {
+        *has_tls = object_count == 1;
+        return 0;
+    }
+    return result == KZT_PUBLIC_LOADER_BUSY
+               ? KZT_GUEST_TLS_REFRESH_BUSY : -1;
+}
+
+int kzt_materialize_guest_tls_image(
+    const kzt_public_loader_tls_object_t *object,
+    void *destination,
+    size_t destination_size)
+{
+    return kzt_public_loader_materialize_tls_image(
+               object, &kzt_public_loader_reader,
+               destination, destination_size) == KZT_PUBLIC_LOADER_OK
+               ? 0 : -1;
+}
+
+int kzt_register_guest_tls_link_map(uintptr_t link_map_addr)
+{
+    if (!latx_kzt_guest_tls_enabled()) {
+        return 0;
+    }
+    int result = -1;
+
+    if (!link_map_addr) {
+        return -1;
+    }
+    mmap_lock();
+    for (size_t index = 0;
+         index < kzt_guest_tls_external_map_count; ++index) {
+        if (kzt_guest_tls_external_maps[index].link_map_addr ==
+            link_map_addr) {
+            if (kzt_guest_tls_external_maps[index].references ==
+                SIZE_MAX) {
+                kzt_guest_tls_external_error = 1;
+                goto out;
+            }
+            ++kzt_guest_tls_external_maps[index].references;
+            result = 0;
+            goto out;
+        }
+    }
+    if (kzt_guest_tls_external_map_count ==
+            KZT_PUBLIC_LOADER_MAX_OBJECTS ||
+        kzt_guest_tls_external_generation == UINT64_MAX) {
+        kzt_guest_tls_external_error = 1;
+        goto out;
+    }
+    kzt_guest_tls_external_maps[kzt_guest_tls_external_map_count++] =
+        (kzt_guest_tls_external_map_t) {
+            .link_map_addr = link_map_addr,
+            .load_generation = ++kzt_guest_tls_external_generation,
+            .references = 1,
+        };
+    result = 0;
+
+out:
+    mmap_unlock();
+    return result;
+}
+
+void kzt_unregister_guest_tls_link_map(uintptr_t link_map_addr)
+{
+    if (!latx_kzt_guest_tls_enabled()) {
+        return;
+    }
+    mmap_lock();
+    for (size_t index = 0;
+         index < kzt_guest_tls_external_map_count; ++index) {
+        if (kzt_guest_tls_external_maps[index].link_map_addr !=
+            link_map_addr) {
+            continue;
+        }
+        if (--kzt_guest_tls_external_maps[index].references != 0) {
+            break;
+        }
+        memmove(&kzt_guest_tls_external_maps[index],
+                &kzt_guest_tls_external_maps[index + 1],
+                (kzt_guest_tls_external_map_count - index - 1) *
+                    sizeof(kzt_guest_tls_external_maps[0]));
+        --kzt_guest_tls_external_map_count;
+        break;
+    }
+    mmap_unlock();
+}
+
 static void kzt_report_object_fallback_once(
     const kzt_public_loader_object_t *object,
     const char *name,
@@ -2385,6 +3110,10 @@ uintptr_t kzt_resolve_guest_symbol(const char *name)
         return 0;
     }
     mmap_lock();
+    if (latx_kzt_guest_tls_enabled() && kzt_guest_tls_external_error) {
+        mmap_unlock();
+        return 0;
+    }
     snapshot = kzt_public_loader_observer;
     if (snapshot.active) {
         result = kzt_public_loader_observer_refresh(
@@ -2597,12 +3326,6 @@ static int kzt_try_bind_loaded_object(
         rfilename = kzt_find_realsofilepath(rfilename, filetmp);
     }
 
-    printf_log(LOG_DEBUG,
-               "%d debug %s link_map=%p{0x%lx, %s, l_ld=%p}\n",
-               getpid(), __func__, (void *)object->link_map_addr,
-               object->load_bias, name_copy,
-               (void *)object->dynamic_addr);
-
     f = fopen(rfilename, "rb");
     if (!f) {
         kzt_report_object_fallback_once(
@@ -2625,6 +3348,13 @@ static int kzt_try_bind_loaded_object(
 
     kzt_calculate_loaded_elf_range(h, object->load_bias,
                                    &map_start, &map_end);
+    printf_log(LOG_DEBUG,
+               "%d debug %s link_map=%p{load=[%p,%p), bias=%p, "
+               "%s, l_ld=%p}\n",
+               getpid(), __func__, (void *)object->link_map_addr,
+               (void *)map_start, (void *)map_end,
+               (void *)object->load_bias, name_copy,
+               (void *)object->dynamic_addr);
     ElfHeadReFix(h, object->load_bias);
 
     if (!have_mmap_lock() || !KZTRelocationTargetsAreWritable(h)) {
@@ -2843,6 +3573,19 @@ void kzt_try_bind_before_guest_relro(uintptr_t start, size_t length, int prot)
                    "mprotect(%p, %zu)\n",
                    (void *)object.link_map_addr, (void *)start, length);
     }
+    if (latx_kzt_guest_tls_enabled() &&
+        result == KZT_PUBLIC_LOADER_OK && lsenv && lsenv->cpu_state) {
+        CPUX86State *env = (CPUX86State *)lsenv->cpu_state;
+
+        if (env->kzt_guest_tls_allocation &&
+            kzt_guest_tls_preinitialize_static(
+                env, object.link_map_addr) != 0) {
+            fprintf(stderr,
+                    "KZT cannot initialize static Guest TLS before "
+                    "RELRO protection; refusing to run constructors\n");
+            _exit(EXIT_FAILURE);
+        }
+    }
     in_preprotect = 0;
 }
 
@@ -2965,18 +3708,41 @@ static void kzt_dynamic_library_change_callback(CPUX86State *env)
 {
     kzt_public_loader_result_t result;
 
-    (void)env;
+    kzt_guest_tls_loader_event_begin();
     mmap_lock();
     result = kzt_public_loader_observer_refresh(
         &kzt_public_loader_observer, &kzt_public_loader_reader,
         kzt_try_bind_observed_object, NULL);
     mmap_unlock();
     if (result != KZT_PUBLIC_LOADER_OK &&
-        result != KZT_PUBLIC_LOADER_BUSY) {
+        result != KZT_PUBLIC_LOADER_BUSY &&
+        result != KZT_PUBLIC_LOADER_LIMIT) {
         kzt_report_observer_failure_once("refresh", result);
         printf_log(LOG_INFO,
                    "KZT public loader refresh failed: %s\n",
                    kzt_public_loader_result_name(result));
+        if (env && env->kzt_guest_tls_allocation) {
+            fprintf(stderr,
+                    "KZT public loader state is invalid before "
+                    "dynamic-library constructors; refusing to continue\n");
+            _exit(EXIT_FAILURE);
+        }
+    }
+    if (latx_kzt_guest_tls_enabled() &&
+        (result == KZT_PUBLIC_LOADER_OK ||
+         result == KZT_PUBLIC_LOADER_LIMIT)) {
+        int tls_result = kzt_guest_tls_refresh_local(env);
+
+        if (tls_result == KZT_GUEST_TLS_REFRESH_BUSY) {
+            return;
+        }
+        if (tls_result == 0) {
+            return;
+        }
+        fprintf(stderr,
+                "KZT cannot refresh attached Guest TLS before "
+                "dynamic-library constructors; refusing to continue\n");
+        _exit(EXIT_FAILURE);
     }
 }
 
@@ -2987,7 +3753,22 @@ static void kzt_guest_main_entry_callback(CPUX86State *env)
     uintptr_t dynamic_addr = 0;
     size_t dynamic_count = 0;
 
+    kzt_libc_semantic_process_reset(env);
+    kzt_guest_tls_loader_tracking_reset();
+    if (latx_finalize_host_thread_template(env) != 0) {
+        fprintf(stderr,
+                "KZT Host-thread template initialization failed; "
+                "refusing native bindings\n");
+        exit(EXIT_FAILURE);
+    }
     mmap_lock();
+    if (latx_kzt_guest_tls_enabled()) {
+        memset(kzt_guest_tls_external_maps, 0,
+               sizeof(kzt_guest_tls_external_maps));
+        kzt_guest_tls_external_map_count = 0;
+        kzt_guest_tls_external_generation = 0;
+        kzt_guest_tls_external_error = 0;
+    }
     if (kzt_find_main_dynamic_table(
             elf_header, &dynamic_addr, &dynamic_count) == 0) {
         observer_result = kzt_public_loader_observer_activate(
@@ -3017,12 +3798,24 @@ static void kzt_guest_main_entry_callback(CPUX86State *env)
     if (observer_result == KZT_PUBLIC_LOADER_OK) {
         CPUState *cpu = env_cpu(env);
         target_ulong eip = env->eip;
+        uintptr_t fork_addr;
 
+        kzt_guest_tls_loader_tracking_enable();
         kzt_install_guest_pc_callback(
             kzt_public_r_brk_inst, cpu,
             kzt_public_loader_observer.r_brk_addr,
             kzt_dynamic_library_change_callback);
         env->eip = eip;
+        fork_addr = latx_kzt_guest_tls_enabled()
+            ? kzt_resolve_guest_symbol("fork") : 0;
+        if (fork_addr) {
+            memset(kzt_guest_fork_inst, 0,
+                   sizeof(kzt_guest_fork_inst));
+            kzt_install_guest_pc_callback(
+                kzt_guest_fork_inst, cpu, fork_addr,
+                kzt_guest_fork_entry_callback);
+            env->eip = eip;
+        }
         printf_log(LOG_INFO,
                    "KZT public loader observer active: "
                    "r_debug=%p r_brk=%p objects=%zu\n",
@@ -3041,6 +3834,12 @@ static void kzt_guest_main_entry_callback(CPUX86State *env)
     finiReFlesh(elf_header);
     x64free_fini = 1;
     AddDebugInfo(LIB_EMULATED, elf_header->name, info1.start_code, info1.end_code);
+}
+
+static void kzt_guest_fork_entry_callback(CPUX86State *env)
+{
+    (void)env;
+    kzt_guest_tls_fork_prepare_early();
 }
 static TranslationBlock *kzt_install_guest_pc_callback(
     uint32_t *inst_old, CPUState *cpu, uintptr_t addr,
@@ -3129,11 +3928,29 @@ void kzt_install_runtime_callbacks(CPUState *cpu, void *info)
     env = cpu->env_ptr;
     eip = env->eip;
 
+    if (latx_kzt_guest_tls_enabled() &&
+        kzt_public_loader_observer.active &&
+        kzt_public_loader_observer.r_brk_addr) {
+        memset(kzt_public_r_brk_inst, 0,
+               sizeof(kzt_public_r_brk_inst));
+        kzt_install_guest_pc_callback(
+            kzt_public_r_brk_inst, cpu,
+            kzt_public_loader_observer.r_brk_addr,
+            kzt_dynamic_library_change_callback);
+        env->eip = eip;
+        return;
+    }
+
+    kzt_guest_tls_loader_tracking_reset();
     kzt_public_loader_observer_reset(&kzt_public_loader_observer);
     memset(kzt_public_r_brk_inst, 0, sizeof(kzt_public_r_brk_inst));
+    memset(kzt_guest_fork_inst, 0, sizeof(kzt_guest_fork_inst));
     kzt_main_relocated_before_relro = 0;
     kzt_main_fallback_reported = 0;
     kzt_observer_failure_reported = 0;
+    if (latx_kzt_guest_tls_enabled()) {
+        memset(jmpinst_exec, 0, sizeof(jmpinst_exec));
+    }
 
     /*
      * The program-entry hook is version independent.  It installs the
@@ -3267,13 +4084,12 @@ void kzt_wine_init_x86(void)
         return;
     }
     struct malloc_map* m = malloc(sizeof(struct malloc_map));
-    m->mallocp = (void *)(uintptr_t)RunFunctionWithState((uintptr_t)my_context->dlprivate->x86dlsym, 2,
-    0, "malloc");
-    ;
-    m->freep = (void *)(uintptr_t)RunFunctionWithState((uintptr_t)my_context->dlprivate->x86dlsym, 2,
-    0, "free");
-    m->reallocp = (void *)(uintptr_t)RunFunctionWithState((uintptr_t)my_context->dlprivate->x86dlsym, 2,
-    0, "realloc");
+    m->mallocp = (void *)(uintptr_t)RunFunctionWithStateInternal(
+        (uintptr_t)my_context->dlprivate->x86dlsym, 2, 0, "malloc");
+    m->freep = (void *)(uintptr_t)RunFunctionWithStateInternal(
+        (uintptr_t)my_context->dlprivate->x86dlsym, 2, 0, "free");
+    m->reallocp = (void *)(uintptr_t)RunFunctionWithStateInternal(
+        (uintptr_t)my_context->dlprivate->x86dlsym, 2, 0, "realloc");
     m->h = wine_elf_header;
     AddMallocMap(my_context, m);
     x86free = m->freep;
