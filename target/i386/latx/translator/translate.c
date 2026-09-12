@@ -4326,7 +4326,9 @@ static inline void helper_restore_reg(IR2_OPND opnd)
 void gen_test_page_flag(IR2_OPND mem_opnd, int mem_imm, uint32_t flag,
                         unsigned int mem_size)
 {
+#if TARGET_ABI_BITS == 32
     uint32_t required_flag = flag & PAGE_WRITE ? PAGE_WRITE : PAGE_READ;
+#endif
 
     if (!option_mem_test) {
 #if TARGET_ABI_BITS == 32
@@ -4357,7 +4359,9 @@ void gen_test_page_flag(IR2_OPND mem_opnd, int mem_imm, uint32_t flag,
     IR2_OPND label1 = ra_alloc_label();
     IR2_OPND label2 = ra_alloc_label();
     IR2_OPND label_fault = ra_alloc_label();
+#if TARGET_ABI_BITS == 32
     IR2_OPND label_check_end = ra_alloc_label();
+#endif
     bool need_restore0 = false;
     bool need_restore1 = false;
     bool need_restore2 = false;
