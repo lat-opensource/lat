@@ -40,7 +40,7 @@ jobs:
     name: Publish final LAT CI result
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Authenticate the LAT CI hub callback
         env:
