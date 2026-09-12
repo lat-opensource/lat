@@ -763,6 +763,34 @@ uint32_t helper_fnstcw(CPUX86State *env)
     return env->fpuc;
 }
 
+static int x86_rounding_mode_to_host(unsigned mode)
+{
+    static int host_round_mode[4] = {
+        FE_TONEAREST,
+        FE_DOWNWARD,
+        FE_UPWARD,
+        FE_TOWARDZERO
+    };
+
+    assert(mode < ARRAY_SIZE(host_round_mode));
+    return host_round_mode[mode];
+}
+
+#ifdef CONFIG_LATX
+static unsigned x86_rounding_mode_to_fcsr(unsigned mode)
+{
+    static const unsigned fcsr_round_mode[4] = {
+        0, /* round to nearest */
+        3, /* round down */
+        2, /* round up */
+        1, /* round toward zero */
+    };
+
+    assert(mode < ARRAY_SIZE(fcsr_round_mode));
+    return fcsr_round_mode[mode];
+}
+#endif
+
 static void set_x86_rounding_mode(unsigned mode, float_status *status)
 {
     static FloatRoundMode x86_round_mode[4] = {
@@ -774,13 +802,7 @@ static void set_x86_rounding_mode(unsigned mode, float_status *status)
     assert(mode < ARRAY_SIZE(x86_round_mode));
     set_float_rounding_mode(x86_round_mode[mode], status);
     if (option_set_rounding_opt) {
-        static int round_mode_enum[4] = {
-            FE_TONEAREST,
-            FE_DOWNWARD,
-            FE_UPWARD,
-            FE_TOWARDZERO
-        };
-        fesetround(round_mode_enum[mode]);
+        fesetround(x86_rounding_mode_to_host(mode));
     }
 }
 
@@ -2856,7 +2878,7 @@ void helper_fxsave(CPUX86State *env, target_ulong ptr)
     do_xsave_fpu(env, ptr, ra);
 
     if (env->cr[4] & CR4_OSFXSR_MASK) {
-        cpu_stl_data_ra(env, ptr + XO(legacy.mxcsr_mask), 0x0000ffff, ra);
+        do_xsave_mxcsr(env, ptr, ra);
         /* Fast FXSAVE leaves out the XMM registers */
         if (!(env->efer & MSR_EFER_FFXSR)
             || (env->hflags & HF_CPL_MASK)
@@ -3311,6 +3333,17 @@ void update_mxcsr_status(CPUX86State *env)
     /* set flush to zero */
     set_flush_to_zero((mxcsr & SSE_FZ) ? 1 : 0, &env->sse_status);
 }
+
+#ifdef CONFIG_LATX
+void cpu_x86_set_host_rounding_from_mxcsr(CPUX86State *env)
+{
+    unsigned mode = (env->mxcsr & SSE_RC_MASK) >> SSE_RC_SHIFT;
+
+    env->fcsr = (env->fcsr & ~(3U << 8)) |
+                (x86_rounding_mode_to_fcsr(mode) << 8);
+    fesetround(x86_rounding_mode_to_host(mode));
+}
+#endif
 
 void update_mxcsr_from_sse_status(CPUX86State *env)
 {

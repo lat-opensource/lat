@@ -1729,6 +1729,8 @@ void tr_lat_spin_unlock(IR2_OPND lat_lock_addr);
 
 void gen_softfpu_helper_prologue(IR1_INST *pir1);
 void gen_softfpu_helper_epilogue(IR1_INST *pir1);
+void gen_softfpu_x87_fcsr_enter(void);
+void gen_softfpu_x87_fcsr_exit(void);
 void update_fcsr_rm(IR2_OPND control_word, IR2_OPND fcsr);
 
 bool ir1_need_reserve_h128(IR1_INST *ir1);

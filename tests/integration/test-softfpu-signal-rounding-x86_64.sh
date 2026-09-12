@@ -23,14 +23,13 @@ fi
 
 "$clang" --target=x86_64-linux-gnu -fuse-ld=lld -nostdlib -static \
     -Wl,--build-id=none "$source_file" \
-    -o "$workdir/softfpu-helper-store-gpr-x86_64"
+    -o "$workdir/softfpu-signal-rounding-x86_64"
 
-LATX_AOT=0 LATX_MT=0 LATX_SOFTFPU=1 LATX_SOFTFPU_FAST=0 \
-    "$emulator" "$workdir/softfpu-helper-store-gpr-x86_64"
-
-for fast in 0 0xe00000; do
-    LATX_AOT=0 LATX_MT=0 LATX_SOFTFPU=2 LATX_SOFTFPU_FAST=$fast \
-        "$emulator" "$workdir/softfpu-helper-store-gpr-x86_64"
+for mode in 1 2; do
+    LATX_AOT=0 LATX_MT=0 LATX_SOFTFPU=$mode LATX_SOFTFPU_FAST=0 \
+        "$emulator" "$workdir/softfpu-signal-rounding-x86_64"
 done
+LATX_AOT=0 LATX_MT=0 LATX_SOFTFPU=2 LATX_SOFTFPU_FAST=-1 \
+    "$emulator" "$workdir/softfpu-signal-rounding-x86_64"
 
-echo "PASS: softfpu helper results use restored high-GPR addresses"
+echo "PASS: x86_64 sigreturn restores softfpu rounding state"

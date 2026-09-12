@@ -1,5 +1,21 @@
 if 'x86_64-linux-user' in target_dirs
   latx_integration_tests += [{
+    'name': 'test-softfpu-control-rounding-x86_64',
+    'runner': find_program('../../test-softfpu-control-rounding-x86_64.sh'),
+    'args': [
+      emulators['latx-x86_64'],
+      files('../../softfpu-control-rounding-x86_64.S'),
+    ],
+  }]
+  latx_integration_tests += [{
+    'name': 'test-softfpu-signal-rounding-x86_64',
+    'runner': find_program('../../test-softfpu-signal-rounding-x86_64.sh'),
+    'args': [
+      emulators['latx-x86_64'],
+      files('../../softfpu-signal-rounding-x86_64.S'),
+    ],
+  }]
+  latx_integration_tests += [{
     'name': 'test-proc-readdir',
     'runner': find_program('../../test-proc-readdir.sh'),
     'args': [
@@ -86,6 +102,48 @@ if 'x86_64-linux-user' in target_dirs
 endif
 
 if 'i386-linux-user' in target_dirs
+  latx_integration_tests += [{
+    'name': 'test-softfpu-ldmxcsr-rounding-i386',
+    'runner': find_program('../../test-softfpu-ldmxcsr-rounding-i386.sh'),
+    'args': [
+      emulators['latx-i386'],
+      files('../../softfpu-ldmxcsr-rounding-i386.S'),
+    ],
+  }]
+  latx_integration_tests += [{
+    'name': 'test-softfpu-fxsave-mxcsr-i386',
+    'runner': find_program('../../test-softfpu-fxsave-mxcsr-i386.sh'),
+    'args': [
+      emulators['latx-i386'],
+      files('../../softfpu-fxsave-mxcsr-i386.S'),
+    ],
+  }]
+  latx_integration_tests += [{
+    'name': 'test-softfpu-control-rounding-i386',
+    'runner': find_program('../../test-softfpu-control-rounding-i386.sh'),
+    'args': [
+      emulators['latx-i386'],
+      files('../../softfpu-control-rounding-i386.S'),
+    ],
+  }]
+  if 'CONFIG_LATX_AVX_OPT' in config_host
+    latx_integration_tests += [{
+      'name': 'test-softfpu-xrstor-rounding-i386',
+      'runner': find_program('../../test-softfpu-xrstor-rounding-i386.sh'),
+      'args': [
+        emulators['latx-i386'],
+        files('../../softfpu-xrstor-rounding-i386.S'),
+      ],
+    }]
+  endif
+  latx_integration_tests += [{
+    'name': 'test-softfpu-signal-rounding-i386',
+    'runner': find_program('../../test-softfpu-signal-rounding-i386.sh'),
+    'args': [
+      emulators['latx-i386'],
+      files('../../softfpu-signal-rounding-i386.S'),
+    ],
+  }]
   latx_integration_tests += [{
     'name': 'test-softfpu-eflags-region-i386',
     'runner': find_program('../../test-softfpu-eflags-region-i386.sh'),

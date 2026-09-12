@@ -23,14 +23,11 @@ fi
 
 "$clang" --target=i386-linux-gnu -fuse-ld=lld -nostdlib -static \
     -Wl,--build-id=none "$source_file" \
-    -o "$workdir/softfpu-eflags-region-i386"
+    -o "$workdir/softfpu-fxsave-mxcsr-i386"
 
-LATX_AOT=0 LATX_MT=0 LATX_SOFTFPU=1 LATX_SOFTFPU_FAST=0 \
-    "$emulator" "$workdir/softfpu-eflags-region-i386"
-
-for fast in 0 0xc00000; do
-    LATX_AOT=0 LATX_MT=0 LATX_SOFTFPU=2 LATX_SOFTFPU_FAST=$fast \
-        "$emulator" "$workdir/softfpu-eflags-region-i386"
+for mode in 1 2; do
+    LATX_AOT=0 LATX_MT=0 LATX_SOFTFPU=$mode LATX_SOFTFPU_FAST=0 \
+        "$emulator" "$workdir/softfpu-fxsave-mxcsr-i386"
 done
 
-echo "PASS: x87 comparison flags preserved in all softfpu variants"
+echo "PASS: softfpu FXSAVE records MXCSR"
