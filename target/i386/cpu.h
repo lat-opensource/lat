@@ -1211,6 +1211,15 @@ typedef union {
     MMXReg mmx;
 } FPReg;
 
+#ifdef CONFIG_LATX
+enum {
+    LATX_FPU_MODE_MMX,
+    LATX_FPU_MODE_X87,
+    /* Reload the MMX view on reentry; the restored env stays authoritative. */
+    LATX_FPU_MODE_RESTORED,
+};
+#endif
+
 typedef struct {
     uint64_t base;
     uint64_t mask;
@@ -1424,7 +1433,7 @@ typedef struct CPUX86State {
     int func_index;
     int last_func_index;
  #endif
-    bool mode_fpu;
+    uint8_t mode_fpu;
     bool fpu_clobber;
 #endif
     /* standard registers */
