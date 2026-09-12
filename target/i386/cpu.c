@@ -687,7 +687,7 @@ static void x86_cpu_vendor_words2str(char *dst, uint32_t vendor1,
 #ifdef CONFIG_LATX_AVX_OPT
 #define TCG_7_0_ECX_FEATURES (CPUID_7_0_ECX_PKU | \
           /* CPUID_7_0_ECX_OSPKE is dynamic */ \
-          CPUID_7_0_ECX_LA57)
+          CPUID_7_0_ECX_LA57 | CPUID_7_0_ECX_VAES)
 #else/*CONFIG_LATX_AVX_OPT*/
 #define TCG_7_0_ECX_FEATURES (CPUID_7_0_ECX_PKU | \
           /* CPUID_7_0_ECX_OSPKE is dynamic */ \
@@ -1933,6 +1933,8 @@ static X86CPUDefinition builtin_x86_defs[] = {
             CPUID_7_0_EBX_BMI1 |
             CPUID_7_0_EBX_AVX2 |
             CPUID_7_0_EBX_BMI2,
+        .features[FEAT_7_0_ECX] =
+            CPUID_7_0_ECX_VAES,
         .features[FEAT_XSAVE] =
             CPUID_XSAVE_XSAVEOPT | CPUID_XSAVE_XGETBV1,
 #endif/*CONFIG_LATX_AVX_OPT*/
@@ -2081,6 +2083,8 @@ static X86CPUDefinition builtin_x86_defs[] = {
             CPUID_7_0_EBX_BMI1 |
             CPUID_7_0_EBX_AVX2 |
             CPUID_7_0_EBX_BMI2,
+        .features[FEAT_7_0_ECX] =
+            CPUID_7_0_ECX_VAES,
         .features[FEAT_XSAVE] =
             CPUID_XSAVE_XSAVEOPT | CPUID_XSAVE_XGETBV1,
 #endif
