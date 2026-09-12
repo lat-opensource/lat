@@ -2185,7 +2185,9 @@ static void pgb_fail_in_use(const char *image_name)
 static void pgb_have_guest_base(const char *image_name, abi_ulong guest_loaddr,
                                 abi_ulong guest_hiaddr, long align)
 {
+#ifndef CONFIG_BUILD_LIBLAT
     const int flags = MAP_ANONYMOUS | MAP_PRIVATE | MAP_NORESERVE;
+#endif
     void *addr, *test;
 
     if (!QEMU_IS_ALIGNED(guest_base, align)) {
@@ -2218,16 +2220,25 @@ static void pgb_have_guest_base(const char *image_name, abi_ulong guest_loaddr,
      * Expand the allocation to the entire reserved_va.
      * Exclude the mmap_min_addr hole.
      */
+#ifndef CONFIG_BUILD_LIBLAT
     if (reserved_va) {
         guest_loaddr = (guest_base >= mmap_min_addr ? 0
                         : mmap_min_addr - guest_base);
         guest_hiaddr = reserved_va;
     }
+#endif
 
     /* Reserve the address space for the binary, or reserved_va. */
     test = g2h_untagged(guest_loaddr);
+#ifdef CONFIG_BUILD_LIBLAT
+    addr = latx_liblat_reserve_host(test, guest_hiaddr - guest_loaddr);
+#else
     addr = mmap(test, guest_hiaddr - guest_loaddr, PROT_NONE, flags, -1, 0);
+#endif
     if (test != addr) {
+        if (addr != MAP_FAILED) {
+            munmap(addr, guest_hiaddr - guest_loaddr);
+        }
         pgb_fail_in_use(image_name);
     }
 }

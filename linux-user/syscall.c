@@ -159,6 +159,10 @@
 #ifdef CONFIG_LATX
 #define TUNNEL_VIRTUAL_SYSCALL_ID 600
 #include "lsenv.h"
+#include "kzt-guest-tls.h"
+#include "kzt-guest-thread.h"
+#include "kzt-libc-semantic.h"
+#include "myalign.h"
 #include <tunnel_lib.h>
 #include "aot.h"
 #include "latx-options.h"
@@ -259,7 +263,6 @@ out_marker:
 
 #include <linux/netfilter_ipv4.h>
 #include <linux/dma-buf.h>
-
 #include <sys/syscall.h>
 
 /* Generic prctl constants that may be absent from old host headers. */
@@ -1201,7 +1204,7 @@ static uint16_t host_to_target_errno_table[ERRNO_TABLE_SIZE] = {
 #endif
 };
 
-static inline int host_to_target_errno(int err)
+int host_to_target_errno(int err)
 {
     if (err >= 0 && err < ERRNO_TABLE_SIZE &&
         host_to_target_errno_table[err]) {
@@ -1210,7 +1213,7 @@ static inline int host_to_target_errno(int err)
     return err;
 }
 
-static inline int target_to_host_errno(int err)
+int target_to_host_errno(int err)
 {
     if (err >= 0 && err < ERRNO_TABLE_SIZE &&
         target_to_host_errno_table[err]) {
@@ -1479,6 +1482,10 @@ static struct shm_region {
     abi_ulong start;
     abi_ulong size;
     bool in_use;
+#ifdef CONFIG_BUILD_LIBLAT
+    dev_t dev;
+    ino_t inode;
+#endif
 } shm_regions[N_SHM_REGIONS];
 
 static abi_ulong target_brk;
@@ -5942,6 +5949,47 @@ abi_ulong latx_is_shm(abi_ulong maddr)
 #ifdef TARGET_I386
 static abi_long guest_mdwe_mmap(CPUState *cpu, abi_ulong len, int prot);
 #endif
+#ifdef CONFIG_BUILD_LIBLAT
+static bool liblat_shm_map_matches(const struct shm_region *region,
+                                   const MapInfo *map)
+{
+    return !map->is_priv && map->dev == region->dev &&
+           map->inode == region->inode;
+}
+
+static bool liblat_refresh_shm_regions(void)
+{
+    IntervalTreeRoot *maps = read_self_maps();
+
+    if (!maps) {
+        return false;
+    }
+    for (int i = 0; i < N_SHM_REGIONS; i++) {
+        struct shm_region *region = &shm_regions[i];
+        IntervalTreeNode *node;
+        uintptr_t start, last;
+        bool present = false;
+
+        if (!region->in_use) {
+            continue;
+        }
+        start = (uintptr_t)g2h_untagged(region->start);
+        last = start + region->size - 1;
+        for (node = interval_tree_iter_first(maps, start, last); node;
+             node = interval_tree_iter_next(node, start, last)) {
+            if (liblat_shm_map_matches(region,
+                                      container_of(node, MapInfo, itree))) {
+                present = true;
+                break;
+            }
+        }
+        region->in_use = present;
+    }
+    free_self_maps(maps);
+    return true;
+}
+#endif
+
 static inline abi_ulong do_shmat(CPUArchState *cpu_env,
                                  int shmid, abi_ulong shmaddr, int shmflg)
 {
@@ -5951,6 +5999,10 @@ static inline abi_ulong do_shmat(CPUArchState *cpu_env,
     struct shmid_ds shm_info;
     int i,ret;
     abi_ulong shmlba;
+#ifdef CONFIG_BUILD_LIBLAT
+    GArray *reservations = NULL;
+    int region_slot = -1;
+#endif
 
     /* shmat pointers are always untagged */
 
@@ -5975,6 +6027,33 @@ static inline abi_ulong do_shmat(CPUArchState *cpu_env,
     }
 
     mmap_lock();
+#ifdef CONFIG_BUILD_LIBLAT
+    if (!liblat_refresh_shm_regions()) {
+        mmap_unlock();
+        return -TARGET_ENOMEM;
+    }
+    for (i = 0; i < N_SHM_REGIONS; i++) {
+        if (!shm_regions[i].in_use) {
+            if (region_slot < 0) {
+                region_slot = i;
+            }
+        } else if (shmaddr &&
+                   shmaddr < shm_regions[i].start + shm_regions[i].size &&
+                   shm_regions[i].start < shmaddr + shm_info.shm_segsz) {
+            if (!(shmflg & SHM_REMAP) || shm_regions[i].start != shmaddr ||
+                shm_regions[i].size != shm_info.shm_segsz) {
+                mmap_unlock();
+                return -TARGET_EINVAL;
+            }
+            region_slot = i;
+            break;
+        }
+    }
+    if (region_slot < 0) {
+        mmap_unlock();
+        return -TARGET_ENOMEM;
+    }
+#endif
 
 #ifdef TARGET_I386
     ret = guest_mdwe_mmap(cpu, shm_info.shm_segsz,
@@ -6002,7 +6081,30 @@ static inline abi_ulong do_shmat(CPUArchState *cpu_env,
 #ifdef LATX_DEBUG
         fprintf(stderr, "[LATX-WARNING] %s:%d\n", __func__, __LINE__);
 #endif
-	    shmflg |= SHM_REMAP;
+#ifdef CONFIG_BUILD_LIBLAT
+        /* shmat replaces whole Host pages, unlike mmap's subpage emulation. */
+        for (abi_ulong page = shmaddr + TARGET_PAGE_ALIGN(shm_info.shm_segsz);
+             page < HOST_PAGE_ALIGN(shmaddr + shm_info.shm_segsz);
+             page += TARGET_PAGE_SIZE) {
+            if (page_get_flags(page) & PAGE_VALID) {
+                mmap_unlock();
+                return -TARGET_EINVAL;
+            }
+        }
+        if (!(shmflg & SHM_REMAP) &&
+            page_find_range_empty(shmaddr, shmaddr + shm_info.shm_segsz - 1,
+                                  shm_info.shm_segsz, TARGET_PAGE_SIZE) != shmaddr) {
+            mmap_unlock();
+            return -TARGET_EINVAL;
+        }
+        reservations = latx_liblat_reserve_fixed(shmaddr, shm_info.shm_segsz);
+        if (!reservations) {
+            ret = get_errno(-1);
+            mmap_unlock();
+            return ret;
+        }
+#endif
+        shmflg |= SHM_REMAP;
         host_raddr = shmat(shmid, (void *)g2h_untagged(shmaddr), shmflg);
     } else {
         abi_ulong mmap_start;
@@ -6013,11 +6115,23 @@ static inline abi_ulong do_shmat(CPUArchState *cpu_env,
         if (mmap_start == -1) {
             errno = ENOMEM;
             host_raddr = (void *)-1;
-        } else
+        } else {
+#ifdef CONFIG_BUILD_LIBLAT
+            reservations = latx_liblat_reserve_fixed(mmap_start, shm_info.shm_segsz);
+            if (!reservations) {
+                ret = get_errno(-1);
+                mmap_unlock();
+                return ret;
+            }
+#endif
             host_raddr = shmat(shmid, g2h_untagged(mmap_start),
                                shmflg | SHM_REMAP);
+        }
     }
 
+#ifdef CONFIG_BUILD_LIBLAT
+    latx_liblat_finish_reservations(reservations, host_raddr == (void *)-1);
+#endif
     if (host_raddr == (void *)-1) {
         mmap_unlock();
         return get_errno((long)host_raddr);
@@ -6033,6 +6147,27 @@ static inline abi_ulong do_shmat(CPUArchState *cpu_env,
                    (shmflg & SHM_RDONLY ? 0 : PAGE_WRITE) |
                    (shmflg & SHM_EXEC ? PAGE_EXEC : 0));
 
+#ifdef CONFIG_BUILD_LIBLAT
+    {
+        IntervalTreeRoot *maps = read_self_maps();
+        uintptr_t host = (uintptr_t)host_raddr;
+        IntervalTreeNode *node = maps
+            ? interval_tree_iter_first(maps, host, host) : NULL;
+        MapInfo *map = node ? container_of(node, MapInfo, itree) : NULL;
+
+        /* Record the backing object, not PAGE_MEMSHARE (also used by mmap). */
+        if (!map || map->is_priv || !map->inode) {
+            g_error("liblat cannot identify the attached SysV mapping");
+        }
+        i = region_slot;
+        shm_regions[i].in_use = true;
+        shm_regions[i].start = raddr;
+        shm_regions[i].size = shm_info.shm_segsz;
+        shm_regions[i].dev = map->dev;
+        shm_regions[i].inode = map->inode;
+        free_self_maps(maps);
+    }
+#else
     for (i = 0; i < N_SHM_REGIONS; i++) {
         if (!shm_regions[i].in_use) {
             shm_regions[i].in_use = true;
@@ -6042,6 +6177,7 @@ static inline abi_ulong do_shmat(CPUArchState *cpu_env,
         }
     }
 
+#endif
     mmap_unlock();
     return raddr;
 
@@ -6051,25 +6187,69 @@ static inline abi_long do_shmdt(abi_ulong shmaddr)
 {
     int i;
     abi_long rv;
+#ifdef CONFIG_BUILD_LIBLAT
+    IntervalTreeRoot *maps;
+#endif
 
     /* shmdt pointers are always untagged */
 
     mmap_lock();
 
+#ifdef CONFIG_BUILD_LIBLAT
+    for (i = 0; i < N_SHM_REGIONS; i++) {
+        if (shm_regions[i].in_use && shm_regions[i].start == shmaddr) {
+            break;
+        }
+    }
+    if (i == N_SHM_REGIONS ||
+        !latx_liblat_range_has_no_host_mapping(shmaddr, shm_regions[i].size)) {
+        mmap_unlock();
+        return -TARGET_EINVAL;
+    }
+    /* Snapshot before detaching while Guest mapping mutations are locked. */
+    maps = read_self_maps();
+    if (!maps) {
+        mmap_unlock();
+        return -TARGET_ENOMEM;
+    }
+#endif
     rv = get_errno(shmdt(g2h_untagged(shmaddr)));
     if (!is_error(rv)) {
         for (i = 0; i < N_SHM_REGIONS; ++i) {
             if (shm_regions[i].in_use && shm_regions[i].start == shmaddr) {
-#ifdef TARGET_I386
+#if defined(TARGET_I386) && !defined(CONFIG_BUILD_LIBLAT)
                 guest_vma_name_reset(shmaddr, shm_regions[i].size);
 #endif
+#ifdef CONFIG_BUILD_LIBLAT
+                uintptr_t start = (uintptr_t)g2h_untagged(shmaddr);
+                uintptr_t last = start + shm_regions[i].size - 1;
+                IntervalTreeNode *node;
+
+                for (node = interval_tree_iter_first(maps, start, last); node;
+                     node = interval_tree_iter_next(node, start, last)) {
+                    if (liblat_shm_map_matches(&shm_regions[i],
+                            container_of(node, MapInfo, itree))) {
+                        abi_ulong first = h2g_nocheck(
+                            (void *)MAX(start, node->start));
+                        abi_ulong end = h2g_nocheck(
+                            (void *)(MIN(last, node->last) + 1));
+
+                        guest_vma_name_reset(first, end - first);
+                        page_set_flags(first, end, 0);
+                    }
+                }
+#else
                 page_set_flags(shmaddr, shmaddr + shm_regions[i].size, 0);
+#endif
                 shm_regions[i].in_use = false;
                 break;
             }
         }
     }
 
+#ifdef CONFIG_BUILD_LIBLAT
+    free_self_maps(maps);
+#endif
     mmap_unlock();
 
     return rv;
@@ -9590,9 +9770,301 @@ abi_long do_arch_prctl(CPUX86State *env, int code, abi_ulong addr)
 #endif /* defined(TARGET_I386) */
 
 #define NEW_STACK_SIZE 0x200000
+#define LATX_HOST_THREAD_ATTACH_RETRIES 32
 
 
 static pthread_mutex_t clone_lock = PTHREAD_MUTEX_INITIALIZER;
+#ifdef CONFIG_LATX
+static CPUArchState *latx_host_thread_template;
+static pthread_key_t latx_host_thread_key;
+static pthread_once_t latx_host_thread_key_once = PTHREAD_ONCE_INIT;
+static int latx_host_thread_key_error;
+
+static void latx_host_thread_destructor(void *opaque);
+
+static void latx_host_thread_key_init(void)
+{
+    latx_host_thread_key_error =
+        pthread_key_create(&latx_host_thread_key,
+                           latx_host_thread_destructor);
+}
+
+static void latx_host_thread_release_cpu(CPUState *cpu)
+{
+    CPUX86State *env = cpu->env_ptr;
+    TaskState *ts = cpu->opaque;
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+    void *fast_jmp_cache = env->tb_jmp_cache_ptr;
+#endif
+
+    kzt_guest_tls_destroy(env);
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+    env->tb_jmp_cache_ptr = NULL;
+#endif
+    if (env->gdt.base) {
+        target_munmap(env->gdt.base,
+                      sizeof(uint64_t) * TARGET_GDT_ENTRIES, 0);
+        env->gdt.base = 0;
+    }
+    if (env->kzt_guest_stack_base) {
+        target_munmap(env->kzt_guest_stack_base, NEW_STACK_SIZE, 0);
+        env->kzt_guest_stack_base = 0;
+    }
+    object_property_set_bool(OBJECT(cpu), "realized", false, NULL);
+    object_unparent(OBJECT(cpu));
+    object_unref(OBJECT(cpu));
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+    latx_fast_jmp_cache_free_rcu(fast_jmp_cache);
+#endif
+    g_free(ts);
+}
+
+static void latx_host_thread_destructor(void *opaque)
+{
+    CPUState *cpu = opaque;
+
+    kzt_guest_thread_destroy(cpu->env_ptr);
+    kzt_libc_semantic_destroy(cpu->env_ptr);
+    if (kzt_guest_tls_cleanup_robust_list(cpu->env_ptr) != 0) {
+        fprintf(stderr,
+                "KZT Guest robust-list cleanup failed; "
+                "refusing to continue\n");
+        _exit(EXIT_FAILURE);
+    }
+    pthread_mutex_lock(&clone_lock);
+    latx_host_thread_release_cpu(cpu);
+    pthread_mutex_unlock(&clone_lock);
+
+    thread_cpu = NULL;
+    lsenv = NULL;
+    rcu_unregister_thread();
+}
+
+void latx_register_host_thread_template(CPUArchState *env)
+{
+    if (!latx_kzt_guest_tls_enabled()) {
+        return;
+    }
+    CPUState *cpu = env_cpu(env);
+
+    if (!close_latx_parallel) {
+        cpu->tcg_cflags |= CF_PARALLEL;
+    }
+}
+
+int latx_finalize_host_thread_template(CPUArchState *env)
+{
+    if (!latx_kzt_guest_tls_enabled()) {
+        return 0;
+    }
+    CPUState *source_cpu;
+    CPUState *template_cpu;
+    TaskState *source_ts;
+    TaskState *template_ts;
+    CPUArchState *template_env;
+    int result = -1;
+
+    if (!env || !env->segs[R_FS].base) {
+        return -1;
+    }
+    pthread_mutex_lock(&clone_lock);
+    if (latx_host_thread_template) {
+        template_cpu = env_cpu(latx_host_thread_template);
+        latx_host_thread_template = NULL;
+        latx_host_thread_release_cpu(template_cpu);
+    }
+
+    source_cpu = env_cpu(env);
+    source_ts = source_cpu ? source_cpu->opaque : NULL;
+    if (!source_ts) {
+        goto out;
+    }
+    template_env = cpu_copy(env);
+    if (!template_env) {
+        goto out;
+    }
+    template_cpu = env_cpu(template_env);
+    cpu_list_remove(template_cpu);
+
+    template_ts = g_new0(TaskState, 1);
+    init_task_state(template_ts);
+    template_ts->bprm = source_ts->bprm;
+    template_ts->info = source_ts->info;
+    template_ts->signal_mask = source_ts->signal_mask;
+    template_ts->seccomp_filter = source_ts->seccomp_filter;
+    template_ts->ipc_namespace_isolated =
+        source_ts->ipc_namespace_isolated;
+    template_cpu->opaque = template_ts;
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+    template_env->tb_jmp_cache_ptr = NULL;
+#endif
+#ifdef CONFIG_LATX_KZT
+    template_env->kzt_guest_tls_parent_snapshot = NULL;
+    template_env->kzt_guest_tls_allocation = NULL;
+    template_env->kzt_guest_thread_state = NULL;
+    template_env->kzt_libc_semantic_state = NULL;
+    if (kzt_guest_tls_snapshot_parent(env, template_env) != 0) {
+        latx_host_thread_release_cpu(template_cpu);
+        goto out;
+    }
+#endif
+    template_env->kzt_guest_stack_base = 0;
+    latx_host_thread_template = template_env;
+    result = 0;
+
+out:
+    pthread_mutex_unlock(&clone_lock);
+    return result;
+}
+
+static int latx_attach_current_host_thread_once(void)
+{
+    CPUArchState *parent_env;
+    CPUState *parent_cpu;
+    TaskState *parent_ts;
+    CPUArchState *new_env;
+    CPUState *new_cpu;
+    TaskState *ts;
+    abi_long stack;
+    int old_cancel_state;
+    int ret;
+
+    if (thread_cpu && lsenv && lsenv->cpu_state) {
+        return 0;
+    }
+    if (!latx_kzt_guest_tls_enabled()) {
+        return -1;
+    }
+    ret = pthread_once(&latx_host_thread_key_once,
+                       latx_host_thread_key_init);
+    if (ret || latx_host_thread_key_error) {
+        return -1;
+    }
+    ret = pthread_setcancelstate(PTHREAD_CANCEL_DISABLE,
+                                 &old_cancel_state);
+    if (ret) {
+        return -1;
+    }
+    ts = g_new0(TaskState, 1);
+    init_task_state(ts);
+
+    pthread_mutex_lock(&clone_lock);
+    parent_env = latx_host_thread_template;
+    parent_cpu = parent_env ? env_cpu(parent_env) : NULL;
+    parent_ts = parent_cpu ? (TaskState *)parent_cpu->opaque : NULL;
+    if (!parent_ts) {
+        pthread_mutex_unlock(&clone_lock);
+        g_free(ts);
+        pthread_setcancelstate(old_cancel_state, NULL);
+        return -1;
+    }
+    rcu_register_thread();
+    new_env = cpu_copy(parent_env);
+    if (!new_env) {
+        rcu_unregister_thread();
+        pthread_mutex_unlock(&clone_lock);
+        g_free(ts);
+        pthread_setcancelstate(old_cancel_state, NULL);
+        return -1;
+    }
+    new_cpu = env_cpu(new_env);
+    new_cpu->opaque = ts;
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+    new_env->tb_jmp_cache_ptr = NULL;
+#endif
+#ifdef CONFIG_LATX_KZT
+    new_env->kzt_guest_tls_parent_snapshot = NULL;
+    new_env->kzt_guest_tls_allocation = NULL;
+    new_env->kzt_guest_thread_state = NULL;
+    new_env->kzt_libc_semantic_state = NULL;
+    if (kzt_guest_tls_clone_parent_snapshot(parent_env, new_env) != 0) {
+        latx_host_thread_release_cpu(new_cpu);
+        rcu_unregister_thread();
+        pthread_mutex_unlock(&clone_lock);
+        pthread_setcancelstate(old_cancel_state, NULL);
+        return -1;
+    }
+#endif
+    new_env->kzt_guest_stack_base = 0;
+    stack = target_mmap(0, NEW_STACK_SIZE, PROT_READ | PROT_WRITE,
+                        MAP_PRIVATE | MAP_ANONYMOUS, -1, 0, 0);
+    if (is_error(stack)) {
+        latx_host_thread_release_cpu(env_cpu(new_env));
+        rcu_unregister_thread();
+        pthread_mutex_unlock(&clone_lock);
+        pthread_setcancelstate(old_cancel_state, NULL);
+        return -1;
+    }
+    new_env->kzt_guest_stack_base = stack;
+
+    cpu_clone_regs_child(new_env, stack + NEW_STACK_SIZE, 0);
+    ts->bprm = parent_ts->bprm;
+    ts->info = parent_ts->info;
+    ts->signal_mask = parent_ts->signal_mask;
+    ts->seccomp_filter = parent_ts->seccomp_filter;
+    ts->ipc_namespace_isolated = parent_ts->ipc_namespace_isolated;
+    new_cpu->random_seed = qemu_guest_random_seed_thread_part1();
+
+    tcg_register_thread();
+    thread_cpu = new_cpu;
+    task_settid(ts);
+    qemu_guest_random_seed_thread_part2(new_cpu->random_seed);
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+    if (!latx_fast_jmp_cache_init(new_env)) {
+        fprintf(stderr, "[LATX-ERR] latx_fast_jmp_cache_init error!\n");
+    }
+#endif
+    latx_lsenv_init(new_env);
+    ret = kzt_guest_tls_initialize(parent_env, new_env);
+    if (ret != 0) {
+        pthread_mutex_unlock(&clone_lock);
+        latx_host_thread_destructor(new_cpu);
+        pthread_setcancelstate(old_cancel_state, NULL);
+        return ret;
+    }
+    kzt_guest_thread_initialize(new_env);
+    if (kzt_libc_semantic_process_ready() &&
+        kzt_libc_semantic_initialize(new_env) != 0) {
+        pthread_mutex_unlock(&clone_lock);
+        latx_host_thread_destructor(new_cpu);
+        pthread_setcancelstate(old_cancel_state, NULL);
+        return -1;
+    }
+    if (pthread_setspecific(latx_host_thread_key, new_cpu) != 0) {
+        pthread_mutex_unlock(&clone_lock);
+        latx_host_thread_destructor(new_cpu);
+        pthread_setcancelstate(old_cancel_state, NULL);
+        return -1;
+    }
+    pthread_mutex_unlock(&clone_lock);
+    pthread_setcancelstate(old_cancel_state, NULL);
+    return 0;
+}
+
+int latx_attach_current_host_thread(void)
+{
+    int result;
+    unsigned int delay_us = 1000;
+
+    for (int attempt = 0;
+         attempt < LATX_HOST_THREAD_ATTACH_RETRIES; ++attempt) {
+        result = latx_attach_current_host_thread_once();
+        if (result != KZT_GUEST_TLS_REFRESH_BUSY) {
+            return result;
+        }
+        if (attempt + 1 < LATX_HOST_THREAD_ATTACH_RETRIES) {
+            /*
+             * Wait without the attempt's locks or Guest state. Back off
+             * rather than repeatedly allocating CPUs and deferred caches.
+             */
+            g_usleep(delay_us);
+            delay_us = MIN(delay_us * 2, 32000U);
+        }
+    }
+    return -1;
+}
+#endif /* CONFIG_LATX */
+
 static int do_sys_futex(int *uaddr, int op, int val,
                         const struct timespec *timeout, int *uaddr2,
                         int val3);
@@ -9647,6 +10119,7 @@ static void *clone_func(void *arg)
 
 static void cleanup_guest_thread_resources(CPUArchState *env)
 {
+    kzt_libc_semantic_destroy(env);
     assert(env->gdt.base);
     target_munmap(env->gdt.base, sizeof(uint64_t) * TARGET_GDT_ENTRIES, 0);
 }
@@ -9882,6 +10355,7 @@ static int do_fork(CPUArchState *env, unsigned int flags, abi_ulong newsp,
             return -TARGET_ERESTARTSYS;
         }
 
+        kzt_guest_tls_fork_prepare();
         fork_start();
 #if defined(TARGET_NR_timer_create)
         posix_timer_fork_start();
@@ -9924,6 +10398,10 @@ static int do_fork(CPUArchState *env, unsigned int flags, abi_ulong newsp,
             /* Child Process.  */
             cpu_clone_regs_child(env, newsp, flags);
             fork_end(1);
+            kzt_guest_tls_after_fork_child(env);
+            kzt_guest_loader_after_fork_child();
+            kzt_guest_thread_after_fork_child();
+            kzt_libc_semantic_after_fork_child();
 #if defined(TARGET_NR_timer_create)
             posix_timer_fork_end(true);
 #endif
@@ -9973,6 +10451,7 @@ static int do_fork(CPUArchState *env, unsigned int flags, abi_ulong newsp,
             }
             cpu_clone_regs_parent(env, flags);
             fork_end(0);
+            kzt_guest_tls_fork_parent();
 #if defined(TARGET_NR_timer_create)
             posix_timer_fork_end(false);
 #endif
@@ -10571,7 +11050,9 @@ void syscall_init(void)
     /* Build target_to_host_errno_table[] table from
      * host_to_target_errno_table[]. */
     for (i = 0; i < ERRNO_TABLE_SIZE; i++) {
-        target_to_host_errno_table[host_to_target_errno_table[i]] = i;
+        if (host_to_target_errno_table[i]) {
+            target_to_host_errno_table[host_to_target_errno_table[i]] = i;
+        }
     }
 
     /* we patch the ioctl size if necessary. We rely on the fact that
@@ -17298,6 +17779,13 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
 #ifdef __NR_exit_group
         /* new thread calls */
     case TARGET_NR_exit_group:
+#ifdef CONFIG_LIBLAT_INITBIN
+        if (((CPUX86State *)cpu_env)->liblat_bootstrap_active) {
+            ((CPUX86State *)cpu_env)->liblat_bootstrap_status = arg1;
+            ((CPUX86State *)cpu_env)->liblat_bootstrap_complete = true;
+            return 0;
+        }
+#endif
         preexit_cleanup(cpu_env, arg1);
         /* dump basic block here. TODO */
 #ifdef CONFIG_LATX_AOT
@@ -21269,8 +21757,19 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
                     abi_long arg5, abi_long arg6, abi_long arg7,
                     abi_long arg8)
 {
-    return do_syscall_with_seccomp(cpu_env, num, num,
-                                   guest_seccomp_target_arch(),
-                                   arg1, arg2, arg3, arg4,
-                                   arg5, arg6, arg7, arg8);
+#ifdef CONFIG_LATX
+    CPUX86State *env = cpu_env;
+    int tls_execution_paused = num == TARGET_NR_sched_yield
+        ? kzt_guest_tls_execution_pause(env) : 0;
+    abi_long result = do_syscall_with_seccomp(
+        cpu_env, num, num, guest_seccomp_target_arch(),
+        arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8);
+
+    kzt_guest_tls_execution_resume(env, tls_execution_paused);
+    return result;
+#else
+    return do_syscall_with_seccomp(
+        cpu_env, num, num, guest_seccomp_target_arch(),
+        arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8);
+#endif
 }

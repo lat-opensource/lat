@@ -17,6 +17,7 @@
 #include "translate.h"
 #include "wrappertbbridge.h"
 #include "callback.h"
+#include "kzt_public_loader_observer.h"
 
 extern elfheader_t* elf_header;
 extern int latx_wine;
@@ -160,5 +161,33 @@ void kzt_bridge_init(void);
 void kzt_wine_bridge(abi_ulong start, int fd);
 int latx_dpy_xcb_sync(void *v1);
 uintptr_t kzt_resolve_guest_symbol(const char *name);
+uintptr_t kzt_resolve_guest_object_symbol(
+    const char *object_name,
+    const char *symbol_name);
+uintptr_t kzt_resolve_guest_link_map_symbol(
+    uintptr_t link_map_addr,
+    const char *symbol_name);
+uintptr_t kzt_find_guest_link_map_by_address(uintptr_t guest_addr);
+int kzt_guest_loader_state_is_consistent(void);
+uintptr_t kzt_find_guest_link_map_by_address_ex(
+    uintptr_t guest_addr,
+    kzt_public_loader_result_t *lookup_result);
+int kzt_register_guest_tls_link_map(uintptr_t link_map_addr);
+void kzt_unregister_guest_tls_link_map(uintptr_t link_map_addr);
+int kzt_collect_guest_tls_objects(
+    kzt_public_loader_tls_object_t *objects,
+    size_t object_capacity,
+    size_t *object_count);
+int kzt_collect_guest_tls_object(
+    uintptr_t link_map_addr,
+    kzt_public_loader_tls_object_t *object,
+    int *has_tls);
+int kzt_materialize_guest_tls_image(
+    const kzt_public_loader_tls_object_t *object,
+    void *destination,
+    size_t destination_size);
 elfheader_t* loadElfFromFile(const char* name);
+#ifdef CONFIG_LIBLAT
+#include "latx/liblat.h"
+#endif
 #endif  //__MY_ALIGN__H_

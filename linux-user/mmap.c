@@ -21,6 +21,11 @@
 #include "trace.h"
 #include "exec/log.h"
 #include "qemu.h"
+#ifdef CONFIG_BUILD_LIBLAT
+#include "qemu/selfmap.h"
+#include <sys/syscall.h>
+#include <linux/memfd.h>
+#endif
 
 #ifndef MREMAP_DONTUNMAP
 #define MREMAP_DONTUNMAP 4
@@ -466,11 +471,263 @@ abi_ulong mmap_next_start_2g = MMAP_2G;
 
 unsigned long last_brk;
 
+#ifdef CONFIG_BUILD_LIBLAT
+/* All helpers below run under mmap_lock(). */
+static int liblat_reservation_fd = -1;
+static dev_t liblat_reservation_dev;
+static ino_t liblat_reservation_inode;
+
+typedef struct LiblatReservation {
+    void *address;
+    size_t size;
+} LiblatReservation;
+
+static bool liblat_reservation_file_valid(void)
+{
+    struct stat info;
+
+    return liblat_reservation_fd >= 0 &&
+           fstat(liblat_reservation_fd, &info) == 0 &&
+           info.st_dev == liblat_reservation_dev &&
+           info.st_ino == liblat_reservation_inode;
+}
+
+void *latx_liblat_reserve_host(void *address, size_t size)
+{
+    struct stat info;
+
+    if (liblat_reservation_fd < 0) {
+        liblat_reservation_fd = syscall(SYS_memfd_create,
+                                        "liblat-reservation", MFD_CLOEXEC);
+        if (liblat_reservation_fd < 0) {
+            return MAP_FAILED;
+        }
+        if (fstat(liblat_reservation_fd, &info) != 0) {
+            close(liblat_reservation_fd);
+            liblat_reservation_fd = -1;
+            return MAP_FAILED;
+        }
+        liblat_reservation_dev = info.st_dev;
+        liblat_reservation_inode = info.st_ino;
+    } else if (!liblat_reservation_file_valid()) {
+        errno = EBADF;
+        return MAP_FAILED;
+    }
+    /* A unique backing inode identifies pending reservations in /proc/maps. */
+    return mmap(address, size, PROT_NONE, MAP_PRIVATE | MAP_NORESERVE,
+                liblat_reservation_fd, 0);
+}
+
+static int liblat_host_page_owner(abi_ulong page, IntervalTreeRoot *maps)
+{
+    IntervalTreeNode *node;
+    uintptr_t host = (uintptr_t)g2h_untagged(page);
+
+    for (abi_ulong offset = 0; offset < qemu_host_page_size;
+         offset += TARGET_PAGE_SIZE) {
+        if (page_get_flags(page + offset) & PAGE_VALID) {
+            return 1;
+        }
+    }
+    node = interval_tree_iter_first(maps, host, host + qemu_host_page_size - 1);
+    if (node && node->start <= host &&
+        node->last >= host + qemu_host_page_size - 1 &&
+        liblat_reservation_file_valid()) {
+        MapInfo *info = container_of(node, MapInfo, itree);
+
+        return info->dev == liblat_reservation_dev &&
+               info->inode == liblat_reservation_inode ? 2 : 0;
+    }
+    return 0;
+}
+
+void latx_liblat_finish_reservations(GArray *reservations, bool rollback)
+{
+    int saved_errno = errno;
+
+    if (reservations) {
+        if (rollback) {
+            for (guint i = 0; i < reservations->len; i++) {
+                LiblatReservation *entry =
+                    &g_array_index(reservations, LiblatReservation, i);
+                munmap(entry->address, entry->size);
+            }
+        }
+        g_array_free(reservations, true);
+    }
+    errno = saved_errno;
+}
+
+GArray *latx_liblat_reserve_fixed(abi_ulong start, abi_ulong size)
+{
+    abi_ulong end;
+    IntervalTreeRoot *maps;
+    GArray *reservations;
+
+    if (!size || size > reserved_va || start > reserved_va - size) {
+        errno = EINVAL;
+        return NULL;
+    }
+    end = HOST_PAGE_ALIGN(start + size);
+    maps = read_self_maps();
+    reservations = g_array_new(false, false, sizeof(LiblatReservation));
+
+    if (!maps) {
+        errno = ENOMEM;
+        latx_liblat_finish_reservations(reservations, true);
+        return NULL;
+    }
+    for (abi_ulong page = start & qemu_host_page_mask; page < end;
+         page += qemu_host_page_size) {
+        LiblatReservation entry;
+        void *mapped;
+
+        int owner = liblat_host_page_owner(page, maps);
+
+        if (owner == 1) {
+            continue;
+        }
+        entry.address = g2h_untagged(page);
+        entry.size = qemu_host_page_size;
+        if (owner == 2) {
+            g_array_append_val(reservations, entry);
+            continue;
+        }
+        mapped = latx_liblat_reserve_host(entry.address, entry.size);
+        if (mapped != entry.address) {
+            if (mapped != MAP_FAILED) {
+                munmap(mapped, entry.size);
+                errno = EEXIST;
+            }
+            free_self_maps(maps);
+            latx_liblat_finish_reservations(reservations, true);
+            return NULL;
+        }
+        g_array_append_val(reservations, entry);
+    }
+    free_self_maps(maps);
+    return reservations;
+}
+
+static void liblat_release_pending_range(abi_ulong start, abi_ulong size)
+{
+    int saved_errno = errno;
+    IntervalTreeRoot *maps = read_self_maps();
+
+    if (maps) {
+        for (abi_ulong page = start & qemu_host_page_mask;
+             page < HOST_PAGE_ALIGN(start + size); page += qemu_host_page_size) {
+            if (liblat_host_page_owner(page, maps) == 2) {
+                munmap(g2h_untagged(page), qemu_host_page_size);
+            }
+        }
+        free_self_maps(maps);
+    }
+    errno = saved_errno;
+}
+
+bool latx_liblat_range_has_no_host_mapping(abi_ulong start, abi_ulong size)
+{
+    abi_ulong end = HOST_PAGE_ALIGN(start + size);
+    IntervalTreeRoot *maps;
+    bool result = true;
+
+    if (page_check_range(start, size, PAGE_VALID)) {
+        return true;
+    }
+    maps = read_self_maps();
+    if (!maps) {
+        return false;
+    }
+    for (abi_ulong page = start & qemu_host_page_mask; page < end;
+         page += qemu_host_page_size) {
+        uintptr_t host = (uintptr_t)g2h_untagged(page);
+
+        if (!liblat_host_page_owner(page, maps) &&
+            interval_tree_iter_first(maps, host, host + qemu_host_page_size - 1)) {
+            result = false;
+            break;
+        }
+    }
+    free_self_maps(maps);
+    return result;
+}
+
+/*
+ * The native embedding executable can live inside the Guest VA limit.
+ * Unlike a standalone translator, liblat does not own that entire range.
+ * Find a kernel-visible hole and reserve it without MAP_FIXED, checking the
+ * returned address so concurrent native mappings cannot be overwritten.
+ */
+static abi_ulong mmap_find_vma_embedded(abi_ulong start, abi_ulong size,
+                                        abi_ulong align, abi_ulong limit)
+{
+    abi_ulong minimum = HOST_PAGE_ALIGN(MAX(mmap_min_addr, TARGET_PAGE_SIZE));
+
+    align = MAX(align, qemu_host_page_size);
+    size = HOST_PAGE_ALIGN(size);
+    if (!size || size > limit || minimum > limit - size) {
+        return (abi_ulong)-1;
+    }
+    start = MAX(start, minimum);
+    for (int pass = 0; pass < 2; pass++) {
+        abi_ulong address = pass ? minimum : start;
+        abi_ulong end = pass ? MIN(start, limit) : limit;
+
+        if (size > end || address > end - size) {
+            continue;
+        }
+        for (int attempt = 0; attempt < 64; attempt++) {
+            IntervalTreeRoot *maps = read_self_maps();
+            IntervalTreeNode *node;
+            void *wanted, *mapped;
+
+            if (!maps) {
+                return (abi_ulong)-1;
+            }
+            address = ROUND_UP(address, align);
+            while (address <= end - size) {
+                wanted = g2h_untagged(address);
+                node = interval_tree_iter_first(maps, (uintptr_t)wanted,
+                                                (uintptr_t)wanted + size - 1);
+                if (!node) {
+                    break;
+                }
+                if (node->last == UINTPTR_MAX) {
+                    address = end;
+                    break;
+                }
+                address = ROUND_UP(h2g_nocheck((void *)(node->last + 1)),
+                                   align);
+            }
+            free_self_maps(maps);
+            if (address > end - size) {
+                break;
+            }
+            wanted = g2h_untagged(address);
+            mapped = latx_liblat_reserve_host(wanted, size);
+            if (mapped == wanted) {
+                return address;
+            }
+            if (mapped == MAP_FAILED) {
+                return (abi_ulong)-1;
+            }
+            munmap(mapped, size);
+            /* Refresh the map after a concurrent native allocation. */
+        }
+    }
+    return (abi_ulong)-1;
+}
+#endif
+
 /* Subroutine of mmap_find_vma, used when we have pre-allocated a chunk
    of guest address space.  */
 static abi_ulong mmap_find_vma_reserved(abi_ulong start, abi_ulong size,
                                         abi_ulong align)
 {
+#ifdef CONFIG_BUILD_LIBLAT
+    return mmap_find_vma_embedded(start, size, align, reserved_va);
+#else
     /*
     abi_ulong tmp, addr, end_addr;
     bool looped = false;
@@ -523,6 +780,7 @@ static abi_ulong mmap_find_vma_reserved(abi_ulong start, abi_ulong size,
     }
 
     return ret;
+#endif
 }
 
 /*
@@ -650,6 +908,10 @@ abi_ulong mmap_find_vma(abi_ulong start, abi_ulong size, abi_ulong align)
 #ifdef TARGET_X86_64
 abi_ulong mmap_find_vma_2g(abi_ulong start, abi_ulong size, abi_ulong align)
 {
+#ifdef CONFIG_BUILD_LIBLAT
+    return mmap_find_vma_embedded(start, size, align,
+                                  MIN(reserved_va, UINT64_C(0x80000000)));
+#else
 
     bool looped = false;
     align = MAX(align, qemu_host_page_size);
@@ -706,6 +968,7 @@ abi_ulong mmap_find_vma_2g(abi_ulong start, abi_ulong size, abi_ulong align)
         qemu_log("MAP_32BIT not supported when reserved_va not used.\n");
         return (abi_ulong)-1;
     }
+#endif
 }
 #endif
 
@@ -770,6 +1033,10 @@ abi_long target_mmap(abi_ulong start, abi_ulong len, int target_prot,
     int page_flags, temp_flags, host_prot;
     uint64_t host_offset;
     int shadow_fd = -1;
+#ifdef CONFIG_BUILD_LIBLAT
+    GArray *fixed_reservations = NULL;
+    LiblatReservation nonfixed_reservation = { 0 };
+#endif
 
     /* Hacking wine user_shared_data mapping to avoid shadow page */
     if (start == 0x7ffe0000 && len == 0x1000 && (flags == (MAP_FIXED | MAP_SHARED)) && fd > 0
@@ -857,6 +1124,20 @@ abi_long target_mmap(abi_ulong start, abi_ulong len, int target_prot,
         }
     }
 
+#ifdef CONFIG_BUILD_LIBLAT
+    if (flags & MAP_FIXED) {
+        if ((start & ~TARGET_PAGE_MASK) ||
+            !guest_range_valid_untagged(start, len) || len > reserved_va ||
+            start > reserved_va - len) {
+            errno = EINVAL;
+            goto fail;
+        }
+        fixed_reservations = latx_liblat_reserve_fixed(start, len);
+        if (!fixed_reservations) {
+            goto fail;
+        }
+    }
+#endif
     real_start = start & qemu_host_page_mask;
     host_offset = offset & qemu_host_page_mask;
 
@@ -879,6 +1160,10 @@ abi_long target_mmap(abi_ulong start, abi_ulong len, int target_prot,
             errno = ENOMEM;
             goto fail;
         }
+#ifdef CONFIG_BUILD_LIBLAT
+        nonfixed_reservation.address = g2h_untagged(start);
+        nonfixed_reservation.size = host_len;
+#endif
 #ifdef TARGET_X86_64
         if (latx_wine && real_start && (start != real_start)) {
             errno = EINVAL;
@@ -944,7 +1229,9 @@ abi_long target_mmap(abi_ulong start, abi_ulong len, int target_prot,
                 if (is_shadow_page_shmm(start)) {
                     fprintf(stderr, "%s:%d, should not happen\n", __func__, __LINE__);
                 }
+#ifndef CONFIG_BUILD_LIBLAT
                 munmap(g2h_untagged(start), host_len);
+#endif
                 goto fail;
             }
             host_start += offset - host_offset;
@@ -1200,9 +1487,20 @@ abi_long target_mmap(abi_ulong start, abi_ulong len, int target_prot,
     if (shadow_fd != -1) {
         close(shadow_fd);
     }
+#ifdef CONFIG_BUILD_LIBLAT
+    latx_liblat_finish_reservations(fixed_reservations, false);
+#endif
     mmap_unlock();
     return start;
 fail:
+#ifdef CONFIG_BUILD_LIBLAT
+    latx_liblat_finish_reservations(fixed_reservations, true);
+    if (nonfixed_reservation.address) {
+        int saved_errno = errno;
+        munmap(nonfixed_reservation.address, nonfixed_reservation.size);
+        errno = saved_errno;
+    }
+#endif
     if (shadow_fd != -1) {
         close(shadow_fd);
     }
@@ -1288,14 +1586,32 @@ static int mmap_unmap_host_range(abi_ulong start, abi_ulong len)
     if (real_start >= real_end) {
         return 0;
     }
+#ifndef CONFIG_BUILD_LIBLAT
     if (reserved_va) {
         mmap_reserve(real_start, real_end - real_start);
         return 0;
     }
+#endif
     if (is_shadow_page_shmm(real_start)) {
         fprintf(stderr, "%s:%d, should not happen\n", __func__, __LINE__);
     }
+#ifdef CONFIG_BUILD_LIBLAT
+    /* Never unmap holes: a Native thread may allocate one after our check. */
+    for (addr = real_start; addr < real_end; addr += qemu_host_page_size) {
+        bool owned = false;
+
+        for (abi_ulong offset = 0; offset < qemu_host_page_size;
+             offset += TARGET_PAGE_SIZE) {
+            owned |= (page_get_flags(addr + offset) & PAGE_VALID) != 0;
+        }
+        if (owned && munmap(g2h_untagged(addr), qemu_host_page_size) != 0) {
+            return -1;
+        }
+    }
+    return 0;
+#else
     return munmap(g2h_untagged(real_start), real_end - real_start);
+#endif
 }
 
 int target_munmap(abi_ulong start, abi_ulong len, int rlimit_as_account)
@@ -1313,6 +1629,12 @@ int target_munmap(abi_ulong start, abi_ulong len, int rlimit_as_account)
     }
 
     mmap_lock();
+#ifdef CONFIG_BUILD_LIBLAT
+    if (!latx_liblat_range_has_no_host_mapping(start, len)) {
+        mmap_unlock();
+        return -TARGET_EINVAL;
+    }
+#endif
     ret = mmap_unmap_host_range(start, len);
 
     if (ret == 0) {
@@ -1357,6 +1679,12 @@ abi_long target_mremap(abi_ulong old_addr, abi_ulong old_size,
     bool shared_mapping = false;
 #endif
     bool unreserved_extension = false;
+#ifdef CONFIG_BUILD_LIBLAT
+    const bool keep_guest_reservation = false;
+    GArray *destination_reservations = NULL;
+#else
+    const bool keep_guest_reservation = reserved_va != 0;
+#endif
     int prot;
     void *host_addr;
 
@@ -1440,6 +1768,13 @@ abi_long target_mremap(abi_ulong old_addr, abi_ulong old_size,
     start_exclusive();
     mmap_lock();
 
+#ifdef CONFIG_BUILD_LIBLAT
+    if (!page_check_range(old_addr, source_size, PAGE_VALID)) {
+        errno = EFAULT;
+        host_addr = MAP_FAILED;
+        goto mremap_done;
+    }
+#endif
     prot = page_get_flags(old_addr);
 #if defined(CONFIG_LATX) && defined(TARGET_I386)
     for (addr = old_addr; addr < old_addr + source_size;
@@ -1586,11 +1921,29 @@ abi_long target_mremap(abi_ulong old_addr, abi_ulong old_size,
                 }
             }
         }
+#ifdef CONFIG_BUILD_LIBLAT
+        if (host_addr == MAP_FAILED && !(flags & MREMAP_FIXED) &&
+            mmap_start != (abi_ulong)-1) {
+            liblat_release_pending_range(mmap_start, new_size);
+        }
+#endif
     } else if (flags & MREMAP_FIXED) {
+#ifdef CONFIG_BUILD_LIBLAT
+        if (new_size > reserved_va || new_addr > reserved_va - new_size) {
+            errno = ENOMEM;
+            host_addr = MAP_FAILED;
+            goto mremap_done;
+        }
+        destination_reservations = latx_liblat_reserve_fixed(new_addr, new_size);
+        if (!destination_reservations) {
+            host_addr = MAP_FAILED;
+            goto mremap_done;
+        }
+#endif
         host_addr = mremap(g2h_untagged(old_addr), old_size, new_size,
                            flags, g2h_untagged(new_addr));
 
-        if (reserved_va && host_addr != MAP_FAILED && !keep_old) {
+        if (keep_guest_reservation && host_addr != MAP_FAILED && !keep_old) {
             /* If new and old addresses overlap then the above mremap will
                already have failed with EINVAL.  */
             mmap_reserve(old_addr, old_size);
@@ -1607,10 +1960,16 @@ abi_long target_mremap(abi_ulong old_addr, abi_ulong old_size,
             host_addr = mremap(g2h_untagged(old_addr), old_size, new_size,
                                flags | MREMAP_FIXED,
                                g2h_untagged(mmap_start));
-            if (host_addr == MAP_FAILED)
+            if (host_addr == MAP_FAILED) {
+#ifdef CONFIG_BUILD_LIBLAT
+                int saved_errno = errno;
+                munmap(g2h_untagged(mmap_start), HOST_PAGE_ALIGN(new_size));
+                errno = saved_errno;
+#else
                 errno = EFAULT;
-            else {
-                if (reserved_va && !keep_old) {
+#endif
+            } else {
+                if (keep_guest_reservation && !keep_old) {
                     mmap_reserve(old_addr, old_size);
                 }
             }
@@ -1618,7 +1977,7 @@ abi_long target_mremap(abi_ulong old_addr, abi_ulong old_size,
     } else {
         int prot = 0;
         int num_pages = 0;
-        if (reserved_va && old_size < new_size) {
+        if (keep_guest_reservation && old_size < new_size) {
             abi_ulong addr;
             for (addr = TARGET_PAGE_ALIGN(old_addr + old_size);
                  addr < TARGET_PAGE_ALIGN(old_addr + new_size);
@@ -1628,7 +1987,7 @@ abi_long target_mremap(abi_ulong old_addr, abi_ulong old_size,
             }
         }
         if (prot == 0) {
-            if (reserved_va && new_size > old_size && num_pages) {
+            if (keep_guest_reservation && new_size > old_size && num_pages) {
                 if (is_shadow_page_shmm(TARGET_PAGE_ALIGN(old_addr + old_size))) {
                     fprintf(stderr, "%s:%d, should not happen\n", __func__, __LINE__);
                 }
@@ -1647,7 +2006,7 @@ abi_long target_mremap(abi_ulong old_addr, abi_ulong old_size,
                                        new_size, old_size, flags);
                     errno = ENOMEM;
                     host_addr = MAP_FAILED;
-                } else if (reserved_va && old_size > new_size) {
+                } else if (keep_guest_reservation && old_size > new_size) {
                     mmap_reserve(old_addr + old_size, old_size - new_size);
                 }
             }
@@ -1709,6 +2068,9 @@ mremap_done:
 #endif
     }
 
+#ifdef CONFIG_BUILD_LIBLAT
+    latx_liblat_finish_reservations(destination_reservations, host_addr == MAP_FAILED);
+#endif
     mmap_unlock();
     end_exclusive();
 

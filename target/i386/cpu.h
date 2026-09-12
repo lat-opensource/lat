@@ -1661,6 +1661,18 @@ typedef struct CPUX86State {
 #ifdef CONFIG_LATX
     ucontext_t *puc;
     uintptr_t insn_save[2];
+    target_ulong kzt_guest_stack_base;
+#ifdef CONFIG_LATX_KZT
+    void *kzt_guest_tls_allocation;
+    void *kzt_guest_thread_state;
+    void *kzt_guest_tls_parent_snapshot;
+    void *kzt_libc_semantic_state;
+#endif
+#ifdef CONFIG_LIBLAT_INITBIN
+    bool liblat_bootstrap_active;
+    bool liblat_bootstrap_complete;
+    int liblat_bootstrap_status;
+#endif
 #endif
 } CPUX86State;
 

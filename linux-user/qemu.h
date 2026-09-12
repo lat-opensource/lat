@@ -372,8 +372,18 @@ abi_long do_syscall_with_seccomp(void *cpu_env, int num, int seccomp_num,
                                 abi_long arg5, abi_long arg6, abi_long arg7,
                                 abi_long arg8);
 extern __thread CPUState *thread_cpu;
+#ifdef CONFIG_LIBLAT
+void my_signalhandler(int signal, siginfo_t *info, void *ucontext);
+#endif
+#ifdef CONFIG_LATX
+void latx_register_host_thread_template(CPUArchState *env);
+int latx_finalize_host_thread_template(CPUArchState *env);
+int latx_attach_current_host_thread(void);
+#endif
 void cpu_loop(CPUArchState *env);
 const char *target_strerror(int err);
+int host_to_target_errno(int err);
+int target_to_host_errno(int err);
 int get_osversion(void);
 void init_qemu_uname_release(void);
 void fork_start(void);
@@ -621,6 +631,13 @@ extern unsigned long last_brk;
 extern abi_ulong option_mmap_fixed;
 extern abi_ulong mmap_next_start;
 abi_ulong mmap_find_vma(abi_ulong, abi_ulong, abi_ulong);
+#ifdef CONFIG_BUILD_LIBLAT
+/* Internal: the caller holds mmap_lock(). */
+void *latx_liblat_reserve_host(void *address, size_t size);
+GArray *latx_liblat_reserve_fixed(abi_ulong start, abi_ulong size);
+void latx_liblat_finish_reservations(GArray *reservations, bool rollback);
+bool latx_liblat_range_has_no_host_mapping(abi_ulong start, abi_ulong size);
+#endif
 void mmap_fork_start(void);
 void mmap_fork_end(int child);
 void sigact_fork_start(void);

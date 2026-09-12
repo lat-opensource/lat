@@ -3,6 +3,7 @@ cs_latx_debug = 'CONFIG_LATX_DEBUG' in config_host
 cs_diet = 'CONFIG_CAPSTONE_DIET' in config_host
 cs_op_access = 'CONFIG_LATX_CAPSTONE_OP_ACCESS' in config_host
 latx_kzt = 'CONFIG_LATX_KZT' in config_host
+latx_build_liblat = 'CONFIG_BUILD_LIBLAT' in config_host
 
 capStone_data = configuration_data()
 capStone_data.set('CAPSTONE_USE_SYS_DYN_MEM', '1')
@@ -56,11 +57,20 @@ capStone_cargs = [
 ]
 
 if cs_latx_debug or cs_git
+    if latx_build_liblat
+    libcapstone_git_lib = static_library('capstone_git',
+                                 build_by_default: false,
+                                 sources: capstone_git_files,
+                                 c_args: capStone_cargs,
+                                 include_directories: capstone_git_incdir_library,
+                                 pic: true)
+    else
     libcapstone_git_lib = static_library('capstone_git',
                                  build_by_default: false,
                                  sources: capstone_git_files,
                                  c_args: capStone_cargs,
                                  include_directories: capstone_git_incdir_library)
+    endif
     capstone_git = declare_dependency(link_with: libcapstone_git_lib,
                                   include_directories: capstone_git_incdir_dependency)
 endif
@@ -79,10 +89,18 @@ i386_ss.add(when: 'CONFIG_LATX', if_true: files(
   'latx-signal.c',
 ) + latx_string_utils + latx_runtime)
 
+if latx_build_liblat
+lazydis_lib = static_library('lazydis',
+                         build_by_default: false,
+                         sources: files('latx-disassemble-trace/zydis.c'),
+                         include_directories: include_directories('include/', 'include/zydisdir'),
+                         pic: true)
+else
 lazydis_lib = static_library('lazydis',
                          build_by_default: false,
                          sources: files('latx-disassemble-trace/zydis.c'),
                          include_directories: include_directories('include/', 'include/zydisdir'))
+endif
 
 lazydis = declare_dependency(link_with: lazydis_lib,
                          link_args: ['-L' + meson.current_source_dir() + '/exlib', '-lZydis', '-lZycore'],

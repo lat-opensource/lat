@@ -55,6 +55,7 @@ uint32_t GetBaseSize(elfheader_t* h);
 int IsAddressInElfSpace(const elfheader_t* h, uintptr_t addr);
 elfheader_t* FindElfAddress(box64context_t *context, uintptr_t addr);
 const char* FindNearestSymbolName(elfheader_t* h, void* p, uintptr_t* start, uint64_t* sz);
+uintptr_t FindElfSymbolAddress(elfheader_t *h, const char *name);
 void* GetDynamicSection(elfheader_t* h);
 
 const char* GetSymbolVersion(elfheader_t* h, int version);
