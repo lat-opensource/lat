@@ -645,6 +645,152 @@ static inline void get_ts_queue(CPUState *cpu, target_ulong cs_base,
     lsassert(*tb_num_in_tu <= MAX_TB_IN_TS);
 }
 
+#ifdef CONFIG_LATX_FLAG_REDUCTION
+#define MAX_EFLAGS_ANALYSIS_TBS 32
+
+static bool eflags_analysis_allocator_has_space(void)
+{
+    uintptr_t align = qemu_icache_linesize;
+    uintptr_t tb_addr;
+    uintptr_t s_data_addr;
+    uintptr_t next;
+
+    if (option_split_tb) {
+        tb_addr = ROUND_UP((uintptr_t)tcg_ctx->tb_gen_ptr, align);
+        s_data_addr = ROUND_UP(tb_addr + sizeof(TranslationBlock), align);
+        next = ROUND_UP(s_data_addr + sizeof(struct separated_data), align);
+        if (next > (uintptr_t)tcg_ctx->tb_gen_highwater) {
+            return false;
+        }
+        return ROUND_UP((uintptr_t)tcg_ctx->code_gen_ptr, align) <=
+               (uintptr_t)tcg_ctx->code_gen_highwater;
+    }
+
+    tb_addr = ROUND_UP((uintptr_t)tcg_ctx->code_gen_ptr, align);
+    s_data_addr = ROUND_UP(tb_addr + sizeof(TranslationBlock), align);
+    next = ROUND_UP(s_data_addr + sizeof(struct separated_data), align);
+    return next <= (uintptr_t)tcg_ctx->code_gen_highwater;
+}
+
+static bool eflags_analysis_has_space(uint32_t tb_limit, int max_insns)
+{
+    return tu_data->tb_num < tb_limit &&
+           tu_data->ir1_num_in_tu + max_insns < MAX_IR1_IN_TU &&
+           eflags_analysis_allocator_has_space();
+}
+
+/*
+ * Extend the final TU with same-page direct callees after HBR has finished.
+ * CALL itself keeps only its normal execution edge; the EFLAGS pass finds the
+ * callee in tb_list by target_pc.
+ */
+static void get_eflags_call_queue(CPUState *cpu, target_ulong cs_base,
+        uint32_t flags, int cflags, int max_insns)
+{
+    TranslationBlock **tb_list = tu_data->tb_list;
+    uint32_t *tb_num_in_tu = &tu_data->tb_num;
+    uint32_t original_tb_num = *tb_num_in_tu;
+    uint32_t tb_limit = original_tb_num + MAX_EFLAGS_ANALYSIS_TBS;
+
+    if (tb_limit > MAX_TB_IN_CACHE) {
+        tb_limit = MAX_TB_IN_CACHE;
+    }
+
+    for (uint32_t i = 0; i < original_tb_num; i++) {
+        TranslationBlock *tb = tb_list[i];
+        if (!eflags_analysis_has_space(tb_limit, max_insns)) {
+            break;
+        }
+        if (tb->s_data->last_ir1_type != IR1_TYPE_CALL ||
+            ir1_opcode(tb_ir1_inst_last(tb)) != dt_X86_INS_CALL ||
+            get_tb_id(tb->s_data->target_pc, cflags) < 0) {
+            continue;
+        }
+
+        get_target_tb(tb, cpu, cs_base, flags, cflags, max_insns);
+        tb->s_data->next_tb[TU_TB_INDEX_TARGET] = NULL;
+        tb->tu_jmp[TU_TB_INDEX_TARGET] = TB_JMP_RESET_OFFSET_INVALID;
+    }
+
+    for (uint32_t i = original_tb_num;
+         i < *tb_num_in_tu && i < tb_limit; i++) {
+        TranslationBlock *tb = tb_list[i];
+
+        if (!eflags_analysis_has_space(tb_limit, max_insns)) {
+            return;
+        }
+        if (is_bad_tb(tb)) {
+            continue;
+        }
+
+        switch (tb->s_data->last_ir1_type) {
+        case IR1_TYPE_BRANCH:
+            if (get_tb_id(tb->s_data->next_pc, cflags) >= 0 &&
+                eflags_analysis_has_space(tb_limit, max_insns)) {
+                get_next_tb(tb, cpu, cs_base, flags, cflags, max_insns);
+            }
+            if (get_tb_id(tb->s_data->target_pc, cflags) >= 0 &&
+                eflags_analysis_has_space(tb_limit, max_insns)) {
+                get_target_tb(tb, cpu, cs_base, flags, cflags, max_insns);
+            }
+            break;
+        case IR1_TYPE_CALL:
+            if (get_tb_id(tb->s_data->next_pc, cflags) >= 0 &&
+                eflags_analysis_has_space(tb_limit, max_insns)) {
+                get_next_tb(tb, cpu, cs_base, flags, cflags, max_insns);
+            }
+            if (ir1_opcode(tb_ir1_inst_last(tb)) == dt_X86_INS_CALL &&
+                get_tb_id(tb->s_data->target_pc, cflags) >= 0 &&
+                eflags_analysis_has_space(tb_limit, max_insns)) {
+                get_target_tb(tb, cpu, cs_base, flags, cflags, max_insns);
+                tb->s_data->next_tb[TU_TB_INDEX_TARGET] = NULL;
+                tb->tu_jmp[TU_TB_INDEX_TARGET] =
+                        TB_JMP_RESET_OFFSET_INVALID;
+            }
+            break;
+        case IR1_TYPE_CALLIN:
+        case IR1_TYPE_NORMAL:
+        case IR1_TYPE_SYSCALL:
+            if (get_tb_id(tb->s_data->next_pc, cflags) >= 0 &&
+                eflags_analysis_has_space(tb_limit, max_insns)) {
+                get_next_tb(tb, cpu, cs_base, flags, cflags, max_insns);
+            }
+            break;
+        case IR1_TYPE_JUMP:
+            if (get_tb_id(tb->s_data->target_pc, cflags) >= 0 &&
+                eflags_analysis_has_space(tb_limit, max_insns)) {
+                get_target_tb(tb, cpu, cs_base, flags, cflags, max_insns);
+            }
+            break;
+        case IR1_TYPE_JUMPIN:
+        case IR1_TYPE_RET:
+            break;
+        default:
+            lsassert(0);
+        }
+    }
+}
+
+static void discard_eflags_call_queue(uint32_t original_tb_num,
+        uint32_t original_ir1_num)
+{
+    TranslationBlock **tb_list = tu_data->tb_list;
+    uint32_t *tb_num_in_tu = &tu_data->tb_num;
+
+    for (uint32_t i = original_tb_num; i < *tb_num_in_tu; i++) {
+        TranslationBlock *tb = tb_list[i];
+        int tb_id = get_tb_id(tb->pc, tb->cflags);
+
+        if (tb_id >= 0 && curr_tb_message_vector[tb_id].tb == tb) {
+            curr_tb_message_vector[tb_id].tb = NULL;
+        }
+        tb_list[i] = NULL;
+    }
+    *tb_num_in_tu = original_tb_num;
+    tu_data->ir1_num_in_tu = original_ir1_num;
+}
+#endif
+
 /* static int max_tb_num; */
 
 static void delet_static_tb(TranslationBlock **tb_list, uint32_t *tb_num_in_tu)
@@ -721,7 +867,29 @@ static void ts_tb_explore(CPUState *cpu, target_ulong cs_base,
 
     qsort(tb_list, *tb_num_in_tu, sizeof(TranslationBlock *), tb_sort_cmp);
     solve_tb_overlap(*tb_num_in_tu, tb_list, max_insns);
-    tu_ir1_optimization(tb_list, *tb_num_in_tu);
+
+#ifdef CONFIG_LATX_FLAG_REDUCTION
+    if (option_eflags_cross) {
+        uint32_t original_tb_num = *tb_num_in_tu;
+        uint32_t original_ir1_num = *ir1_num_in_tu;
+        void *original_code_gen_ptr = tcg_ctx->code_gen_ptr;
+        void *original_tb_gen_ptr = tcg_ctx->tb_gen_ptr;
+        void *original_data_gen_ptr = tcg_ctx->data_gen_ptr;
+        bool original_suppress_disasm = suppress_disasm_side_effects;
+
+        suppress_disasm_side_effects = true;
+        get_eflags_call_queue(cpu, cs_base, flags, cflags, max_insns);
+        suppress_disasm_side_effects = original_suppress_disasm;
+        tu_ir1_optimization(tb_list, *tb_num_in_tu);
+        discard_eflags_call_queue(original_tb_num, original_ir1_num);
+        qatomic_set(&tcg_ctx->code_gen_ptr, original_code_gen_ptr);
+        qatomic_set(&tcg_ctx->tb_gen_ptr, original_tb_gen_ptr);
+        tcg_ctx->data_gen_ptr = original_data_gen_ptr;
+    } else
+#endif
+    {
+        tu_ir1_optimization(tb_list, *tb_num_in_tu);
+    }
     delet_static_tb(tb_list, tb_num_in_tu);
 
     for (int i = 0; i < *tb_num_in_tu; i++) {
@@ -842,4 +1010,3 @@ uint64 translate_lib(seg_info **seg_info_vector, int begin_id,
     in_pre_translate = 0;
     return tb_num_in_ts;
 }
-

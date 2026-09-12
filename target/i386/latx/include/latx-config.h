@@ -44,6 +44,7 @@ void latx_handle_args(char *filename);
 
 #ifdef CONFIG_LATX_TU
 void target_disasm(struct TranslationBlock *tb, int max_insns);
+extern __thread bool suppress_disasm_side_effects;
 #endif
 
 #ifdef CONFIG_LATX_LARGE_CC

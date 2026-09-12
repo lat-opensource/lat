@@ -14,6 +14,7 @@
 #include "reg-alloc.h"
 #include "translate.h"
 #include "insts-pattern.h"
+#include "flag-reduction.h"
 
 #ifdef CONFIG_LATX_INSTS_PATTERN
 
@@ -184,6 +185,8 @@ static int inst_pattern(TranslationBlock *tb,
             pir1->instptn.opc  = INSTPTN_OPC_CMP_SBB;
             pir1->instptn.next = ir1;
             ir1->instptn.opc  = INSTPTN_OPC_NOP;
+            ir1->instptn.replaced_eflag_use =
+                    flag_reduction_get_arch_use(ir1);
             // ir1->instptn.next = NULL;
             return 1;
         }
@@ -212,6 +215,8 @@ static int inst_pattern(TranslationBlock *tb,
             pir1->instptn.opc  = INSTPTN_OPC_CMP_XXCC;
             pir1->instptn.next = ir1;
             ir1->instptn.opc  = INSTPTN_OPC_NOP;
+            ir1->instptn.replaced_eflag_use =
+                    flag_reduction_get_arch_use(ir1);
             // ir1->instptn.next = NULL;
             return 1;
         default:
@@ -256,6 +261,8 @@ static int inst_pattern(TranslationBlock *tb,
             pir1->instptn.opc  = INSTPTN_OPC_TEST_XXCC;
             pir1->instptn.next = ir1;
             ir1->instptn.opc  = INSTPTN_OPC_NOP;
+            ir1->instptn.replaced_eflag_use =
+                    flag_reduction_get_arch_use(ir1);
             // ir1->instptn.next = NULL;
             return 1;
         default:
@@ -342,6 +349,8 @@ static int inst_pattern(TranslationBlock *tb,
             pir1->instptn.opc  = INSTPTN_OPC_UCOMISD_SETA;
             pir1->instptn.next = ir1;
             ir1->instptn.opc  = INSTPTN_OPC_NOP;
+            ir1->instptn.replaced_eflag_use =
+                    flag_reduction_get_arch_use(ir1);
             // ir1->instptn.next = NULL;
             return 1;
         default:
@@ -384,6 +393,11 @@ static int inst_pattern(TranslationBlock *tb,
                 pir1->instptn.opc  = INSTPTN_OPC_NEG_CMOVCC;
                 pir1->instptn.next = ir1;
                 ir1->instptn.opc  = INSTPTN_OPC_NOP;
+                if (!ir1_is_prefix_lock(pir1) ||
+                    !ir1_opnd_is_mem(ir1_get_opnd(pir1, 0))) {
+                    ir1->instptn.replaced_eflag_use =
+                            flag_reduction_get_arch_use(ir1);
+                }
                 return 1;
             default:
                 return 0;
@@ -462,6 +476,8 @@ bool insts_pattern_scan_jcc_end(TranslationBlock *tb, IR1_INST *pir1, int pir1_i
                 pir1->instptn.opc  = INSTPTN_OPC_CMP_JCC;
                 pir1->instptn.next = ir1_jcc;
                 ir1_jcc->instptn.opc  = INSTPTN_OPC_NOP;
+                ir1_jcc->instptn.replaced_eflag_use =
+                        flag_reduction_get_arch_use(ir1_jcc);
                 // ir1_jcc->instptn.next = NULL;
             } else {
                 instptn_check_cmp_xx_jcc_0();
@@ -469,6 +485,8 @@ bool insts_pattern_scan_jcc_end(TranslationBlock *tb, IR1_INST *pir1, int pir1_i
                 pir1->instptn.next = ir1_jcc;
                 ir1_jcc->instptn.opc  = INSTPTN_OPC_CMP_XX_JCC;
                 ir1_jcc->instptn.next = tb_ir1_inst(tb, pir1_index);
+                ir1_jcc->instptn.replaced_eflag_use =
+                        flag_reduction_get_arch_use(ir1_jcc);
                 tb->has_jcc_end_ptn = true;
             }
             return false;
@@ -502,6 +520,8 @@ bool insts_pattern_scan_jcc_end(TranslationBlock *tb, IR1_INST *pir1, int pir1_i
                 pir1->instptn.opc  = INSTPTN_OPC_TEST_JCC;
                 pir1->instptn.next = ir1_jcc;
                 ir1_jcc->instptn.opc  = INSTPTN_OPC_NOP;
+                ir1_jcc->instptn.replaced_eflag_use =
+                        flag_reduction_get_arch_use(ir1_jcc);
                 // ir1_jcc->instptn.next = NULL;
             } else {
                 instptn_check_test_xx_jcc_0();
@@ -509,6 +529,8 @@ bool insts_pattern_scan_jcc_end(TranslationBlock *tb, IR1_INST *pir1, int pir1_i
                 pir1->instptn.next = ir1_jcc;
                 ir1_jcc->instptn.opc  = INSTPTN_OPC_TEST_XX_JCC;
                 ir1_jcc->instptn.next = tb_ir1_inst(tb, pir1_index);
+                ir1_jcc->instptn.replaced_eflag_use =
+                        flag_reduction_get_arch_use(ir1_jcc);
                 tb->has_jcc_end_ptn = true;
             }
             return false;
@@ -529,6 +551,8 @@ bool insts_pattern_scan_jcc_end(TranslationBlock *tb, IR1_INST *pir1, int pir1_i
                 pir1->instptn.opc  = INSTPTN_OPC_BT_JCC;
                 pir1->instptn.next = ir1_jcc;
                 ir1_jcc->instptn.opc  = INSTPTN_OPC_NOP;
+                ir1_jcc->instptn.replaced_eflag_use =
+                        flag_reduction_get_arch_use(ir1_jcc);
                 // ir1_jcc->instptn.next = NULL;
             } else {
                 instptn_check_bt_xx_jcc_0();
@@ -536,6 +560,8 @@ bool insts_pattern_scan_jcc_end(TranslationBlock *tb, IR1_INST *pir1, int pir1_i
                 pir1->instptn.next = ir1_jcc;
                 ir1_jcc->instptn.opc  = INSTPTN_OPC_BT_XX_JCC;
                 ir1_jcc->instptn.next = tb_ir1_inst(tb, pir1_index);
+                ir1_jcc->instptn.replaced_eflag_use =
+                        flag_reduction_get_arch_use(ir1_jcc);
                 tb->has_jcc_end_ptn = true;
             }
             return false;
@@ -561,6 +587,11 @@ bool insts_pattern_scan_jcc_end(TranslationBlock *tb, IR1_INST *pir1, int pir1_i
                 pir1->instptn.opc  = INSTPTN_OPC_SUB_JCC;
                 pir1->instptn.next = ir1_jcc;
                 ir1_jcc->instptn.opc  = INSTPTN_OPC_NOP;
+                if (!ir1_is_prefix_lock(pir1) ||
+                    !ir1_opnd_is_mem(ir1_get_opnd(pir1, 0))) {
+                    ir1_jcc->instptn.replaced_eflag_use =
+                            flag_reduction_get_arch_use(ir1_jcc);
+                }
                 // ir1_jcc->instptn.next = NULL;
             }
             return false;
@@ -580,6 +611,13 @@ bool insts_pattern_scan_jcc_end(TranslationBlock *tb, IR1_INST *pir1, int pir1_i
                 pir1->instptn.opc  = INSTPTN_OPC_SHR_JCC;
                 pir1->instptn.next = ir1_jcc;
                 ir1_jcc->instptn.opc  = INSTPTN_OPC_NOP;
+                uint32_t count_mask =
+                        ir1_opnd_size(ir1_get_opnd(pir1, 0)) == 64 ?
+                        0x3f : 0x1f;
+                if ((ir1_opnd_uimm(opnd1) & count_mask) != 0) {
+                    ir1_jcc->instptn.replaced_eflag_use =
+                            flag_reduction_get_arch_use(ir1_jcc);
+                }
                 // ir1_jcc->instptn.next = NULL;
             }
             return false;
@@ -596,6 +634,11 @@ bool insts_pattern_scan_jcc_end(TranslationBlock *tb, IR1_INST *pir1, int pir1_i
                 pir1->instptn.opc  = INSTPTN_OPC_AND_JCC;
                 pir1->instptn.next = ir1_jcc;
                 ir1_jcc->instptn.opc  = INSTPTN_OPC_NOP;
+                if (!ir1_is_prefix_lock(pir1) ||
+                    !ir1_opnd_is_mem(ir1_get_opnd(pir1, 0))) {
+                    ir1_jcc->instptn.replaced_eflag_use =
+                            flag_reduction_get_arch_use(ir1_jcc);
+                }
                 // ir1_jcc->instptn.next = NULL;
             }
             return false;
@@ -622,6 +665,8 @@ bool insts_pattern_scan_jcc_end(TranslationBlock *tb, IR1_INST *pir1, int pir1_i
                 pir1->instptn.opc  = INSTPTN_OPC_COMISD_JCC;
                 pir1->instptn.next = ir1_jcc;
                 ir1_jcc->instptn.opc  = INSTPTN_OPC_NOP;
+                ir1_jcc->instptn.replaced_eflag_use =
+                        flag_reduction_get_arch_use(ir1_jcc);
                 // ir1_jcc->instptn.next = NULL;
             } else {
                 instptn_check_comisd_xx_jcc_0();
@@ -629,6 +674,8 @@ bool insts_pattern_scan_jcc_end(TranslationBlock *tb, IR1_INST *pir1, int pir1_i
                 pir1->instptn.next = ir1_jcc;
                 ir1_jcc->instptn.opc  = INSTPTN_OPC_COMISD_XX_JCC;
                 ir1_jcc->instptn.next = tb_ir1_inst(tb, pir1_index);
+                ir1_jcc->instptn.replaced_eflag_use =
+                        flag_reduction_get_arch_use(ir1_jcc);
                 tb->has_jcc_end_ptn = true;
             }
             return false;
@@ -654,6 +701,8 @@ bool insts_pattern_scan_jcc_end(TranslationBlock *tb, IR1_INST *pir1, int pir1_i
                 pir1->instptn.opc  = INSTPTN_OPC_COMISS_JCC;
                 pir1->instptn.next = ir1_jcc;
                 ir1_jcc->instptn.opc  = INSTPTN_OPC_NOP;
+                ir1_jcc->instptn.replaced_eflag_use =
+                        flag_reduction_get_arch_use(ir1_jcc);
                 // ir1_jcc->instptn.next = NULL;
             } else {
                 instptn_check_comiss_xx_jcc_0();
@@ -661,6 +710,8 @@ bool insts_pattern_scan_jcc_end(TranslationBlock *tb, IR1_INST *pir1, int pir1_i
                 pir1->instptn.next = ir1_jcc;
                 ir1_jcc->instptn.opc  = INSTPTN_OPC_COMISS_XX_JCC;
                 ir1_jcc->instptn.next = tb_ir1_inst(tb, pir1_index);
+                ir1_jcc->instptn.replaced_eflag_use =
+                        flag_reduction_get_arch_use(ir1_jcc);
                 tb->has_jcc_end_ptn = true;
             }
             return false;
@@ -686,6 +737,8 @@ bool insts_pattern_scan_jcc_end(TranslationBlock *tb, IR1_INST *pir1, int pir1_i
                 pir1->instptn.opc  = INSTPTN_OPC_UCOMISD_JCC;
                 pir1->instptn.next = ir1_jcc;
                 ir1_jcc->instptn.opc  = INSTPTN_OPC_NOP;
+                ir1_jcc->instptn.replaced_eflag_use =
+                        flag_reduction_get_arch_use(ir1_jcc);
                 // ir1_jcc->instptn.next = NULL;
             } else {
                 instptn_check_ucomisd_xx_jcc_0();
@@ -693,6 +746,8 @@ bool insts_pattern_scan_jcc_end(TranslationBlock *tb, IR1_INST *pir1, int pir1_i
                 pir1->instptn.next = ir1_jcc;
                 ir1_jcc->instptn.opc  = INSTPTN_OPC_UCOMISD_XX_JCC;
                 ir1_jcc->instptn.next = tb_ir1_inst(tb, pir1_index);
+                ir1_jcc->instptn.replaced_eflag_use =
+                        flag_reduction_get_arch_use(ir1_jcc);
                 tb->has_jcc_end_ptn = true;
             }
             return false;
@@ -718,6 +773,8 @@ bool insts_pattern_scan_jcc_end(TranslationBlock *tb, IR1_INST *pir1, int pir1_i
                 pir1->instptn.opc  = INSTPTN_OPC_UCOMISS_JCC;
                 pir1->instptn.next = ir1_jcc;
                 ir1_jcc->instptn.opc  = INSTPTN_OPC_NOP;
+                ir1_jcc->instptn.replaced_eflag_use =
+                        flag_reduction_get_arch_use(ir1_jcc);
                 ir1_jcc->instptn.next = NULL;
             } else {
                 instptn_check_ucomiss_xx_jcc_0();
@@ -725,6 +782,8 @@ bool insts_pattern_scan_jcc_end(TranslationBlock *tb, IR1_INST *pir1, int pir1_i
                 pir1->instptn.next = ir1_jcc;
                 ir1_jcc->instptn.opc  = INSTPTN_OPC_UCOMISS_XX_JCC;
                 ir1_jcc->instptn.next = tb_ir1_inst(tb, pir1_index);
+                ir1_jcc->instptn.replaced_eflag_use =
+                        flag_reduction_get_arch_use(ir1_jcc);
                 tb->has_jcc_end_ptn = true;
             }
             return false;

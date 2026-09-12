@@ -40,11 +40,14 @@ typedef struct {
 #define __ALL_EFLAGS (__OF | __SF | __ZF | __AF | __PF | __CF)
 
 void flag_gen(IR1_INST *pir1);
+uint8 flag_reduction_get_arch_use(IR1_INST *pir1);
 
 #ifdef CONFIG_LATX_FLAG_REDUCTION
 uint8 pending_use_of_succ(void *tb, int indirect_depth, int max_depth);
 void flag_reduction(IR1_INST *pir1, uint8 *pending_use);
 uint8 flag_reduction_check(TranslationBlock *tb);
+void flag_reduction_get_tb_summary(TranslationBlock *tb,
+        uint8 *use_before_def, uint8 *must_def);
 
 #define DEF_FLAG_RDTN(_prex) \
         uint8 _prex##_pending_use = __ALL_EFLAGS;
