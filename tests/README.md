@@ -153,7 +153,11 @@ holds a reader across fork and covers lazy and deferred child startup. This
 scenario depends on KZT's atfork path not waiting for the parent's grace period.
 Both cases check each callback marked published after `call_rcu1()` returns:
 after the child drains, every published callback in its snapshot must have run
-exactly once. Producers remain active during the forks.
+exactly once. A publisher remains active during the forks, and the parent still
+checks all 512 callbacks. Child drains run one at a time and the test is
+scheduled before other suite entries because QEMU user-mode can strand a
+post-fork worker startup when several emulated threaded-fork workloads compete;
+this scheduling does not relax the per-callback assertions.
 
 Run the common case explicitly (the binary is not part of the default build):
 

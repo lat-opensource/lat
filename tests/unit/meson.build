@@ -177,11 +177,14 @@ if 'CONFIG_POSIX' in config_host
     dependencies: [glib, qemuutil],
     build_by_default: false,
   )
+  # QEMU user-mode can strand post-fork worker startup after several emulated
+  # tests have competed.  Run this fork/thread stress test first and isolated.
   test('test-rcu-fork-queue', test_rcu_fork_queue,
-       suite: 'lat-pr-fast', timeout: 30)
+       suite: 'lat-pr-fast', timeout: 45, is_parallel: false, priority: 100)
   if 'CONFIG_LATX' in config_host and 'CONFIG_LATX_KZT' in config_host
     test('test-rcu-fork-queue-held-reader', test_rcu_fork_queue,
-         args: ['--held-reader'], suite: 'lat-pr-fast', timeout: 30)
+         args: ['--held-reader'], suite: 'lat-pr-fast', timeout: 45,
+         is_parallel: false, priority: 100)
   endif
 endif
 

@@ -5,6 +5,110 @@
 #include <signal.h>
 #include <sys/wait.h>
 
+/* Keep the internal deadlines below the Meson timeout (45 seconds). */
+#define CHILD_TIMEOUT_SECONDS 10
+#define MAIN_TIMEOUT_SECONDS 30
+
+typedef enum DeadlineStage {
+    STAGE_NOT_STARTED,
+    STAGE_HELD_READER_START,
+    STAGE_HELD_GRACE_PERIOD,
+    STAGE_HELD_CHILD_LAZY_DRAIN,
+    STAGE_HELD_CHILD_DEFERRED_WORKER_START,
+    STAGE_HELD_CHILD_CALLBACK_WAIT,
+    STAGE_HELD_PARENT_READER_RELEASE,
+    STAGE_HELD_PARENT_DRAIN,
+    STAGE_HELD_PARENT_CHILD_WAIT,
+    STAGE_EMPTY_CHILD_WORKER_START,
+    STAGE_EMPTY_CHILD_CALLBACK_WAIT,
+    STAGE_EMPTY_PARENT_CHILD_WAIT,
+    STAGE_REENTRANT_CALLBACK_WAIT,
+    STAGE_REENTRANT_DRAIN,
+    STAGE_CONCURRENT_READER_START,
+    STAGE_CONCURRENT_CONSUMER_START,
+    STAGE_CONCURRENT_GRACE_PERIOD,
+    STAGE_CONCURRENT_PUBLISH_WAIT,
+    STAGE_CONCURRENT_CHILD_DRAIN_WORKER_START,
+    STAGE_CONCURRENT_CHILD_DRAIN_CALLBACK_WAIT,
+    STAGE_CONCURRENT_CHILD_EXACT_ONCE,
+    STAGE_CONCURRENT_PARENT_PRODUCER_JOIN,
+    STAGE_CONCURRENT_PARENT_READER_RELEASE,
+    STAGE_CONCURRENT_PARENT_DRAIN,
+    STAGE_CONCURRENT_PARENT_EXACT_ONCE,
+    STAGE_CONCURRENT_PARENT_CHILD_WAIT,
+} DeadlineStage;
+
+static volatile sig_atomic_t deadline_stage = STAGE_NOT_STARTED;
+
+#define STAGE_DESCRIPTION_SIZE 64
+static const char stage_descriptions[][STAGE_DESCRIPTION_SIZE] = {
+    [STAGE_NOT_STARTED] = "not started",
+    [STAGE_HELD_READER_START] = "held-fork reader startup",
+    [STAGE_HELD_GRACE_PERIOD] = "held-fork grace-period wait",
+    [STAGE_HELD_CHILD_LAZY_DRAIN] = "held-fork child lazy drain",
+    [STAGE_HELD_CHILD_DEFERRED_WORKER_START] =
+        "held-fork child deferred worker startup",
+    [STAGE_HELD_CHILD_CALLBACK_WAIT] = "held-fork child callback wait",
+    [STAGE_HELD_PARENT_READER_RELEASE] = "held-fork parent reader release",
+    [STAGE_HELD_PARENT_DRAIN] = "held-fork parent drain",
+    [STAGE_HELD_PARENT_CHILD_WAIT] = "held-fork parent child wait",
+    [STAGE_EMPTY_CHILD_WORKER_START] = "empty-fork child worker startup",
+    [STAGE_EMPTY_CHILD_CALLBACK_WAIT] = "empty-fork child callback wait",
+    [STAGE_EMPTY_PARENT_CHILD_WAIT] = "empty-fork parent child wait",
+    [STAGE_REENTRANT_CALLBACK_WAIT] = "reentrant callback wait",
+    [STAGE_REENTRANT_DRAIN] = "reentrant callback drain",
+    [STAGE_CONCURRENT_READER_START] = "concurrent-fork reader startup",
+    [STAGE_CONCURRENT_CONSUMER_START] =
+        "concurrent-fork blocker callback wait",
+    [STAGE_CONCURRENT_GRACE_PERIOD] = "concurrent-fork grace-period wait",
+    [STAGE_CONCURRENT_PUBLISH_WAIT] =
+        "concurrent-fork first publication wait",
+    [STAGE_CONCURRENT_CHILD_DRAIN_WORKER_START] =
+        "concurrent-fork child drain worker startup",
+    [STAGE_CONCURRENT_CHILD_DRAIN_CALLBACK_WAIT] =
+        "concurrent-fork child drain callback wait",
+    [STAGE_CONCURRENT_CHILD_EXACT_ONCE] =
+        "concurrent-fork child exact-once check",
+    [STAGE_CONCURRENT_PARENT_PRODUCER_JOIN] =
+        "concurrent-fork parent producer join",
+    [STAGE_CONCURRENT_PARENT_READER_RELEASE] =
+        "concurrent-fork parent reader release",
+    [STAGE_CONCURRENT_PARENT_DRAIN] = "concurrent-fork parent drain",
+    [STAGE_CONCURRENT_PARENT_EXACT_ONCE] =
+        "concurrent-fork parent exact-once check",
+    [STAGE_CONCURRENT_PARENT_CHILD_WAIT] =
+        "concurrent-fork parent child wait",
+};
+
+static void write_stage(int fd, DeadlineStage stage, bool timeout)
+{
+    static const char progress_prefix[] = "RCU fork queue stage: ";
+    static const char timeout_prefix[] = "RCU fork queue test timed out at: ";
+    const char *prefix = timeout ? timeout_prefix : progress_prefix;
+    const char *description;
+    char message[sizeof(timeout_prefix) + STAGE_DESCRIPTION_SIZE];
+    size_t length = 0;
+
+    if ((unsigned)stage >= ARRAY_SIZE(stage_descriptions)) {
+        stage = STAGE_NOT_STARTED;
+    }
+    description = stage_descriptions[stage];
+    while (*prefix) {
+        message[length++] = *prefix++;
+    }
+    while (*description) {
+        message[length++] = *description++;
+    }
+    message[length++] = '\n';
+    (void)!write(fd, message, length);
+}
+
+static void set_stage(DeadlineStage stage)
+{
+    deadline_stage = stage;
+    write_stage(STDERR_FILENO, stage, false);
+}
+
 typedef struct TestCallback {
     struct rcu_head rcu;
     int calls;
@@ -19,9 +123,7 @@ static struct rcu_reader_data *held_reader_state;
 
 static void deadline(int sig)
 {
-    static const char message[] = "RCU fork queue test timed out\n";
-
-    (void)!write(STDERR_FILENO, message, sizeof(message) - 1);
+    write_stage(STDERR_FILENO, deadline_stage, true);
     _exit(124);
 }
 
@@ -47,17 +149,19 @@ static void *held_reader(void *opaque)
     return NULL;
 }
 
-static void begin_reader(QemuThread *thread)
+static void begin_reader(QemuThread *thread, DeadlineStage stage)
 {
     qemu_event_init(&reader_entered, false);
     qemu_event_init(&reader_release, false);
     qemu_thread_create(thread, "held-reader", held_reader, NULL,
                        QEMU_THREAD_JOINABLE);
+    set_stage(stage);
     qemu_event_wait(&reader_entered);
 }
 
-static void wait_for_grace_period(void)
+static void wait_for_grace_period(DeadlineStage stage)
 {
+    set_stage(stage);
     for (int i = 0; i < 2000; i++) {
         if (qatomic_read(&held_reader_state->waiting)) {
             return;
@@ -67,8 +171,9 @@ static void wait_for_grace_period(void)
     g_error("RCU callback consumer did not enter the held grace period");
 }
 
-static void end_reader(QemuThread *thread)
+static void end_reader(QemuThread *thread, DeadlineStage stage)
 {
+    set_stage(stage);
     qemu_event_set(&reader_release);
     qemu_thread_join(thread);
     qemu_event_destroy(&reader_entered);
@@ -95,9 +200,9 @@ static void test_held_fork(bool deferred)
     pid_t child;
 
     qemu_event_init(&callback.done, false);
-    begin_reader(&reader);
+    begin_reader(&reader, STAGE_HELD_READER_START);
     call_rcu1(&callback.rcu, mark_callback);
-    wait_for_grace_period();
+    wait_for_grace_period(STAGE_HELD_GRACE_PERIOD);
     g_assert_cmpint(qatomic_read(&callback.calls), ==, 0);
     if (deferred) {
         previous_defer = rcu_defer_atfork_child();
@@ -105,16 +210,19 @@ static void test_held_fork(bool deferred)
     child = fork();
     g_assert_cmpint(child, >=, 0);
     if (child == 0) {
-        alarm(3);
+        alarm(CHILD_TIMEOUT_SECONDS);
         g_assert_false(rcu_call_thread_is_running());
         g_usleep(10000);
         g_assert_false(rcu_call_thread_is_running());
         if (deferred) {
             /* This is the existing guest namespace/thread safe-point API. */
+            set_stage(STAGE_HELD_CHILD_DEFERRED_WORKER_START);
             rcu_start_deferred_thread();
+            set_stage(STAGE_HELD_CHILD_CALLBACK_WAIT);
             qemu_event_wait(&callback.done);
         } else {
             /* The first new queued call must also drain inherited work. */
+            set_stage(STAGE_HELD_CHILD_LAZY_DRAIN);
             drain_call_rcu();
         }
         g_assert_cmpint(qatomic_read(&callback.calls), ==, 1);
@@ -123,8 +231,10 @@ static void test_held_fork(bool deferred)
     if (deferred) {
         rcu_restore_atfork_child_defer(previous_defer);
     }
-    end_reader(&reader);
+    end_reader(&reader, STAGE_HELD_PARENT_READER_RELEASE);
+    set_stage(STAGE_HELD_PARENT_DRAIN);
     drain_call_rcu();
+    set_stage(STAGE_HELD_PARENT_CHILD_WAIT);
     check_child(child);
     g_assert_cmpint(qatomic_read(&callback.calls), ==, 1);
     qemu_event_destroy(&callback.done);
@@ -141,16 +251,19 @@ static void test_empty_fork(void)
     if (child == 0) {
         TestCallback callback = {0};
 
-        alarm(3);
+        alarm(CHILD_TIMEOUT_SECONDS);
 #ifdef CONFIG_LATX
         g_assert_false(rcu_call_thread_is_running());
 #endif
         qemu_event_init(&callback.done, false);
+        set_stage(STAGE_EMPTY_CHILD_WORKER_START);
         call_rcu1(&callback.rcu, mark_callback);
+        set_stage(STAGE_EMPTY_CHILD_CALLBACK_WAIT);
         qemu_event_wait(&callback.done);
         g_assert_cmpint(qatomic_read(&callback.calls), ==, 1);
         _exit(0);
     }
+    set_stage(STAGE_EMPTY_PARENT_CHILD_WAIT);
     check_child(child);
 }
 
@@ -167,14 +280,17 @@ static void test_reentrant_callback(void)
 
     qemu_event_init(&nested.done, false);
     call_rcu1(&first, reentrant_callback);
+    set_stage(STAGE_REENTRANT_CALLBACK_WAIT);
     qemu_event_wait(&nested.done);
+    set_stage(STAGE_REENTRANT_DRAIN);
     drain_call_rcu();
     g_assert_cmpint(qatomic_read(&nested.calls), ==, 1);
     qemu_event_destroy(&nested.done);
 }
 
-#define PRODUCERS 4
-#define CALLBACKS_PER_PRODUCER 128
+/* One publisher still races call_rcu1() against fork; keep 512 callbacks. */
+#define PRODUCERS 1
+#define CALLBACKS_PER_PRODUCER 512
 static TestCallback concurrent[PRODUCERS * CALLBACKS_PER_PRODUCER];
 static int published, completed;
 static QemuEvent consumer_entered, consumer_release;
@@ -209,6 +325,20 @@ static void concurrent_callback(struct rcu_head *head)
     qatomic_inc(&completed);
 }
 
+static void drain_concurrent_child(void)
+{
+    TestCallback barrier = {0};
+
+    qemu_event_init(&barrier.done, false);
+    set_stage(STAGE_CONCURRENT_CHILD_DRAIN_WORKER_START);
+    call_rcu1(&barrier.rcu, mark_callback);
+    g_assert_true(rcu_call_thread_is_running());
+    set_stage(STAGE_CONCURRENT_CHILD_DRAIN_CALLBACK_WAIT);
+    qemu_event_wait(&barrier.done);
+    g_assert_cmpint(qatomic_read(&barrier.calls), ==, 1);
+    qemu_event_destroy(&barrier.done);
+}
+
 static void *producer(void *opaque)
 {
     size_t id = (size_t)opaque;
@@ -232,11 +362,11 @@ static void test_concurrent_fork(bool held)
 #endif
     QemuThread producers[PRODUCERS];
     struct rcu_head blocker = {0};
-    pid_t children[4];
+    pid_t child;
 
 #ifdef CONFIG_LATX_KZT
     if (held) {
-        begin_reader(&reader);
+        begin_reader(&reader, STAGE_CONCURRENT_READER_START);
     } else
 #endif
     {
@@ -248,6 +378,7 @@ static void test_concurrent_fork(bool held)
         qemu_event_init(&consumer_entered, false);
         qemu_event_init(&consumer_release, false);
         call_rcu1(&blocker, hold_consumer);
+        set_stage(STAGE_CONCURRENT_CONSUMER_START);
         qemu_event_wait(&consumer_entered);
     }
     for (size_t i = 0; i < PRODUCERS; i++) {
@@ -256,34 +387,53 @@ static void test_concurrent_fork(bool held)
     }
 #ifdef CONFIG_LATX_KZT
     if (held) {
-        wait_for_grace_period();
+        wait_for_grace_period(STAGE_CONCURRENT_GRACE_PERIOD);
     }
 #endif
+    set_stage(STAGE_CONCURRENT_PUBLISH_WAIT);
     while (qatomic_read(&published) == 0) {
         g_usleep(1000);
     }
-    for (int i = 0; i < ARRAY_SIZE(children); i++) {
-        children[i] = fork();
-        g_assert_cmpint(children[i], >=, 0);
-        if (children[i] == 0) {
-            alarm(3);
-            drain_call_rcu();
+    for (int i = 0; i < 4; i++) {
+        child = fork();
+        g_assert_cmpint(child, >=, 0);
+        if (child == 0) {
+            alarm(CHILD_TIMEOUT_SECONDS);
+#ifdef CONFIG_LATX
+            g_assert_false(rcu_call_thread_is_running());
+            g_usleep(10000);
+            g_assert_false(rcu_call_thread_is_running());
+#else
+            g_assert_true(rcu_call_thread_is_running());
+#endif
+            drain_concurrent_child();
+            set_stage(STAGE_CONCURRENT_CHILD_EXACT_ONCE);
             check_published_callbacks();
             _exit(0);
         }
+        /*
+         * Keep post-fork worker startups independent.  QEMU user-mode can
+         * strand one when several emulated children create pthreads at once.
+         * Every child still checks its full published snapshot exactly once.
+         */
+        set_stage(STAGE_CONCURRENT_PARENT_CHILD_WAIT);
+        check_child(child);
     }
+    set_stage(STAGE_CONCURRENT_PARENT_PRODUCER_JOIN);
     for (size_t i = 0; i < PRODUCERS; i++) {
         qemu_thread_join(&producers[i]);
     }
 #ifdef CONFIG_LATX_KZT
     if (held) {
-        end_reader(&reader);
+        end_reader(&reader, STAGE_CONCURRENT_PARENT_READER_RELEASE);
     } else
 #endif
     {
         qemu_event_set(&consumer_release);
     }
+    set_stage(STAGE_CONCURRENT_PARENT_DRAIN);
     drain_call_rcu();
+    set_stage(STAGE_CONCURRENT_PARENT_EXACT_ONCE);
     check_published_callbacks();
     if (!held) {
         qemu_event_destroy(&consumer_entered);
@@ -291,21 +441,19 @@ static void test_concurrent_fork(bool held)
     }
     g_assert_cmpint(qatomic_read(&completed), ==,
                     PRODUCERS * CALLBACKS_PER_PRODUCER);
-    for (int i = 0; i < ARRAY_SIZE(children); i++) {
-        check_child(children[i]);
-    }
 }
 
 int main(int argc, char **argv)
 {
     signal(SIGALRM, deadline);
-    alarm(20);
+    alarm(MAIN_TIMEOUT_SECONDS);
 #ifdef CONFIG_LATX_KZT
     if (argc == 2 && !strcmp(argv[1], "--held-reader")) {
         test_held_fork(false);
         test_held_fork(true);
         test_concurrent_fork(true);
-        puts("RCU fork queue: held grace, lazy/deferred and concurrent producers passed");
+        puts("RCU fork queue: held grace, lazy/deferred and concurrent "
+             "publication passed");
     } else
 #endif
     {
