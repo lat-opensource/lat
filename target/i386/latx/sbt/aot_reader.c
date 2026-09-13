@@ -6,6 +6,7 @@
 
 #include "qemu-def.h"
 #include "aot.h"
+#include "latx-version.h"
 #include "aot_reader.h"
 #include "file_ctx.h"
 #include "qemu.h"

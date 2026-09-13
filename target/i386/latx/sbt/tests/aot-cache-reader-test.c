@@ -3,6 +3,7 @@
 #include <fcntl.h>
 
 #include "aot.h"
+#include "latx-version.h"
 #include "aot_reader.h"
 #include "aot_lib.h"
 #include "file_ctx.h"
@@ -109,6 +110,19 @@ static void write_cache(const char *name, bool has_header, bool has_footer,
     g_assert(g_file_set_contents(path, (char *)contents, size, NULL));
 }
 
+static void replace_cache_footer(const char *path, const char *footer)
+{
+    g_autofree char *contents = NULL;
+    g_autoptr(GString) replaced = NULL;
+    gsize size;
+
+    g_assert(g_file_get_contents(path, &contents, &size, NULL));
+    g_assert(size >= sizeof(aot_header));
+    replaced = g_string_new_len(contents, sizeof(aot_header));
+    g_string_append(replaced, footer);
+    g_assert(g_file_set_contents(path, replaced->str, replaced->len, NULL));
+}
+
 static void remove_cache(const char *name)
 {
     char path[PATH_MAX];
@@ -130,11 +144,21 @@ int main(void)
     g_autofree char *cache_parent = NULL;
     g_autofree char *test_dir = NULL;
     g_autofree char *old_home = NULL;
+    g_autofree char *stale_footer = g_strdup_printf(
+        "Version: stale-%s", AOT_VERSION + strlen("Version: "));
     char lib_name[] = "test-library";
     char bad_footer_name[] = "bad-footer";
     char truncated_name[] = "truncated";
     char complete_name[] = "complete";
+    char stale_version_name[] = "stale-version";
+    char wrong_mode_name[] = "wrong-mode";
     char fdopen_failure_name[] = "fdopen-failure";
+    const char *wrong_mode_footer = "Version: " LATX_VERSION
+#ifdef CONFIG_LATX_DEBUG
+        "-release";
+#else
+        "-debug";
+#endif
     char cache_path[PATH_MAX];
     void *buffer;
     lib_info *lib;
@@ -172,6 +196,24 @@ int main(void)
     g_assert(lib_tree_remove(complete_name));
 
     reset_stream_counts();
+    buffer = NULL;
+    write_cache(stale_version_name, true, true, cache_path);
+    replace_cache_footer(cache_path, stale_footer);
+    g_assert(aot_load(lib_name, stale_version_name, &buffer) == NULL);
+    g_assert(buffer == NULL);
+    g_assert(!g_file_test(cache_path, G_FILE_TEST_EXISTS));
+    assert_stream_closed();
+
+    reset_stream_counts();
+    buffer = NULL;
+    write_cache(wrong_mode_name, true, true, cache_path);
+    replace_cache_footer(cache_path, wrong_mode_footer);
+    g_assert(aot_load(lib_name, wrong_mode_name, &buffer) == NULL);
+    g_assert(buffer == NULL);
+    g_assert(!g_file_test(cache_path, G_FILE_TEST_EXISTS));
+    assert_stream_closed();
+
+    reset_stream_counts();
     fail_fdopen = true;
     buffer = NULL;
     write_cache(fdopen_failure_name, true, true, cache_path);
@@ -184,6 +226,8 @@ int main(void)
     remove_cache(bad_footer_name);
     remove_cache(truncated_name);
     remove_cache(complete_name);
+    remove_cache(stale_version_name);
+    remove_cache(wrong_mode_name);
     remove_cache(fdopen_failure_name);
     cache_dir = g_build_filename(test_dir, ".cache", "latx", NULL);
     g_assert(g_rmdir(cache_dir) == 0);

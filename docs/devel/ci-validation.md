@@ -111,12 +111,24 @@ subsequent runs use the image after the master image-builder run publishes it.
 The Clang ccache identity includes the real compiler binaries and the wrapper,
 so changing the toolchain behind the wrapper invalidates cached compilations.
 
+The build generates `latx-version.h` instead of passing `LATX_VERSION` to every
+C/C++ compilation. Only version-display and AOT-footer consumers include it.
+The `latx_version` override, Git-derived fallback and debug/release footer
+formats remain unchanged. Version-only changes affect the consumers' header
+dependencies without changing unrelated compilation commands or direct-cache
+identities. Other configure-time generators can still cause rebuilds: for
+example, `convert.py` rewrites shared opcode headers during reconfiguration.
+The header is generated at configuration time, matching the previous version
+selection lifetime; this does not introduce automatic Git polling in Ninja.
+
 ## Local workflow checks
 
 ```sh
 python3 -B tests/ci/test_lat_ci_matrix.py
 python3 -B tests/ci/test_lat_ci_workflows.py
 python3 -B tests/ci/test_lat_ci_release.py
+# With meson, ninja, ccache and a native C compiler on PATH:
+python3 -B tests/ci/test_lat_ci_version.py
 actionlint .github/workflows/release.yml .github/workflows/tests.yml \
   .github/workflows/clang.yml .github/workflows/build-docker-images.yml
 git diff --check
@@ -125,3 +137,10 @@ git diff --check
 These validate selection logic and workflow definitions. Actual queue time,
 cache hit rates, image publication and build/test completion must be measured
 in GitHub Actions after rollout; job-count reduction is not a timing guarantee.
+
+The version-cache test compiles the actual Meson version rules and AOT footer
+macros in an isolated native fixture. It checks incremental rebuild scope,
+direct hits after cleaning objects, and changed version/footer output in both
+debug and release modes. It does not run the LoongArch translator or establish
+AOT runtime compatibility by itself; the normal build and `lat-pr-fast` gates
+remain required for the candidate.

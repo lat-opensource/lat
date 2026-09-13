@@ -13,6 +13,7 @@
 #include "qemu-def.h"
 #include "segment.h"
 #include "aot.h"
+#include "latx-version.h"
 #include "aot_exit.h"
 #include <stdlib.h>
 #include <math.h>

@@ -105,7 +105,11 @@ if latx_version == ''
   latx_version = 'unknown'
 endif
 
-add_project_arguments('-DLATX_VERSION="' + latx_version + '"', language: ['c', 'cpp'])
+# Only version consumers include this header. A global -D changes every
+# compilation command on each revision and defeats ccache's direct mode.
+latx_version_data = configuration_data()
+latx_version_data.set_quoted('LATX_VERSION', latx_version)
+configure_file(output: 'latx-version.h', configuration: latx_version_data)
 
 # The path to glib.h is added to all compilation commands.  This was
 # grandfathered in from the QEMU Makefiles.

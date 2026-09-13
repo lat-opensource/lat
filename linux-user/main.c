@@ -19,6 +19,7 @@
 
 #include "library_private.h"
 #include "qemu/osdep.h"
+#include "latx-version.h"
 #include "qemu-common.h"
 #include "qemu/units.h"
 #include "qemu/accel.h"

@@ -10,6 +10,7 @@
  * @brief AOT optimization
  */
 #include "aot_merge.h"
+#include "latx-version.h"
 #include "latx-options.h"
 #include "file_ctx.h"
 
