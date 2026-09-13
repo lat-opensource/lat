@@ -64,8 +64,8 @@ permissions:
 # Test registration and suite selection rules are documented in tests/README.md.
 concurrency:
   # Keep reusable calls separate from the caller and from Clang.
-  group: lat-tests-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: lat-tests-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/master') }}
 
 jobs:
   select-matrix:

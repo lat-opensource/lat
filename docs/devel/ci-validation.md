@@ -92,9 +92,12 @@ integration or performance acceptance testing.
 ## Avoiding repeated work
 
 Each PR workflow cancels older runs of the same workflow and PR when a new run
-starts. Different PRs do not cancel one another. Master, scheduled, manual and
-release runs are not cancelled by this policy. GCC push builds run only on
-`master` or version tags, and assigning a PR no longer triggers a build.
+starts. GCC, Clang and test workflows also cancel obsolete master push runs.
+Their concurrency groups include the event type, so a master push cannot cancel
+manual, scheduled or release validation on the same ref. Different PRs do not
+cancel one another. Version-tag runs are not cancelled by this policy. Image
+publication retains its separate scheduling policy. GCC push builds run only
+on `master` or version tags, and assigning a PR no longer triggers a build.
 
 Test and Clang jobs persist ccache separately from product build caches, with
 keys separating the container, sanitizer mode where applicable, Dockerfiles and
