@@ -31,6 +31,7 @@
 
 #include "qapi/error.h"
 #include "qemu.h"
+#include "guest-seccomp.h"
 #include "qemu/path.h"
 #include "qemu/queue.h"
 #include "qemu/config-file.h"
@@ -235,6 +236,12 @@ void fork_end(int child)
            Discard information about the parent threads.  */
         CPU_FOREACH_SAFE(cpu, next_cpu) {
             if (cpu != thread_cpu) {
+                TaskState *task = cpu->opaque;
+
+                if (task) {
+                    guest_seccomp_filter_unref(task->seccomp_filter);
+                    task->seccomp_filter = NULL;
+                }
                 QTAILQ_REMOVE_RCU(&cpus, cpu, node);
             }
         }

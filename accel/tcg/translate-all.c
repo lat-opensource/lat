@@ -193,6 +193,13 @@ static void smc_retrans_destory(void)
     }
 }
 
+void latx_smc_thread_cleanup(void)
+{
+    /* The tree owns its nodes, but the referenced TBs belong to the shared
+     * translation cache and must remain alive for other guest threads. */
+    smc_retrans_destory();
+}
+
 #endif
 
 /**
