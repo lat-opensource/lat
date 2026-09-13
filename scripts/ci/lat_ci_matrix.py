@@ -17,11 +17,17 @@ BUILD_TYPES = [
     {"NAME": "build64-dbg", "OPT": "-c"},
 ]
 TEST_CONTAINERS = [
-    {"name": "latx-runner-aosc", "tag": "loong64", "sanitizers": False,
+    {"name": "latx-runner-aosc",
+     "dockerfile": ".github/.ci/aosc/Dockerfile",
+     "tag": "loong64", "sanitizers": False,
      "prepare_meson": "command -v meson >/dev/null || oma install -y meson"},
-    {"name": "latx-runner-debian", "tag": "loong64", "sanitizers": True,
+    {"name": "latx-runner-debian",
+     "dockerfile": ".github/.ci/debian/Dockerfile",
+     "tag": "loong64", "sanitizers": True,
      "prepare_meson": "command -v meson >/dev/null || { apt-get update && apt-get install -y meson; }"},
-    {"name": "latx-runner-fedora", "tag": "loongarch64", "sanitizers": False,
+    {"name": "latx-runner-fedora",
+     "dockerfile": ".github/.ci/fedora/Dockerfile",
+     "tag": "loongarch64", "sanitizers": False,
      "prepare_meson": "command -v meson >/dev/null"},
 ]
 BUILD_FILES = {

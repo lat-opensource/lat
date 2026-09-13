@@ -100,8 +100,12 @@ publication retains its separate scheduling policy. GCC push builds run only
 on `master` or version tags, and assigning a PR no longer triggers a build.
 
 Test and Clang jobs persist ccache separately from product build caches, with
-keys separating the container, sanitizer mode where applicable, Dockerfiles and
-commit. Prefix restoration reuses prior compilations, and the container prints
+keys separating the container, sanitizer mode where applicable, its own
+Dockerfile and commit. Changing one distro's Dockerfile does not invalidate the
+other distros' test cache keys. The `tests-v2` keys retain a same-container,
+same-sanitizer `tests-v1` restore fallback for rollout; ccache still validates
+compiler options and input contents before reusing objects.
+Prefix restoration reuses prior compilations, and the container prints
 ccache statistics even when compilation or testing fails. Meson build trees are
 not restored across fresh runners. The Fedora and Clang images include ccache;
 the test job can install it in older Fedora images during rollout.

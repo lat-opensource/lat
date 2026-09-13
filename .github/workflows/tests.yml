@@ -108,9 +108,10 @@ jobs:
         uses: actions/cache@v6
         with:
           path: /tmp/lat-test-cache
-          key: tests-v1-${{ matrix.container.name }}-${{ matrix.container.sanitizers }}-${{ hashFiles('.github/.ci/**/Dockerfile') }}-${{ github.sha }}
+          key: tests-v2-${{ matrix.container.name }}-${{ matrix.container.sanitizers }}-${{ hashFiles(matrix.container.dockerfile) }}-${{ github.sha }}
           restore-keys: |
-            tests-v1-${{ matrix.container.name }}-${{ matrix.container.sanitizers }}-${{ hashFiles('.github/.ci/**/Dockerfile') }}-
+            tests-v2-${{ matrix.container.name }}-${{ matrix.container.sanitizers }}-${{ hashFiles(matrix.container.dockerfile) }}-
+            tests-v1-${{ matrix.container.name }}-${{ matrix.container.sanitizers }}-
 
       - name: Setup QEMU
         uses: docker/setup-qemu-action@v4
