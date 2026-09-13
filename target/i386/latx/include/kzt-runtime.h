@@ -22,6 +22,7 @@
  */
 extern int option_kzt;
 extern uint32_t kzt_effective_groups;
+void kzt_reclaim_unloaded_headers(void);
 
 static inline bool latx_kzt_runtime_enabled(void)
 {
