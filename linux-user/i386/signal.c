@@ -454,6 +454,7 @@ static void setup_sigcontext(struct target_sigcontext *sc,
     CPUState *cs = env_cpu(env);
 #ifdef CONFIG_LATX
     save_xmm_to_env(env);
+    cpu_x86_sync_latx_fpu_status(env);
     cpu_x86_canonicalize_latx_mmx_state(env);
 #endif
 #ifndef TARGET_X86_64
@@ -639,7 +640,10 @@ void setup_frame(int sig, struct target_sigaction *ka,
 
     unlock_user_struct(frame, frame_addr, 1);
 
-    cpu_x86_init_user_x87(env);
+    cpu_x86_init_user_fpstate(env);
+#ifdef CONFIG_LATX
+    load_xmm_from_env(env);
+#endif
 
     return;
 
@@ -731,7 +735,10 @@ void setup_rt_frame(int sig, struct target_sigaction *ka,
 
     unlock_user_struct(frame, frame_addr, 1);
 
-    cpu_x86_init_user_x87(env);
+    cpu_x86_init_user_fpstate(env);
+#ifdef CONFIG_LATX
+    load_xmm_from_env(env);
+#endif
 
     return;
 
