@@ -19,8 +19,11 @@ esac
 workdir=$(mktemp -d)
 trap 'rm -rf "$workdir"' EXIT HUP INT TERM
 
+guest_dir=${LATX_SIGNAL_GUEST_DIR:-$workdir}
 compiler=
-if command -v clang-19 >/dev/null 2>&1 &&
+if [ -n "${LATX_SIGNAL_GUEST_DIR:-}" ]; then
+    compiler=prebuilt
+elif command -v clang-19 >/dev/null 2>&1 &&
         command -v ld.lld >/dev/null 2>&1; then
     clang=clang-19
     compiler=clang
@@ -40,19 +43,24 @@ compile_case()
     name=$1
     number=$2
 
-    if [ "$compiler" = clang ]; then
+    if [ "$compiler" = prebuilt ]; then
+        if [ ! -x "$guest_dir/$name" ]; then
+            echo "FAIL: guest executable missing: $guest_dir/$name" >&2
+            exit 1
+        fi
+    elif [ "$compiler" = clang ]; then
         "$clang" --target="$arch-linux-gnu" -fuse-ld=lld -nostdlib \
             -static -no-pie -O2 -ffreestanding -fno-builtin \
             -fno-stack-protector -mno-sse -mno-sse2 -mmmx \
             -Wl,--build-id=none "$signal_flags" \
             -DTEST_CASE="$number" "$source_file" \
-            -o "$workdir/$name"
+            -o "$guest_dir/$name"
     else
         "${CC:-cc}" "$bits" -nostdlib -static -no-pie -O2 -ffreestanding \
             -fno-builtin -fno-stack-protector -mno-sse -mno-sse2 -mmmx \
             -Wl,--build-id=none "$signal_flags" \
             -DTEST_CASE="$number" "$source_file" \
-            -o "$workdir/$name"
+            -o "$guest_dir/$name"
     fi
 }
 
@@ -63,7 +71,7 @@ run_case()
 
     set +e
     timeout 10s env LATX_AOT=0 LATX_KZT=0 LATX_SOFTFPU="$mode" \
-        "$emulator" "$workdir/$name"
+        "$emulator" "$guest_dir/$name"
     ret=$?
     set -e
 
