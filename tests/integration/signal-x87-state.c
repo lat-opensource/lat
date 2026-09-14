@@ -5,6 +5,11 @@
 #define TEST_SSE_ENTRY 4
 #define TEST_AVX_ENTRY 5
 #define TEST_X87_NONZERO_TOP 6
+#define TEST_X87_EXCEPTION_FLAGS 7
+#define TEST_X87_DENORMAL_FLAG 8
+#define TEST_HANDLER_FLAG_LEAK 9
+#define TEST_SSE_EXCEPTION_FLAGS 10
+#define TEST_MIXED_EXCEPTION_FLAGS 11
 
 #ifndef TEST_CASE
 #error TEST_CASE must select an x87 signal regression
@@ -81,6 +86,18 @@ static uint64_t handler_vector[4] __attribute__((aligned(32)));
 static uint64_t restored_vector[4] __attribute__((aligned(32)));
 static uint32_t handler_mxcsr;
 static uint16_t restored_top;
+static uint16_t signal_frame_status;
+static uint32_t signal_frame_mxcsr;
+static const uint64_t tiny_value = 0x39b4484bfeebc2a0ULL; /* 1e-30 */
+
+static struct fxsave_area *signal_fxsave(void *context)
+{
+    /* Linux UAPI ucontext: mcontext.fpregs at 224 (64-bit), 96 (32-bit). */
+    unsigned long address = *(unsigned long *)((uint8_t *)context +
+                                              (sizeof(long) == 8 ? 224 : 96));
+
+    return (void *)(address + (sizeof(long) == 8 ? 0 : 112));
+}
 
 static inline long target_syscall4(long nr, long arg1, long arg2,
                                    long arg3, long arg4)
@@ -126,11 +143,9 @@ static void signal_handler(int sig, void *info, void *context)
     (void)context;
 
 #if TEST_CASE == TEST_X87_NONZERO_TOP
-    /* Linux UAPI ucontext: mcontext.fpregs at 224 (64-bit), 96 (32-bit). */
     unsigned long address = *(unsigned long *)((uint8_t *)context +
                                               (sizeof(long) == 8 ? 224 : 96));
-    struct fxsave_area *state = (void *)(address +
-                                       (sizeof(long) == 8 ? 0 : 112));
+    struct fxsave_area *state = signal_fxsave(context);
     int i;
 
     if (!handler_ran) {
@@ -161,6 +176,56 @@ static void signal_handler(int sig, void *info, void *context)
     } else {
         restored_top = (state->fsw >> 11) & 7;
     }
+#elif TEST_CASE == TEST_X87_EXCEPTION_FLAGS || \
+      TEST_CASE == TEST_X87_DENORMAL_FLAG || \
+      TEST_CASE == TEST_HANDLER_FLAG_LEAK || \
+      TEST_CASE == TEST_SSE_EXCEPTION_FLAGS || \
+      TEST_CASE == TEST_MIXED_EXCEPTION_FLAGS
+    struct fxsave_area *state = signal_fxsave(context);
+
+#if TEST_CASE == TEST_SSE_EXCEPTION_FLAGS || \
+    TEST_CASE == TEST_MIXED_EXCEPTION_FLAGS
+    signal_frame_status = state->fsw;
+    signal_frame_mxcsr = state->mxcsr;
+    __asm__ volatile(
+        "fnstsw %0\n\t"
+        "stmxcsr %1\n\t"
+        "fninit"
+        : "=m"(handler_state.fsw), "=m"(handler_mxcsr)
+        :
+        : "memory");
+#elif TEST_CASE == TEST_X87_DENORMAL_FLAG
+    if (!handler_ran) {
+        unsigned long address = *(unsigned long *)((uint8_t *)context +
+                                                  (sizeof(long) == 8 ?
+                                                   224 : 96));
+
+        state->fsw |= 1 << 1;
+#ifndef __x86_64__
+        *(uint32_t *)(address + 4) |= 1 << 1;
+#endif
+        if (*(uint32_t *)((uint8_t *)state + 464) == 0x46505853) {
+            *(uint64_t *)((uint8_t *)state + 512) |= 1;
+        }
+    } else {
+        signal_frame_status = state->fsw;
+    }
+#elif TEST_CASE == TEST_HANDLER_FLAG_LEAK
+    if (!handler_ran) {
+        __asm__ volatile(
+            "fld1\n\t"
+            "fldl %0\n\t"
+            "faddp"
+            :
+            : "m"(tiny_value)
+            : "st", "memory");
+    } else {
+        signal_frame_status = state->fsw;
+    }
+#else
+    signal_frame_status = state->fsw;
+#endif
+    __asm__ volatile("fninit" : : : "memory");
 #elif TEST_CASE == TEST_SSE_ENTRY || TEST_CASE == TEST_AVX_ENTRY
     /* Compiler-generated FP/vector instructions are disabled for this file. */
     __asm__ volatile("stmxcsr %0" : "=m"(handler_mxcsr));
@@ -353,6 +418,171 @@ static int run_test(void)
     }
     __asm__ volatile("fninit" : : : "memory");
     return restored_top == 3 ? 0 : 61;
+}
+#elif TEST_CASE == TEST_X87_EXCEPTION_FLAGS
+static int run_test(void)
+{
+    uint16_t restored_status;
+
+    /* 1 + 1e-30 is inexact in x87 extended precision. */
+    __asm__ volatile(
+        "fninit\n\t"
+        "fld1\n\t"
+        "fldl %0\n\t"
+        "faddp"
+        :
+        : "m"(tiny_value)
+        : "st", "memory");
+    if (send_signal() < 0 || handler_ran != 1) {
+        return 11;
+    }
+    __asm__ volatile(
+        "fnstsw %0\n\t"
+        "fninit"
+        : "=m"(restored_status)
+        :
+        : "memory");
+    if (!(signal_frame_status & (1 << 5))) {
+        return 72;
+    }
+    return restored_status & (1 << 5) ? 0 : 71;
+}
+#elif TEST_CASE == TEST_X87_DENORMAL_FLAG
+static int run_test(void)
+{
+    __asm__ volatile("fninit" : : : "memory");
+    if (send_signal() < 0 || handler_ran != 1) {
+        return 11;
+    }
+    /* No FP instruction between sigreturn and the second frame save. */
+    if (send_signal() < 0 || handler_ran != 2) {
+        return 11;
+    }
+    __asm__ volatile("fninit" : : : "memory");
+    return signal_frame_status & (1 << 1) ? 0 : 81;
+}
+#elif TEST_CASE == TEST_HANDLER_FLAG_LEAK
+static int run_test(void)
+{
+    __asm__ volatile("fninit" : : : "memory");
+    if (send_signal() < 0 || handler_ran != 1) {
+        return 11;
+    }
+    /* Handler flags must not survive restoration of a clean frame. */
+    if (send_signal() < 0 || handler_ran != 2) {
+        return 11;
+    }
+    __asm__ volatile("fninit" : : : "memory");
+    return signal_frame_status & 0x3f ? 91 : 0;
+}
+#elif TEST_CASE == TEST_SSE_EXCEPTION_FLAGS
+static int run_test(void)
+{
+    uint32_t mxcsr = 0x1f80;
+    uint32_t restored_mxcsr;
+    uint16_t restored_status;
+
+    __asm__ volatile(
+        "fninit\n\t"
+        "ldmxcsr %0\n\t"
+        "xorps %%xmm0, %%xmm0\n\t"
+        "divss %%xmm0, %%xmm0"
+        :
+        : "m"(mxcsr)
+        : "memory");
+    if (send_signal() < 0 || handler_ran != 1) {
+        return 11;
+    }
+    __asm__ volatile(
+        "fnstsw %0\n\t"
+        "stmxcsr %1\n\t"
+        "fninit"
+        : "=m"(restored_status), "=m"(restored_mxcsr)
+        :
+        : "memory");
+    if (signal_frame_status & 0x3f) {
+        return 101;
+    }
+    if (!(signal_frame_mxcsr & 1)) {
+        return 102;
+    }
+    if (handler_state.fsw || handler_mxcsr != 0x1f80) {
+        return 103;
+    }
+    if (restored_status & 0x3f) {
+        return 104;
+    }
+    return restored_mxcsr & 1 ? 0 : 105;
+}
+#elif TEST_CASE == TEST_MIXED_EXCEPTION_FLAGS
+static int check_mixed_state(void)
+{
+    uint32_t restored_mxcsr;
+    uint16_t restored_status;
+
+    __asm__ volatile(
+        "fnstsw %0\n\t"
+        "stmxcsr %1"
+        : "=m"(restored_status), "=m"(restored_mxcsr)
+        :
+        : "memory");
+    if ((signal_frame_status & 0x3f) != (1 << 5) ||
+        !(signal_frame_mxcsr & 1)) {
+        return 111;
+    }
+    if (handler_state.fsw || handler_mxcsr != 0x1f80) {
+        return 112;
+    }
+    if ((restored_status & 0x3f) != (1 << 5) ||
+        !(restored_mxcsr & 1)) {
+        return 113;
+    }
+    return 0;
+}
+
+static int run_test(void)
+{
+    uint32_t mxcsr = 0x1f80;
+    int ret;
+
+    /* x87 first, then SSE: both domains must retain only their own flag. */
+    __asm__ volatile(
+        "fninit\n\t"
+        "ldmxcsr %0\n\t"
+        "fld1\n\t"
+        "fldl %1\n\t"
+        "faddp\n\t"
+        "xorps %%xmm0, %%xmm0\n\t"
+        "divss %%xmm0, %%xmm0"
+        :
+        : "m"(mxcsr), "m"(tiny_value)
+        : "st", "memory");
+    if (send_signal() < 0 || handler_ran != 1) {
+        return 11;
+    }
+    ret = check_mixed_state();
+    if (ret) {
+        return ret;
+    }
+
+    /* SSE first, then x87: switching domains must archive SSE flags. */
+    __asm__ volatile(
+        "fninit\n\t"
+        "ldmxcsr %0\n\t"
+        "xorps %%xmm0, %%xmm0\n\t"
+        "divss %%xmm0, %%xmm0\n\t"
+        "fld1\n\t"
+        "fldl %1\n\t"
+        "faddp"
+        :
+        : "m"(mxcsr), "m"(tiny_value)
+        : "st", "memory");
+    if (send_signal() < 0 || handler_ran != 2) {
+        return 11;
+    }
+    ret = check_mixed_state();
+    __asm__ volatile("fninit" : : : "memory");
+    return ret;
 }
 #else
 #error unknown TEST_CASE

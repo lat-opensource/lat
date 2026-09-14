@@ -1435,6 +1435,8 @@ typedef struct CPUX86State {
  #endif
     uint8_t mode_fpu;
     bool fpu_clobber;
+    /* The current host FCSR sticky flags were produced by x87 code. */
+    bool fcsr_is_x87;
 #endif
     /* standard registers */
     uint64_t regs[CPU_NB_REGS];

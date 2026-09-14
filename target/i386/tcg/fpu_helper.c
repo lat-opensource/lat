@@ -3279,12 +3279,10 @@ void cpu_x86_sync_latx_fcsr(CPUX86State *env)
             (!option_enable_fcsr_exc && !(fpuc & x87_mask))) {
             fcsr |= 1 << i;
         }
-        if (fpus & x87_mask) {
-            fcsr |= 1 << (16 + i);
-        }
     }
 
     env->fcsr = fcsr;
+    env->fcsr_is_x87 = false;
     set_float_exception_flags(
         ((fpus & FPUS_IE ? float_flag_invalid : 0) |
          (fpus & FPUS_ZE ? float_flag_divbyzero : 0) |
@@ -3297,7 +3295,23 @@ void cpu_x86_sync_latx_fcsr(CPUX86State *env)
 
 void cpu_x86_sync_latx_fpu_status(CPUX86State *env)
 {
+    static const uint8_t x87_flag_map[5] = {
+        FPUS_IE, FPUS_ZE, FPUS_OE, FPUS_UE, FPUS_PE,
+    };
+    uint32_t fcsr = env->fcsr;
     uint8_t flags = get_float_exception_flags(&env->fp_status);
+    int i;
+
+    /* Attribute shared LA sticky flags to their current guest FP domain. */
+    for (i = 0; i < 5; i++) {
+        if (fcsr & (1u << (20 - i))) {
+            if (env->fcsr_is_x87) {
+                env->fpus |= x87_flag_map[i];
+            } else {
+                env->mxcsr |= x87_flag_map[i];
+            }
+        }
+    }
 
     fpu_set_exception(env,
                       ((flags & float_flag_invalid ? FPUS_IE : 0) |
@@ -3353,6 +3367,7 @@ void cpu_x86_init_user_fpstate(CPUX86State *env)
 
 #ifdef CONFIG_LATX
     env->fcsr = 0;
+    env->fcsr_is_x87 = false;
     env->mode_fpu = LATX_FPU_MODE_X87;
 #endif
 }
