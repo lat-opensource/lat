@@ -78,6 +78,13 @@ if 'CONFIG_LATX' in config_host and host_machine.cpu_family() == 'loongarch64'
 endif
 
 test(
+  'test-latx-smc-shmm',
+  python,
+  args: [files('test-latx-smc-shmm.py'), project_source_root],
+  suite: 'lat-pr-fast',
+)
+
+test(
   'test-x11-synchronize-callback',
   python,
   args: [
