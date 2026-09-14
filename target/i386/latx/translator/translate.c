@@ -2421,7 +2421,8 @@ int tr_ir2_generate(struct TranslationBlock *tb)
         imm_cache->curr_ir2_index = lsenv->tr_data->ir2_inst_num_current;
 #endif
         tr_init_for_each_ir1_in_tb(pir1, ir1_nr, i);
-        if (is_x87) {
+        if (is_x87 &&
+            (i == 0 || !ir1_is_x87_insn(ir1_opcode(pir1 - 1)))) {
             begin_x87_fcsr_access();
         }
 #if defined(CONFIG_LATX_DEBUG) && defined(TARGET_X86_64) && \
@@ -2462,7 +2463,9 @@ int tr_ir2_generate(struct TranslationBlock *tb)
             gen_softfpu_helper_epilogue(pir1);
         }
 
-        if (is_x87) {
+        if (is_x87 &&
+            (i + 1 == ir1_nr ||
+             !ir1_is_x87_insn(ir1_opcode(pir1 + 1)))) {
             end_x87_fcsr_access();
         }
 
