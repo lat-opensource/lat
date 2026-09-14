@@ -454,6 +454,7 @@ static void setup_sigcontext(struct target_sigcontext *sc,
     CPUState *cs = env_cpu(env);
 #ifdef CONFIG_LATX
     save_xmm_to_env(env);
+    cpu_x86_sync_latx_fpu_status(env);
     cpu_x86_canonicalize_latx_mmx_state(env);
 #endif
 #ifndef TARGET_X86_64

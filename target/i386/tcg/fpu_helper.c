@@ -3284,6 +3284,27 @@ void cpu_x86_sync_latx_fcsr(CPUX86State *env)
     }
 
     env->fcsr = fcsr;
+    set_float_exception_flags(
+        ((fpus & FPUS_IE ? float_flag_invalid : 0) |
+         (fpus & FPUS_ZE ? float_flag_divbyzero : 0) |
+         (fpus & FPUS_OE ? float_flag_overflow : 0) |
+         (fpus & FPUS_UE ? float_flag_underflow : 0) |
+         (fpus & FPUS_PE ? float_flag_inexact : 0) |
+         (fpus & FPUS_DE ? float_flag_input_denormal : 0)),
+        &env->fp_status);
+}
+
+void cpu_x86_sync_latx_fpu_status(CPUX86State *env)
+{
+    uint8_t flags = get_float_exception_flags(&env->fp_status);
+
+    fpu_set_exception(env,
+                      ((flags & float_flag_invalid ? FPUS_IE : 0) |
+                       (flags & float_flag_divbyzero ? FPUS_ZE : 0) |
+                       (flags & float_flag_overflow ? FPUS_OE : 0) |
+                       (flags & float_flag_underflow ? FPUS_UE : 0) |
+                       (flags & float_flag_inexact ? FPUS_PE : 0) |
+                       (flags & float_flag_input_denormal ? FPUS_DE : 0)));
 }
 
 void cpu_x86_sync_latx_fpu_mode(CPUX86State *env)

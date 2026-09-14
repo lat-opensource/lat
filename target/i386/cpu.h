@@ -1947,6 +1947,7 @@ void cpu_x86_init_user_fpstate(CPUX86State *s);
 #ifdef CONFIG_LATX
 void cpu_x86_canonicalize_latx_mmx_state(CPUX86State *s);
 void cpu_x86_sync_latx_fcsr(CPUX86State *s);
+void cpu_x86_sync_latx_fpu_status(CPUX86State *s);
 void cpu_x86_sync_latx_fpu_mode(CPUX86State *s);
 #endif
 
