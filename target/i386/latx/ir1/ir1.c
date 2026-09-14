@@ -130,6 +130,9 @@ void (*disassemble_trace_cmp)(const uint8_t *code, size_t code_size,
         uint64_t address,
         size_t count,
         struct la_dt_insn *inputinsn, int mode) = disassemble_trace_cmp_nop;
+
+#include "ir1-decode.h"
+
 static IR1_OPND ir1_opnd_new_static_reg(IR1_OPND_TYPE opnd_type, int size,
                                         dt_x86_reg reg)
 {
@@ -331,31 +334,44 @@ static void __attribute__((__constructor__)) x86tomisp_ir1_init(void)
 #endif
 };
 
-ADDRX ir1_disasm(IR1_INST *ir1, uint8_t *addr, ADDRX t_pc, int ir1_num, void *pir1_base)
+ADDRX ir1_disasm(IR1_INST *ir1, uint8_t *addr, ADDRX t_pc, int ir1_num,
+                 void *pir1_base)
 {
     struct la_dt_insn *info;
-    uint32_t nop = 0x401f0f;
-    uint64_t nop_5 = 0x441f0f;
+    bool original_code = true;
+    uint8_t nop[15] = { 0x0f, 0x1f, 0x40, 0 };
+    uint8_t nop_5[15] = { 0x0f, 0x1f, 0x44, 0, 0 };
     if (((*((uint32_t *)addr)) & 0xf8ffffff) == 0xc81e0ff3) {
         //repleace endbr32/rdsspd with 4 bytes nop, just a temporary solution
-        addr = (uint8_t *)&nop;
+        addr = nop;
+        original_code = false;
     }
 
     if (((*((uint64_t *)addr)) & 0xfffffaff) == 0x1e0f48f3) {
         /* repleace rdsspq with 5 bytes nop, just a temporary solution */
-        addr = (uint8_t *)&nop_5;
+        addr = nop_5;
+        original_code = false;
     }
 #ifdef CONFIG_LATX_AVX_OPT
     if (((*((uint64_t *)addr)) & 0xfffffaff) == 0xae0f48f3) {
         /* repleace incsspq with 5 bytes nop, just a temporary solution */
-        addr = (uint8_t *)&nop_5;
+        addr = nop_5;
+        original_code = false;
     }
 #endif
     /* FIXME:the count parameter in cs_disasm is 1, it means we translte 1 insn at a time,
      * there should be a performance improvement if we increase the number, but
      * for now there are some problems if we change it. It will be settled later.
      */
-    int count = la_disa_v1(addr, 15, (uint64_t)t_pc,
+    info = original_code ? ir1_hot_decode(
+        addr, t_pc, ir1_num, pir1_base, CODEIS64) : NULL;
+    bool hot_hit = info != NULL;
+    if (!hot_hit && original_code) {
+        info = ir1_decode_template_lookup(addr, 15, t_pc, ir1_num,
+                                          pir1_base, CODEIS64);
+    }
+    bool template_hit = !hot_hit && info != NULL;
+    int count = info ? 1 : la_disa_v1(addr, 15, (uint64_t)t_pc,
         1, &info, ir1_num, pir1_base, CODEIS64);
 
     ir1->info = info;
@@ -387,6 +403,9 @@ ADDRX ir1_disasm(IR1_INST *ir1, uint8_t *addr, ADDRX t_pc, int ir1_num, void *pi
                 info->x86.operands[i].mem.segment = dt_X86_REG_INVALID;
             }
         }
+    }
+    if (original_code && !hot_hit && !template_hit) {
+        ir1_decode_template_insert(addr, 15, CODEIS64, info);
     }
 #ifdef CONFIG_LATX_INSTS_PATTERN
     ir1->instptn.opc  = INSTPTN_OPC_NONE;
