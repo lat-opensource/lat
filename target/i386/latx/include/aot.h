@@ -264,6 +264,8 @@ typedef enum aot_rel_kind {
     LOAD_HELPER_END,
 
     LOAD_TUNNEL_ADDR_BEGIN,
+    /* Keep this outside the dense tunnel relocation range. */
+    B_SHADOW_JMP_GLUE = 0x10000,
 } aot_rel_kind;
 
 typedef struct aot_rel {
