@@ -89,6 +89,18 @@ run_case()
     53) reason="handler inherited interrupted vector state" ;;
     54) reason="sigreturn corrupted vector state" ;;
     61) reason="sigreturn misclassified nonzero x87 TOP as MMX" ;;
+    71) reason="sigreturn lost the x87 precision flag" ;;
+    72) reason="signal frame lost the x87 precision flag" ;;
+    81) reason="signal round-trip lost the x87 denormal flag" ;;
+    91) reason="handler exception flags leaked past sigreturn" ;;
+    101) reason="SSE exception flag leaked into the x87 signal state" ;;
+    102) reason="signal frame lost the SSE exception flag" ;;
+    103) reason="handler inherited interrupted FP exception state" ;;
+    104) reason="sigreturn copied the SSE flag into x87 state" ;;
+    105) reason="sigreturn lost the SSE exception flag" ;;
+    111) reason="signal frame mixed x87 and SSE exception flags" ;;
+    112) reason="mixed exception flags leaked into the handler" ;;
+    113) reason="sigreturn mixed x87 and SSE exception flags" ;;
     124) reason="test timed out" ;;
     *) reason="unexpected exit status $ret" ;;
     esac
@@ -103,6 +115,11 @@ compile_case sse-entry 4
 compile_case avx-entry 5
 if [ "$signal_flags" != -DTEST_LEGACY_SIGNAL ]; then
     compile_case x87-nonzero-top 6
+    compile_case x87-exception-flags 7
+    compile_case x87-denormal-flag 8
+    compile_case handler-flag-leak 9
+    compile_case sse-exception-flags 10
+    compile_case mixed-exception-flags 11
 fi
 
 for mode in 0 1 2; do
@@ -113,5 +130,10 @@ for mode in 0 1 2; do
     run_case avx-entry "$mode"
     if [ "$signal_flags" != -DTEST_LEGACY_SIGNAL ]; then
         run_case x87-nonzero-top "$mode"
+        run_case x87-exception-flags "$mode"
+        run_case x87-denormal-flag "$mode"
+        run_case handler-flag-leak "$mode"
+        run_case sse-exception-flags "$mode"
+        run_case mixed-exception-flags "$mode"
     fi
 done
