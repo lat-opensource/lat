@@ -29,4 +29,13 @@ void jrra_pre_translate(void** list, int num, CPUState *cpu,
                         uint32_t flags, uint32_t cflags);
 void jrra_context_switch_bt_to_native(void);
 void jrra_relocate_return_target(TranslationBlock *tb, uintptr_t new_base);
+
+#if defined(TARGET_X86_64) && defined(CONFIG_LATX_JRRA)
+/*
+ * Return a host code entry that dispatches to guest_restorer, or zero if
+ * bridge creation fails. The entry must remain valid while signal handlers
+ * can still return through it.
+ */
+uintptr_t get_signal_return_bridge(target_ulong guest_restorer);
+#endif
 #endif
