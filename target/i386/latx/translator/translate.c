@@ -184,6 +184,8 @@ static char insn_info[MAX_IR1_NUM_PER_TB * IR1_INST_SIZE] = {0};
 static IR1_INST ir1_list[MAX_IR1_NUM_PER_TB];
 #endif
 
+__thread bool suppress_disasm_side_effects;
+
 IR1_INST *get_ir1_list(struct TranslationBlock *tb, ADDRX pc, int max_insns)
 {
     static uint8_t inst_cache[TCG_MAX_INSNS];
@@ -289,7 +291,8 @@ IR1_INST *get_ir1_list(struct TranslationBlock *tb, ADDRX pc, int max_insns)
         next_pir1->info = NULL;
     }
 #endif
-    if (pir1->info != NULL && ir1_num == 2 && ir1_is_return(pir1) &&
+    if (!suppress_disasm_side_effects && pir1->info != NULL &&
+        ir1_num == 2 && ir1_is_return(pir1) &&
         ir1_opcode(&ir1_list[0]) == dt_X86_INS_MOV) {
         IR1_INST *insert_ir1 = &ir1_list[0];
         IR1_OPND *opnd1 = ir1_get_opnd(insert_ir1, 1);
