@@ -29,6 +29,7 @@
 #include "aot_smc.h"
 #include "aot_page.h"
 #include "../translator/tr-vpaes.h"
+#include "crypto/aes.h"
 #include<sys/syscall.h>
 #include "exec/translate-all.h"
 #include "latx-smc.h"
@@ -183,6 +184,27 @@ int aot_buffer_all_num;
 /* Where the aot relocation table is loaded in buffer. */
 aot_rel *aot_rel_table;
 uint32_t aot_rel_entry_num;
+
+/* Integration tests use this marker to reject JIT fallback on hot AOT runs. */
+static void aot_test_mark_loaded(const char *lib_name)
+{
+    const char *marker = getenv("LATX_TEST_AOT_LOAD_MARKER");
+    int fd;
+
+    if (!marker) {
+        return;
+    }
+    fd = open(marker, O_WRONLY | O_CREAT | O_APPEND, 0600);
+    if (fd < 0) {
+        return;
+    }
+    if (write(fd, lib_name, strlen(lib_name)) < 0 ||
+        write(fd, "\n", 1) < 0) {
+        close(fd);
+        return;
+    }
+    close(fd);
+}
 
 void mk_aot_dir(char * pathname)
 {
@@ -1272,8 +1294,9 @@ static void* relkind_to_fixup_addr[] = {
     [LOAD_HELPER_AESKEYGENASSIST_XMM] = helper_aeskeygenassist_xmm,
     [LOAD_HELPER_AESDEC_XMM] = helper_aesdec_xmm,
     [LOAD_HELPER_AESDECLAST_XMM] = helper_aesdeclast_xmm,
-    [LOAD_HELPER_AESENC_XMM] = helper_aesenc_xmm,
-    [LOAD_HELPER_AESENCLAST_XMM] = helper_aesenclast_xmm,
+    [LOAD_HOST_AES_TE_LATX] = (void *)AES_Te_latx,
+    [LOAD_HOST_AES_SBOX_LATX] = (void *)AES_sbox_latx,
+    [LOAD_HOST_AES_VPAES_LASX] = (void *)AES_vpaes_lasx,
     [LOAD_HELPER_SHA1NEXTE] = helper_sha1nexte,
     [LOAD_HELPER_SHA1MSG1] = helper_sha1msg1,
     [LOAD_HELPER_SHA1MSG2] = helper_sha1msg2,
@@ -1609,6 +1632,7 @@ void recover_aot_tb(char *lib_name, uint64_t aot_offset, abi_long start,
         seg->buffer = curr_aot_buffer;
         seg->p_segment = p_segment;
         seg->seg_flag |= SEG_AOT_LOADED;
+        aot_test_mark_loaded(lib_name);
     }
     if (p_segment->aot_file_type & ELF_AOT_FILE) {
         aot_guest_code_protect(start, start + len, p_segment, curr_aot_buffer);
