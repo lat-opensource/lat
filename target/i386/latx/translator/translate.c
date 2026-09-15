@@ -139,6 +139,7 @@ void tr_init(void *tb)
         t->imm_cache->bucket = (IMM_CACHE_BUCKET *)mm_calloc(
             CACHE_MAX_CAPACITY, sizeof(IMM_CACHE_BUCKET));
     }
+    t->aes_table_kind = 0;
 }
 
 void tr_fini(bool check_the_extension)
@@ -1865,6 +1866,21 @@ static bool (*translate_functions[])(IR1_INST *) = {
     TRANS_FUNC_GEN_REAL(ENDING, NULL),
 };
 
+static void reset_aes_table_cache_for_non_aes(IR1_INST *ir1)
+{
+    TRANSLATION_DATA *t = lsenv->tr_data;
+
+    if (ir1_opcode(ir1) != dt_X86_INS_AESENC &&
+        ir1_opcode(ir1) != dt_X86_INS_AESENCLAST
+#ifdef CONFIG_LATX_AVX_OPT
+        && ir1_opcode(ir1) != dt_X86_INS_VAESENC
+        && ir1_opcode(ir1) != dt_X86_INS_VAESENCLAST
+#endif
+        ) {
+        t->aes_table_kind = 0;
+    }
+}
+
 bool ir1_translate(IR1_INST *ir1)
 {
 #ifdef CONFIG_LATX_INSTS_PATTERN
@@ -1884,6 +1900,8 @@ bool ir1_translate(IR1_INST *ir1)
         lsenv->current_ir1 = ir1_addr(ir1);
     }
 #endif
+
+    reset_aes_table_cache_for_non_aes(ir1);
 
     if (ir1_opcode(ir1) == dt_X86_INS_CALL) {
         if (!ir1_is_indirect_call(ir1)) {
