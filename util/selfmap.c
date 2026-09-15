@@ -58,6 +58,7 @@ IntervalTreeRoot *read_self_maps(void)
 
                 e->itree.start = start;
                 e->itree.last = end - 1;
+                e->offset = offset;
                 e->dev = makedev(dev_maj, dev_min);
                 e->inode = inode;
                 e->is_read  = fields[1][0] == 'r';
