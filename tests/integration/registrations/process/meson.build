@@ -1,3 +1,27 @@
+if 'x86_64-linux-user' in target_dirs
+  latx_integration_tests += [{
+    'name': 'test-proc-fd-closefrom-x86_64',
+    'runner': find_program('../../test-proc-fd-closefrom.sh'),
+    'args': [
+      emulators['latx-x86_64'],
+      files('../../proc-fd-closefrom.c'),
+      'x86_64',
+    ],
+  }]
+endif
+
+if 'i386-linux-user' in target_dirs
+  latx_integration_tests += [{
+    'name': 'test-proc-fd-closefrom-i386',
+    'runner': find_program('../../test-proc-fd-closefrom.sh'),
+    'args': [
+      emulators['latx-i386'],
+      files('../../proc-fd-closefrom.c'),
+      'i386',
+    ],
+  }]
+endif
+
 foreach arch : ['x86_64', 'i386']
   if arch + '-linux-user' in target_dirs
     latx_integration_tests += [{
