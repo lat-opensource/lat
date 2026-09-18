@@ -1,4 +1,5 @@
 #include "qemu/osdep.h"
+#include <glib/gstdio.h>
 
 #include "file_ctx.h"
 #include "aot-file-publish-test.h"

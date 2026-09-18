@@ -34,6 +34,7 @@
 #include "qemu.h"
 #include "qemu/pressure-vessel.h"
 #include "kzt-groups.h"
+#include "kzt-guest-tls.h"
 #include "kzt_relocation_transaction.h"
 
 static int kzt_relocation_slot_fits_page(uintptr_t slot_addr)
@@ -930,6 +931,24 @@ static int relocate_elf_rela(
 	Elf64_Sym *sym = &head->DynSym[ELF64_R_SYM(rela[i].r_info)];
         int bind = ELF64_ST_BIND(sym->st_info);
         const char* symname = SymName(head, sym);
+        if (latx_kzt_guest_tls_enabled() && transaction) {
+            const char *elf_name = ElfName(head);
+            const char *base_name = elf_name ? strrchr(elf_name, '/') : NULL;
+
+            base_name = base_name ? base_name + 1 : elf_name;
+            if (base_name &&
+                (!strcmp(base_name, "libc.so.6") ||
+                 !strncmp(base_name, "libc-", 5)) &&
+                (!strcmp(symname, "malloc") ||
+                 !strcmp(symname, "calloc") ||
+                 !strcmp(symname, "realloc") ||
+                 !strcmp(symname, "free") ||
+                 !strcmp(symname, "memalign") ||
+                 !strcmp(symname, "aligned_alloc") ||
+                 !strcmp(symname, "posix_memalign"))) {
+                continue;
+            }
+        }
         uint64_t *p = (uint64_t*)(rela[i].r_offset + head->delta);
         uintptr_t offs = 0;
         uintptr_t end = 0;
@@ -1558,6 +1577,24 @@ const char* FindNearestSymbolName(elfheader_t* h, void* p, uintptr_t* start, uin
         *sz = size;
 
     return ret;
+}
+
+uintptr_t FindElfSymbolAddress(elfheader_t *h, const char *name)
+{
+    if (!h || !name || h->fini_done) {
+        return 0;
+    }
+
+    for (size_t i = 0; i < h->numDynSym; ++i) {
+        const Elf64_Sym *sym = &h->DynSym[i];
+
+        if (sym->st_shndx != SHN_UNDEF && sym->st_value &&
+            ELF64_ST_TYPE(sym->st_info) == STT_FUNC &&
+            strcmp(h->DynStr + sym->st_name, name) == 0) {
+            return sym->st_value + h->delta;
+        }
+    }
+    return 0;
 }
 
 const char* VersionnedName(const char* name, int ver, const char* vername)

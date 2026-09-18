@@ -159,6 +159,10 @@
 #ifdef CONFIG_LATX
 #define TUNNEL_VIRTUAL_SYSCALL_ID 600
 #include "lsenv.h"
+#include "kzt-guest-tls.h"
+#include "kzt-guest-thread.h"
+#include "kzt-libc-semantic.h"
+#include "myalign.h"
 #include <tunnel_lib.h>
 #include "aot.h"
 #include "latx-options.h"
@@ -1201,7 +1205,7 @@ static uint16_t host_to_target_errno_table[ERRNO_TABLE_SIZE] = {
 #endif
 };
 
-static inline int host_to_target_errno(int err)
+int host_to_target_errno(int err)
 {
     if (err >= 0 && err < ERRNO_TABLE_SIZE &&
         host_to_target_errno_table[err]) {
@@ -1210,7 +1214,7 @@ static inline int host_to_target_errno(int err)
     return err;
 }
 
-static inline int target_to_host_errno(int err)
+int target_to_host_errno(int err)
 {
     if (err >= 0 && err < ERRNO_TABLE_SIZE &&
         target_to_host_errno_table[err]) {
@@ -9590,9 +9594,301 @@ abi_long do_arch_prctl(CPUX86State *env, int code, abi_ulong addr)
 #endif /* defined(TARGET_I386) */
 
 #define NEW_STACK_SIZE 0x200000
+#define LATX_HOST_THREAD_ATTACH_RETRIES 32
 
 
 static pthread_mutex_t clone_lock = PTHREAD_MUTEX_INITIALIZER;
+#ifdef CONFIG_LATX
+static CPUArchState *latx_host_thread_template;
+static pthread_key_t latx_host_thread_key;
+static pthread_once_t latx_host_thread_key_once = PTHREAD_ONCE_INIT;
+static int latx_host_thread_key_error;
+
+static void latx_host_thread_destructor(void *opaque);
+
+static void latx_host_thread_key_init(void)
+{
+    latx_host_thread_key_error =
+        pthread_key_create(&latx_host_thread_key,
+                           latx_host_thread_destructor);
+}
+
+static void latx_host_thread_release_cpu(CPUState *cpu)
+{
+    CPUX86State *env = cpu->env_ptr;
+    TaskState *ts = cpu->opaque;
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+    void *fast_jmp_cache = env->tb_jmp_cache_ptr;
+#endif
+
+    kzt_guest_tls_destroy(env);
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+    env->tb_jmp_cache_ptr = NULL;
+#endif
+    if (env->gdt.base) {
+        target_munmap(env->gdt.base,
+                      sizeof(uint64_t) * TARGET_GDT_ENTRIES, 0);
+        env->gdt.base = 0;
+    }
+    if (env->kzt_guest_stack_base) {
+        target_munmap(env->kzt_guest_stack_base, NEW_STACK_SIZE, 0);
+        env->kzt_guest_stack_base = 0;
+    }
+    object_property_set_bool(OBJECT(cpu), "realized", false, NULL);
+    object_unparent(OBJECT(cpu));
+    object_unref(OBJECT(cpu));
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+    latx_fast_jmp_cache_free_rcu(fast_jmp_cache);
+#endif
+    g_free(ts);
+}
+
+static void latx_host_thread_destructor(void *opaque)
+{
+    CPUState *cpu = opaque;
+
+    kzt_guest_thread_destroy(cpu->env_ptr);
+    kzt_libc_semantic_destroy(cpu->env_ptr);
+    if (kzt_guest_tls_cleanup_robust_list(cpu->env_ptr) != 0) {
+        fprintf(stderr,
+                "KZT Guest robust-list cleanup failed; "
+                "refusing to continue\n");
+        _exit(EXIT_FAILURE);
+    }
+    pthread_mutex_lock(&clone_lock);
+    latx_host_thread_release_cpu(cpu);
+    pthread_mutex_unlock(&clone_lock);
+
+    thread_cpu = NULL;
+    lsenv = NULL;
+    rcu_unregister_thread();
+}
+
+void latx_register_host_thread_template(CPUArchState *env)
+{
+    if (!latx_kzt_guest_tls_enabled()) {
+        return;
+    }
+    CPUState *cpu = env_cpu(env);
+
+    if (!close_latx_parallel) {
+        cpu->tcg_cflags |= CF_PARALLEL;
+    }
+}
+
+int latx_finalize_host_thread_template(CPUArchState *env)
+{
+    if (!latx_kzt_guest_tls_enabled()) {
+        return 0;
+    }
+    CPUState *source_cpu;
+    CPUState *template_cpu;
+    TaskState *source_ts;
+    TaskState *template_ts;
+    CPUArchState *template_env;
+    int result = -1;
+
+    if (!env || !env->segs[R_FS].base) {
+        return -1;
+    }
+    pthread_mutex_lock(&clone_lock);
+    if (latx_host_thread_template) {
+        template_cpu = env_cpu(latx_host_thread_template);
+        latx_host_thread_template = NULL;
+        latx_host_thread_release_cpu(template_cpu);
+    }
+
+    source_cpu = env_cpu(env);
+    source_ts = source_cpu ? source_cpu->opaque : NULL;
+    if (!source_ts) {
+        goto out;
+    }
+    template_env = cpu_copy(env);
+    if (!template_env) {
+        goto out;
+    }
+    template_cpu = env_cpu(template_env);
+    cpu_list_remove(template_cpu);
+
+    template_ts = g_new0(TaskState, 1);
+    init_task_state(template_ts);
+    template_ts->bprm = source_ts->bprm;
+    template_ts->info = source_ts->info;
+    template_ts->signal_mask = source_ts->signal_mask;
+    template_ts->seccomp_filter = source_ts->seccomp_filter;
+    template_ts->ipc_namespace_isolated =
+        source_ts->ipc_namespace_isolated;
+    template_cpu->opaque = template_ts;
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+    template_env->tb_jmp_cache_ptr = NULL;
+#endif
+#ifdef CONFIG_LATX_KZT
+    template_env->kzt_guest_tls_parent_snapshot = NULL;
+    template_env->kzt_guest_tls_allocation = NULL;
+    template_env->kzt_guest_thread_state = NULL;
+    template_env->kzt_libc_semantic_state = NULL;
+    if (kzt_guest_tls_snapshot_parent(env, template_env) != 0) {
+        latx_host_thread_release_cpu(template_cpu);
+        goto out;
+    }
+#endif
+    template_env->kzt_guest_stack_base = 0;
+    latx_host_thread_template = template_env;
+    result = 0;
+
+out:
+    pthread_mutex_unlock(&clone_lock);
+    return result;
+}
+
+static int latx_attach_current_host_thread_once(void)
+{
+    CPUArchState *parent_env;
+    CPUState *parent_cpu;
+    TaskState *parent_ts;
+    CPUArchState *new_env;
+    CPUState *new_cpu;
+    TaskState *ts;
+    abi_long stack;
+    int old_cancel_state;
+    int ret;
+
+    if (thread_cpu && lsenv && lsenv->cpu_state) {
+        return 0;
+    }
+    if (!latx_kzt_guest_tls_enabled()) {
+        return -1;
+    }
+    ret = pthread_once(&latx_host_thread_key_once,
+                       latx_host_thread_key_init);
+    if (ret || latx_host_thread_key_error) {
+        return -1;
+    }
+    ret = pthread_setcancelstate(PTHREAD_CANCEL_DISABLE,
+                                 &old_cancel_state);
+    if (ret) {
+        return -1;
+    }
+    ts = g_new0(TaskState, 1);
+    init_task_state(ts);
+
+    pthread_mutex_lock(&clone_lock);
+    parent_env = latx_host_thread_template;
+    parent_cpu = parent_env ? env_cpu(parent_env) : NULL;
+    parent_ts = parent_cpu ? (TaskState *)parent_cpu->opaque : NULL;
+    if (!parent_ts) {
+        pthread_mutex_unlock(&clone_lock);
+        g_free(ts);
+        pthread_setcancelstate(old_cancel_state, NULL);
+        return -1;
+    }
+    rcu_register_thread();
+    new_env = cpu_copy(parent_env);
+    if (!new_env) {
+        rcu_unregister_thread();
+        pthread_mutex_unlock(&clone_lock);
+        g_free(ts);
+        pthread_setcancelstate(old_cancel_state, NULL);
+        return -1;
+    }
+    new_cpu = env_cpu(new_env);
+    new_cpu->opaque = ts;
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+    new_env->tb_jmp_cache_ptr = NULL;
+#endif
+#ifdef CONFIG_LATX_KZT
+    new_env->kzt_guest_tls_parent_snapshot = NULL;
+    new_env->kzt_guest_tls_allocation = NULL;
+    new_env->kzt_guest_thread_state = NULL;
+    new_env->kzt_libc_semantic_state = NULL;
+    if (kzt_guest_tls_clone_parent_snapshot(parent_env, new_env) != 0) {
+        latx_host_thread_release_cpu(new_cpu);
+        rcu_unregister_thread();
+        pthread_mutex_unlock(&clone_lock);
+        pthread_setcancelstate(old_cancel_state, NULL);
+        return -1;
+    }
+#endif
+    new_env->kzt_guest_stack_base = 0;
+    stack = target_mmap(0, NEW_STACK_SIZE, PROT_READ | PROT_WRITE,
+                        MAP_PRIVATE | MAP_ANONYMOUS, -1, 0, 0);
+    if (is_error(stack)) {
+        latx_host_thread_release_cpu(env_cpu(new_env));
+        rcu_unregister_thread();
+        pthread_mutex_unlock(&clone_lock);
+        pthread_setcancelstate(old_cancel_state, NULL);
+        return -1;
+    }
+    new_env->kzt_guest_stack_base = stack;
+
+    cpu_clone_regs_child(new_env, stack + NEW_STACK_SIZE, 0);
+    ts->bprm = parent_ts->bprm;
+    ts->info = parent_ts->info;
+    ts->signal_mask = parent_ts->signal_mask;
+    ts->seccomp_filter = parent_ts->seccomp_filter;
+    ts->ipc_namespace_isolated = parent_ts->ipc_namespace_isolated;
+    new_cpu->random_seed = qemu_guest_random_seed_thread_part1();
+
+    tcg_register_thread();
+    thread_cpu = new_cpu;
+    task_settid(ts);
+    qemu_guest_random_seed_thread_part2(new_cpu->random_seed);
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+    if (!latx_fast_jmp_cache_init(new_env)) {
+        fprintf(stderr, "[LATX-ERR] latx_fast_jmp_cache_init error!\n");
+    }
+#endif
+    latx_lsenv_init(new_env);
+    ret = kzt_guest_tls_initialize(parent_env, new_env);
+    if (ret != 0) {
+        pthread_mutex_unlock(&clone_lock);
+        latx_host_thread_destructor(new_cpu);
+        pthread_setcancelstate(old_cancel_state, NULL);
+        return ret;
+    }
+    kzt_guest_thread_initialize(new_env);
+    if (kzt_libc_semantic_process_ready() &&
+        kzt_libc_semantic_initialize(new_env) != 0) {
+        pthread_mutex_unlock(&clone_lock);
+        latx_host_thread_destructor(new_cpu);
+        pthread_setcancelstate(old_cancel_state, NULL);
+        return -1;
+    }
+    if (pthread_setspecific(latx_host_thread_key, new_cpu) != 0) {
+        pthread_mutex_unlock(&clone_lock);
+        latx_host_thread_destructor(new_cpu);
+        pthread_setcancelstate(old_cancel_state, NULL);
+        return -1;
+    }
+    pthread_mutex_unlock(&clone_lock);
+    pthread_setcancelstate(old_cancel_state, NULL);
+    return 0;
+}
+
+int latx_attach_current_host_thread(void)
+{
+    int result;
+    unsigned int delay_us = 1000;
+
+    for (int attempt = 0;
+         attempt < LATX_HOST_THREAD_ATTACH_RETRIES; ++attempt) {
+        result = latx_attach_current_host_thread_once();
+        if (result != KZT_GUEST_TLS_REFRESH_BUSY) {
+            return result;
+        }
+        if (attempt + 1 < LATX_HOST_THREAD_ATTACH_RETRIES) {
+            /*
+             * Wait without the attempt's locks or Guest state. Back off
+             * rather than repeatedly allocating CPUs and deferred caches.
+             */
+            g_usleep(delay_us);
+            delay_us = MIN(delay_us * 2, 32000U);
+        }
+    }
+    return -1;
+}
+#endif /* CONFIG_LATX */
+
 static int do_sys_futex(int *uaddr, int op, int val,
                         const struct timespec *timeout, int *uaddr2,
                         int val3);
@@ -9647,6 +9943,7 @@ static void *clone_func(void *arg)
 
 static void cleanup_guest_thread_resources(CPUArchState *env)
 {
+    kzt_libc_semantic_destroy(env);
     assert(env->gdt.base);
     target_munmap(env->gdt.base, sizeof(uint64_t) * TARGET_GDT_ENTRIES, 0);
 }
@@ -9882,6 +10179,7 @@ static int do_fork(CPUArchState *env, unsigned int flags, abi_ulong newsp,
             return -TARGET_ERESTARTSYS;
         }
 
+        kzt_guest_tls_fork_prepare();
         fork_start();
 #if defined(TARGET_NR_timer_create)
         posix_timer_fork_start();
@@ -9924,6 +10222,10 @@ static int do_fork(CPUArchState *env, unsigned int flags, abi_ulong newsp,
             /* Child Process.  */
             cpu_clone_regs_child(env, newsp, flags);
             fork_end(1);
+            kzt_guest_tls_after_fork_child(env);
+            kzt_guest_loader_after_fork_child();
+            kzt_guest_thread_after_fork_child();
+            kzt_libc_semantic_after_fork_child();
 #if defined(TARGET_NR_timer_create)
             posix_timer_fork_end(true);
 #endif
@@ -9973,6 +10275,7 @@ static int do_fork(CPUArchState *env, unsigned int flags, abi_ulong newsp,
             }
             cpu_clone_regs_parent(env, flags);
             fork_end(0);
+            kzt_guest_tls_fork_parent();
 #if defined(TARGET_NR_timer_create)
             posix_timer_fork_end(false);
 #endif
@@ -10571,7 +10874,9 @@ void syscall_init(void)
     /* Build target_to_host_errno_table[] table from
      * host_to_target_errno_table[]. */
     for (i = 0; i < ERRNO_TABLE_SIZE; i++) {
-        target_to_host_errno_table[host_to_target_errno_table[i]] = i;
+        if (host_to_target_errno_table[i]) {
+            target_to_host_errno_table[host_to_target_errno_table[i]] = i;
+        }
     }
 
     /* we patch the ioctl size if necessary. We rely on the fact that
@@ -21149,6 +21454,148 @@ static bool syscall_user_dispatch(CPUArchState *env, int num, uint32_t arch)
 }
 #endif
 
+#ifdef CONFIG_LATX
+static bool kzt_is_fork_syscall(int num, abi_long flags)
+{
+    switch (num) {
+#ifdef TARGET_NR_fork
+    case TARGET_NR_fork:
+#endif
+#ifdef TARGET_NR_vfork
+    case TARGET_NR_vfork:
+#endif
+#ifdef TARGET_NR_clone3
+    case TARGET_NR_clone3:
+#endif
+        return true;
+#ifdef TARGET_NR_clone
+    case TARGET_NR_clone:
+        return !(flags & CLONE_VM) || (flags & CLONE_VFORK);
+#endif
+    default:
+        return false;
+    }
+}
+
+/* Only waits that do not change Guest TLS, mappings, or thread identity. */
+static bool kzt_syscall_can_pause(int num, abi_long operation)
+{
+    switch (num) {
+#ifdef TARGET_NR_read
+    case TARGET_NR_read:
+#endif
+#ifdef TARGET_NR_readv
+    case TARGET_NR_readv:
+#endif
+#ifdef TARGET_NR_pread64
+    case TARGET_NR_pread64:
+#endif
+#ifdef TARGET_NR_preadv
+    case TARGET_NR_preadv:
+#endif
+#ifdef TARGET_NR_write
+    case TARGET_NR_write:
+#endif
+#ifdef TARGET_NR_writev
+    case TARGET_NR_writev:
+#endif
+#ifdef TARGET_NR_pwrite64
+    case TARGET_NR_pwrite64:
+#endif
+#ifdef TARGET_NR_pwritev
+    case TARGET_NR_pwritev:
+#endif
+#ifdef TARGET_NR_recvfrom
+    case TARGET_NR_recvfrom:
+#endif
+#ifdef TARGET_NR_recvmsg
+    case TARGET_NR_recvmsg:
+#endif
+#ifdef TARGET_NR_recvmmsg
+    case TARGET_NR_recvmmsg:
+#endif
+#ifdef TARGET_NR_sendto
+    case TARGET_NR_sendto:
+#endif
+#ifdef TARGET_NR_sendmsg
+    case TARGET_NR_sendmsg:
+#endif
+#ifdef TARGET_NR_accept
+    case TARGET_NR_accept:
+#endif
+#ifdef TARGET_NR_accept4
+    case TARGET_NR_accept4:
+#endif
+#ifdef TARGET_NR_connect
+    case TARGET_NR_connect:
+#endif
+#ifdef TARGET_NR_poll
+    case TARGET_NR_poll:
+#endif
+#ifdef TARGET_NR_ppoll
+    case TARGET_NR_ppoll:
+#endif
+#ifdef TARGET_NR_select
+    case TARGET_NR_select:
+#endif
+#ifdef TARGET_NR__newselect
+    case TARGET_NR__newselect:
+#endif
+#ifdef TARGET_NR_pselect6
+    case TARGET_NR_pselect6:
+#endif
+#ifdef TARGET_NR_epoll_wait
+    case TARGET_NR_epoll_wait:
+#endif
+#ifdef TARGET_NR_epoll_pwait
+    case TARGET_NR_epoll_pwait:
+#endif
+#ifdef TARGET_NR_epoll_pwait2
+    case TARGET_NR_epoll_pwait2:
+#endif
+#ifdef TARGET_NR_ppoll_time64
+    case TARGET_NR_ppoll_time64:
+#endif
+#ifdef TARGET_NR_pselect6_time64
+    case TARGET_NR_pselect6_time64:
+#endif
+#ifdef TARGET_NR_clock_nanosleep_time64
+    case TARGET_NR_clock_nanosleep_time64:
+#endif
+#ifdef TARGET_NR_nanosleep
+    case TARGET_NR_nanosleep:
+#endif
+#ifdef TARGET_NR_clock_nanosleep
+    case TARGET_NR_clock_nanosleep:
+#endif
+#ifdef TARGET_NR_wait4
+    case TARGET_NR_wait4:
+#endif
+#ifdef TARGET_NR_waitpid
+    case TARGET_NR_waitpid:
+#endif
+#ifdef TARGET_NR_waitid
+    case TARGET_NR_waitid:
+#endif
+#ifdef TARGET_NR_sched_yield
+    case TARGET_NR_sched_yield:
+#endif
+        return true;
+#ifdef TARGET_NR_futex
+    case TARGET_NR_futex:
+#endif
+#ifdef TARGET_NR_futex_time64
+    case TARGET_NR_futex_time64:
+#endif
+        /* PI operations transfer lock ownership and require separate handling. */
+        return (operation & FUTEX_CMD_MASK) == FUTEX_WAIT ||
+               (operation & FUTEX_CMD_MASK) == FUTEX_WAIT_BITSET;
+    default:
+        return false;
+    }
+}
+#endif
+
 abi_long do_syscall_with_seccomp(void *cpu_env, int num, int seccomp_num,
                                 uint32_t seccomp_arch, abi_long arg1,
                                 abi_long arg2, abi_long arg3, abi_long arg4,
@@ -21195,6 +21642,11 @@ abi_long do_syscall_with_seccomp(void *cpu_env, int num, int seccomp_num,
 #ifdef TARGET_I386
     if (!loader_tunnel &&
         syscall_user_dispatch(env, seccomp_num, seccomp_arch)) {
+#ifdef CONFIG_LATX
+        if (kzt_is_fork_syscall(num, arg1)) {
+            kzt_guest_tls_fork_abort();
+        }
+#endif
         return -TARGET_QEMU_ESIGRETURN;
     }
 #endif
@@ -21250,6 +21702,7 @@ abi_long do_syscall_with_seccomp(void *cpu_env, int num, int seccomp_num,
         g_assert_not_reached();
 #endif
     case GUEST_SECCOMP_KILL_THREAD:
+        kzt_guest_tls_fork_abort();
         seccomp_kill_thread(env);
     case GUEST_SECCOMP_KILL_PROCESS:
         force_sig_abort(TARGET_SIGSYS);
@@ -21263,6 +21716,13 @@ abi_long do_syscall_with_seccomp(void *cpu_env, int num, int seccomp_num,
                           arg3, arg4, arg5, arg6);
     }
 
+#ifdef CONFIG_LATX
+    /* A restarted syscall is still inside the same libc fork invocation. */
+    if (kzt_is_fork_syscall(num, arg1) &&
+        (ret != -TARGET_ERESTARTSYS || ts->seccomp_errno_return)) {
+        kzt_guest_tls_fork_abort();
+    }
+#endif
     record_syscall_return(cpu, num, ret);
     return ret;
 }
@@ -21272,8 +21732,19 @@ abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
                     abi_long arg5, abi_long arg6, abi_long arg7,
                     abi_long arg8)
 {
-    return do_syscall_with_seccomp(cpu_env, num, num,
-                                   guest_seccomp_target_arch(),
-                                   arg1, arg2, arg3, arg4,
-                                   arg5, arg6, arg7, arg8);
+#ifdef CONFIG_LATX
+    CPUX86State *env = cpu_env;
+    int tls_execution_paused = kzt_syscall_can_pause(num, arg2)
+        ? kzt_guest_tls_syscall_pause(env) : 0;
+    abi_long result = do_syscall_with_seccomp(
+        cpu_env, num, num, guest_seccomp_target_arch(),
+        arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8);
+
+    kzt_guest_tls_execution_resume(env, tls_execution_paused);
+    return result;
+#else
+    return do_syscall_with_seccomp(
+        cpu_env, num, num, guest_seccomp_target_arch(),
+        arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8);
+#endif
 }

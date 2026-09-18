@@ -188,7 +188,9 @@
 //GOM(__cxa_atexit, iFEppp)
 ////GO(__cxa_at_quick_exit, /* at_quick_exit has signature iF@ -> */ iF@pp)
 //GOM(__cxa_finalize, vFEp)
-//GOM(__cxa_thread_atexit_impl, iFEppp)
+#ifdef CONFIG_LATX_KZT
+GOM(__cxa_thread_atexit_impl, iFEppp)
+#endif
 ////GO(__cyg_profile_func_enter,
 ////GO(__cyg_profile_func_exit,
 //GO(daemon, iFii)
@@ -1467,8 +1469,11 @@ GOM(__libc_free, vFp)
 //GO(pthread_getspecific, pFL)
 //GO(pthread_getname_np, iFppL)
 //GO(pthread_join, iFLp)
-//GOM(pthread_key_create, iFEpp)
-//GO(pthread_key_delete, iFL)
+#ifdef CONFIG_LATX_KZT
+GOM(pthread_key_create, iFEpp)
+GOM(__pthread_key_create, iFEpp)
+GOM(pthread_key_delete, iFu)
+#endif
 //GO2(pthread_kill@GLIBC_2.2.5, iFEpi, my_pthread_kill_old)
 //GOM(pthread_kill, iFEpi)
 //GO(pthread_kill_other_threads_np, vFv)

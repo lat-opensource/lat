@@ -12,6 +12,7 @@
 #include "elfloader.h"
 #include "latx-options.h"
 #include "myalign.h"
+#include "kzt-guest-tls.h"
 #include "x86dlfun.h"
 
 static void set_x86dlfun(void *const *resolved)
@@ -37,6 +38,21 @@ int init_x86dlfun_from(const char *primary, const char *fallback)
     elfheader_t *header;
     int resolved_count = 0;
 
+    if (latx_kzt_guest_tls_enabled()) {
+        for (int index = 0; index < X86_DL_SYMBOL_COUNT; ++index) {
+            resolved[index] = (void *)kzt_resolve_guest_object_symbol(
+                primary, symbols[index]);
+            if (!resolved[index]) {
+                resolved[index] = (void *)kzt_resolve_guest_object_symbol(
+                    fallback, symbols[index]);
+            }
+            if (!resolved[index]) {
+                return -1;
+            }
+        }
+        set_x86dlfun(resolved);
+        return 0;
+    }
 #if defined(CONFIG_LOONGARCH_NEW_WORLD) && defined(CONFIG_LATX_KZT)
     if (latx_kzt_runtime_enabled()) {
         for (int index = 0; index < X86_DL_SYMBOL_COUNT; ++index) {

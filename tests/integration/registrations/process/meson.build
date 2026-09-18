@@ -9,6 +9,15 @@ if 'x86_64-linux-user' in target_dirs
     'timeout': 120,
   }]
   latx_integration_tests += [{
+    'name': 'test-runtime-prefix-exec',
+    'runner': find_program('../../test-runtime-prefix-exec.sh'),
+    'args': [
+      emulators['latx-x86_64'],
+      files('../../runtime-prefix-exec.c'),
+    ],
+    'timeout': 60,
+  }]
+  latx_integration_tests += [{
     'name': 'test-proc-readdir',
     'runner': find_program('../../test-proc-readdir.sh'),
     'args': [
