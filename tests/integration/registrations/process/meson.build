@@ -9,6 +9,15 @@ if 'x86_64-linux-user' in target_dirs
     'timeout': 120,
   }]
   latx_integration_tests += [{
+    'name': 'test-signal-x87-state-x86_64',
+    'runner': find_program('../../test-signal-x87-state.sh'),
+    'args': [
+      emulators['latx-x86_64'],
+      files('../../signal-x87-state.c'),
+      'x86_64',
+    ],
+  }]
+  latx_integration_tests += [{
     'name': 'test-proc-readdir',
     'runner': find_program('../../test-proc-readdir.sh'),
     'args': [
@@ -95,6 +104,24 @@ if 'x86_64-linux-user' in target_dirs
 endif
 
 if 'i386-linux-user' in target_dirs
+  latx_integration_tests += [{
+    'name': 'test-signal-x87-state-i386-legacy',
+    'runner': find_program('../../test-signal-x87-state.sh'),
+    'args': [
+      emulators['latx-i386'],
+      files('../../signal-x87-state.c'),
+      'i386-legacy',
+    ],
+  }]
+  latx_integration_tests += [{
+    'name': 'test-signal-x87-state-i386',
+    'runner': find_program('../../test-signal-x87-state.sh'),
+    'args': [
+      emulators['latx-i386'],
+      files('../../signal-x87-state.c'),
+      'i386',
+    ],
+  }]
   latx_integration_tests += [{
     'name': 'test-softfpu-eflags-region-i386',
     'runner': find_program('../../test-softfpu-eflags-region-i386.sh'),

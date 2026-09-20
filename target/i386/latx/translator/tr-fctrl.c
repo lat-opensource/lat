@@ -166,6 +166,59 @@ void update_sw_by_fcsr(IR2_OPND sw_opnd)
     ra_free_temp(temp1);
 }
 
+static void update_mxcsr_by_fcsr(void)
+{
+    int mxcsr_offset = lsenv_offset_of_mxcsr(lsenv);
+    IR2_OPND mxcsr = ra_alloc_itemp();
+    IR2_OPND fcsr = ra_alloc_itemp();
+    IR2_OPND temp1 = ra_alloc_itemp();
+    IR2_OPND temp2 = ra_alloc_itemp();
+
+    lsassert(mxcsr_offset <= 0x7ff);
+    la_ld_wu(mxcsr, env_ir2_opnd, mxcsr_offset);
+    la_movfcsr2gr(fcsr, fcsr_ir2_opnd);
+
+    /* Convert LA sticky flags to the matching MXCSR status bits. */
+    la_bitrev_w(temp1, fcsr);
+    la_srli_d(temp1, temp1, 11);
+    la_bstrpick_d(temp2, temp1, 0, 0);
+    la_or(mxcsr, mxcsr, temp2);
+    la_bstrpick_d(temp2, temp1, 4, 1);
+    la_slli_d(temp2, temp2, 2);
+    la_or(mxcsr, mxcsr, temp2);
+    la_st_w(mxcsr, env_ir2_opnd, mxcsr_offset);
+
+    la_bstrins_w(fcsr, zero_ir2_opnd,
+                 FCSR_OFF_FLAGS_V, FCSR_OFF_FLAGS_I);
+    la_movgr2fcsr(fcsr_ir2_opnd, fcsr);
+
+    ra_free_temp(mxcsr);
+    ra_free_temp(fcsr);
+    ra_free_temp(temp1);
+    ra_free_temp(temp2);
+}
+
+void begin_x87_fcsr_access(void)
+{
+    IR2_OPND one = ra_alloc_itemp();
+
+    /* Any pending host flags belong to the preceding SSE operation. */
+    update_mxcsr_by_fcsr();
+    li_d(one, 1);
+    la_st_b(one, env_ir2_opnd, lsenv_offset_of_fcsr_is_x87(lsenv));
+    ra_free_temp(one);
+}
+
+void end_x87_fcsr_access(void)
+{
+    IR2_OPND sw = ra_alloc_itemp();
+
+    update_sw_by_fcsr(sw);
+    la_st_b(zero_ir2_opnd, env_ir2_opnd,
+            lsenv_offset_of_fcsr_is_x87(lsenv));
+    ra_free_temp(sw);
+}
+
 bool translate_fnstcw(IR1_INST *pir1)
 {
     /* 1. load the value of fpu control word */

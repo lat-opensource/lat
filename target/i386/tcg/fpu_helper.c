@@ -3246,7 +3246,11 @@ static bool latx_x87_state_is_mmx(const CPUX86State *env)
 {
     int i;
 
-    /* MMX sets every x87 tag valid and every physical exponent to 0xffff. */
+    /* MMX resets TOP, sets all tags valid and every exponent to 0xffff. */
+    if (env->fpstt != 0) {
+        return false;
+    }
+
     for (i = 0; i < 8; i++) {
         CPU_LDoubleU reg = { .d = env->fpregs[i].d };
 
@@ -3271,15 +3275,51 @@ void cpu_x86_sync_latx_fcsr(CPUX86State *env)
     for (i = 0; i < 5; i++) {
         uint32_t x87_mask = 1 << exception_map[i];
 
-        if ((!option_enable_fcsr_exc || i != 0) && !(fpuc & x87_mask)) {
+        if ((option_enable_fcsr_exc && i != 0) ||
+            (!option_enable_fcsr_exc && !(fpuc & x87_mask))) {
             fcsr |= 1 << i;
-        }
-        if (fpus & x87_mask) {
-            fcsr |= 1 << (16 + i);
         }
     }
 
     env->fcsr = fcsr;
+    env->fcsr_is_x87 = false;
+    set_float_exception_flags(
+        ((fpus & FPUS_IE ? float_flag_invalid : 0) |
+         (fpus & FPUS_ZE ? float_flag_divbyzero : 0) |
+         (fpus & FPUS_OE ? float_flag_overflow : 0) |
+         (fpus & FPUS_UE ? float_flag_underflow : 0) |
+         (fpus & FPUS_PE ? float_flag_inexact : 0) |
+         (fpus & FPUS_DE ? float_flag_input_denormal : 0)),
+        &env->fp_status);
+}
+
+void cpu_x86_sync_latx_fpu_status(CPUX86State *env)
+{
+    static const uint8_t x87_flag_map[5] = {
+        FPUS_IE, FPUS_ZE, FPUS_OE, FPUS_UE, FPUS_PE,
+    };
+    uint32_t fcsr = env->fcsr;
+    uint8_t flags = get_float_exception_flags(&env->fp_status);
+    int i;
+
+    /* Attribute shared LA sticky flags to their current guest FP domain. */
+    for (i = 0; i < 5; i++) {
+        if (fcsr & (1u << (20 - i))) {
+            if (env->fcsr_is_x87) {
+                env->fpus |= x87_flag_map[i];
+            } else {
+                env->mxcsr |= x87_flag_map[i];
+            }
+        }
+    }
+
+    fpu_set_exception(env,
+                      ((flags & float_flag_invalid ? FPUS_IE : 0) |
+                       (flags & float_flag_divbyzero ? FPUS_ZE : 0) |
+                       (flags & float_flag_overflow ? FPUS_OE : 0) |
+                       (flags & float_flag_underflow ? FPUS_UE : 0) |
+                       (flags & float_flag_inexact ? FPUS_PE : 0) |
+                       (flags & float_flag_input_denormal ? FPUS_DE : 0)));
 }
 
 void cpu_x86_sync_latx_fpu_mode(CPUX86State *env)
@@ -3302,13 +3342,33 @@ void cpu_x86_sync_latx_fpu_mode(CPUX86State *env)
 }
 #endif
 
-void cpu_x86_init_user_x87(CPUX86State *env)
+void cpu_x86_init_user_fpstate(CPUX86State *env)
 {
     do_fninit(env);
+    set_float_exception_flags(0, &env->fp_status);
+    env->fpop = 0;
+    env->fpip = 0;
+    env->fpdp = 0;
+    memset(env->fpregs, 0, sizeof(env->fpregs));
+
+    cpu_set_mxcsr(env, 0x1f80);
+    memset(env->xmm_regs, 0, sizeof(env->xmm_regs));
+    memset(env->ymmh_regs, 0, sizeof(env->ymmh_regs));
+
+    /* Initialize the other user components supported by do_xrstor(). */
+    memset(env->bnd_regs, 0, sizeof(env->bnd_regs));
+    memset(&env->bndcs_regs, 0, sizeof(env->bndcs_regs));
+    env->hflags &= ~HF_MPX_IU_MASK;
+    cpu_sync_bndcs_hflags(env);
+    if (env->pkru) {
+        env->pkru = 0;
+        tlb_flush(env_cpu(env));
+    }
 
 #ifdef CONFIG_LATX
     env->fcsr = 0;
-    env->mode_fpu = 1;
+    env->fcsr_is_x87 = false;
+    env->mode_fpu = LATX_FPU_MODE_X87;
 #endif
 }
 #endif
