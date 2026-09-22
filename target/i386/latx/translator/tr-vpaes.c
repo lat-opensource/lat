@@ -133,6 +133,7 @@ static void vpaes_restore_low_fprs(void)
     tr_load_top_from_env();
 }
 
+#ifdef CONFIG_LATX_AOT
 static enum aot_rel_kind vpaes_table_rel_kind(int kind)
 {
     switch (kind) {
@@ -147,6 +148,7 @@ static enum aot_rel_kind vpaes_table_rel_kind(int kind)
     }
 }
 
+#endif
 static void vpaes_load_addr(IR2_OPND addr, int kind)
 {
     aot_load_host_addr(addr, (ADDR)latx_vpaes_get_table_addr(kind),

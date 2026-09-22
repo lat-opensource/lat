@@ -185,6 +185,7 @@ static bool smc_retrans_insert(TranslationBlock *tb)
     }
     return false;
 }
+#ifdef CONFIG_LATX_AOT
 static void smc_retrans_destory(void)
 {
     if (smc_retrans_tree) {
@@ -195,6 +196,7 @@ static void smc_retrans_destory(void)
 
 #endif
 
+#endif
 /**
  * struct page_entry - page descriptor entry
  * @pd:     pointer to the &struct PageDesc of the page this entry represents
