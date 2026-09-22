@@ -1138,23 +1138,6 @@ static void host_signal_handler(int host_signum, siginfo_t *info,
     if (host_signum == SIGILL) {
         TranslationBlock *current_tb = tcg_tb_lookup(UC_PC(uc));
         if (current_tb) {
-            for (int n = 0; n < 2; n++) {
-                if (current_tb->jmp_target_arg[n] !=
-                        TB_JMP_RESET_OFFSET_INVALID &&
-                    current_tb->jmp_reset_offset[n] !=
-                        TB_JMP_RESET_OFFSET_INVALID &&
-                    UC_PC(uc) == (uintptr_t)current_tb->tc.ptr +
-                        current_tb->jmp_target_arg[n] + 4) {
-                    /*
-                     * The sentinel may already have been overwritten by
-                     * the time its SIGILL is delivered.  Retry the pair to
-                     * recompute its scratch register from a consistent PC.
-                     */
-                    UC_PC(uc) = (uintptr_t)current_tb->tc.ptr +
-                        current_tb->jmp_target_arg[n];
-                    return;
-                }
-            }
             if (*(unsigned int *)UC_PC(uc) == FASTTB_ILLINST_MAGIC) {
 #if defined(CONFIG_LATX_DEBUG)
                 fprintf(stderr, "[FAST_JMPCACHE] SIGILL handled\n");
@@ -1178,6 +1161,27 @@ static void host_signal_handler(int host_signum, siginfo_t *info,
     }
 #endif
 #ifdef CONFIG_LATX
+    if (host_signum == SIGILL && tcg_tb_lookup(UC_PC(uc))) {
+        /*
+         * An instruction emitted by LATX is not supported by this host.
+         * This is a translator failure, not a guest SIGILL.  Returning to
+         * the same host PC would immediately raise SIGILL again.  Restore
+         * the default disposition and report the host failure.
+         */
+        struct sigaction act = {
+            .sa_handler = SIG_DFL,
+        };
+        sigset_t set;
+
+        sigemptyset(&act.sa_mask);
+        sigaction(SIGILL, &act, NULL);
+        sigemptyset(&set);
+        sigaddset(&set, SIGILL);
+        sigprocmask(SIG_UNBLOCK, &set, NULL);
+        kill(getpid(), SIGILL);
+        _exit(128 + SIGILL);
+    }
+
     if (option_fork_unlink && host_signum == SIGRTMIN + 1 &&
         info->si_code == SI_QUEUE &&
         info->si_int == FORK_UNLINK_MAGIC) {

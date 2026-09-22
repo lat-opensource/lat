@@ -1905,9 +1905,11 @@ void tb_target_set_jmp_pair(uintptr_t jmp_rx, uintptr_t jmp_rw,
 
 #ifdef CONFIG_LATX_FAST_JMPCACHE
     if ((i1 >> 26) == OPC_B) {
-        /* Stop an old first instruction from using a partially updated pair. */
-        qatomic_set((uint32_t *)(jmp_rw + 4), FASTTB_ILLINST_MAGIC);
-        flush_idcache_range(jmp_rx + 4, jmp_rw + 4, 4);
+        /*
+         * Publish only the direct branch.  Keep the old second instruction
+         * so a thread that already executed the old first instruction can
+         * still complete the old far jump.  The new branch skips it.
+         */
         qatomic_set((uint32_t *)jmp_rw, i1);
         flush_idcache_range(jmp_rx, jmp_rw, 4);
     } else {
