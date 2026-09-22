@@ -2820,7 +2820,8 @@ void tr_generate_exit_tb_to_next(IR1_INST *ir1)
 {
     TranslationBlock *tb = lsenv->tr_data->curr_tb;
     IR2_OPND next_pc = ra_alloc_dbt_arg2();
-    target_ulong call_offset = aot_get_call_offset(ir1_addr_next(ir1));
+    target_ulong call_offset __attribute__((unused)) =
+            aot_get_call_offset(ir1_addr_next(ir1));
 
     aot_load_guest_addr(next_pc, ir1_addr_next(ir1), LOAD_CALL_TARGET,
                         call_offset);
@@ -2918,7 +2919,8 @@ void tr_generate_exit_tb(IR1_INST *branch, int succ_id)
         }
 direct_jmp:
         if (option_anonym && (tb->flags & HF_TF_MASK)) {
-            target_ulong call_offset = aot_get_call_offset(succ_x86_addr);
+            target_ulong call_offset __attribute__((unused)) =
+                    aot_get_call_offset(succ_x86_addr);
 
             aot_load_guest_addr(succ_x86_addr_opnd, succ_x86_addr,
                                 LOAD_CALL_TARGET, call_offset);
