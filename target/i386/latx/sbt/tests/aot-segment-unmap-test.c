@@ -88,6 +88,7 @@ int main(void)
 {
     char path[] = "/tmp/latx-segment-unmap-XXXXXX";
     void *cache[5];
+    void *replaced_cache;
     unsigned char resident;
     size_t page_size = sysconf(_SC_PAGESIZE);
     size_t stride = page_size * 2;
@@ -97,6 +98,7 @@ int main(void)
 
     qemu_host_page_size = page_size;
     qemu_host_page_mask = ~(page_size - 1);
+
     segment_tree_init();
     lib_tree_init();
     fd = mkstemp(path);
@@ -109,6 +111,37 @@ int main(void)
         add_segment(path, (uintptr_t)guest + stride * i, page_size,
                     &cache[i]);
     }
+    g_assert(get_segment_num() == 5);
+    g_assert(get_lib_num() == 5);
+
+    /* A non-replacing mmap must not invalidate an existing AOT segment. */
+    aot_mmap_invalidate_replaced_range((abi_ulong)guest, page_size,
+                                       MAP_PRIVATE | MAP_ANONYMOUS);
+    g_assert(get_segment_num() == 5);
+    g_assert(get_lib_num() == 5);
+
+#if MAP_FIXED_NOREPLACE != 0
+    /* NOREPLACE is converted to host MAP_FIXED only after an empty check. */
+    aot_mmap_invalidate_replaced_range((abi_ulong)guest, page_size,
+                                       MAP_PRIVATE | MAP_ANONYMOUS |
+                                       MAP_FIXED_NOREPLACE);
+    g_assert(get_segment_num() == 5);
+    g_assert(get_lib_num() == 5);
+#endif
+
+    /* A replacing mmap must release the segment and its mapped AOT cache. */
+    replaced_cache = cache[0];
+    aot_mmap_invalidate_replaced_range((abi_ulong)guest, page_size,
+                                       MAP_PRIVATE | MAP_ANONYMOUS |
+                                       MAP_FIXED);
+    g_assert(get_segment_num() == 4);
+    g_assert(get_lib_num() == 4);
+    errno = 0;
+    ret = mincore(replaced_cache, page_size, &resident);
+    g_assert(ret == -1 && errno == ENOMEM);
+
+    /* Restore the first segment for the munmap range tests below. */
+    add_segment(path, (uintptr_t)guest, page_size, &cache[0]);
     g_assert(get_segment_num() == 5);
     g_assert(get_lib_num() == 5);
 
