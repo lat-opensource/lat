@@ -27,7 +27,7 @@ class GhbrAuditTest(unittest.TestCase):
 
     def test_repository_inventory(self):
         result = self.audit_with(self.load_inventory())
-        self.assertEqual(result["consumer_functions"], 27)
+        self.assertEqual(result["consumer_functions"], 28)
         self.assertEqual(result["mov32_functions"], 39)
         self.assertEqual(result["categories"].get("candidate-review", 0), 0)
         self.assertTrue(result["may_def_model"])

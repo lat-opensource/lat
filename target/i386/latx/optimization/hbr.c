@@ -2408,6 +2408,17 @@ static void deal_hide_opnd_def(TranslationBlock *tb, IR1_INST *ir1)
             set_def_reg(tb, ir1, edx_index);
         }
         break;
+    case WRAP(CMPXCHG):
+        if (width == 32) {
+            IR1_OPND *dest = ir1_get_opnd(ir1, 0);
+
+            set_may_def_reg(tb, ir1, eax_index);
+            if (ir1_opnd_is_gpr(dest)) {
+                set_may_def_reg(tb, ir1,
+                                ir1_opnd_base_reg_num(dest));
+            }
+        }
+        break;
     default:
         break;
     }
@@ -2494,7 +2505,19 @@ static bool def_h32(TranslationBlock *tb, IR1_INST *ir1)
     case WRAP(SBB):
     case WRAP(NEG):
     case WRAP(XADD):
+    case WRAP(BSWAP):
+    case WRAP(POPCNT):
+    case WRAP(TZCNT):
+    case WRAP(LZCNT):
         des_def_gpr(tb, ir1);
+        return true;
+    case WRAP(BSF):
+    case WRAP(BSR):
+        if (ir1->info->bytes[0] == 0xF3) {
+            des_def_gpr(tb, ir1);
+        } else {
+            set_may_def_reg(tb, ir1, ir1_opnd_base_reg_num(des_opnd));
+        }
         return true;
     case WRAP(XCHG):
         if (ir1_opnd_is_same_reg(des_opnd, ir1_get_opnd(ir1, 1))) {

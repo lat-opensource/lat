@@ -19,6 +19,8 @@ if 'x86_64-linux-user' in target_dirs
   endforeach
 
   foreach ghbr_fixture : [
+    'ghbr-bitops',
+    'ghbr-conditional',
     'ghbr-implicit-registers',
     'ghbr-imul',
   ]
