@@ -1607,7 +1607,7 @@ int have_am(void);
 IR2_OPND convert_mem(IR1_OPND *, int *);
 IR2_OPND mem_imm_add_disp(IR2_OPND, int *, int);
 IR2_OPND convert_mem_no_offset(IR1_OPND *);
-void convert_mem_to_specific_gpr(IR1_OPND *, IR2_OPND, int);
+void convert_mem_to_specific_gpr(IR1_OPND *, IR2_OPND, int, bool);
 IR2_OPND convert_mem_to_itemp(IR1_OPND *opnd0);
 IR2_OPND convert_gpr_opnd(IR1_OPND *, EXTENSION_MODE);
 IR2_OPND load_freg128_from_ir1(IR1_OPND *);

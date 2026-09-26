@@ -299,7 +299,7 @@ static void translate_mov_from_gpr(IR1_OPND *opnd0, IR1_OPND *opnd1)
             la_bstrins_d(dest, src, 15, 0);
             break;
         case 32:
-            la_mov32_zx(dest, src);
+            store_ireg_to_ir1(src, opnd0, false);
             break;
         case 64:
             la_mov64(dest, src);
@@ -1399,7 +1399,7 @@ bool translate_lea(IR1_INST *pir1)
 
     /* LEA computes only the effective offset; segment bases are ignored. */
     addr.mem.segment = dt_X86_REG_INVALID;
-    convert_mem_to_specific_gpr(&addr, dest_op, op0_size);
+    convert_mem_to_specific_gpr(&addr, dest_op, op0_size, !GHBR_ON(pir1));
 
     return true;
 }

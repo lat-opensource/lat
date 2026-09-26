@@ -2419,6 +2419,12 @@ static void deal_hide_opnd_def(TranslationBlock *tb, IR1_INST *ir1)
             }
         }
         break;
+    case WRAP(CMPXCHG8B):
+        if (width == 64) {
+            set_may_def_reg(tb, ir1, eax_index);
+            set_may_def_reg(tb, ir1, edx_index);
+        }
+        break;
     default:
         break;
     }
@@ -2442,6 +2448,10 @@ static bool def_h32(TranslationBlock *tb, IR1_INST *ir1)
     case WRAP(MOVSX):
     case WRAP(MOVZX):
     /* case WRAP(MOVSXD): */
+        if (ir1_opnd_size(des_opnd) == 32) {
+            des_def_gpr(tb, ir1);
+            return true;
+        }
         if (ir1_opnd_size(des_opnd) == 64 &&
                 ir1_opnd_size(ir1_get_opnd(ir1, 1)) == 32) {
             des_def_gpr(tb, ir1);
@@ -2449,8 +2459,9 @@ static bool def_h32(TranslationBlock *tb, IR1_INST *ir1)
         }
         return false;
     case WRAP(MOV):
-        if ((ir1_opnd_size(ir1_get_opnd(ir1, 0)) == 64)
-                && ir1_opnd_size(des_opnd) == 64) {
+        if (ir1_opnd_size(des_opnd) == 32 ||
+            ((ir1_opnd_size(ir1_get_opnd(ir1, 0)) == 64) &&
+             ir1_opnd_size(des_opnd) == 64)) {
             des_def_gpr(tb, ir1);
             return true;
         }
@@ -2497,6 +2508,10 @@ static bool def_h32(TranslationBlock *tb, IR1_INST *ir1)
     case WRAP(RCR):
     case WRAP(SHRD):
     case WRAP(SHLD):
+    case WRAP(SHL):
+    case WRAP(SHR):
+    case WRAP(SAR):
+    case WRAP(SAL):
     case WRAP(ADD):
     case WRAP(ADC):
     case WRAP(INC):
@@ -2505,10 +2520,14 @@ static bool def_h32(TranslationBlock *tb, IR1_INST *ir1)
     case WRAP(SBB):
     case WRAP(NEG):
     case WRAP(XADD):
+    case WRAP(BTS):
+    case WRAP(BTR):
+    case WRAP(BTC):
     case WRAP(BSWAP):
     case WRAP(POPCNT):
     case WRAP(TZCNT):
     case WRAP(LZCNT):
+    case WRAP(LEA):
         des_def_gpr(tb, ir1);
         return true;
     case WRAP(BSF):
@@ -2520,11 +2539,12 @@ static bool def_h32(TranslationBlock *tb, IR1_INST *ir1)
         }
         return true;
     case WRAP(XCHG):
-        if (ir1_opnd_is_same_reg(des_opnd, ir1_get_opnd(ir1, 1))) {
-            des_def_gpr(tb, ir1);
-            return true;
+        des_def_gpr(tb, ir1);
+        if (ir1_opnd_is_gpr(ir1_get_opnd(ir1, 1))) {
+            set_def_reg(tb, ir1,
+                        ir1_opnd_base_reg_num(ir1_get_opnd(ir1, 1)));
         }
-        return false;
+        return true;
     case WRAP(IMUL):
         if (ir1_get_opnd_num(ir1) > 1) {
             des_def_gpr(tb, ir1);
