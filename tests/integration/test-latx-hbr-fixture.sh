@@ -37,3 +37,32 @@ case $status in
 *) echo "FAIL: $(basename "$source_file" .c) exited with status $status" >&2
    exit "$status" ;;
 esac
+
+case $(basename "$source_file") in
+ghbr-*)
+    aot_home="$workdir/aot"
+    marker="$workdir/aot-loaded"
+    mkdir -p "$aot_home"
+    HOME="$aot_home" LATX_AOT=1 LATX_KZT=0 timeout -s KILL 90 \
+        "$emulator" -L "$guest_root" "$guest"
+    aot_file=
+    for attempt in $(seq 1 100); do
+        aot_file=$(find "$aot_home/.cache/latx" -type f \
+            -name 'v2-*.aot2' -size +0c -print -quit 2>/dev/null || true)
+        [ -n "$aot_file" ] && break
+        sleep 0.1
+    done
+    if [ -z "$aot_file" ]; then
+        echo "FAIL: no AOT cache generated for $guest" >&2
+        exit 1
+    fi
+    HOME="$aot_home" LATX_AOT=1 LATX_KZT=0 \
+        LATX_TEST_AOT_LOAD_MARKER="$marker" timeout -s KILL 90 \
+        "$emulator" -L "$guest_root" "$guest"
+    if ! grep -Fx "$guest" "$marker" >/dev/null 2>&1; then
+        echo "FAIL: guest AOT cache was not loaded for $guest" >&2
+        exit 1
+    fi
+    echo "PASS: $(basename "$source_file" .c) cold/hot AOT"
+    ;;
+esac
