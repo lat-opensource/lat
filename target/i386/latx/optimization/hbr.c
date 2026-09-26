@@ -2472,6 +2472,12 @@ static bool def_h32(TranslationBlock *tb, IR1_INST *ir1)
             return true;
         }
         return false;
+    case WRAP(IMUL):
+        if (ir1_get_opnd_num(ir1) > 1) {
+            des_def_gpr(tb, ir1);
+            return true;
+        }
+        return false;
     default:
         return false;
     }

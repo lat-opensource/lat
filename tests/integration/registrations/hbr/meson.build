@@ -20,6 +20,7 @@ if 'x86_64-linux-user' in target_dirs
 
   foreach ghbr_fixture : [
     'ghbr-implicit-registers',
+    'ghbr-imul',
   ]
     latx_integration_tests += [{
       'name': 'test-latx-' + ghbr_fixture,

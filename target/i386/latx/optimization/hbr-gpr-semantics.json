@@ -10,6 +10,7 @@
     { "file": "tr-arith.c", "function": "translate_sbb", "category": "architectural-writeback" },
     { "file": "tr-arith.c", "function": "translate_neg", "category": "architectural-writeback" },
     { "file": "tr-arith.c", "function": "translate_xadd", "category": "architectural-writeback" },
+    { "file": "tr-arith.c", "function": "translate_imul_", "category": "architectural-writeback" },
     { "file": "tr-logic.c", "function": "translate_xor", "category": "architectural-writeback" },
     { "file": "tr-logic.c", "function": "translate_and", "category": "architectural-writeback" },
     { "file": "tr-logic.c", "function": "translate_or", "category": "architectural-writeback" },
@@ -25,7 +26,8 @@
     { "file": "tr-misc.c", "function": "translate_cwde", "category": "architectural-writeback" },
     { "file": "tr-mov.c", "function": "translate_xchg", "category": "architectural-writeback" },
     { "file": "tr-mov.c", "function": "translate_movd", "category": "architectural-writeback" },
-    { "file": "tr-pattern.c", "function": "gen_sub", "category": "architectural-writeback" }
+    { "file": "tr-pattern.c", "function": "gen_sub", "category": "architectural-writeback" },
+    { "file": "tr-pattern.c", "function": "translate_and_jcc", "category": "architectural-writeback" }
   ],
   "mov32_sites": [
     { "file": "tr-arith.c", "function": "translate_add", "gated": true, "category": "architectural-writeback" },
@@ -36,7 +38,7 @@
     { "file": "tr-arith.c", "function": "translate_sbb", "gated": true, "category": "architectural-writeback" },
     { "file": "tr-arith.c", "function": "translate_neg", "gated": true, "category": "architectural-writeback" },
     { "file": "tr-arith.c", "function": "translate_mul", "gated": false, "category": "input-normalization" },
-    { "file": "tr-arith.c", "function": "translate_imul_", "gated": false, "category": "candidate-review" },
+    { "file": "tr-arith.c", "function": "translate_imul_", "gated": true, "category": "architectural-writeback" },
     { "file": "tr-arith.c", "function": "translate_xadd", "gated": true, "category": "architectural-writeback" },
     { "file": "tr-arith.c", "function": "translate_mulx", "gated": false, "category": "input-normalization" },
     { "file": "tr-logic.c", "function": "translate_xor", "gated": true, "category": "architectural-writeback" },
@@ -66,6 +68,6 @@
     { "file": "tr-opnd-process.c", "function": "clear_h32", "gated": false, "category": "non-64-mode" },
     { "file": "tr-pattern.c", "function": "gen_sub", "gated": true, "category": "architectural-writeback" },
     { "file": "tr-pattern.c", "function": "load_opnd_from_opnd", "gated": false, "category": "temporary-conversion" },
-    { "file": "tr-pattern.c", "function": "translate_and_jcc", "gated": false, "category": "candidate-review" }
+    { "file": "tr-pattern.c", "function": "translate_and_jcc", "gated": true, "category": "architectural-writeback" }
   ]
 }
