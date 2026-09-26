@@ -2341,9 +2341,11 @@ static void over_tb_gpr_opt(TranslationBlock **tb_list, int tb_num_in_tu)
         IR1_INST *ir1;
         for (int j = tb_ir1_num(tb) - 1; j >= 0; j--) {
             ir1 = tb_ir1_inst(tb, j);
-            if (ir1->gpr_def & gpr_out) {
+            uint32_t defs = ir1->gpr_def | ir1->gpr_may_def;
+
+            if (defs & gpr_out) {
                 gpr_out &= ~ir1->gpr_def;
-            } else if(ir1->gpr_def) {
+            } else if (defs) {
                 /* fprintf(stderr, "%x %x\n", ir1->gpr_def, gpr_out); */
                 ir1->hbr_flag |= GHBR_CAN_OPT;
             }
@@ -2363,10 +2365,20 @@ static void des_def_gpr(TranslationBlock *tb, IR1_INST *ir1)
     ir1->gpr_def |= 1 << dest_num;
 }
 
+static void set_use_reg(TranslationBlock *tb, IR1_INST *ir1, int reg_num);
+
 static void set_def_reg(TranslationBlock *tb, IR1_INST *ir1, int reg_num)
 {
     if (reg_num >= 0 && reg_num < 16) {
         ir1->gpr_def |= 1 << reg_num;
+    }
+}
+
+static void set_may_def_reg(TranslationBlock *tb, IR1_INST *ir1, int reg_num)
+{
+    if (reg_num >= 0 && reg_num < 16) {
+        ir1->gpr_may_def |= 1 << reg_num;
+        set_use_reg(tb, ir1, reg_num);
     }
 }
 
@@ -2446,6 +2458,24 @@ static bool def_h32(TranslationBlock *tb, IR1_INST *ir1)
         return false;
     }
     switch (ir1_opcode(ir1)) {
+    case WRAP(CMOVA):
+    case WRAP(CMOVAE):
+    case WRAP(CMOVB):
+    case WRAP(CMOVBE):
+    case WRAP(CMOVE):
+    case WRAP(CMOVG):
+    case WRAP(CMOVGE):
+    case WRAP(CMOVL):
+    case WRAP(CMOVLE):
+    case WRAP(CMOVNE):
+    case WRAP(CMOVNO):
+    case WRAP(CMOVNP):
+    case WRAP(CMOVNS):
+    case WRAP(CMOVO):
+    case WRAP(CMOVP):
+    case WRAP(CMOVS):
+        set_may_def_reg(tb, ir1, ir1_opnd_base_reg_num(des_opnd));
+        return true;
     case WRAP(XOR):
     case WRAP(AND):
     case WRAP(OR):
@@ -2647,6 +2677,7 @@ static void get_gpr_use_def(TranslationBlock *tb)
     for (int i = 0; i < tb_ir1_num(tb); ++i) {
         ir1 = tb_ir1_inst(tb, i);
         ir1->gpr_def = 0;
+        ir1->gpr_may_def = 0;
         ir1->gpr_use = 0;
         bool has_explicit_def = def_h32(tb, ir1);
         use_h32(tb, ir1, has_explicit_def);

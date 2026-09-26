@@ -26,8 +26,23 @@
     { "file": "tr-misc.c", "function": "translate_cwde", "category": "architectural-writeback" },
     { "file": "tr-mov.c", "function": "translate_xchg", "category": "architectural-writeback" },
     { "file": "tr-mov.c", "function": "translate_movd", "category": "architectural-writeback" },
+    { "file": "tr-mov.c", "function": "translate_cmovcc", "category": "conditional-writeback" },
     { "file": "tr-pattern.c", "function": "gen_sub", "category": "architectural-writeback" },
     { "file": "tr-pattern.c", "function": "translate_and_jcc", "category": "architectural-writeback" }
+  ],
+  "may_def_rules": [
+    {
+      "family": "CMOVcc",
+      "opcodes": [
+        "CMOVA", "CMOVAE", "CMOVB", "CMOVBE", "CMOVE", "CMOVG",
+        "CMOVGE", "CMOVL", "CMOVLE", "CMOVNE", "CMOVNO", "CMOVNP",
+        "CMOVNS", "CMOVO", "CMOVP", "CMOVS"
+      ],
+      "use": ["old destination high32"],
+      "may_def": ["destination high32 = 0"],
+      "preserve": ["old destination high32 on false path"],
+      "consumer": "tr-mov.c:translate_cmovcc"
+    }
   ],
   "mov32_sites": [
     { "file": "tr-arith.c", "function": "translate_add", "gated": true, "category": "architectural-writeback" },
