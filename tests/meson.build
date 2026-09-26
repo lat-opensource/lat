@@ -21,6 +21,7 @@ if python3.found()
     ['test-latx-ghbr-audit', '../scripts/test_latx_ghbr_audit.py'],
     ['test-latx-ghbr-conditional', '../scripts/test_latx_ghbr_conditional.py'],
     ['test-latx-ghbr-implicit', '../scripts/test_latx_ghbr_implicit.py'],
+    ['test-latx-ir2-zero-chain', '../scripts/test_latx_ir2_zero_chain.py'],
   ]
   foreach test_def : latx_python_tests
     test(
