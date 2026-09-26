@@ -27,9 +27,10 @@ class GhbrAuditTest(unittest.TestCase):
 
     def test_repository_inventory(self):
         result = self.audit_with(self.load_inventory())
-        self.assertEqual(result["consumer_functions"], 26)
+        self.assertEqual(result["consumer_functions"], 27)
         self.assertEqual(result["mov32_functions"], 39)
         self.assertEqual(result["categories"].get("candidate-review", 0), 0)
+        self.assertTrue(result["may_def_model"])
 
     def test_missing_mov32_site_fails(self):
         data = self.load_inventory()
@@ -58,10 +59,10 @@ class GhbrAuditTest(unittest.TestCase):
         data = self.load_inventory()
         site = next(
             site for site in data["mov32_sites"]
-            if site["function"] == "translate_add"
+            if site["function"] == "translate_mul"
         )
-        site["gated"] = False
-        with self.assertRaisesRegex(audit.AuditError, "gated-only"):
+        site["gated"] = True
+        with self.assertRaisesRegex(audit.AuditError, "gated mov32 sites"):
             self.audit_with(data)
 
 

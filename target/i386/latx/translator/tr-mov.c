@@ -1375,9 +1375,11 @@ bool translate_cmovcc(IR1_INST *pir1)
 
     if (ir1_opnd_size(opnd0) == 64) {
         la_or(dest_opnd, cond1, cond2);
-    } else {
+    } else if (!GHBR_ON(pir1)) {
         la_or(cond1, cond1, cond2);
         store_ireg_to_ir1(cond1, opnd0, false);
+    } else {
+        la_or(dest_opnd, cond1, cond2);
     }
     ra_free_temp(cond1);
     ra_free_temp(cond2);

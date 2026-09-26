@@ -10,6 +10,7 @@ from pathlib import Path
 
 CATEGORIES = {
     "architectural-writeback",
+    "conditional-writeback",
     "input-normalization",
     "address-normalization",
     "temporary-conversion",
@@ -117,6 +118,20 @@ def compare_sites(name, actual, expected):
         raise AuditError(f"{name}: stale inventory entries: {stale}")
 
 
+def audit_may_def_model(repo_root):
+    source = (
+        repo_root / "target/i386/latx/optimization/hbr.c"
+    ).read_text(encoding="utf-8")
+    required = (
+        "gpr_may_def",
+        "set_may_def_reg",
+        "case WRAP(CMOVA)",
+    )
+    missing = [token for token in required if token not in source]
+    if missing:
+        raise AuditError(f"missing conditional-write model: {missing}")
+
+
 def audit(repo_root, inventory_path=None):
     repo_root = Path(repo_root)
     if inventory_path is None:
@@ -134,12 +149,14 @@ def audit(repo_root, inventory_path=None):
         key for key, entry in mov32.items() if entry["gated"]
     }
     consumer_functions = set(consumers)
-    if gated_functions != consumer_functions:
+    ungated_consumers = gated_functions - consumer_functions
+    if ungated_consumers:
         raise AuditError(
-            "gated mov32 sites and GHBR_ON functions differ: "
-            f"gated-only={sorted(gated_functions - consumer_functions)} "
-            f"consumer-only={sorted(consumer_functions - gated_functions)}"
+            "gated mov32 sites without GHBR_ON consumer: "
+            f"{sorted(ungated_consumers)}"
         )
+
+    audit_may_def_model(repo_root)
 
     category_counts = {}
     for entry in mov32.values():
@@ -149,6 +166,7 @@ def audit(repo_root, inventory_path=None):
         "consumer_functions": len(consumers),
         "mov32_functions": len(mov32),
         "categories": category_counts,
+        "may_def_model": True,
     }
 
 
