@@ -56,17 +56,11 @@ bool translate_tzcnt(IR1_INST *pir1)
         load_ireg_from_ir1(ir1_get_opnd(pir1, 1), ZERO_EXTENSION, false);
     IR2_OPND label_exit = ra_alloc_label();
     IR2_OPND label_ctz = ra_alloc_label();
-    IR2_OPND count;
-    bool count_opnd_is_temp = false;
     int opnd_size = ir1_opnd_size(ir1_get_opnd(pir1, 0));
-    /* if the reg is 64 bits or is zero-extend from the high bits */
     lsassert(ir1_opnd_is_gpr(ir1_get_opnd(pir1, 0)));
-    if (opnd_size == 64) {
-        count = ra_alloc_gpr(ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 0)));
-    } else {
-        count = ra_alloc_itemp();
-        count_opnd_is_temp = true;
-    }
+    bool count_is_temp = opnd_size == 16;
+    IR2_OPND count = count_is_temp ? ra_alloc_itemp() :
+        ra_alloc_gpr(ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 0)));
 
     if (ir1_need_calculate_any_flag(pir1)) {
         IR2_OPND eflags = ra_alloc_itemp();
@@ -88,8 +82,7 @@ bool translate_tzcnt(IR1_INST *pir1)
     la_ctz_d(count, src_opnd);
 
     la_label(label_exit);
-    /* 3. store result */
-    if (count_opnd_is_temp) {
+    if (count_is_temp) {
         store_ireg_to_ir1(count, ir1_get_opnd(pir1, 0), false);
         ra_free_temp(count);
     }
@@ -101,17 +94,11 @@ bool translate_bsf(IR1_INST *pir1)
     IR2_OPND src_opnd =
         load_ireg_from_ir1(ir1_get_opnd(pir1, 1), ZERO_EXTENSION, false);
     IR2_OPND label_exit = ra_alloc_label();
-    IR2_OPND count;
-    bool count_opnd_is_temp = false;
     int opnd_size = ir1_opnd_size(ir1_get_opnd(pir1, 0));
-    /* if the reg is 64 bits or is zero-extend from the high bits */
     lsassert(ir1_opnd_is_gpr(ir1_get_opnd(pir1, 0)));
-    if (opnd_size == 64) {
-        count = ra_alloc_gpr(ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 0)));
-    } else {
-        count = ra_alloc_itemp();
-        count_opnd_is_temp = true;
-    }
+    bool count_is_temp = opnd_size == 16;
+    IR2_OPND count = count_is_temp ? ra_alloc_itemp() :
+        ra_alloc_gpr(ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 0)));
     generate_eflag_calculation(src_opnd, src_opnd, src_opnd, pir1, true);
     /* case 1: if reg/mem is zero */
     la_beq(src_opnd, zero_ir2_opnd, label_exit);
@@ -120,11 +107,10 @@ bool translate_bsf(IR1_INST *pir1)
     /* 1. count zero */
     la_ctz_d(count, src_opnd);
     /* 2. store result */
-    if (count_opnd_is_temp) {
+    if (count_is_temp) {
         store_ireg_to_ir1(count, ir1_get_opnd(pir1, 0), false);
         ra_free_temp(count);
     }
-
 /* label_exit: */
     la_label(label_exit);
     return true;
@@ -141,17 +127,11 @@ bool translate_bsr(IR1_INST *pir1)
         load_ireg_from_ir1(ir1_get_opnd(pir1, 1), ZERO_EXTENSION, false);
 
     IR2_OPND label_exit = ra_alloc_label();
-    IR2_OPND count;
-    bool count_opnd_is_temp = false;
     int opnd_size = ir1_opnd_size(ir1_get_opnd(pir1, 0));
-    /* if the reg is 64 bits or is zero-extend from the high bits */
     lsassert(ir1_opnd_is_gpr(ir1_get_opnd(pir1, 0)));
-    if (opnd_size == 64) {
-        count = ra_alloc_gpr(ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 0)));
-    } else {
-        count = ra_alloc_itemp();
-        count_opnd_is_temp = true;
-    }
+    bool count_is_temp = opnd_size == 16;
+    IR2_OPND count = count_is_temp ? ra_alloc_itemp() :
+        ra_alloc_gpr(ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 0)));
 
     generate_eflag_calculation(src_opnd, src_opnd, src_opnd, pir1, true);
     /* case 1: if reg/mem is zero */
@@ -165,7 +145,7 @@ bool translate_bsr(IR1_INST *pir1)
     la_addi_d(count, count, -63);
     la_sub_d(count, zero_ir2_opnd, count);
     /* 3. store result */
-    if (count_opnd_is_temp) {
+    if (count_is_temp) {
         store_ireg_to_ir1(count, ir1_get_opnd(pir1, 0), false);
         ra_free_temp(count);
     }
@@ -182,28 +162,20 @@ bool translate_lzcnt(IR1_INST *pir1)
         load_ireg_from_ir1(ir1_get_opnd(pir1, 1), ZERO_EXTENSION, false);
 
     IR2_OPND temp = ra_alloc_itemp();
-    IR2_OPND count;
-    bool count_opnd_is_temp = false;
     int opnd_size = ir1_opnd_size(ir1_get_opnd(pir1, 0));
     li_d(temp, 64 - opnd_size);
     lsassert(ir1_opnd_is_gpr(ir1_get_opnd(pir1, 0)));
-    if (opnd_size == 64) {
-        count = ra_alloc_gpr(ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 0)));
-    } else {
-        count = ra_alloc_itemp();
-        count_opnd_is_temp = true;
-    }
+    bool count_is_temp = opnd_size == 16;
+    IR2_OPND count = count_is_temp ? ra_alloc_itemp() :
+        ra_alloc_gpr(ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 0)));
 
     la_clz_d(count, src_opnd);
     la_sub_d(count, count, temp);
-    if (count_opnd_is_temp) {
+    generate_eflag_calculation(count, count, src_opnd, pir1, true);
+    if (count_is_temp) {
         store_ireg_to_ir1(count, ir1_get_opnd(pir1, 0), false);
         ra_free_temp(count);
     }
-
-    IR2_OPND dest_opnd =
-        load_ireg_from_ir1(ir1_get_opnd(pir1, 0), ZERO_EXTENSION, false);
-    generate_eflag_calculation(dest_opnd, dest_opnd, src_opnd, pir1, true);
 
     return true;
 }
