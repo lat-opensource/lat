@@ -2274,7 +2274,69 @@ static void clear_ir1_flag(TranslationBlock **tb_list, int tb_num_in_tu)
 }
 
 #ifdef TARGET_X86_64
-static void over_tb_gpr_opt(TranslationBlock **tb_list, int tb_num_in_tu)
+typedef struct GHBRStats {
+    uint64_t modeled_def_instructions;
+    uint64_t candidates;
+    uint64_t hits;
+    uint64_t external_edges;
+} GHBRStats;
+
+static __thread GHBRStats ghbr_stats;
+static __thread int ghbr_stats_enabled = -1;
+
+static bool ghbr_stats_on(void)
+{
+    if (ghbr_stats_enabled < 0) {
+        const char *value = getenv("LATX_GHBR_STATS");
+
+        ghbr_stats_enabled = value && !strcmp(value, "1");
+    }
+    return ghbr_stats_enabled;
+}
+
+static void count_ghbr_external_edge(TranslationBlock **tb_list,
+        int tb_num_in_tu, TranslationBlock *successor, bool stats)
+{
+    if (stats && successor &&
+        !hbr_in_tu_successor(tb_list, tb_num_in_tu, successor)) {
+        ghbr_stats.external_edges++;
+    }
+}
+
+static void count_ghbr_external_edges(TranslationBlock **tb_list,
+        int tb_num_in_tu, bool stats)
+{
+    if (!stats) {
+        return;
+    }
+
+    for (int i = 0; i < tb_num_in_tu; i++) {
+        TranslationBlock *tb = tb_list[i];
+        TranslationBlock *next_tb =
+            (TranslationBlock *)tb->s_data->next_tb[TU_TB_INDEX_NEXT];
+        TranslationBlock *target_tb =
+            (TranslationBlock *)tb->s_data->next_tb[TU_TB_INDEX_TARGET];
+
+        switch (tb->s_data->last_ir1_type) {
+        case IR1_TYPE_BRANCH:
+            count_ghbr_external_edge(tb_list, tb_num_in_tu, next_tb, stats);
+            count_ghbr_external_edge(tb_list, tb_num_in_tu, target_tb, stats);
+            break;
+        case IR1_TYPE_JUMP:
+        case IR1_TYPE_CALL:
+            count_ghbr_external_edge(tb_list, tb_num_in_tu, target_tb, stats);
+            break;
+        case IR1_TYPE_NORMAL:
+            count_ghbr_external_edge(tb_list, tb_num_in_tu, next_tb, stats);
+            break;
+        default:
+            break;
+        }
+    }
+}
+
+static void over_tb_gpr_opt(TranslationBlock **tb_list, int tb_num_in_tu,
+                            bool stats)
 {
     TranslationBlock *next_tbs[tb_num_in_tu];
     TranslationBlock *target_tbs[tb_num_in_tu];
@@ -2288,6 +2350,7 @@ static void over_tb_gpr_opt(TranslationBlock **tb_list, int tb_num_in_tu)
 
     bool continue_flag = true;
     uint32_t old_live_in, old_live_out;
+    count_ghbr_external_edges(tb_list, tb_num_in_tu, stats);
     while(continue_flag) {
         continue_flag = false;
         for (int i = tb_num_in_tu - 1; i >= 0; i--) {
@@ -2343,11 +2406,19 @@ static void over_tb_gpr_opt(TranslationBlock **tb_list, int tb_num_in_tu)
             ir1 = tb_ir1_inst(tb, j);
             uint32_t defs = ir1->gpr_def | ir1->gpr_may_def;
 
-            if (defs & gpr_out) {
-                gpr_out &= ~ir1->gpr_def;
-            } else if (defs) {
-                /* fprintf(stderr, "%x %x\n", ir1->gpr_def, gpr_out); */
-                ir1->hbr_flag |= GHBR_CAN_OPT;
+            if (defs) {
+                if (stats) {
+                    ghbr_stats.modeled_def_instructions++;
+                    ghbr_stats.candidates++;
+                }
+                if (defs & gpr_out) {
+                    gpr_out &= ~ir1->gpr_def;
+                } else {
+                    ir1->hbr_flag |= GHBR_CAN_OPT;
+                    if (stats) {
+                        ghbr_stats.hits++;
+                    }
+                }
             }
             gpr_out |= ir1->gpr_use;
         }
@@ -2731,10 +2802,23 @@ static void get_gpr_use_def(TranslationBlock *tb)
 
 static void do_gpr_opt(TranslationBlock **tb_list, int tb_num_in_tu)
 {
+    bool stats = ghbr_stats_on();
+    if (stats) {
+        ghbr_stats = (GHBRStats){0};
+    }
     for (int i = 0; i < tb_num_in_tu; i++) {
         get_gpr_use_def(tb_list[i]);
     }
-    over_tb_gpr_opt(tb_list, tb_num_in_tu);
+    over_tb_gpr_opt(tb_list, tb_num_in_tu, stats);
+    if (stats) {
+        fprintf(stderr,
+                "[GHBR][TU] tb=" TARGET_FMT_lx " defs=%" PRIu64
+                " candidates=%" PRIu64 " hits=%" PRIu64
+                " external_edges=%" PRIu64 "\n",
+                tb_list[0]->pc, ghbr_stats.modeled_def_instructions,
+                ghbr_stats.candidates, ghbr_stats.hits,
+                ghbr_stats.external_edges);
+    }
 }
 #endif
 

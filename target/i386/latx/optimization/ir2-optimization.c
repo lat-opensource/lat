@@ -267,7 +267,9 @@ static bool ir2_zx_stats_enabled(void)
     static __thread int enabled = -1;
 
     if (enabled < 0) {
-        enabled = getenv("LATX_GHBR_STATS") != NULL;
+        const char *value = getenv("LATX_GHBR_STATS");
+
+        enabled = value && !strcmp(value, "1");
     }
     return enabled;
 }
