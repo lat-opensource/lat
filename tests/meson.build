@@ -19,6 +19,7 @@ python3 = find_program('python3', required: false)
 if python3.found()
   latx_python_tests = [
     ['test-latx-ghbr-audit', '../scripts/test_latx_ghbr_audit.py'],
+    ['test-latx-ghbr-conditional', '../scripts/test_latx_ghbr_conditional.py'],
     ['test-latx-ghbr-implicit', '../scripts/test_latx_ghbr_implicit.py'],
   ]
   foreach test_def : latx_python_tests
