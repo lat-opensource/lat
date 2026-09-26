@@ -124,6 +124,15 @@ static void replace_cache_footer(const char *path, const char *footer)
     g_assert(g_file_set_contents(path, replaced->str, replaced->len, NULL));
 }
 
+static void write_truncated_cache(const char *name, char *path)
+{
+    uint8_t contents[sizeof(aot_header) - 1] = { 0 };
+
+    g_assert(get_aot_path(name, path, PATH_MAX) == 0);
+    g_assert(g_file_set_contents(path, (char *)contents, sizeof(contents),
+                                 NULL));
+}
+
 static void remove_cache(const char *name)
 {
     char path[PATH_MAX];
@@ -180,7 +189,7 @@ int main(void)
 
         reset_stream_counts();
         buffer = NULL;
-        write_cache(truncated_name, false, true, cache_path);
+        write_truncated_cache(truncated_name, cache_path);
         g_assert(aot_load(lib_name, truncated_name, &buffer) == NULL);
         g_assert(buffer == NULL);
         g_assert(!g_file_test(cache_path, G_FILE_TEST_EXISTS));
