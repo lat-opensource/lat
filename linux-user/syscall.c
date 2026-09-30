@@ -9709,11 +9709,19 @@ typedef struct ForkCloneContext {
     jmp_buf jump_buffer;
 } ForkCloneContext;
 
+/*
+ * Fortified longjmp rejects the deliberate jump from a clone child stack.
+ * Bind directly to the unchecked implementation; do_fork() has already
+ * blocked signals and this path does not need to restore a signal mask.
+ */
+extern void fork_clone_longjmp(jmp_buf env, int value)
+    __asm__("_longjmp") __attribute__((noreturn));
+
 static int fork_clone_func(void *opaque)
 {
     ForkCloneContext *context = opaque;
 
-    longjmp(context->jump_buffer, 1);
+    fork_clone_longjmp(context->jump_buffer, 1);
 }
 
 static int fork_with_flags(unsigned int flags)
@@ -9721,7 +9729,7 @@ static int fork_with_flags(unsigned int flags)
     char stack[PTHREAD_STACK_MIN] __attribute__((aligned(16)));
     ForkCloneContext context;
 
-    if (setjmp(context.jump_buffer) == 0) {
+    if (_setjmp(context.jump_buffer) == 0) {
         return clone(fork_clone_func, stack + sizeof(stack), flags, &context);
     }
     return 0;
