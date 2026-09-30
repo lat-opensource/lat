@@ -30,6 +30,7 @@ _Static_assert(sizeof(kzt_x86_64_link_map_prefix_t) == 40,
 #define KZT_X86_64_DT_HASH 4
 #define KZT_X86_64_DT_STRTAB 5
 #define KZT_X86_64_DT_SYMTAB 6
+#define KZT_X86_64_DT_SONAME 14
 #define KZT_X86_64_DT_STRSZ 10
 #define KZT_X86_64_DT_SYMENT 11
 #define KZT_X86_64_DT_GNU_HASH INT64_C(0x6ffffef5)
@@ -246,6 +247,7 @@ static int kzt_public_loader_symbol_name_matches(
 static kzt_public_loader_result_t kzt_public_loader_find_object_symbol(
     const kzt_public_loader_object_t *object,
     const kzt_public_loader_reader_t *reader,
+    const char *library_name,
     const char *symbol_name,
     size_t symbol_name_size,
     uintptr_t *symbol_addr)
@@ -257,6 +259,7 @@ static kzt_public_loader_result_t kzt_public_loader_find_object_symbol(
     uint64_t symbol_table_value = 0;
     uint64_t hash_value = 0;
     uint64_t gnu_hash_value = 0;
+    uint64_t soname = 0;
     uint64_t string_table_size = 0;
     uint64_t symbol_entry_size = 0;
     uint32_t hash_header[2];
@@ -286,6 +289,9 @@ static kzt_public_loader_result_t kzt_public_loader_find_object_symbol(
             break;
         }
         switch (entry.tag) {
+        case KZT_X86_64_DT_SONAME:
+            soname = entry.value;
+            break;
         case KZT_X86_64_DT_HASH:
             hash_value = entry.value;
             break;
@@ -325,6 +331,23 @@ static kzt_public_loader_result_t kzt_public_loader_find_object_symbol(
         kzt_public_loader_dynamic_pointer(
             object, symbol_table_value, &symbol_table_addr) != 0) {
         return KZT_PUBLIC_LOADER_OVERFLOW;
+    }
+    if (library_name) {
+        int matches;
+
+        if (!soname || soname >= string_table_size) {
+            return KZT_PUBLIC_LOADER_NOT_FOUND;
+        }
+        if (soname > UINTPTR_MAX - string_table_addr) {
+            return KZT_PUBLIC_LOADER_OVERFLOW;
+        }
+        matches = kzt_public_loader_symbol_name_matches(
+            reader, string_table_addr + soname, string_table_size - soname,
+            library_name, strlen(library_name));
+        if (matches <= 0) {
+            return matches < 0 ? KZT_PUBLIC_LOADER_READ_ERROR
+                               : KZT_PUBLIC_LOADER_NOT_FOUND;
+        }
     }
     if (hash_value) {
         if (kzt_public_loader_read(reader, hash_addr,
@@ -929,6 +952,7 @@ kzt_public_loader_result_t kzt_public_loader_observer_refresh(
 kzt_public_loader_result_t kzt_public_loader_find_symbol(
     const kzt_public_loader_observer_t *observer,
     const kzt_public_loader_reader_t *reader,
+    const char *library_name,
     const char *symbol_name,
     uintptr_t *symbol_addr)
 {
@@ -966,7 +990,8 @@ kzt_public_loader_result_t kzt_public_loader_find_symbol(
             .previous_addr = (uintptr_t)map.previous,
         };
         result = kzt_public_loader_find_object_symbol(
-            &object, reader, symbol_name, symbol_name_size, &candidate);
+            &object, reader, library_name, symbol_name, symbol_name_size,
+            &candidate);
         if (result == KZT_PUBLIC_LOADER_NOT_FOUND) {
             continue;
         }

@@ -2489,7 +2489,7 @@ static void kzt_request_header_cleanup(CPUX86State *env)
     }
 }
 
-uintptr_t kzt_resolve_guest_symbol(const char *name)
+uintptr_t kzt_resolve_guest_symbol(const char *library_name, const char *name)
 {
     kzt_public_loader_observer_t snapshot;
     kzt_public_loader_result_t result;
@@ -2516,7 +2516,8 @@ uintptr_t kzt_resolve_guest_symbol(const char *name)
     }
     if (result == KZT_PUBLIC_LOADER_OK) {
         result = kzt_public_loader_find_symbol(
-            &snapshot, &kzt_public_loader_reader, name, &address);
+            &snapshot, &kzt_public_loader_reader, library_name, name,
+            &address);
     }
     mmap_unlock();
     return result == KZT_PUBLIC_LOADER_OK ? address : 0;

@@ -238,7 +238,8 @@ static void write_gnu_hash_dlopen_object(fixture_t *fixture)
           .value = SYMBOL_HASH_ADDR - SYMBOL_ELF_BASE },
         { .tag = 5, .value = SYMBOL_STRING_ADDR - SYMBOL_ELF_BASE },
         { .tag = 6, .value = SYMBOL_TABLE_ADDR - SYMBOL_ELF_BASE },
-        { .tag = 10, .value = sizeof("\0dlopen") },
+        { .tag = 14, .value = sizeof("\0dlopen") },
+        { .tag = 10, .value = sizeof("\0dlopen\0libdl.so.2") },
         { .tag = 11, .value = sizeof(test_x86_64_symbol_t) },
         { .tag = KZT_X86_64_DT_NULL, .value = 0 },
     };
@@ -266,7 +267,7 @@ static void write_gnu_hash_dlopen_object(fixture_t *fixture)
             .value = 0x905d0,
         },
     };
-    static const char strings[] = "\0dlopen";
+    static const char strings[] = "\0dlopen\0libdl.so.2";
 
     fixture_write(fixture, SYMBOL_DYNAMIC_ADDR,
                   dynamic, sizeof(dynamic));
@@ -629,11 +630,18 @@ static void test_symbol_lookup_uses_live_gnu_hash_object(void)
               record_visit, &log) == KZT_PUBLIC_LOADER_OK);
 
     CHECK(kzt_public_loader_find_symbol(
-              &observer, &reader, "dlopen", &symbol_addr) ==
+              &observer, &reader, NULL, "dlopen", &symbol_addr) ==
           KZT_PUBLIC_LOADER_OK);
     CHECK(symbol_addr == SYMBOL_ELF_BASE + 0x905d0);
     CHECK(kzt_public_loader_find_symbol(
-              &observer, &reader, "missing", &symbol_addr) ==
+              &observer, &reader, "libdl.so.2", "dlopen", &symbol_addr) ==
+          KZT_PUBLIC_LOADER_OK);
+    CHECK(symbol_addr == SYMBOL_ELF_BASE + 0x905d0);
+    CHECK(kzt_public_loader_find_symbol(
+              &observer, &reader, "libc.so.6", "dlopen", &symbol_addr) ==
+          KZT_PUBLIC_LOADER_NOT_FOUND);
+    CHECK(kzt_public_loader_find_symbol(
+              &observer, &reader, NULL, "missing", &symbol_addr) ==
           KZT_PUBLIC_LOADER_NOT_FOUND);
 }
 

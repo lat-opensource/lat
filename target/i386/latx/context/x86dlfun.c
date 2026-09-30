@@ -41,7 +41,11 @@ int init_x86dlfun_from(const char *primary, const char *fallback)
     if (latx_kzt_runtime_enabled()) {
         for (int index = 0; index < X86_DL_SYMBOL_COUNT; ++index) {
             resolved[index] =
-                (void *)kzt_resolve_guest_symbol(symbols[index]);
+                (void *)kzt_resolve_guest_symbol(primary, symbols[index]);
+            if (!resolved[index]) {
+                resolved[index] =
+                    (void *)kzt_resolve_guest_symbol(fallback, symbols[index]);
+            }
             if (!resolved[index]) {
                 return -1;
             }
