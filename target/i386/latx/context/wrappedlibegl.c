@@ -22,9 +22,54 @@
 #include "librarian.h"
 #include "callback.h"
 #include "library.h"
+#include "kzt-groups.h"
+#include "kzt-runtime.h"
 
 const char* libeglName = "libEGL.so.1";
 #define LIBNAME libegl
+
+static bool host_egl_supports_angle_passthrough(void)
+{
+    /* Extensions used by Chromium's ANGLE passthrough decoder. */
+    static const char *const required_extensions[] = {
+        "EGL_CHROMIUM_create_context_bind_generates_resource",
+        "EGL_ANGLE_create_context_webgl_compatibility",
+        "EGL_ANGLE_robust_resource_initialization",
+        "EGL_ANGLE_display_texture_share_group",
+        "EGL_ANGLE_create_context_client_arrays",
+    };
+    static int cached = -1;
+    void *egl;
+    const char *(*query_string)(void *, int);
+    const char *extensions;
+
+    if (cached >= 0)
+        return cached;
+
+    egl = dlopen(libeglName, RTLD_LAZY | RTLD_LOCAL);
+    if (!egl) {
+        cached = 0;
+        return false;
+    }
+    query_string = dlsym(egl, "eglQueryString");
+    extensions = query_string ? query_string(NULL, 0x3055) : NULL;
+    cached = extensions != NULL;
+    for (size_t i = 0; cached && i < G_N_ELEMENTS(required_extensions); ++i)
+        cached = strstr(extensions, required_extensions[i]) != NULL;
+    dlclose(egl);
+    return cached;
+}
+
+#define PRE_INIT                                                        \
+    do {                                                                \
+        if (latx_kzt_runtime_enabled() &&                               \
+            !host_egl_supports_angle_passthrough()) {                   \
+            kzt_groups_log_wrapper_rejection(                           \
+                libeglName,                                             \
+                "host EGL lacks required ANGLE extensions");            \
+            return -1;                                                  \
+        }                                                               \
+    } while (0);
 
 #include "generated/wrappedlibegltypes.h"
 #include "wrappercallback.h"
