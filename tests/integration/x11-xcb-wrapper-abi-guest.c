@@ -3,6 +3,7 @@
 #include <inttypes.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #include <X11/Xlib.h>
 #include <xcb/xcb.h>
@@ -47,6 +48,8 @@ int main(void)
     xcb_void_cookie_t cookie;
     xcb_image_t *image;
     xcb_pixmap_t pixmap;
+    XImage *xlib_image;
+    int destroy_result;
     int screen_number;
     int result;
 
@@ -70,6 +73,21 @@ int main(void)
     XFlush(display);
     result = check(callback_count > 0 && !callback_mismatch,
                    "XSynchronizeProc-Display", 11);
+    if (result) {
+        return result;
+    }
+
+    xlib_image = XCreateImage(
+        display, DefaultVisual(display, DefaultScreen(display)),
+        DefaultDepth(display, DefaultScreen(display)), ZPixmap, 0,
+        calloc(1, 4), 1, 1, 32, 4);
+    result = check(xlib_image != NULL && xlib_image->f.destroy_image != NULL,
+                   "XImage-destroy-callback", 12);
+    if (result) {
+        return result;
+    }
+    destroy_result = xlib_image->f.destroy_image(xlib_image);
+    result = check(destroy_result != 0, "XImage-destroy-guest-data", 13);
     if (result) {
         return result;
     }

@@ -1133,6 +1133,15 @@ EXPORT int32_t my_XPeekIfEvent(my_XDisplay_t *dpy, void* ev,
 void sub_image_wrapper(uintptr_t fnc);
 typedef void* (*sub_image_wrapper_t)(void*, int32_t, int32_t, uint32_t, uint32_t);
 
+typedef int32_t (*destroy_image_wrapper_t)(void*);
+void destroy_image_wrapper(uintptr_t fnc);
+void destroy_image_wrapper(uintptr_t fnc)
+{
+    __MY_CPU;
+    (void)fnc;
+    cpu->regs[R_EAX] = my_XDestroyImage((void *)cpu->regs[R_EDI]);
+}
+
 void BridgeImageFunc(XImage *img);
 void BridgeImageFunc(XImage *img)
 {
@@ -1146,7 +1155,7 @@ void BridgeImageFunc(XImage *img)
     uintptr_t fnc;
 
     GO(create_image, pFppuiipuuii)
-    GO(destroy_image, iFp)
+    GO(destroy_image, destroy_image_wrapper)
     GO(get_pixel, LFpii)
     GO(put_pixel, iFpiiL)
     GO(sub_image, sub_image_wrapper)
