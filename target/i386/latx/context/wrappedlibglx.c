@@ -21,6 +21,7 @@
 #include "library.h"
 #include "wrappedlibs.h"
 #include "myalign.h"
+#include "gltools.h"
 
 const char* libglxName = "libGLX.so.0";
 #define LIBNAME libglx
@@ -243,9 +244,7 @@ static void* getGLXProcAddress(glprocaddress_t procaddr, const char* rname)
         }
     }
     if(k==kh_end(wrappers->glwrappers)) {
-        printf_dlsym(LOG_DEBUG, "%p\n", NULL);
-        printf_dlsym(LOG_INFO, "Warning, no wrapper for %s\n", rname);
-        return NULL;
+        return getGLProcAddress(procaddr, rname);
     }
     const char* constname = kh_key(wrappers->glwrappers, k);
     AddOffsetSymbol(my_context->maplib, symbol, rname);

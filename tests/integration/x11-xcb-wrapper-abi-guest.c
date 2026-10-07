@@ -6,6 +6,8 @@
 #include <stdlib.h>
 
 #include <X11/Xlib.h>
+#include <GL/gl.h>
+#include <GL/glx.h>
 #include <xcb/xcb.h>
 #include <xcb/xcb_image.h>
 
@@ -52,6 +54,7 @@ int main(void)
     int destroy_result;
     int screen_number;
     int result;
+    __GLXextFuncPtr get_string;
 
     result = check(XInitThreads() != 0 && _Xglobal_lock != NULL &&
                    _XLockMutex_fn != NULL && _XUnlockMutex_fn != NULL,
@@ -88,6 +91,17 @@ int main(void)
     }
     destroy_result = xlib_image->f.destroy_image(xlib_image);
     result = check(destroy_result != 0, "XImage-destroy-guest-data", 13);
+    if (result) {
+        return result;
+    }
+    get_string = glXGetProcAddress((const GLubyte *)"glGetString");
+    result = check(get_string != NULL,
+                   "glXGetProcAddress-GL-fallback", 14);
+    if (result) {
+        return result;
+    }
+    result = check(((const GLubyte *(*)(GLenum))get_string)(GL_VERSION) != NULL,
+                   "glXGetProcAddress-bridged-call", 15);
     if (result) {
         return result;
     }
