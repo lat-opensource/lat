@@ -12,6 +12,10 @@
 
 #define PTR_VALUE(value) ((void *)(uintptr_t)(value))
 
+extern void *_Xglobal_lock;
+extern void (*_XLockMutex_fn)(void *);
+extern void (*_XUnlockMutex_fn)(void *);
+
 static Display *callback_display;
 static int callback_count;
 static int callback_mismatch;
@@ -45,6 +49,15 @@ int main(void)
     xcb_pixmap_t pixmap;
     int screen_number;
     int result;
+
+    result = check(XInitThreads() != 0 && _Xglobal_lock != NULL &&
+                   _XLockMutex_fn != NULL && _XUnlockMutex_fn != NULL,
+                   "XInitThreads-mutex-callbacks", 9);
+    if (result) {
+        return result;
+    }
+    _XLockMutex_fn(_Xglobal_lock);
+    _XUnlockMutex_fn(_Xglobal_lock);
 
     display = XOpenDisplay(NULL);
     if (!display) {

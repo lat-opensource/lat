@@ -19,7 +19,21 @@ def main() -> int:
         "XSynchronizeProc must forward its Display argument"
     )
     assert reverse in source, "native XSynchronizeProc must use the iFp bridge"
-    print("XSynchronizeProc preserves its one-argument callback ABI")
+
+    assert "bridge_X11_mutex_functions(lib);" in source, (
+        "libX11 must bridge its externally referenced mutex callbacks"
+    )
+    assert '_XLockMutex_fn' in source and '_XUnlockMutex_fn' in source, (
+        "Xlib lock and unlock mutex callbacks must be bridged"
+    )
+    for unnecessary in (
+        "_XCreateMutex_fn", "_XFreeMutex_fn", "_Xthread_self_fn",
+    ):
+        assert unnecessary not in source, (
+            f"unreferenced Xlib internal callback {unnecessary} must not be bridged"
+        )
+
+    print("X11 callback ABI and required mutex bridges are present")
     return 0
 
 

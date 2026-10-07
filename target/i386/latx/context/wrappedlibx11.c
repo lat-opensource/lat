@@ -1732,8 +1732,25 @@ EXPORT void* my_XOpenIM(my_XDisplay_t* dpy, void* v2, void* v3, void* v4)
     return ret;
 }
 
+static void bridge_X11_mutex_functions(library_t *lib)
+{
+    static const char *const functions[] = {
+        "_XLockMutex_fn",
+        "_XUnlockMutex_fn",
+    };
+
+    for (size_t i = 0; i < ARRAY_SIZE(functions); i++) {
+        void **slot = dlsym(lib->priv.w.lib, functions[i]);
+
+        if (slot && *slot) {
+            AddAutomaticBridge(lib->priv.w.bridge, vFp, *slot, 0);
+        }
+    }
+}
+
 #define CUSTOM_INIT                 \
     getMy(lib);                     \
+    bridge_X11_mutex_functions(lib); \
     setNeededLibs(lib, 1,           \
         "libXcursor.so.1");
 #define CUSTOM_FINI \
