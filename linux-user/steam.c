@@ -265,6 +265,19 @@ out:
 
 #endif
 
+static bool latx_pressure_vessel_path_is_within(const char *parent,
+                                                const char *path)
+{
+    size_t length;
+
+    if (!parent || !path) {
+        return false;
+    }
+    length = strlen(parent);
+    return !strncmp(parent, path, length) &&
+           (path[length] == '\0' || path[length] == '/');
+}
+
 #if defined(TARGET_I386) && !defined(TARGET_X86_64)
 static bool latx_pressure_vessel_elf_is_i386(const char *path)
 {
@@ -348,19 +361,6 @@ static bool latx_pressure_vessel_guest_path_present(const char *library_path,
         }
     }
     return false;
-}
-
-static bool latx_pressure_vessel_path_is_within(const char *parent,
-                                                const char *path)
-{
-    size_t length;
-
-    if (!parent || !path) {
-        return false;
-    }
-    length = strlen(parent);
-    return !strncmp(parent, path, length) &&
-           (path[length] == '\0' || path[length] == '/');
 }
 
 static char *latx_pressure_vessel_find_i386_sysroot(
@@ -448,6 +448,69 @@ static void latx_pressure_vessel_append_i386_sysroot(envlist_t *envlist)
 }
 #endif
 
+#if defined(TARGET_X86_64)
+/*
+ * The guest sysroot may only reach the process Steam was asked to run.  The
+ * Runtime and the compatibility tool resolve loader and libc from their own
+ * installation, and their children inherit this environment, so the guest
+ * loader directory is put in front of the application payload and removed
+ * from every other process.  Without install metadata the payload behaviour is
+ * kept, except for the programs the Runtime hands the environment to directly.
+ */
+static char *latx_pressure_vessel_library_path(const envlist_t *envlist,
+                                               const char *program,
+                                               const char *directory,
+                                               bool wrapper)
+{
+    const char *library_path = envlist_getenv(envlist, "LD_LIBRARY_PATH");
+    const char *install = envlist_getenv(envlist,
+                                         "STEAM_COMPAT_INSTALL_PATH");
+    g_autofree char *install_real = NULL;
+    g_autofree char *program_real = realpath(program, NULL);
+    g_auto(GStrv) directories = NULL;
+    GString *result = g_string_new(NULL);
+    bool payload;
+    bool present = false;
+
+    if (install && install[0]) {
+        install_real = realpath(install, NULL);
+        payload = install_real && program_real &&
+                  latx_pressure_vessel_path_is_within(install_real,
+                                                      program_real);
+    } else {
+        payload = !wrapper && !latx_pressure_vessel_webhelper(program);
+    }
+
+    directories = g_strsplit(library_path ? library_path : "", ":", -1);
+    for (char **item = directories; *item; item++) {
+        if (!strcmp(*item, directory)) {
+            present = true;
+            continue;
+        }
+        if (!(*item)[0]) {
+            continue;
+        }
+        if (result->len) {
+            g_string_append_c(result, ':');
+        }
+        g_string_append(result, *item);
+    }
+
+    if (!payload) {
+        if (!present) {
+            g_string_free(result, true);
+            return NULL;
+        }
+        return g_string_free(result, false);
+    }
+    if (result->len) {
+        g_string_prepend_c(result, ':');
+    }
+    g_string_prepend(result, directory);
+    return g_string_free(result, false);
+}
+#endif
+
 void latx_steam_prepare(const char *program, char **target_argv,
                                   envlist_t *envlist)
 {
@@ -519,22 +582,17 @@ void latx_steam_prepare(const char *program, char **target_argv,
 
         if (resolved) {
             g_autofree char *directory = g_path_get_dirname(resolved);
-            const char *library_path = envlist_getenv(envlist,
-                                                      "LD_LIBRARY_PATH");
-            g_autofree char *assignment = NULL;
-            size_t length = strlen(directory);
+            g_autofree char *updated = latx_pressure_vessel_library_path(
+                envlist, program, directory, wrapper_name);
 
-            if (library_path && !strncmp(library_path, directory, length) &&
-                (!library_path[length] || library_path[length] == ':')) {
-                return;
+            if (updated) {
+                g_autofree char *assignment = g_strdup_printf(
+                    "LD_LIBRARY_PATH=%s", updated);
+
+                (void)envlist_setenv(envlist, assignment);
+                (void)latx_pressure_vessel_runtime_configure(envlist,
+                                                             expected_files);
             }
-            assignment = g_strdup_printf(
-                "LD_LIBRARY_PATH=%s%s%s", directory,
-                library_path && library_path[0] ? ":" : "",
-                library_path ? library_path : "");
-            (void)envlist_setenv(envlist, assignment);
-            (void)latx_pressure_vessel_runtime_configure(envlist,
-                                                         expected_files);
         }
     }
 #endif
