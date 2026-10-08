@@ -32,8 +32,9 @@
 #include "symbols.h"
 #include "lsenv.h"
 #include "qemu.h"
-#include "qemu/pressure-vessel.h"
+#include "qemu/steam.h"
 #include "kzt-groups.h"
+#include "linux-user/steam.h"
 #include "kzt_relocation_transaction.h"
 
 static int kzt_relocation_slot_fits_page(uintptr_t slot_addr)
@@ -591,7 +592,8 @@ static void for_needed_check(elfheader_t* h, int needlibcnt,
                 }
                 if (!not_found) {
                     AddPath(tmp_path.paths[i], lib_path, 1);
-                    if (!latx_pressure_vessel_runtime_is_library_path(
+                    if (!latx_steam_context_active() &&
+                        !latx_pressure_vessel_runtime_is_library_path(
                             tmp_path.paths[i])) {
                         AddPath(tmp_path.paths[i], private_lib_path, 1);
                     }
@@ -685,7 +687,7 @@ static void kzt_append_application_library_paths(path_collection_t *paths,
     }
     directories = g_strsplit(library_path, ":", -1);
     for (char **directory = directories; *directory; directory++) {
-        if (!(*directory)[0] ||
+        if (!(*directory)[0] || latx_steam_context_active() ||
             latx_pressure_vessel_runtime_is_library_path(*directory)) {
             continue;
         }
@@ -702,9 +704,14 @@ void CheckEnableKZT(elfheader_t *h, char **target_argv, int target_argc)
     char *rpath;
 
     int needlibcnt = 0;
+    if (latx_steam_context_active() && option_kzt_log) {
+        fprintf(stderr, "KZT: Steam launch context: prefer enabled wrappers "
+                        "for library-name requests\n");
+    }
     /*
      * Resolve dependencies through RPATH/RUNPATH/LD_LIBRARY_PATH, but only
-     * treat paths embedded in the ELF as application-private libraries.
+     * apply the private-library veto outside the Steam launch context.
+     * Explicit path requests retain NewLibrary's existing precise policy.
      */
     for (size_t i=0; i<h->numDynamic; ++i) {
         switch(h->Dynamic[i].d_tag) {

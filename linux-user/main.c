@@ -53,7 +53,7 @@
 #include "cpu_loop-common.h"
 #include "crypto/init.h"
 #ifdef CONFIG_LATX
-#include "pressure-vessel.h"
+#include "steam.h"
 #endif
 int mydebug = 1;
 
@@ -1531,7 +1531,7 @@ int main(int argc, char **argv, char **envp)
     init_paths(interp_prefix);
 
 #ifdef CONFIG_LATX
-    latx_pressure_vessel_prepare(exec_path, target_argv, envlist);
+    latx_steam_prepare(exec_path, target_argv, envlist);
 #endif
 
     error_init(argv[0]);
