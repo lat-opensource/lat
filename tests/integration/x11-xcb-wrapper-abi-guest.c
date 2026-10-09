@@ -45,6 +45,10 @@ static int check(int passed, const char *name, int failure_code)
 int main(void)
 {
     Display *display;
+    XVisualInfo *visual_info;
+    Colormap colormap;
+    Window context_window;
+    GLXContext context;
     xcb_connection_t *connection;
     xcb_shm_segment_info_t shminfo;
     xcb_void_cookie_t cookie;
@@ -94,6 +98,45 @@ int main(void)
     if (result) {
         return result;
     }
+    /*
+     * glGetString needs a current context: without one it returns NULL even
+     * though the entry point resolved, which would fail the bridging check
+     * below for the wrong reason.
+     */
+    {
+        static int visual_attributes[] = {
+            GLX_RGBA, GLX_DEPTH_SIZE, 24, GLX_DOUBLEBUFFER, None,
+        };
+        XSetWindowAttributes window_attributes;
+
+        visual_info = glXChooseVisual(display, DefaultScreen(display),
+                                      visual_attributes);
+        result = check(visual_info != NULL, "glXChooseVisual", 16);
+        if (result) {
+            return result;
+        }
+        colormap = XCreateColormap(display,
+                                   RootWindow(display, visual_info->screen),
+                                   visual_info->visual, AllocNone);
+        window_attributes.colormap = colormap;
+        window_attributes.event_mask = 0;
+        context_window = XCreateWindow(
+            display, RootWindow(display, visual_info->screen), 0, 0, 16, 16,
+            0, visual_info->depth, InputOutput, visual_info->visual,
+            CWColormap, &window_attributes);
+        context = context_window
+                      ? glXCreateContext(display, visual_info, NULL, True)
+                      : NULL;
+        XMapWindow(display, context_window);
+        XSync(display, False);
+        result = check(context != NULL &&
+                       glXMakeCurrent(display, context_window, context) != 0,
+                       "glXMakeCurrent", 17);
+        if (result) {
+            return result;
+        }
+    }
+
     get_string = glXGetProcAddress((const GLubyte *)"glGetString");
     result = check(get_string != NULL,
                    "glXGetProcAddress-GL-fallback", 14);
@@ -183,6 +226,11 @@ int main(void)
     }
 
     xcb_disconnect(connection);
+    glXMakeCurrent(display, None, NULL);
+    glXDestroyContext(display, context);
+    XDestroyWindow(display, context_window);
+    XFreeColormap(display, colormap);
+    XFree(visual_info);
     XCloseDisplay(display);
     puts("PASS:x11-xcb-wrapper-abi");
     return 0;
