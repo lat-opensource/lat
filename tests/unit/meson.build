@@ -97,6 +97,7 @@ test(
   args: [
     files('check-x11-synchronize-callback.py'),
     project_source_root / 'target/i386/latx/context/wrappedlibx11.c',
+    project_source_root / 'target/i386/latx/include/wrappedlibx11_private.h',
   ],
   suite: 'lat-pr-fast',
 )

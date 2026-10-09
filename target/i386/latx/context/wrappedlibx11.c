@@ -1757,6 +1757,21 @@ static void bridge_X11_mutex_functions(library_t *lib)
     }
 }
 
+/*
+ * A host Xlib built without automatic thread initialisation leaves the mutex
+ * callbacks null until the guest calls XInitThreads.  Bridge them again after
+ * the host call so a late assignment still hands the guest a callable
+ * endpoint instead of a raw host pointer.
+ */
+EXPORT uint32_t my_XInitThreads(void);
+EXPORT uint32_t my_XInitThreads(void)
+{
+    uint32_t ret = my->XInitThreads();
+
+    bridge_X11_mutex_functions(my_lib);
+    return ret;
+}
+
 #define CUSTOM_INIT                 \
     getMy(lib);                     \
     bridge_X11_mutex_functions(lib); \

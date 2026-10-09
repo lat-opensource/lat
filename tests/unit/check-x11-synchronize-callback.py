@@ -7,6 +7,7 @@ import sys
 
 def main() -> int:
     source = pathlib.Path(sys.argv[1]).read_text()
+    private = pathlib.Path(sys.argv[2]).read_text()
 
     callback = """static int my_XSynchronizeProc_##A(void *dpy)"""
     dispatch = """RunFunctionFmt(my_XSynchronizeProc_fct_##A, "p", dpy)"""
@@ -32,6 +33,22 @@ def main() -> int:
         assert unnecessary not in source, (
             f"unreferenced Xlib internal callback {unnecessary} must not be bridged"
         )
+
+    assert "GOM(XInitThreads, iFv)" in private, (
+        "XInitThreads must route through the wrapper so a late mutex "
+        "callback assignment is bridged"
+    )
+    xinit = """EXPORT uint32_t my_XInitThreads(void)
+{
+    uint32_t ret = my->XInitThreads();
+
+    bridge_X11_mutex_functions(my_lib);
+    return ret;
+}"""
+    assert xinit in source, (
+        "the XInitThreads wrapper must re-bridge the mutex callbacks after "
+        "the host call"
+    )
 
     print("X11 callback ABI and required mutex bridges are present")
     return 0
