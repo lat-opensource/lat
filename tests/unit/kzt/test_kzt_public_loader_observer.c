@@ -33,6 +33,8 @@
 #define LIBC_HASH_ADDR (LIBC_ELF_BASE + 0x200)
 #define LIBC_TABLE_ADDR (LIBC_ELF_BASE + 0x300)
 #define LIBC_STRING_ADDR (LIBC_ELF_BASE + 0x400)
+#define LIBC_SYMBOL_VALUE UINT64_C(0x1234)
+#define LIBC_MALLOC_NAME_OFFSET 11
 #define TEST_PAGE_SIZE 0x1000
 #define KZT_TEST_PT_GNU_RELRO UINT32_C(0x6474e552)
 
@@ -290,8 +292,8 @@ static void write_gnu_hash_libc_object(fixture_t *fixture)
           .value = LIBC_HASH_ADDR - LIBC_ELF_BASE },
         { .tag = 5, .value = LIBC_STRING_ADDR - LIBC_ELF_BASE },
         { .tag = 6, .value = LIBC_TABLE_ADDR - LIBC_ELF_BASE },
-        { .tag = 14, .value = sizeof("\0libc.so.6") },
-        { .tag = 10, .value = sizeof("\0libc.so.6") },
+        { .tag = 14, .value = 1 },
+        { .tag = 10, .value = sizeof("\0libc.so.6\0malloc") },
         { .tag = 11, .value = sizeof(test_x86_64_symbol_t) },
         { .tag = KZT_X86_64_DT_NULL, .value = 0 },
     };
@@ -312,8 +314,16 @@ static void write_gnu_hash_libc_object(fixture_t *fixture)
         .bucket = 1,
         .chain = 1,
     };
-    const test_x86_64_symbol_t symbols[2] = { 0 };
-    static const char strings[] = "\0libc.so.6";
+    const test_x86_64_symbol_t symbols[] = {
+        { 0 },
+        {
+            .name = LIBC_MALLOC_NAME_OFFSET,
+            .info = 0x12,
+            .section_index = 1,
+            .value = LIBC_SYMBOL_VALUE,
+        },
+    };
+    static const char strings[] = "\0libc.so.6\0malloc";
 
     fixture_write(fixture, LIBC_DYNAMIC_ADDR, dynamic, sizeof(dynamic));
     fixture_write(fixture, LIBC_HASH_ADDR, &hash, sizeof(hash));
@@ -714,12 +724,75 @@ static void test_split_libc_libdl_lookup_falls_back_to_libdl(void)
               record_visit, &log) == KZT_PUBLIC_LOADER_OK);
 
     CHECK(kzt_public_loader_find_symbol(
+              &observer, &reader, "libc.so.6", "malloc", &symbol_addr) ==
+          KZT_PUBLIC_LOADER_OK);
+    CHECK(symbol_addr == LIBC_ELF_BASE + LIBC_SYMBOL_VALUE);
+    CHECK(kzt_public_loader_find_symbol(
               &observer, &reader, "libc.so.6", "dlopen", &symbol_addr) ==
           KZT_PUBLIC_LOADER_NOT_FOUND);
     CHECK(kzt_public_loader_find_symbol(
               &observer, &reader, "libdl.so.2", "dlopen", &symbol_addr) ==
           KZT_PUBLIC_LOADER_OK);
     CHECK(symbol_addr == SYMBOL_ELF_BASE + 0x905d0);
+}
+
+/*
+ * init_x86dlfun_from() resolves each entry point from a primary library and
+ * falls back to a second one.  Drive the same ordered lookup so a libc that
+ * is present but does not export dlopen still reaches libdl.
+ */
+static void test_ordered_library_lookup_uses_the_fallback(void)
+{
+    fixture_t fixture;
+    visit_log_t log = { 0 };
+    kzt_public_loader_observer_t observer;
+    const kzt_public_loader_reader_t reader = {
+        .read_memory = fixture_read,
+        .opaque = &fixture,
+    };
+    const char *const libc_then_libdl[] = { "libc.so.6", "libdl.so.2" };
+    const char *const absent_then_libdl[] = { "absent.so.2", "libdl.so.2" };
+    const char *const libc_then_absent[] = { "libc.so.6", "absent.so.2" };
+    uintptr_t symbol_addr = 0;
+
+    memset(&fixture, 0, sizeof(fixture));
+    write_dynamic(&fixture, R_DEBUG_ADDR);
+    write_debug(&fixture, KZT_LOADER_DEBUG_CONSISTENT, MAP1_ADDR);
+    write_map(&fixture, MAP1_ADDR, LIBC_ELF_BASE, NAME1_ADDR,
+              LIBC_DYNAMIC_ADDR, MAP2_ADDR, 0);
+    write_map(&fixture, MAP2_ADDR, SYMBOL_ELF_BASE, NAME2_ADDR,
+              SYMBOL_DYNAMIC_ADDR, 0, MAP1_ADDR);
+    write_gnu_hash_libc_object(&fixture);
+    write_gnu_hash_dlopen_object(&fixture);
+    kzt_public_loader_observer_reset(&observer);
+    CHECK(kzt_public_loader_observer_activate(
+              &observer, DYNAMIC_ADDR, 16, &reader,
+              record_visit, &log) == KZT_PUBLIC_LOADER_OK);
+
+    CHECK(kzt_public_loader_find_symbol_from_libraries(
+              &observer, &reader, libc_then_libdl,
+              sizeof(libc_then_libdl) / sizeof(libc_then_libdl[0]),
+              "dlopen", &symbol_addr) == KZT_PUBLIC_LOADER_OK);
+    CHECK(symbol_addr == SYMBOL_ELF_BASE + 0x905d0);
+
+    /* A primary that is not in the snapshot must not stop the search. */
+    CHECK(kzt_public_loader_find_symbol_from_libraries(
+              &observer, &reader, absent_then_libdl,
+              sizeof(absent_then_libdl) / sizeof(absent_then_libdl[0]),
+              "dlopen", &symbol_addr) == KZT_PUBLIC_LOADER_OK);
+    CHECK(symbol_addr == SYMBOL_ELF_BASE + 0x905d0);
+
+    /* Without libdl the same lookup fails closed instead of matching libc. */
+    CHECK(kzt_public_loader_find_symbol_from_libraries(
+              &observer, &reader, libc_then_absent,
+              sizeof(libc_then_absent) / sizeof(libc_then_absent[0]),
+              "dlopen", &symbol_addr) == KZT_PUBLIC_LOADER_NOT_FOUND);
+    CHECK(kzt_public_loader_find_symbol_from_libraries(
+              &observer, &reader, NULL, 1, "dlopen", &symbol_addr) ==
+          KZT_PUBLIC_LOADER_INVALID_INPUT);
+    CHECK(kzt_public_loader_find_symbol_from_libraries(
+              &observer, &reader, libc_then_libdl, 0, "dlopen",
+              &symbol_addr) == KZT_PUBLIC_LOADER_INVALID_INPUT);
 }
 
 int main(void)
@@ -735,6 +808,7 @@ int main(void)
     test_object_relro_classification_uses_guest_memory();
     test_symbol_lookup_uses_live_gnu_hash_object();
     test_split_libc_libdl_lookup_falls_back_to_libdl();
+    test_ordered_library_lookup_uses_the_fallback();
     puts("kzt public loader observer tests: PASS");
     return 0;
 }

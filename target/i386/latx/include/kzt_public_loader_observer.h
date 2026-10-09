@@ -186,6 +186,19 @@ kzt_public_loader_result_t kzt_public_loader_find_symbol(
     const char *symbol_name,
     uintptr_t *symbol_addr);
 
+/*
+ * Resolve a symbol from an ordered list of DT_SONAMEs, returning the first
+ * library that provides it.  This is the lookup order used when a symbol may
+ * live in either of two libraries, such as dlopen in libc or libdl.
+ */
+kzt_public_loader_result_t kzt_public_loader_find_symbol_from_libraries(
+    const kzt_public_loader_observer_t *observer,
+    const kzt_public_loader_reader_t *reader,
+    const char *const *library_names,
+    size_t library_count,
+    const char *symbol_name,
+    uintptr_t *symbol_addr);
+
 const char *kzt_public_loader_result_name(
     kzt_public_loader_result_t result);
 

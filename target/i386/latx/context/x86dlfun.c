@@ -39,13 +39,12 @@ int init_x86dlfun_from(const char *primary, const char *fallback)
 
 #if defined(CONFIG_LOONGARCH_NEW_WORLD) && defined(CONFIG_LATX_KZT)
     if (latx_kzt_runtime_enabled()) {
+        const char *libraries[] = { primary, fallback };
+
         for (int index = 0; index < X86_DL_SYMBOL_COUNT; ++index) {
-            resolved[index] =
-                (void *)kzt_resolve_guest_symbol(primary, symbols[index]);
-            if (!resolved[index]) {
-                resolved[index] =
-                    (void *)kzt_resolve_guest_symbol(fallback, symbols[index]);
-            }
+            resolved[index] = (void *)kzt_resolve_guest_symbol_from(
+                libraries, sizeof(libraries) / sizeof(libraries[0]),
+                symbols[index]);
             if (!resolved[index]) {
                 return -1;
             }

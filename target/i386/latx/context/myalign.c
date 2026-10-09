@@ -2489,35 +2489,65 @@ static void kzt_request_header_cleanup(CPUX86State *env)
     }
 }
 
+/* Take a live loader snapshot; the caller must hold mmap_lock(). */
+static kzt_public_loader_result_t kzt_loader_snapshot(
+    kzt_public_loader_observer_t *snapshot)
+{
+    uintptr_t dynamic_addr = 0;
+    size_t dynamic_count = 0;
+
+    *snapshot = kzt_public_loader_observer;
+    if (snapshot->active) {
+        return kzt_public_loader_observer_refresh(
+            snapshot, &kzt_public_loader_reader,
+            kzt_loader_snapshot_visit, NULL);
+    }
+    if (kzt_find_main_dynamic_table(elf_header, &dynamic_addr,
+                                    &dynamic_count) != 0) {
+        return KZT_PUBLIC_LOADER_NOT_FOUND;
+    }
+    return kzt_public_loader_observer_activate(
+        snapshot, dynamic_addr, dynamic_count, &kzt_public_loader_reader,
+        kzt_loader_snapshot_visit, NULL);
+}
+
 uintptr_t kzt_resolve_guest_symbol(const char *library_name, const char *name)
 {
     kzt_public_loader_observer_t snapshot;
     kzt_public_loader_result_t result;
     uintptr_t address = 0;
-    uintptr_t dynamic_addr = 0;
-    size_t dynamic_count = 0;
 
     if (!name || !elf_header) {
         return 0;
     }
     mmap_lock();
-    snapshot = kzt_public_loader_observer;
-    if (snapshot.active) {
-        result = kzt_public_loader_observer_refresh(
-            &snapshot, &kzt_public_loader_reader,
-            kzt_loader_snapshot_visit, NULL);
-    } else if (kzt_find_main_dynamic_table(
-                   elf_header, &dynamic_addr, &dynamic_count) == 0) {
-        result = kzt_public_loader_observer_activate(
-            &snapshot, dynamic_addr, dynamic_count,
-            &kzt_public_loader_reader, kzt_loader_snapshot_visit, NULL);
-    } else {
-        result = KZT_PUBLIC_LOADER_NOT_FOUND;
-    }
+    result = kzt_loader_snapshot(&snapshot);
     if (result == KZT_PUBLIC_LOADER_OK) {
         result = kzt_public_loader_find_symbol(
             &snapshot, &kzt_public_loader_reader, library_name, name,
             &address);
+    }
+    mmap_unlock();
+    return result == KZT_PUBLIC_LOADER_OK ? address : 0;
+}
+
+uintptr_t kzt_resolve_guest_symbol_from(const char *const *library_names,
+                                        size_t library_count,
+                                        const char *name)
+{
+    kzt_public_loader_observer_t snapshot;
+    kzt_public_loader_result_t result;
+    uintptr_t address = 0;
+
+    if (!name || !elf_header || !library_names || !library_count) {
+        return 0;
+    }
+    mmap_lock();
+    result = kzt_loader_snapshot(&snapshot);
+    if (result == KZT_PUBLIC_LOADER_OK) {
+        result = kzt_public_loader_find_symbol_from_libraries(
+            &snapshot, &kzt_public_loader_reader, library_names,
+            library_count, name, &address);
     }
     mmap_unlock();
     return result == KZT_PUBLIC_LOADER_OK ? address : 0;

@@ -1010,6 +1010,35 @@ kzt_public_loader_result_t kzt_public_loader_find_symbol(
     return KZT_PUBLIC_LOADER_OK;
 }
 
+kzt_public_loader_result_t kzt_public_loader_find_symbol_from_libraries(
+    const kzt_public_loader_observer_t *observer,
+    const kzt_public_loader_reader_t *reader,
+    const char *const *library_names,
+    size_t library_count,
+    const char *symbol_name,
+    uintptr_t *symbol_addr)
+{
+    size_t index;
+
+    if (!library_names || !library_count) {
+        return KZT_PUBLIC_LOADER_INVALID_INPUT;
+    }
+    for (index = 0; index < library_count; ++index) {
+        kzt_public_loader_result_t result;
+
+        if (!library_names[index]) {
+            return KZT_PUBLIC_LOADER_INVALID_INPUT;
+        }
+        result = kzt_public_loader_find_symbol(
+            observer, reader, library_names[index], symbol_name,
+            symbol_addr);
+        if (result != KZT_PUBLIC_LOADER_NOT_FOUND) {
+            return result;
+        }
+    }
+    return KZT_PUBLIC_LOADER_NOT_FOUND;
+}
+
 const char *kzt_public_loader_result_name(
     kzt_public_loader_result_t result)
 {
