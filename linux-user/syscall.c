@@ -12629,6 +12629,96 @@ static int open_self_auxv(void *cpu_env, int fd, const char *oldpath)
     return 0;
 }
 
+#if defined(TARGET_I386) && defined(__NR_getdents64)
+static bool guest_exe_identity_fd_directory(int fd)
+{
+    struct stat st, expected, task, self_task;
+    struct statfs fs;
+
+    if (fstatfs(fd, &fs) || fs.f_type != PROC_SUPER_MAGIC ||
+        fstat(fd, &st) || !S_ISDIR(st.st_mode)) {
+        return false;
+    }
+
+    /*
+     * Resolve relative to the open directory, including saved procfs fds
+     * whose mount is no longer reachable through the current root.
+     */
+    if (fstatat(fd, "../../self/fd", &expected, 0) == 0 &&
+        st.st_dev == expected.st_dev && st.st_ino == expected.st_ino) {
+        return true;
+    }
+
+    /*
+     * /proc/self/task/<tid>/fd (also /proc/thread-self/fd).  Verify the
+     * owning process, not just a directory named "fd" in another task.
+     */
+    return fstatat(fd, "../fd", &expected, 0) == 0 &&
+           st.st_dev == expected.st_dev && st.st_ino == expected.st_ino &&
+           fstatat(fd, "../..", &task, 0) == 0 &&
+           fstatat(fd, "../../../../self/task", &self_task, 0) == 0 &&
+           task.st_dev == self_task.st_dev && task.st_ino == self_task.st_ino;
+}
+
+static abi_long guest_getdents64(CPUArchState *env, int fd, void *buf,
+                                unsigned int count)
+{
+    TaskState *ts = env_cpu(env)->opaque;
+    abi_long ret, bytes, raw_bytes;
+    char identity[32];
+
+    if (!guest_exe_identity_fd_directory(fd)) {
+        return get_errno(sys_getdents64(fd, buf, count));
+    }
+
+    /*
+     * Keep the private descriptor stable while taking and filtering this
+     * snapshot.  Explicit guest close/dup operations still relocate it.
+     */
+    mmap_lock();
+    snprintf(identity, sizeof(identity), "%d", ts->info->prctl_mm_exe_fd);
+    do {
+        struct linux_dirent64 *previous = NULL;
+        char *cursor = buf;
+
+        ret = get_errno(sys_getdents64(fd, buf, count));
+        raw_bytes = bytes = ret;
+        while (bytes > 0) {
+            struct linux_dirent64 *de = (void *)cursor;
+            unsigned int reclen = de->d_reclen;
+
+            if (reclen <= offsetof(struct linux_dirent64, d_name) ||
+                reclen > bytes) {
+                ret = -TARGET_EIO;
+                break;
+            }
+            bytes -= reclen;
+            if (!strcmp(de->d_name, identity)) {
+                /* Preserve the next directory cookie for seekdir users. */
+                if (previous) {
+                    previous->d_off = de->d_off;
+                }
+                memmove(cursor, cursor + reclen, bytes);
+                ret -= reclen;
+            } else {
+                previous = de;
+                cursor += reclen;
+            }
+        }
+        /*
+         * A batch containing only the private fd is not end-of-directory.
+         * glibc closefrom rewinds after closing any fd; exposing this fd
+         * would make it chase our relocation indefinitely.
+         */
+    } while (ret == 0 && raw_bytes > 0);
+    mmap_unlock();
+    return ret;
+}
+#else
+#define guest_getdents64(env, fd, buf, count) \
+    get_errno(sys_getdents64(fd, buf, count))
+#endif
+
 static int is_proc_myself(const char *filename, const char *entry)
 {
     if (!strncmp(filename, "/proc/", strlen("/proc/"))) {
@@ -17531,7 +17621,7 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
             if (!dirp) {
                 return -TARGET_EFAULT;
             }
-            ret = get_errno(sys_getdents64(arg1, dirp, count));
+            ret = guest_getdents64(cpu_env, arg1, dirp, count);
             if (!is_error(ret)) {
                 /* Convert the dirent64 structs to target dirent.  We do this
                  * in-place, since we can guarantee that a target_dirent is no
@@ -17609,7 +17699,7 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
 
         if (!(dirp = lock_user(VERIFY_WRITE, arg2, count, 0)))
             return -TARGET_EFAULT;
-        ret = get_errno(sys_getdents64(arg1, dirp, count));
+        ret = guest_getdents64(cpu_env, arg1, dirp, count);
         if (!is_error(ret)) {
             struct linux_dirent64 *de;
             int len = ret;
