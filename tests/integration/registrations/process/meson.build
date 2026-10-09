@@ -8,6 +8,15 @@ if 'x86_64-linux-user' in target_dirs
     ],
   }]
   latx_integration_tests += [{
+    'name': 'test-async-sigill-x86_64',
+    'runner': find_program('../../test-async-sigill.py'),
+    'args': [
+      emulators['latx-x86_64'],
+      files('../../async-sigill.S'),
+      'x86_64',
+    ],
+  }]
+  latx_integration_tests += [{
     'name': 'test-x87-signal-mode',
     'runner': find_program('../../test-x87-signal-mode.sh'),
     'args': [
@@ -103,6 +112,15 @@ if 'x86_64-linux-user' in target_dirs
 endif
 
 if 'i386-linux-user' in target_dirs
+  latx_integration_tests += [{
+    'name': 'test-async-sigill-i386',
+    'runner': find_program('../../test-async-sigill.py'),
+    'args': [
+      emulators['latx-i386'],
+      files('../../async-sigill.S'),
+      'i386',
+    ],
+  }]
   latx_integration_tests += [{
     'name': 'test-softfpu-eflags-region-i386',
     'runner': find_program('../../test-softfpu-eflags-region-i386.sh'),

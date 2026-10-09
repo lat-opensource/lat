@@ -1161,7 +1161,9 @@ static void host_signal_handler(int host_signum, siginfo_t *info,
     }
 #endif
 #ifdef CONFIG_LATX
-    if (host_signum == SIGILL && tcg_tb_lookup(UC_PC(uc))) {
+    /* An asynchronous SIGILL can interrupt valid translated instructions. */
+    if (host_signum == SIGILL && info->si_code > 0 &&
+        tcg_tb_lookup(UC_PC(uc))) {
         /*
          * An instruction emitted by LATX is not supported by this host.
          * This is a translator failure, not a guest SIGILL.  Returning to

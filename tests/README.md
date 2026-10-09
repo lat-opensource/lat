@@ -107,6 +107,13 @@ and then run tests with the bundled `meson/meson.py`, or vice versa.
 To run the integration suite, replace `lat-pr-fast` with
 `latx-integration`.
 
+The `test-async-sigill-x86_64` and `test-async-sigill-i386` integration tests
+build `tests/integration/async-sigill.S` with Clang/LLD. Alternatively, compile
+that source from the tested checkout on an x86 Linux host with
+`gcc -nostdlib -static -no-pie` (add `-m32` for i386), name the executables
+`async-sigill-x86_64` and `async-sigill-i386`, and set
+`LATX_SIGILL_GUEST_DIR` to their directory when running the tests.
+
 The `test-x87-signal-mode` integration test builds five static x86-64 guests
 with Clang/LLD only when explicitly run. On a target without that compiler,
 build the same source on an x86-64 Linux host:
