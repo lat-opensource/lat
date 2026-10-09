@@ -2,7 +2,28 @@
  * Exit 10: setup failed; 11: wrong signal; 12: nested return/order failed;
  * 13: final counts failed. SIGILL nests inside SIGTRAP, with distinct
  * restorers. Both restorers must run their guest-side marker instructions.
+ * RETURN_STYLE: 0 = RET, 1 = POP/JMP, 2 = stack-memory JMP.
+ * PROBE_JRRA exits 0 only when CALL stores a host return address, or 77 when
+ * the build does not use JRRA stack. It never executes a signal handler.
  */
+#ifndef RETURN_STYLE
+#define RETURN_STYLE 0
+#endif
+
+.macro signal_return
+#if RETURN_STYLE == 0
+    ret
+#elif RETURN_STYLE == 1
+    pop %rax
+    jmp *%rax
+#elif RETURN_STYLE == 2
+    lea 8(%rsp), %rsp
+    jmp *-8(%rsp)
+#else
+#error Unsupported RETURN_STYLE
+#endif
+.endm
+
 .section .data
 .balign 8
 trap_action:
@@ -21,6 +42,18 @@ inner_restored: .long 0
 .section .text
 .global _start
 _start:
+#if PROBE_JRRA
+    call probe_jrra
+probe_guest_return:
+    mov $77, %edi
+    jmp finish
+probe_jrra:
+    lea probe_guest_return(%rip), %rax
+    cmp %rax, (%rsp)
+    je probe_guest_return
+    xor %edi, %edi
+    jmp finish
+#endif
     mov $13, %eax                 /* rt_sigaction(SIGTRAP, ...) */
     mov $5, %edi
     lea trap_action(%rip), %rsi
@@ -68,7 +101,7 @@ outer_handler:
     inc %ecx
     cmp %ecx, %eax
     jne nested_failed
-    ret
+    signal_return
 
 inner_handler:
     cmp $4, %edi
@@ -79,7 +112,7 @@ inner_handler:
     sub $8, %rsp
     call leaf
     add $8, %rsp
-    ret
+    signal_return
 
 leaf:
     incl leaf_seen(%rip)

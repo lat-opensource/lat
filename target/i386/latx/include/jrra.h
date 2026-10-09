@@ -37,5 +37,7 @@ void jrra_relocate_return_target(TranslationBlock *tb, uintptr_t new_base);
  * can still return through it.
  */
 uintptr_t get_signal_return_bridge(target_ulong guest_restorer);
+/* Resolve only published bridge entries seen by the guest dispatcher. */
+bool resolve_signal_return_bridge(target_ulong pc, target_ulong *guest_pc);
 #endif
 #endif

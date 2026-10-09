@@ -134,6 +134,36 @@ and rounding restoration. Each runs in hard-float and softfpu=1/2, with
 both TB and TU translation. Compile the fixtures from the same checkout
 being tested; a supplied directory with a missing executable is a failure.
 
+The `test-signal-return-bridge` integration test covers RET, POP/JMP and
+stack-memory JMP signal returns with nested handlers and distinct restorers.
+Its CALL probe checks that JRRA stack actually ran. On a build without that
+optimization, the signal-return controls still run, but the test reports
+`SKIP` (77), not a bridge regression pass. Use an O2/O3 build with LSFPU for
+the bridge regression.
+
+If the target has no Clang/LLD, compile the guests from the same checkout on
+an x86-64 Linux host:
+
+```sh
+mkdir -p signal-return-guests
+gcc -nostdlib -static -no-pie -DPROBE_JRRA=1 \
+  tests/integration/signal-return-bridge.S \
+  -o signal-return-guests/signal-return-bridge-probe
+for style in 0 1 2; do
+  gcc -nostdlib -static -no-pie -DRETURN_STYLE=$style \
+    tests/integration/signal-return-bridge.S \
+    -o signal-return-guests/signal-return-bridge-$style
+done
+```
+
+Copy that directory to the LoongArch target and run:
+
+```sh
+LATX_SIGNAL_RETURN_GUEST_DIR=/absolute/path/to/signal-return-guests \
+  meson test -C build64-tests --suite latx-integration \
+  test-signal-return-bridge --print-errorlogs
+```
+
 Before submitting a new test target, verify both of these:
 
 1. A normal product build without `--enable-tests` does not build the test.

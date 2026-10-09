@@ -35,7 +35,7 @@ struct SignalReturnBridge {
 };
 
 /*
- * Protected by mmap_lock(), including publication. Published code is immutable
+ * Creation is protected by mmap_lock(). Published entries are immutable
  * and retained for the process lifetime: a handler can return much later, or
  * leave through a non-local jump without notifying us. Do not put these entries
  * in the flushable TB code buffer. Each distinct restorer currently costs one
@@ -44,6 +44,26 @@ struct SignalReturnBridge {
  * the page read-only and executable.
  */
 static struct SignalReturnBridge *signal_return_bridges;
+
+bool resolve_signal_return_bridge(target_ulong pc, target_ulong *guest_pc)
+{
+    struct SignalReturnBridge *bridge;
+
+    /*
+     * A handler may pop its return address and use an indirect guest JMP
+     * instead of RET. Resolve that address on a dispatcher cache miss, before
+     * it can be decoded as x86 code. Entries are never reclaimed, so readers
+     * need only acquire the fully initialized list, not hold mmap_lock().
+     */
+    for (bridge = qatomic_rcu_read(&signal_return_bridges); bridge;
+         bridge = bridge->next) {
+        if (pc == (uintptr_t)bridge->code) {
+            *guest_pc = bridge->guest_restorer;
+            return true;
+        }
+    }
+    return false;
+}
 
 uintptr_t get_signal_return_bridge(target_ulong guest_restorer)
 {
@@ -107,7 +127,7 @@ uintptr_t get_signal_return_bridge(target_ulong guest_restorer)
     }
 
     /* No caller can observe a partially generated or non-executable entry. */
-    signal_return_bridges = bridge;
+    qatomic_rcu_set(&signal_return_bridges, bridge);
     result = (uintptr_t)bridge->code;
     goto out;
 

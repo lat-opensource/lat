@@ -745,6 +745,19 @@ static inline TranslationBlock *tb_find(CPUState *cpu,
     cpu_get_tb_cpu_state(env, &pc, &cs_base, &flags);
 
     tb = tb_lookup(cpu, pc, cs_base, flags, cflags);
+#if defined(TARGET_X86_64) && defined(CONFIG_LATX_JRRA)
+    if (tb == NULL) {
+        target_ulong guest_pc;
+
+        if (resolve_signal_return_bridge(pc, &guest_pc)) {
+            pc = guest_pc;
+            env->eip = pc - cs_base;
+            /* Do not link or cache a host bridge as a guest code address. */
+            last_tb = NULL;
+            tb = tb_lookup(cpu, pc, cs_base, flags, cflags);
+        }
+    }
+#endif
 #ifdef CONFIG_LATX_AOT
     if (tb == NULL && option_aot) {
         mmap_lock();
