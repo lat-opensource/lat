@@ -54,8 +54,12 @@ static inline unsigned int tb_jmp_cache_hash_func(target_ulong pc)
 /* In user-mode we can get better hashing because we do not have a TLB */
 static inline unsigned int tb_jmp_cache_hash_func(target_ulong pc)
 {
-    return (pc ^ (pc >> TB_JMP_CACHE_BITS)) & (TB_JMP_CACHE_SIZE - 1);
+    return pc & (TB_JMP_CACHE_SIZE - 1);
 }
+
+/* Instruction offsets from tb->jmp_indirect to the FastTB hit-path JIRL. */
+#define TB_JMP_CACHE_FAST_JIRL_OFFSET 5
+#define TB_JMP_CACHE_FAST_MASK_JIRL_OFFSET 9
 
 #endif /* CONFIG_SOFTMMU */
 
