@@ -58,6 +58,9 @@ uint32_t kzt_groups_effective_mask(void);
 bool kzt_group_disable(KztLibraryGroup group, const char *reason);
 void kzt_groups_disable_all(const char *reason);
 bool kzt_group_is_enabled(KztLibraryGroup group);
+/* True when LATX_KZT_LIBS named this group, which lets an explicit request
+ * override a default compatibility guard. */
+bool kzt_group_was_named(KztLibraryGroup group);
 bool kzt_library_is_enabled(const char *soname);
 const char *kzt_groups_last_error(void);
 void kzt_groups_log_library(const char *soname, bool enabled);

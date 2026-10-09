@@ -32,6 +32,7 @@
     X(FONT,   "font",   6, EXPERIMENTAL, KZT_GROUP_CORE | KZT_GROUP_X11) \
     X(INPUT,  "input",  7, EXPERIMENTAL, KZT_GROUP_CORE | KZT_GROUP_X11) \
     X(TEXT,   "text",   8, EXPERIMENTAL, KZT_GROUP_CAIRO)                \
-    X(CAIRO,  "cairo",  5, EXPERIMENTAL, KZT_GROUP_FONT)
+    X(CAIRO,  "cairo",  5, EXPERIMENTAL, KZT_GROUP_FONT)                \
+    X(EGL,    "egl",    9, STABLE,      KZT_GROUP_CORE | KZT_GROUP_X11)
 
 #endif /* LATX_KZT_GROUP_LIST_H */

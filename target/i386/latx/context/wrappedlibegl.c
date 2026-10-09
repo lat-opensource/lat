@@ -28,9 +28,14 @@
 const char* libeglName = "libEGL.so.1";
 #define LIBNAME libegl
 
+/*
+ * Chromium's ANGLE passthrough decoder needs these EGL extensions.  They are
+ * display extensions, so ask the display and not only the client query; some
+ * implementations also list them among the client extensions, so accept
+ * either list.
+ */
 static bool host_egl_supports_angle_passthrough(void)
 {
-    /* Extensions used by Chromium's ANGLE passthrough decoder. */
     static const char *const required_extensions[] = {
         "EGL_CHROMIUM_create_context_bind_generates_resource",
         "EGL_ANGLE_create_context_webgl_compatibility",
@@ -40,8 +45,11 @@ static bool host_egl_supports_angle_passthrough(void)
     };
     static int cached = -1;
     void *egl;
+    void *(*get_display)(void *);
+    unsigned int (*initialize)(void *, int *, int *);
     const char *(*query_string)(void *, int);
-    const char *extensions;
+    const char *client_extensions = NULL;
+    const char *display_extensions = NULL;
 
     if (cached >= 0)
         return cached;
@@ -51,18 +59,41 @@ static bool host_egl_supports_angle_passthrough(void)
         cached = 0;
         return false;
     }
+
+    get_display = dlsym(egl, "eglGetDisplay");
+    initialize = dlsym(egl, "eglInitialize");
     query_string = dlsym(egl, "eglQueryString");
-    extensions = query_string ? query_string(NULL, 0x3055) : NULL;
-    cached = extensions != NULL;
-    for (size_t i = 0; cached && i < G_N_ELEMENTS(required_extensions); ++i)
-        cached = strstr(extensions, required_extensions[i]) != NULL;
+    if (query_string) {
+        client_extensions = query_string(NULL, 0x3055);
+        if (get_display && initialize) {
+            void *display = get_display(NULL);
+            int major = 0;
+            int minor = 0;
+
+            if (display && initialize(display, &major, &minor))
+                display_extensions = query_string(display, 0x3055);
+        }
+    }
+
+    cached = display_extensions != NULL || client_extensions != NULL;
+    for (size_t i = 0; cached && i < G_N_ELEMENTS(required_extensions); ++i) {
+        cached = (display_extensions &&
+                  strstr(display_extensions, required_extensions[i]) != NULL) ||
+                 (client_extensions &&
+                  strstr(client_extensions, required_extensions[i]) != NULL);
+    }
     dlclose(egl);
     return cached;
 }
 
+/*
+ * The guest EGL is used when the host cannot serve ANGLE; the "egl" KZT group
+ * is the explicit switch for stacks that want the host library anyway.
+ */
 #define PRE_INIT                                                        \
     do {                                                                \
         if (latx_kzt_runtime_enabled() &&                               \
+            !kzt_group_was_named(KZT_GROUP_EGL) &&                      \
             !host_egl_supports_angle_passthrough()) {                   \
             kzt_groups_log_wrapper_rejection(                           \
                 libeglName,                                             \

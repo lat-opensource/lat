@@ -25,13 +25,29 @@ def main() -> int:
     )
 
     assert "host_egl_supports_angle_passthrough" in wrappedlibegl, (
-        "EGL wrapper must validate the host ANGLE capabilities it needs"
+        "the EGL wrapper must validate the ANGLE capabilities it needs"
+    )
+    assert "query_string(display, 0x3055)" in wrappedlibegl, (
+        "the ANGLE extensions are display extensions, so query the display"
+    )
+    assert "query_string(NULL, 0x3055)" in wrappedlibegl, (
+        "implementations that report the extensions as client extensions "
+        "must still be accepted"
+    )
+    assert "kzt_group_was_named(KZT_GROUP_EGL)" in wrappedlibegl, (
+        "an explicit LATX_KZT_LIBS request for the egl group must override "
+        "the default capability guard"
     )
     assert "kzt_groups_log_wrapper_rejection" in wrappedlibegl, (
         "EGL wrapper rejection must be reported through the generic policy"
     )
-    assert "return -1;" in wrappedlibegl, (
-        "an incompatible EGL wrapper must ask the generic loader to fall back"
+
+    assert 'GO("libEGL.so.1", libegl, KZT_GROUP_EGL)' in library_list, (
+        "libEGL must have its own group so guest ANGLE stacks can opt out"
+    )
+    assert ('X(EGL,    "egl",    9, STABLE,      '
+            'KZT_GROUP_CORE | KZT_GROUP_X11)' in group_list), (
+        "the stable egl group must stay enabled by default"
     )
 
     assert ('GO("libvulkan.so.1", vulkan, KZT_GROUP_VULKAN)' in

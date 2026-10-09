@@ -41,6 +41,9 @@ static const KztLibraryGroupEntry kzt_library_groups[] = {
 
 static uint32_t requested_groups = KZT_GROUP_STABLE;
 uint32_t kzt_effective_groups = KZT_GROUP_STABLE;
+/* Groups the user named in LATX_KZT_LIBS, so an explicit request can override
+ * a default compatibility guard. */
+static uint32_t named_groups;
 static bool group_log_enabled;
 static char group_error[128];
 static bool library_decision_logged[ARRAY_SIZE(kzt_library_groups)];
@@ -329,6 +332,7 @@ void kzt_groups_reset(void)
 {
     requested_groups = KZT_GROUP_STABLE;
     kzt_effective_groups = KZT_GROUP_STABLE;
+    named_groups = KZT_GROUP_NONE;
     group_log_enabled = false;
     group_error[0] = '\0';
     memset(library_decision_logged, 0, sizeof(library_decision_logged));
@@ -353,9 +357,11 @@ bool kzt_groups_configure(const char *spec, bool log_enabled)
                               &use_stable)) {
         requested_groups = KZT_GROUP_NONE;
         kzt_effective_groups = KZT_GROUP_NONE;
+        named_groups = KZT_GROUP_NONE;
         group_log_enabled = log_enabled;
         return false;
     }
+    named_groups = selected | added | removed;
 
     if (mode == KZT_GROUP_SPEC_EXACT && !use_stable) {
         groups = selected;
@@ -439,6 +445,11 @@ bool kzt_group_is_enabled(KztLibraryGroup group)
 {
     return group != KZT_GROUP_NONE &&
            (kzt_effective_groups & group) == group;
+}
+
+bool kzt_group_was_named(KztLibraryGroup group)
+{
+    return group != KZT_GROUP_NONE && (named_groups & group) != 0;
 }
 
 bool kzt_library_is_enabled(const char *soname)
