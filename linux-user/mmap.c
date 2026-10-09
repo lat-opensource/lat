@@ -762,25 +762,6 @@ static int create_shadow_file(int fd, uint64 offset, abi_ulong start, abi_ulong 
 extern int latx_wine;
 void kzt_wine_bridge(abi_ulong start, int fd);
 #endif
-#ifdef CONFIG_LATX_AOT
-static bool mmap_replaces_existing_mapping(int flags)
-{
-#if MAP_FIXED_NOREPLACE != 0
-    if (flags & MAP_FIXED_NOREPLACE) {
-        return false;
-    }
-#endif
-    return flags & MAP_FIXED;
-}
-
-static void aot_mmap_invalidate_replaced_range(abi_ulong start,
-                                                abi_ulong len, int flags)
-{
-    if (option_aot && mmap_replaces_existing_mapping(flags)) {
-        segment_tree_remove_range(start, start + len);
-    }
-}
-#endif
 abi_ulong option_mmap_fixed;
 abi_long target_mmap(abi_ulong start, abi_ulong len, int target_prot,
                      int flags, int fd, uint64_t offset, int rlimit_as_account)
@@ -789,9 +770,6 @@ abi_long target_mmap(abi_ulong start, abi_ulong len, int target_prot,
     int page_flags, temp_flags, host_prot;
     uint64_t host_offset;
     int shadow_fd = -1;
-#ifdef CONFIG_LATX_AOT
-    int aot_mmap_flags;
-#endif
 
     /* Hacking wine user_shared_data mapping to avoid shadow page */
     if (start == 0x7ffe0000 && len == 0x1000 && (flags == (MAP_FIXED | MAP_SHARED)) && fd > 0
@@ -808,17 +786,6 @@ abi_long target_mmap(abi_ulong start, abi_ulong len, int target_prot,
     if (start && option_mmap_fixed) {
         flags |= MAP_FIXED;
     }
-
-#ifdef CONFIG_LATX_AOT
-    /*
-     * Only MAP_FIXED can replace an existing guest mapping.  A regular mmap
-     * is placed in an empty range, so probing the AOT segment tree for every
-     * allocation only adds overhead.  MAP_FIXED_NOREPLACE is also known to
-     * be empty after the check below, even though it is implemented with a
-     * host MAP_FIXED mapping.
-     */
-    aot_mmap_flags = flags;
-#endif
 
     mmap_lock();
     trace_target_mmap(start, len, target_prot, flags, fd, offset);
@@ -1214,7 +1181,9 @@ abi_long target_mmap(abi_ulong start, abi_ulong len, int target_prot,
 #ifdef CONFIG_LATX_AOT
     wine_sec_info * wine_sec = NULL;
     uint64_t aot_offset = offset;
-    aot_mmap_invalidate_replaced_range(start, len, aot_mmap_flags);
+    if (option_aot) {
+        segment_tree_remove_range(start, start + len);
+    }
     if (option_aot_wine && option_aot) {
         wine_dll_track_sections(start, len, offset, fd);
         wine_sec = wine_sec_tree_lookup(start);

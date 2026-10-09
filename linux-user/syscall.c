@@ -6063,6 +6063,13 @@ static inline abi_long do_shmdt(abi_ulong shmaddr)
 #ifdef TARGET_I386
                 guest_vma_name_reset(shmaddr, shm_regions[i].size);
 #endif
+#ifdef CONFIG_LATX_AOT
+                if (option_aot) {
+                    /* Include padding in the last cleared guest page. */
+                    segment_tree_remove_range(shmaddr,
+                        TARGET_PAGE_ALIGN(shmaddr + shm_regions[i].size));
+                }
+#endif
                 page_set_flags(shmaddr, shmaddr + shm_regions[i].size, 0);
                 shm_regions[i].in_use = false;
                 break;

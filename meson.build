@@ -756,20 +756,35 @@ foreach target : target_dirs
       suite: 'lat-pr-fast',
     )
 
+    aot_shm_syscall_test_body = custom_target(
+      'aot-shm-syscall-test-body',
+      input: files('linux-user/syscall.c'),
+      output: 'aot-shm-syscall-test-body.h',
+      command: [python,
+                files('target/i386/latx/sbt/tests/extract-shm-syscall-test.py'),
+                '@INPUT@', '@OUTPUT@'],
+    )
     aot_segment_unmap_test = executable(
       'test-latx-aot-segment-unmap',
       files(
         'target/i386/latx/sbt/tests/aot-segment-unmap-test.c',
+        'target/i386/latx/sbt/tests/aot-shm-syscall-test.c',
         'target/i386/latx/sbt/segment.c',
         'target/i386/latx/sbt/aot_lib.c'
-      ) + genh + tcg_trace_genh + [syscall_nr_generated],
-      c_args: smc_reload_test_c_args,
+      ) + genh + tcg_trace_genh + [syscall_nr_generated,
+                                   aot_shm_syscall_test_body],
+      c_args: smc_reload_test_c_args + ['-fdata-sections'],
       dependencies: [glib],
       include_directories: target_inc,
       link_args: smc_reload_test_link_args
     )
     test('latx-aot-segment-unmap', aot_segment_unmap_test,
          suite: 'lat-pr-fast')
+
+    foreach mode : ['hint', 'noreplace', 'tail', 'disabled']
+      test('latx-aot-shm-' + mode, aot_segment_unmap_test,
+           args: ['--shm-' + mode], suite: 'latx-integration')
+    endforeach
 
     foreach variant : ['', '-no-tu']
       aot_merge_memory_test = executable(
