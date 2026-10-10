@@ -108,6 +108,9 @@ void tr_init(void *tb)
     t->curr_tb = tb;
     t->curr_ir1_inst = NULL;
 
+    /* Each TB must establish its own native SSE rounding mode. */
+    t->sse_rounding_prepared = false;
+
     /* register allocation init */
     ra_free_all();
 
