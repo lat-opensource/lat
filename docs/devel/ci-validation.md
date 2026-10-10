@@ -22,7 +22,30 @@ the Clang build. It runs on:
 - manual workflow runs;
 - published releases, as a post-publication check;
 - PRs changing build definitions, CI workflows/images/helpers, runtime
-  installation code, or preprocessor directives.
+  installation code, or product preprocessor directives.
+
+Two narrowly recognized test-only changes retain ordinary PR coverage:
+
+- C preprocessor text embedded in `.py` or `.sh` fixtures under `tests/unit/`
+  and `tests/integration/`. Product generators, CI/runtime helpers, C/assembly
+  tests, and files renamed from those paths retain the conservative rule.
+- Appending complete standalone `test()` registrations to the end of the
+  existing `tests/unit/meson.build`, with the literal suite `lat-pr-fast`.
+  The selector reads the exact Git blob named by the PR file metadata and
+  checks its identity, hunk coordinates, unchanged enclosing context, and the
+  appended statements. Only literals, references, arrays, and `files()` or
+  `find_program()` argument calls are recognized. Existing registrations,
+  target definitions, assignments, conditionals, other Meson files, renamed
+  registrars, and unfamiliar syntax still select full coverage. An unavailable
+  or mismatched blob also selects full coverage.
+
+These exceptions still run all of `lat-pr-fast` on Debian with debug mode and
+ASan/UBSan, both guest-width GCC builds on all three distros, and Clang. A mixed
+PR with a product feature-guard or build change still selects the full matrix.
+They reduce eligible PRs from 19 to eight build/test jobs; this is a coverage
+selection result, not a guarantee of proportional wall-clock speedup. The
+runner architecture, QEMU execution, cache policy and non-PR coverage remain
+unchanged.
 
 The shared selector is `scripts/ci/lat_ci_matrix.py`. It checks the complete
 paginated PR file list, including previous paths of renamed files, and added

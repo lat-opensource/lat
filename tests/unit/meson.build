@@ -316,3 +316,10 @@ test(
   args: [files('test-latx-seccomp-lifetime.py'), project_source_root],
   suite: 'lat-pr-fast',
 )
+
+test(
+  'test-lat-ci-matrix',
+  python,
+  args: [files('../ci/test_lat_ci_matrix.py'), 'MatrixSelectionTest'],
+  suite: 'lat-pr-fast',
+)
