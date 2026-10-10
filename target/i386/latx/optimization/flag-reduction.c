@@ -8,6 +8,7 @@
 #include "ir1.h"
 #include "translate.h"
 #include "flag-reduction.h"
+#include "insts-pattern.h"
 
 /**
  * @brief ir1 opcode (x86) per instruction eflags using table
@@ -293,6 +294,19 @@ static const IR1_EFLAG_USEDEF *ir1_opcode_to_eflag_usedef(IR1_INST *ir1)
     return ir1_opcode_eflag_usedef + (ir1_opcode(ir1) - dt_X86_INS_INVALID);
 }
 
+uint8 flag_reduction_get_arch_use(IR1_INST *ir1)
+{
+    return ir1_opcode_to_eflag_usedef(ir1)->use & __ALL_EFLAGS;
+}
+
+static inline IR1_EFLAG_USEDEF ir1_effective_eflag_usedef(IR1_INST *ir1)
+{
+    IR1_EFLAG_USEDEF usedef = *ir1_opcode_to_eflag_usedef(ir1);
+
+    usedef.use &= ~instptn_replaced_eflag_use(ir1);
+    return usedef;
+}
+
 #ifdef CONFIG_LATX_FLAG_REDUCTION
 
 static inline uint32_t rotate_shift_get_masked_imm(IR1_OPND *d, IR1_OPND *s)
@@ -362,6 +376,87 @@ static inline bool cmp_scas_need_zf(IR1_INST *pir1)
             ir1_opcode(pir1) == dt_X86_INS_SCASQ);
 }
 
+/*
+ * Some instructions only update EFLAGS when their runtime count is non-zero.
+ * Such an update is not a must-def and therefore cannot stop EFLAGS liveness
+ * propagated from a successor TB.
+ */
+static bool eflags_def_may_be_skipped(IR1_INST *pir1)
+{
+    IR1_OPCODE op = ir1_opcode(pir1);
+
+    if ((op == dt_X86_INS_CMPSB || op == dt_X86_INS_CMPSW ||
+         op == dt_X86_INS_CMPSD || op == dt_X86_INS_CMPSQ ||
+         op == dt_X86_INS_SCASB || op == dt_X86_INS_SCASW ||
+         op == dt_X86_INS_SCASD || op == dt_X86_INS_SCASQ) &&
+        (ir1_prefix(pir1) == dt_X86_PREFIX_REPE ||
+         ir1_prefix(pir1) == dt_X86_PREFIX_REPNE)) {
+        /* RCX may be zero, in which case no comparison takes place. */
+        return true;
+    }
+
+    if (op == dt_X86_INS_RCL || op == dt_X86_INS_RCR) {
+        /* The effective count also depends on the operand width. */
+        return true;
+    }
+
+    if (op == dt_X86_INS_ROL || op == dt_X86_INS_ROR ||
+        op == dt_X86_INS_SAL || op == dt_X86_INS_SAR ||
+        op == dt_X86_INS_SHL || op == dt_X86_INS_SHR ||
+        op == dt_X86_INS_SHLD || op == dt_X86_INS_SHRD) {
+        int opnd_num = ir1_get_opnd_num(pir1);
+
+        /* A one-operand form has an implicit count of one. */
+        if (opnd_num == 1) {
+            return false;
+        }
+
+        IR1_OPND *count = ir1_get_opnd(pir1, opnd_num - 1);
+        if (!ir1_opnd_is_imm(count)) {
+            return true;
+        }
+
+        IR1_OPND *dest = ir1_get_opnd(pir1, 0);
+        return rotate_shift_get_masked_imm(dest, count) == 0;
+    }
+
+    return false;
+}
+
+/*
+ * Summarize a straight-line TB using the same use/def table as the existing
+ * flag-reduction pass.
+ *
+ * use_before_def: flags read before this TB certainly overwrites them.
+ * must_def:       flags certainly overwritten on every normal execution.
+ */
+void flag_reduction_get_tb_summary(TranslationBlock *tb,
+        uint8 *use_before_def, uint8 *must_def)
+{
+    uint8 preserve = __ALL_EFLAGS;
+    uint8 use = __NONE;
+
+    for (int i = 0; i < tb_ir1_num(tb); i++) {
+        IR1_INST *pir1 = tb_ir1_inst(tb, i);
+        IR1_EFLAG_USEDEF usedef = ir1_effective_eflag_usedef(pir1);
+        uint8 curr_use = usedef.use & __ALL_EFLAGS;
+        uint8 curr_def = (usedef.def | usedef.undef) & __ALL_EFLAGS;
+
+        if (cmp_scas_need_zf(pir1)) {
+            curr_use |= __ZF;
+        }
+
+        use |= curr_use & preserve;
+        if (eflags_def_may_be_skipped(pir1)) {
+            curr_def = __NONE;
+        }
+        preserve &= ~curr_def;
+    }
+
+    *use_before_def = use;
+    *must_def = __ALL_EFLAGS & ~preserve;
+}
+
 /**
  * @brief Find if we have enough information by scan TB
  *
@@ -383,16 +478,16 @@ static bool flag_reduction_pass1(void *tb)
     /* scanning if this insts will def ALL_EFLAGS */
     for (int i = tb_ir1_num(ptb) - 1; i >= 0; --i) {
         pir1 = tb_ir1_inst(ptb, i);
-        const IR1_EFLAG_USEDEF *usedef = ir1_opcode_to_eflag_usedef(pir1);
+        IR1_EFLAG_USEDEF usedef = ir1_effective_eflag_usedef(pir1);
 
         /*
          * NOTE: if you find some insts will use ALL_EFLAGS
          * you can add this case:
-         * if (usedef->use == __ALL_EFLAGS) return false;
+         * if (usedef.use == __ALL_EFLAGS) return false;
          */
-        if (usedef->use != __NONE) {
+        if (usedef.use != __NONE) {
             goto _false_path;
-        } else if (usedef->def == __NONE) {
+        } else if (usedef.def == __NONE) {
             /* curr_inst not def any flags */
             continue;
         } else {
@@ -442,7 +537,7 @@ void flag_reduction(IR1_INST *pir1, uint8 *pending_use)
      *   - flag use:     current inst will use flags
      *   - flag undef:   current inst mark undef flags
      */
-    IR1_EFLAG_USEDEF curr_usedef = *ir1_opcode_to_eflag_usedef(pir1);
+    IR1_EFLAG_USEDEF curr_usedef = ir1_effective_eflag_usedef(pir1);
 
 #ifndef CONFIG_LATX_RADICAL_EFLAGS
     current_def = curr_usedef.def;

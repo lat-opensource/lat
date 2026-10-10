@@ -1411,30 +1411,33 @@ static bool translate_ucomisd_seta(IR1_INST *pir1)
     IR1_OPND *opnd1 = ir1_get_opnd(curr, 1);
     IR2_OPND dest = load_freg128_from_ir1(opnd0);
     IR2_OPND src = load_freg128_from_ir1(opnd1);
-    /* 0. set flag = 0 */
-    IR2_OPND flag_zf = ra_alloc_itemp();
-    IR2_OPND flag_pf = ra_alloc_itemp();
     IR2_OPND flag = ra_alloc_itemp();
-    la_mov64(flag, zero_ir2_opnd);
 
-    /* 1. check ZF, are they equal & unordered? */
-    la_fcmp_cond_d(fcc0_ir2_opnd, dest, src, FCMP_COND_CUEQ);
-    la_movcf2gr(flag_zf, fcc0_ir2_opnd);
+    if (ir1_need_calculate_any_flag(curr)) {
+        /* 0. set flag = 0 */
+        IR2_OPND flag_zf = ra_alloc_itemp();
+        IR2_OPND flag_pf = ra_alloc_itemp();
+        la_mov64(flag, zero_ir2_opnd);
 
-    /* 2. check CF, are they less & unordered? */
-    la_fcmp_cond_d(fcc2_ir2_opnd, dest, src, FCMP_COND_CULT);
-    la_movcf2gr(flag, fcc2_ir2_opnd);
+        /* 1. check ZF, are they equal & unordered? */
+        la_fcmp_cond_d(fcc0_ir2_opnd, dest, src, FCMP_COND_CUEQ);
+        la_movcf2gr(flag_zf, fcc0_ir2_opnd);
 
-    /* 3. check PF, are they unordered? (= ZF & CF) */
-    la_and(flag_pf, flag, flag_zf);
+        /* 2. check CF, are they less & unordered? */
+        la_fcmp_cond_d(fcc2_ir2_opnd, dest, src, FCMP_COND_CULT);
+        la_movcf2gr(flag, fcc2_ir2_opnd);
 
-    la_bstrins_w(flag, flag_zf, ZF_BIT_INDEX, ZF_BIT_INDEX);
-    la_bstrins_w(flag, flag_pf, PF_BIT_INDEX, PF_BIT_INDEX);
+        /* 3. check PF, are they unordered? (= ZF & CF) */
+        la_and(flag_pf, flag, flag_zf);
 
-    ra_free_temp(flag_pf);
-    ra_free_temp(flag_zf);
-    /* 4. mov flag to EFLAGS */
-    la_x86mtflag(flag, 0x3f);
+        la_bstrins_w(flag, flag_zf, ZF_BIT_INDEX, ZF_BIT_INDEX);
+        la_bstrins_w(flag, flag_pf, PF_BIT_INDEX, PF_BIT_INDEX);
+
+        ra_free_temp(flag_pf);
+        ra_free_temp(flag_zf);
+        /* 4. mov flag to EFLAGS */
+        la_x86mtflag(flag, 0x3f);
+    }
 
     lsenv->tr_data->curr_ir1_inst = next;
     lsenv->tr_data->curr_ir1_count++;
