@@ -30,6 +30,7 @@
 #include "librarian_private.h"
 #include "pathcoll.h"
 #include "kzt-groups.h"
+#include "latx-options.h"
 
 #define GO(P, N, G) int wrapped##N##_init(library_t* lib, box64context_t *box64); \
                  void wrapped##N##_fini(library_t* lib); \
@@ -314,7 +315,8 @@ library_t *NewLibrary(const char* path, box64context_t* context)
     int essential = isEssentialLib(lib->name);
     if(!notwrapped && box64_prefer_emulated && !essential)
         notwrapped = 1;
-    int precise = (!box64_prefer_wrapped && !essential && path && strchr(path, '/'))?1:0;
+    bool prefer_wrapped = box64_prefer_wrapped || latx_kzt_runtime_enabled();
+    int precise = (!prefer_wrapped && !essential && path && strchr(path, '/'))?1:0;
     if(!notwrapped && precise && strstr(path, "libtcmalloc_minimal.so"))
         precise = 0;    // allow native version for tcmalloc_minimum
     // check if name is libSDL_sound-1.0.so.1 but with SDL2 loaded, then try emulated first...

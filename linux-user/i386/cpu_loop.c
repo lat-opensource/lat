@@ -22,6 +22,9 @@
 #include "qemu.h"
 #include "cpu_loop-common.h"
 #include "latx-options.h"
+#if defined(CONFIG_LATX_KZT)
+#include "callback.h"
+#endif
 #include <linux/audit.h>
 
 /***********************************************************/
@@ -222,7 +225,8 @@ void cpu_loop(CPUX86State *env)
         process_queued_cpu_work(cs);
 #if defined(CONFIG_LATX_KZT)
         kzt_reclaim_unloaded_headers();
-        if (latx_kzt_runtime_enabled() && trapnr == 0xCC)
+        if (latx_kzt_runtime_enabled() && trapnr == 0xCC &&
+            env->eip == (uintptr_t)&RunFunctionWithState)
             break;
 #endif
         switch(trapnr) {

@@ -515,7 +515,7 @@ GO(XInitExtension, pFpp)
 GOM(XInitImage, iFEp)
 // _XInitImageFuncPtrs
 // _XInitKeysymDB
-GO(XInitThreads, iFv)
+GOM(XInitThreads, iFv)
 //GO(XInsertModifiermapEntry
 GO(XInstallColormap, iFpp)
 GO(XInternalConnectionNumbers, iFppp)

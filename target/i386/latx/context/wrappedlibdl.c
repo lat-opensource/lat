@@ -74,6 +74,22 @@ static void set_dl_errorf(dlprivate_t *dl, const char *format, ...)
     set_dl_error(dl, message);
 }
 
+static void *call_guest_dlopen(const char *filename, int flag,
+                              dlprivate_t *dl)
+{
+    uint64_t ret = RunFunctionWithState(
+        (uintptr_t)dl->x86dlopen, 2, filename, flag);
+
+    printf_dlsym(LOG_DEBUG,
+                 "latx RunFunctionWithState dlopen %s flag=%x ret=0x%lx\n",
+                 filename, flag, ret);
+    if (ret) {
+        return (void *)ret;
+    }
+    set_dl_errorf(dl, "filename \"%s\" flag=%x\n", filename, flag);
+    return NULL;
+}
+
 #define CLEARERR clear_dl_error(dl);
 
 static int replace_path_token(char **path, const char *token,
@@ -269,37 +285,23 @@ EXPORT void* my_dlopen(void *filename, int flag){
         my_context->deferedInit = 1;
         int bindnow = (flag&0x2)?1:0;
         if (!FindLibIsWrapped(basename(rfilename))) {
-#if FORWORDBACK
-            lsassert(dl->x86dlopen);
-            __MY_CPU;
-            Push64(cpu, (uint64_t)dl->x86dlopen);
-            printf_dlsym(LOG_DEBUG, "warning call x86dlopen filename is %s %x\n", (char *)filename, flag);
-            return NULL;
-#else
-            uint64_t ret = RunFunctionWithState((uintptr_t)my_context->dlprivate->x86dlopen, 2, filename, flag);
-            printf_dlsym(LOG_DEBUG, "warning call call x86dlopen filename %s %x ret=0x%lx\n",  (char *)filename, flag, ret);
-            //lsassert(0);
-            if (ret) {
-                box_free(rfilename);
-                return (void *)ret;
-            }
-            set_dl_errorf(dl, "filename \"%s\" flag=%x\n",
-                          (char *)filename, flag);
+            void *ret = call_guest_dlopen(filename, flag, dl);
             box_free(rfilename);
-            return NULL;
-#endif
+            return ret;
         }
         if(AddNeededLib(NULL, NULL, NULL, is_local, bindnow, libs, 1, my_context)) {
             printf_dlsym(strchr(rfilename,'/')?LOG_DEBUG:LOG_INFO, "Warning: Cannot dlopen(\"%s\"/%p, %X)\n", rfilename, filename, flag);
-            set_dl_errorf(dl, "Cannot dlopen(\"%s\"/%p, %X)\n",
-                          rfilename, filename, flag);
-            box_free(rfilename);
-            return NULL;
         }
         lib = GetLibInternal(rfilename);
         if (!lib) {
+            /*
+             * A wrapper may reject its host library when the runtime lacks a
+             * required capability.  Keep local-library preference, but fall
+             * back to the guest loader instead of failing the dlopen.
+             */
+            void *ret = call_guest_dlopen(filename, flag, dl);
             box_free(rfilename);
-            return NULL;
+            return ret;
         }
         lib->x86dlopenflag = flag;
         if (lib && lib->type == LIB_EMULATED) {

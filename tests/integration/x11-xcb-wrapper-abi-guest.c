@@ -3,14 +3,21 @@
 #include <inttypes.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #include <X11/Xlib.h>
+#include <GL/gl.h>
+#include <GL/glx.h>
 #include <xcb/xcb.h>
 #include <xcb/xcb_image.h>
 
 #include "x11-xcb-wrapper-abi-values.h"
 
 #define PTR_VALUE(value) ((void *)(uintptr_t)(value))
+
+extern void *_Xglobal_lock;
+extern void (*_XLockMutex_fn)(void *);
+extern void (*_XUnlockMutex_fn)(void *);
 
 static Display *callback_display;
 static int callback_count;
@@ -38,13 +45,29 @@ static int check(int passed, const char *name, int failure_code)
 int main(void)
 {
     Display *display;
+    XVisualInfo *visual_info;
+    Colormap colormap;
+    Window context_window;
+    GLXContext context;
     xcb_connection_t *connection;
     xcb_shm_segment_info_t shminfo;
     xcb_void_cookie_t cookie;
     xcb_image_t *image;
     xcb_pixmap_t pixmap;
+    XImage *xlib_image;
+    int destroy_result;
     int screen_number;
     int result;
+    __GLXextFuncPtr get_string;
+
+    result = check(XInitThreads() != 0 && _Xglobal_lock != NULL &&
+                   _XLockMutex_fn != NULL && _XUnlockMutex_fn != NULL,
+                   "XInitThreads-mutex-callbacks", 9);
+    if (result) {
+        return result;
+    }
+    _XLockMutex_fn(_Xglobal_lock);
+    _XUnlockMutex_fn(_Xglobal_lock);
 
     display = XOpenDisplay(NULL);
     if (!display) {
@@ -57,6 +80,71 @@ int main(void)
     XFlush(display);
     result = check(callback_count > 0 && !callback_mismatch,
                    "XSynchronizeProc-Display", 11);
+    if (result) {
+        return result;
+    }
+
+    xlib_image = XCreateImage(
+        display, DefaultVisual(display, DefaultScreen(display)),
+        DefaultDepth(display, DefaultScreen(display)), ZPixmap, 0,
+        calloc(1, 4), 1, 1, 32, 4);
+    result = check(xlib_image != NULL && xlib_image->f.destroy_image != NULL,
+                   "XImage-destroy-callback", 12);
+    if (result) {
+        return result;
+    }
+    destroy_result = xlib_image->f.destroy_image(xlib_image);
+    result = check(destroy_result != 0, "XImage-destroy-guest-data", 13);
+    if (result) {
+        return result;
+    }
+    /*
+     * glGetString needs a current context: without one it returns NULL even
+     * though the entry point resolved, which would fail the bridging check
+     * below for the wrong reason.
+     */
+    {
+        static int visual_attributes[] = {
+            GLX_RGBA, GLX_DEPTH_SIZE, 24, GLX_DOUBLEBUFFER, None,
+        };
+        XSetWindowAttributes window_attributes;
+
+        visual_info = glXChooseVisual(display, DefaultScreen(display),
+                                      visual_attributes);
+        result = check(visual_info != NULL, "glXChooseVisual", 16);
+        if (result) {
+            return result;
+        }
+        colormap = XCreateColormap(display,
+                                   RootWindow(display, visual_info->screen),
+                                   visual_info->visual, AllocNone);
+        window_attributes.colormap = colormap;
+        window_attributes.event_mask = 0;
+        context_window = XCreateWindow(
+            display, RootWindow(display, visual_info->screen), 0, 0, 16, 16,
+            0, visual_info->depth, InputOutput, visual_info->visual,
+            CWColormap, &window_attributes);
+        context = context_window
+                      ? glXCreateContext(display, visual_info, NULL, True)
+                      : NULL;
+        XMapWindow(display, context_window);
+        XSync(display, False);
+        result = check(context != NULL &&
+                       glXMakeCurrent(display, context_window, context) != 0,
+                       "glXMakeCurrent", 17);
+        if (result) {
+            return result;
+        }
+    }
+
+    get_string = glXGetProcAddress((const GLubyte *)"glGetString");
+    result = check(get_string != NULL,
+                   "glXGetProcAddress-GL-fallback", 14);
+    if (result) {
+        return result;
+    }
+    result = check(((const GLubyte *(*)(GLenum))get_string)(GL_VERSION) != NULL,
+                   "glXGetProcAddress-bridged-call", 15);
     if (result) {
         return result;
     }
@@ -138,6 +226,11 @@ int main(void)
     }
 
     xcb_disconnect(connection);
+    glXMakeCurrent(display, None, NULL);
+    glXDestroyContext(display, context);
+    XDestroyWindow(display, context_window);
+    XFreeColormap(display, colormap);
+    XFree(visual_info);
     XCloseDisplay(display);
     puts("PASS:x11-xcb-wrapper-abi");
     return 0;

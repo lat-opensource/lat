@@ -73,7 +73,7 @@ ln -s libxcb-image.so.0 "$guest_library_dir/libxcb-image.so"
 
 "$guest_compiler" --sysroot="$guest_root" -O2 -Wall -Wextra -Werror \
     -I"$source_dir" "$guest_source" -L"$guest_library_dir" \
-    -Wl,-rpath,'$ORIGIN/guest-lib' -lxcb-image -lX11 -lxcb \
+    -Wl,-rpath,'$ORIGIN/guest-lib' -lxcb-image -lX11 -lGL -lxcb \
     -o "$guest_program"
 
 test_display=${DISPLAY:-}

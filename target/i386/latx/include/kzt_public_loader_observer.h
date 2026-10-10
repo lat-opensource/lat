@@ -178,10 +178,24 @@ kzt_public_loader_result_t kzt_public_loader_observer_refresh(
     kzt_public_loader_visit_fn visit,
     void *visit_opaque);
 
-/* Resolve one unique defined symbol from the live in-memory link_map set. */
+/* Resolve a unique live symbol, optionally restricted to a DT_SONAME. */
 kzt_public_loader_result_t kzt_public_loader_find_symbol(
     const kzt_public_loader_observer_t *observer,
     const kzt_public_loader_reader_t *reader,
+    const char *library_name,
+    const char *symbol_name,
+    uintptr_t *symbol_addr);
+
+/*
+ * Resolve a symbol from an ordered list of DT_SONAMEs, returning the first
+ * library that provides it.  This is the lookup order used when a symbol may
+ * live in either of two libraries, such as dlopen in libc or libdl.
+ */
+kzt_public_loader_result_t kzt_public_loader_find_symbol_from_libraries(
+    const kzt_public_loader_observer_t *observer,
+    const kzt_public_loader_reader_t *reader,
+    const char *const *library_names,
+    size_t library_count,
     const char *symbol_name,
     uintptr_t *symbol_addr);
 

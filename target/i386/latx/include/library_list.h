@@ -4,7 +4,7 @@
 
 #include "config-host.h"
 
-GO("libEGL.so.1", libegl, KZT_GROUP_GL)
+GO("libEGL.so.1", libegl, KZT_GROUP_EGL)
 #ifndef CONFIG_LOONGARCH_NEW_WORLD
 GO("libdl.so.2", libdl, KZT_GROUP_CORE)
 #endif
@@ -84,7 +84,7 @@ GOALIAS("libxcb-xinput.so", libxcbxinput, KZT_GROUP_X11)
 GOALIAS("libxcb-present.so", libxcbpresent, KZT_GROUP_X11)
 GOALIAS("libcairo.so", cairo, KZT_GROUP_CAIRO)
 GOALIAS("libvulkan.so", vulkan, KZT_GROUP_VULKAN)
-GOALIAS("libEGL.so", libegl, KZT_GROUP_GL)
+GOALIAS("libEGL.so", libegl, KZT_GROUP_EGL)
 #ifndef CONFIG_LOONGARCH_NEW_WORLD
 GOALIAS("libdl.so", libdl, KZT_GROUP_CORE)
 #endif

@@ -1133,6 +1133,15 @@ EXPORT int32_t my_XPeekIfEvent(my_XDisplay_t *dpy, void* ev,
 void sub_image_wrapper(uintptr_t fnc);
 typedef void* (*sub_image_wrapper_t)(void*, int32_t, int32_t, uint32_t, uint32_t);
 
+typedef int32_t (*destroy_image_wrapper_t)(void*);
+void destroy_image_wrapper(uintptr_t fnc);
+void destroy_image_wrapper(uintptr_t fnc)
+{
+    __MY_CPU;
+    (void)fnc;
+    cpu->regs[R_EAX] = my_XDestroyImage((void *)cpu->regs[R_EDI]);
+}
+
 void BridgeImageFunc(XImage *img);
 void BridgeImageFunc(XImage *img)
 {
@@ -1146,7 +1155,7 @@ void BridgeImageFunc(XImage *img)
     uintptr_t fnc;
 
     GO(create_image, pFppuiipuuii)
-    GO(destroy_image, iFp)
+    GO(destroy_image, destroy_image_wrapper)
     GO(get_pixel, LFpii)
     GO(put_pixel, iFpiiL)
     GO(sub_image, sub_image_wrapper)
@@ -1732,8 +1741,40 @@ EXPORT void* my_XOpenIM(my_XDisplay_t* dpy, void* v2, void* v3, void* v4)
     return ret;
 }
 
+static void bridge_X11_mutex_functions(library_t *lib)
+{
+    static const char *const functions[] = {
+        "_XLockMutex_fn",
+        "_XUnlockMutex_fn",
+    };
+
+    for (size_t i = 0; i < ARRAY_SIZE(functions); i++) {
+        void **slot = dlsym(lib->priv.w.lib, functions[i]);
+
+        if (slot && *slot) {
+            AddAutomaticBridge(lib->priv.w.bridge, vFp, *slot, 0);
+        }
+    }
+}
+
+/*
+ * A host Xlib built without automatic thread initialisation leaves the mutex
+ * callbacks null until the guest calls XInitThreads.  Bridge them again after
+ * the host call so a late assignment still hands the guest a callable
+ * endpoint instead of a raw host pointer.
+ */
+EXPORT uint32_t my_XInitThreads(void);
+EXPORT uint32_t my_XInitThreads(void)
+{
+    uint32_t ret = my->XInitThreads();
+
+    bridge_X11_mutex_functions(my_lib);
+    return ret;
+}
+
 #define CUSTOM_INIT                 \
     getMy(lib);                     \
+    bridge_X11_mutex_functions(lib); \
     setNeededLibs(lib, 1,           \
         "libXcursor.so.1");
 #define CUSTOM_FINI \

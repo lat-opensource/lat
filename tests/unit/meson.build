@@ -97,6 +97,7 @@ test(
   args: [
     files('check-x11-synchronize-callback.py'),
     project_source_root / 'target/i386/latx/context/wrappedlibx11.c',
+    project_source_root / 'target/i386/latx/include/wrappedlibx11_private.h',
   ],
   suite: 'lat-pr-fast',
 )
@@ -282,6 +283,19 @@ test_kzt_address_policy = executable(
 test(
   'test-kzt-address-policy',
   test_kzt_address_policy,
+  suite: 'lat-pr-fast',
+)
+
+test(
+  'test-kzt-wrapper-fallback-policy',
+  python,
+  args: [
+    files('check-kzt-wrapper-fallback.py'),
+    project_source_root / 'target/i386/latx/context/wrappedlibdl.c',
+    project_source_root / 'target/i386/latx/context/wrappedlibegl.c',
+    project_source_root / 'target/i386/latx/include/library_list.h',
+    project_source_root / 'target/i386/latx/include/kzt-group-list.h',
+  ],
   suite: 'lat-pr-fast',
 )
 
