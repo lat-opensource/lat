@@ -214,6 +214,38 @@ static void generate_kzt_callback_context(
     la_nop();//for long jmp
     la_nop();//for long jmp
 }
+
+static void generate_kzt_fixed_callback_context(
+    void *code_buf, void (*callback)(CPUX86State *), unsigned int base_reg,
+    uintptr_t base_addr, unsigned int link_reg, uintptr_t return_addr,
+    uintptr_t target)
+{
+    IR2_OPND target_opnd;
+
+    kzt_native_to_wrapper();
+    kzt_helper1((ADDR)callback);
+    kzt_wrapper_to_native();
+
+    if (base_reg && base_reg != link_reg) {
+        li_d(get_la_ir2_opnd(base_reg), base_addr);
+    }
+    if (link_reg) {
+        li_d(get_la_ir2_opnd(link_reg), return_addr);
+    }
+
+    target_opnd = ra_alloc_itemp();
+    if (target_opnd._reg_num == base_reg ||
+        target_opnd._reg_num == link_reg) {
+        IR2_OPND alternate = ra_alloc_itemp();
+
+        ra_free_temp(target_opnd);
+        target_opnd = alternate;
+    }
+    li_d(target_opnd, target);
+    la_jirl(zero_ir2_opnd, target_opnd, 0);
+    ra_free_temp(target_opnd);
+}
+
 int target_latx_emit_callback_bridge(
     void *code_buf_addr, void (*callback)(CPUX86State *))
 {
@@ -229,6 +261,28 @@ int target_latx_emit_callback_bridge(
     label_dispose(NULL, lat_ctx);
     code_nr = tr_ir2_assemble((void *)code_buf_addr,
                               lat_ctx->first_ir2);
+    tr_fini(false);
+    return code_nr;
+}
+
+int target_latx_emit_fixed_callback_bridge(
+    void *code_buf_addr, void (*callback)(CPUX86State *),
+    unsigned int base_reg, uintptr_t base_addr, unsigned int link_reg,
+    uintptr_t return_addr, uintptr_t target)
+{
+    int code_nr = 0;
+    TRANSLATION_DATA *lat_ctx = lsenv->tr_data;
+
+    if (option_dump)
+        qemu_log("[LATX] kzt_fixed_callback_context = %p target=%p\n",
+                 (void *)code_buf_addr, (void *)target);
+
+    tr_init(NULL);
+    generate_kzt_fixed_callback_context(code_buf_addr, callback, base_reg,
+                                        base_addr, link_reg, return_addr,
+                                        target);
+    label_dispose(NULL, lat_ctx);
+    code_nr = tr_ir2_assemble((void *)code_buf_addr, lat_ctx->first_ir2);
     tr_fini(false);
     return code_nr;
 }

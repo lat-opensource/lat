@@ -17,6 +17,10 @@ extern ADDR context_switch_bt_to_native;
 #if defined(CONFIG_LATX_KZT)
 int target_latx_emit_callback_bridge(
     void *code_buf_addr, void (*callback)(CPUX86State *));
+int target_latx_emit_fixed_callback_bridge(
+    void *code_buf_addr, void (*callback)(CPUX86State *),
+    unsigned int base_reg, uintptr_t base_addr, unsigned int link_reg,
+    uintptr_t return_addr, uintptr_t target);
 #endif
 
 int target_latx_host(CPUArchState *env, struct TranslationBlock *tb, int max_insns);
