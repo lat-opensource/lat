@@ -5,6 +5,7 @@
  */
 
 #include "qemu-def.h"
+#include <glib/gstdio.h>
 #include "aot-version.h"
 
 #ifdef AOT_MERGE_TEST_NO_TU

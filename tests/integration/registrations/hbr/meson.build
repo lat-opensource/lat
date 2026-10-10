@@ -17,4 +17,28 @@ if 'x86_64-linux-user' in target_dirs
       'timeout': 120,
     }]
   endforeach
+
+  foreach ghbr_fixture : [
+    'ghbr-bitops',
+    'ghbr-btx',
+    'ghbr-cmpxchg8b',
+    'ghbr-conditional',
+    'ghbr-implicit-registers',
+    'ghbr-imul',
+    'ghbr-lea',
+    'ghbr-mov',
+    'ghbr-shift',
+    'ghbr-xchg',
+  ]
+    latx_integration_tests += [{
+      'name': 'test-latx-' + ghbr_fixture,
+      'runner': find_program('../../test-latx-hbr-fixture.sh'),
+      'args': [
+        emulators['latx-x86_64'],
+        project_source_root / 'tests/integration' / (ghbr_fixture + '.c'),
+      ],
+      'timeout': 300,
+    }]
+  endforeach
+
 endif

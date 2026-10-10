@@ -224,6 +224,153 @@ static int ir2_get_addi_rsp_offs(IR2_INST *ir2)
     return 0;
 }
 
+static bool ir2_gpr_is_known_zero(uint32_t known_zero, const IR2_OPND *opnd)
+{
+    if (!ir2_opnd_is_ireg(opnd)) {
+        return false;
+    }
+
+    int reg = ir2_opnd_base_reg_num(opnd);
+    return reg >= 0 && reg < 32 && (known_zero & (1U << reg));
+}
+
+static void ir2_gpr_set_known_zero(uint32_t *known_zero,
+                                   const IR2_OPND *opnd, bool known)
+{
+    if (!ir2_opnd_is_ireg(opnd)) {
+        return;
+    }
+
+    int reg = ir2_opnd_base_reg_num(opnd);
+    if (reg < 0 || reg >= 32) {
+        return;
+    }
+
+    if (known) {
+        *known_zero |= 1U << reg;
+    } else {
+        *known_zero &= ~(1U << reg);
+    }
+}
+
+static bool ir2_is_self_zero_extend(const IR2_INST *ir2)
+{
+    return ir2_opcode(ir2) == LISA_BSTRPICK_D &&
+           ir2->op_count >= 4 &&
+           ir2_opnd_cmp(&ir2->_opnd[0], &ir2->_opnd[1]) &&
+           ir2_opnd_imm(&ir2->_opnd[2]) == 31 &&
+           ir2_opnd_imm(&ir2->_opnd[3]) == 0;
+}
+
+static bool ir2_zx_stats_enabled(void)
+{
+    static __thread int enabled = -1;
+
+    if (enabled < 0) {
+        const char *value = getenv("LATX_GHBR_STATS");
+
+        enabled = value && !strcmp(value, "1");
+    }
+    return enabled;
+}
+
+static void ir2_opt_zero_high_chain(TranslationBlock *tb)
+{
+    bool stats = ir2_zx_stats_enabled();
+    uint64_t seen = 0;
+    uint64_t removed = 0;
+    uint32_t known_zero = 0;
+    IR2_INST *curr = lsenv->tr_data->first_ir2;
+
+    while (curr) {
+        IR2_INST *next = ir2_next(curr);
+        IR2_OPCODE op = ir2_opcode(curr);
+
+        if (ir2_is_self_zero_extend(curr)) {
+            if (stats) {
+                seen++;
+            }
+            if (ir2_gpr_is_known_zero(known_zero, &curr->_opnd[0])) {
+                ir2_remove(ir2_get_id(curr));
+                if (stats) {
+                    removed++;
+                }
+            } else {
+                ir2_gpr_set_known_zero(&known_zero, &curr->_opnd[0], true);
+            }
+            curr = next;
+            continue;
+        }
+
+        if (op == LISA_X86_INST || op == LISA_NOP) {
+            curr = next;
+            continue;
+        }
+
+        switch (op) {
+        case LISA_BSTRPICK_D:
+            if (curr->op_count >= 3 && ir2_opnd_imm(&curr->_opnd[2]) <= 31) {
+                ir2_gpr_set_known_zero(&known_zero, &curr->_opnd[0], true);
+            } else {
+                known_zero = 0;
+            }
+            break;
+        case LISA_LD_BU:
+        case LISA_LD_HU:
+        case LISA_LD_WU:
+        case LISA_ANDI:
+            ir2_gpr_set_known_zero(&known_zero, &curr->_opnd[0], true);
+            break;
+        case LISA_ORI:
+        case LISA_XORI:
+        case LISA_MOV64:
+            ir2_gpr_set_known_zero(
+                &known_zero, &curr->_opnd[0],
+                ir2_gpr_is_known_zero(known_zero, &curr->_opnd[1]));
+            break;
+        case LISA_OR:
+        case LISA_XOR:
+            ir2_gpr_set_known_zero(
+                &known_zero, &curr->_opnd[0],
+                ir2_gpr_is_known_zero(known_zero, &curr->_opnd[1]) &&
+                ir2_gpr_is_known_zero(known_zero, &curr->_opnd[2]));
+            break;
+        case LISA_AND:
+            ir2_gpr_set_known_zero(
+                &known_zero, &curr->_opnd[0],
+                ir2_gpr_is_known_zero(known_zero, &curr->_opnd[1]) ||
+                ir2_gpr_is_known_zero(known_zero, &curr->_opnd[2]));
+            break;
+        case LISA_SRLI_D:
+            ir2_gpr_set_known_zero(
+                &known_zero, &curr->_opnd[0],
+                ir2_opnd_imm(&curr->_opnd[2]) >= 32 ||
+                ir2_gpr_is_known_zero(known_zero, &curr->_opnd[1]));
+            break;
+        case LISA_ADDI_D:
+            if (ir2_opnd_imm(&curr->_opnd[2]) != 0) {
+                known_zero = 0;
+            } else {
+                ir2_gpr_set_known_zero(
+                    &known_zero, &curr->_opnd[0],
+                    ir2_gpr_is_known_zero(known_zero, &curr->_opnd[1]));
+            }
+            break;
+        default:
+            known_zero = 0;
+            break;
+        }
+
+        curr = next;
+    }
+
+    if (stats && removed) {
+        fprintf(stderr,
+                "[GHBR][IR2] tb=" TARGET_FMT_lx " seen=%" PRIu64
+                " removed=%" PRIu64 "\n", tb->pc, seen, removed);
+    }
+}
+
 static bool ir2_opndn_is_rsp(IR2_INST *ir2, int index)
 {
     if (ir2->_opnd[index]._type == IR2_OPND_GPR &&
@@ -528,6 +675,7 @@ static void ir2_opt_push_pop(TranslationBlock *tb)
 
 void tr_ir2_optimize(TranslationBlock *tb)
 {
+    ir2_opt_zero_high_chain(tb);
 #ifdef CONFIG_LATX_OPT_PUSH_POP
     CPUX86State *env = (CPUX86State*)lsenv->cpu_state;
     CPUState *cpu = env_cpu(env);

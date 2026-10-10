@@ -15,4 +15,24 @@ if host_machine.system() == 'linux'
   )
 endif
 
+python3 = find_program('python3', required: false)
+if python3.found()
+  latx_python_tests = [
+    ['test-latx-ghbr-audit', '../scripts/test_latx_ghbr_audit.py'],
+    ['test-latx-ghbr-conditional', '../scripts/test_latx_ghbr_conditional.py'],
+    ['test-latx-ghbr-implicit', '../scripts/test_latx_ghbr_implicit.py'],
+    ['test-latx-ghbr-stats', '../scripts/test_latx_ghbr_stats.py'],
+    ['test-latx-ir2-zero-chain', '../scripts/test_latx_ir2_zero_chain.py'],
+  ]
+  foreach test_def : latx_python_tests
+    test(
+      test_def[0],
+      python3,
+      args: [files(test_def[1])],
+      protocol: 'exitcode',
+      suite: 'lat-pr-fast',
+    )
+  endforeach
+endif
+
 subdir('integration')

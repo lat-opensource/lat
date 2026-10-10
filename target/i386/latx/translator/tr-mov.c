@@ -299,7 +299,7 @@ static void translate_mov_from_gpr(IR1_OPND *opnd0, IR1_OPND *opnd1)
             la_bstrins_d(dest, src, 15, 0);
             break;
         case 32:
-            la_mov32_zx(dest, src);
+            store_ireg_to_ir1(src, opnd0, false);
             break;
         case 64:
             la_mov64(dest, src);
@@ -1375,9 +1375,11 @@ bool translate_cmovcc(IR1_INST *pir1)
 
     if (ir1_opnd_size(opnd0) == 64) {
         la_or(dest_opnd, cond1, cond2);
-    } else {
+    } else if (!GHBR_ON(pir1)) {
         la_or(cond1, cond1, cond2);
         store_ireg_to_ir1(cond1, opnd0, false);
+    } else {
+        la_or(dest_opnd, cond1, cond2);
     }
     ra_free_temp(cond1);
     ra_free_temp(cond2);
@@ -1397,7 +1399,7 @@ bool translate_lea(IR1_INST *pir1)
 
     /* LEA computes only the effective offset; segment bases are ignored. */
     addr.mem.segment = dt_X86_REG_INVALID;
-    convert_mem_to_specific_gpr(&addr, dest_op, op0_size);
+    convert_mem_to_specific_gpr(&addr, dest_op, op0_size, !GHBR_ON(pir1));
 
     return true;
 }
@@ -2156,28 +2158,29 @@ bool translate_popal(IR1_INST *pir1) {
 bool translate_popcnt(IR1_INST *pir1) {
     IR2_OPND src_opnd =
         load_ireg_from_ir1(ir1_get_opnd(pir1, 1), ZERO_EXTENSION, false);
-    IR2_OPND count = ra_alloc_itemp();
+    int pop_count = ir1_opnd_size(ir1_get_opnd(pir1, 0));
+    bool count_is_temp = pop_count == 16;
     IR2_OPND temp = ra_alloc_itemp();
     IR2_OPND src_temp = ra_alloc_itemp();
     IR2_OPND pop_count_ir2_opnd = ra_alloc_itemp();
-    int pop_count = ir1_opnd_size(ir1_get_opnd(pir1, 0));
+    IR2_OPND dest = count_is_temp ? ra_alloc_itemp() :
+        ra_alloc_gpr(ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 0)));
     IR2_OPND label_exit = ra_alloc_label();
     IR2_OPND label_zero = ra_alloc_label();
     IR2_OPND label_start = ra_alloc_label();
 
     /* set O S Z A C P = 0 */
     la_x86mtflag(zero_ir2_opnd, 0x3f);
-    la_ori(count, zero_ir2_opnd, 0);
+    la_or(src_temp, zero_ir2_opnd, src_opnd);
+    la_ori(dest, zero_ir2_opnd, 0);
 
-    la_beq(src_opnd, zero_ir2_opnd, label_zero);
+    la_beq(src_temp, zero_ir2_opnd, label_zero);
 
     li_d(pop_count_ir2_opnd, pop_count);
-
-    la_or(src_temp, zero_ir2_opnd, src_opnd);
 /* label_start: */
     la_label(label_start);
     la_andi(temp, src_temp, 1);
-    la_add_d(count, count, temp);
+    la_add_d(dest, dest, temp);
     la_srli_d(src_temp, src_temp, 1);
     la_addi_d(pop_count_ir2_opnd, pop_count_ir2_opnd, -1);
     la_bne(pop_count_ir2_opnd, zero_ir2_opnd, label_start);
@@ -2195,7 +2198,9 @@ bool translate_popcnt(IR1_INST *pir1) {
 
 /* label_exit: */
     la_label(label_exit);
-    store_ireg_to_ir1(count, ir1_get_opnd(pir1, 0), false);
-    ra_free_temp(count);
+    if (count_is_temp) {
+        store_ireg_to_ir1(dest, ir1_get_opnd(pir1, 0), false);
+        ra_free_temp(dest);
+    }
     return true;
 }

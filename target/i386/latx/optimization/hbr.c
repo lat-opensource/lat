@@ -2274,7 +2274,69 @@ static void clear_ir1_flag(TranslationBlock **tb_list, int tb_num_in_tu)
 }
 
 #ifdef TARGET_X86_64
-static void over_tb_gpr_opt(TranslationBlock **tb_list, int tb_num_in_tu)
+typedef struct GHBRStats {
+    uint64_t modeled_def_instructions;
+    uint64_t candidates;
+    uint64_t hits;
+    uint64_t external_edges;
+} GHBRStats;
+
+static __thread GHBRStats ghbr_stats;
+static __thread int ghbr_stats_enabled = -1;
+
+static bool ghbr_stats_on(void)
+{
+    if (ghbr_stats_enabled < 0) {
+        const char *value = getenv("LATX_GHBR_STATS");
+
+        ghbr_stats_enabled = value && !strcmp(value, "1");
+    }
+    return ghbr_stats_enabled;
+}
+
+static void count_ghbr_external_edge(TranslationBlock **tb_list,
+        int tb_num_in_tu, TranslationBlock *successor, bool stats)
+{
+    if (stats && successor &&
+        !hbr_in_tu_successor(tb_list, tb_num_in_tu, successor)) {
+        ghbr_stats.external_edges++;
+    }
+}
+
+static void count_ghbr_external_edges(TranslationBlock **tb_list,
+        int tb_num_in_tu, bool stats)
+{
+    if (!stats) {
+        return;
+    }
+
+    for (int i = 0; i < tb_num_in_tu; i++) {
+        TranslationBlock *tb = tb_list[i];
+        TranslationBlock *next_tb =
+            (TranslationBlock *)tb->s_data->next_tb[TU_TB_INDEX_NEXT];
+        TranslationBlock *target_tb =
+            (TranslationBlock *)tb->s_data->next_tb[TU_TB_INDEX_TARGET];
+
+        switch (tb->s_data->last_ir1_type) {
+        case IR1_TYPE_BRANCH:
+            count_ghbr_external_edge(tb_list, tb_num_in_tu, next_tb, stats);
+            count_ghbr_external_edge(tb_list, tb_num_in_tu, target_tb, stats);
+            break;
+        case IR1_TYPE_JUMP:
+        case IR1_TYPE_CALL:
+            count_ghbr_external_edge(tb_list, tb_num_in_tu, target_tb, stats);
+            break;
+        case IR1_TYPE_NORMAL:
+            count_ghbr_external_edge(tb_list, tb_num_in_tu, next_tb, stats);
+            break;
+        default:
+            break;
+        }
+    }
+}
+
+static void over_tb_gpr_opt(TranslationBlock **tb_list, int tb_num_in_tu,
+                            bool stats)
 {
     TranslationBlock *next_tbs[tb_num_in_tu];
     TranslationBlock *target_tbs[tb_num_in_tu];
@@ -2288,6 +2350,7 @@ static void over_tb_gpr_opt(TranslationBlock **tb_list, int tb_num_in_tu)
 
     bool continue_flag = true;
     uint32_t old_live_in, old_live_out;
+    count_ghbr_external_edges(tb_list, tb_num_in_tu, stats);
     while(continue_flag) {
         continue_flag = false;
         for (int i = tb_num_in_tu - 1; i >= 0; i--) {
@@ -2341,11 +2404,21 @@ static void over_tb_gpr_opt(TranslationBlock **tb_list, int tb_num_in_tu)
         IR1_INST *ir1;
         for (int j = tb_ir1_num(tb) - 1; j >= 0; j--) {
             ir1 = tb_ir1_inst(tb, j);
-            if (ir1->gpr_def & gpr_out) {
-                gpr_out &= ~ir1->gpr_def;
-            } else if(ir1->gpr_def) {
-                /* fprintf(stderr, "%x %x\n", ir1->gpr_def, gpr_out); */
-                ir1->hbr_flag |= GHBR_CAN_OPT;
+            uint32_t defs = ir1->gpr_def | ir1->gpr_may_def;
+
+            if (defs) {
+                if (stats) {
+                    ghbr_stats.modeled_def_instructions++;
+                    ghbr_stats.candidates++;
+                }
+                if (defs & gpr_out) {
+                    gpr_out &= ~ir1->gpr_def;
+                } else {
+                    ir1->hbr_flag |= GHBR_CAN_OPT;
+                    if (stats) {
+                        ghbr_stats.hits++;
+                    }
+                }
             }
             gpr_out |= ir1->gpr_use;
         }
@@ -2361,19 +2434,67 @@ static void des_def_gpr(TranslationBlock *tb, IR1_INST *ir1)
     int dest_num = ir1_opnd_base_reg_num(des_opnd);
     assert(dest_num >= 0 && dest_num < 16);
     ir1->gpr_def |= 1 << dest_num;
-    tb->s_data->gpr_def |= 1 << dest_num;
+}
+
+static void set_use_reg(TranslationBlock *tb, IR1_INST *ir1, int reg_num);
+
+static void set_def_reg(TranslationBlock *tb, IR1_INST *ir1, int reg_num)
+{
+    if (reg_num >= 0 && reg_num < 16) {
+        ir1->gpr_def |= 1 << reg_num;
+    }
+}
+
+static void set_may_def_reg(TranslationBlock *tb, IR1_INST *ir1, int reg_num)
+{
+    if (reg_num >= 0 && reg_num < 16) {
+        ir1->gpr_may_def |= 1 << reg_num;
+        set_use_reg(tb, ir1, reg_num);
+    }
 }
 
 static void deal_hide_opnd_def(TranslationBlock *tb, IR1_INST *ir1)
 {
+    int width = ir1_get_opnd_num(ir1) ?
+                ir1_opnd_size(ir1_get_opnd(ir1, 0)) : 0;
+
     switch (ir1_opcode(ir1)) {
     case WRAP(CWDE):
-        ir1->gpr_def |= 1 << eax_index;
-        tb->s_data->gpr_def |= 1 << eax_index;
+        set_def_reg(tb, ir1, eax_index);
         break;
     case WRAP(CQO):
-        ir1->gpr_def |= 1 << edx_index;
-        tb->s_data->gpr_def |= 1 << edx_index;
+        set_def_reg(tb, ir1, edx_index);
+        break;
+    case WRAP(MUL):
+    case WRAP(IMUL):
+        if (ir1_get_opnd_num(ir1) == 1 && (width == 32 || width == 64)) {
+            set_def_reg(tb, ir1, eax_index);
+            set_def_reg(tb, ir1, edx_index);
+        }
+        break;
+    case WRAP(DIV):
+    case WRAP(IDIV):
+        if (width == 32 || width == 64) {
+            set_def_reg(tb, ir1, eax_index);
+            set_def_reg(tb, ir1, edx_index);
+        }
+        break;
+    case WRAP(CMPXCHG):
+        if (width == 32) {
+            IR1_OPND *dest = ir1_get_opnd(ir1, 0);
+
+            set_may_def_reg(tb, ir1, eax_index);
+            if (ir1_opnd_is_gpr(dest)) {
+                set_may_def_reg(tb, ir1,
+                                ir1_opnd_base_reg_num(dest));
+            }
+        }
+        break;
+    case WRAP(CMPXCHG8B):
+        if (width == 64) {
+            set_may_def_reg(tb, ir1, eax_index);
+            set_may_def_reg(tb, ir1, edx_index);
+        }
         break;
     default:
         break;
@@ -2398,6 +2519,10 @@ static bool def_h32(TranslationBlock *tb, IR1_INST *ir1)
     case WRAP(MOVSX):
     case WRAP(MOVZX):
     /* case WRAP(MOVSXD): */
+        if (ir1_opnd_size(des_opnd) == 32) {
+            des_def_gpr(tb, ir1);
+            return true;
+        }
         if (ir1_opnd_size(des_opnd) == 64 &&
                 ir1_opnd_size(ir1_get_opnd(ir1, 1)) == 32) {
             des_def_gpr(tb, ir1);
@@ -2405,8 +2530,9 @@ static bool def_h32(TranslationBlock *tb, IR1_INST *ir1)
         }
         return false;
     case WRAP(MOV):
-        if ((ir1_opnd_size(ir1_get_opnd(ir1, 0)) == 64)
-                && ir1_opnd_size(des_opnd) == 64) {
+        if (ir1_opnd_size(des_opnd) == 32 ||
+            ((ir1_opnd_size(ir1_get_opnd(ir1, 0)) == 64) &&
+             ir1_opnd_size(des_opnd) == 64)) {
             des_def_gpr(tb, ir1);
             return true;
         }
@@ -2425,6 +2551,24 @@ static bool def_h32(TranslationBlock *tb, IR1_INST *ir1)
         return false;
     }
     switch (ir1_opcode(ir1)) {
+    case WRAP(CMOVA):
+    case WRAP(CMOVAE):
+    case WRAP(CMOVB):
+    case WRAP(CMOVBE):
+    case WRAP(CMOVE):
+    case WRAP(CMOVG):
+    case WRAP(CMOVGE):
+    case WRAP(CMOVL):
+    case WRAP(CMOVLE):
+    case WRAP(CMOVNE):
+    case WRAP(CMOVNO):
+    case WRAP(CMOVNP):
+    case WRAP(CMOVNS):
+    case WRAP(CMOVO):
+    case WRAP(CMOVP):
+    case WRAP(CMOVS):
+        set_may_def_reg(tb, ir1, ir1_opnd_base_reg_num(des_opnd));
+        return true;
     case WRAP(XOR):
     case WRAP(AND):
     case WRAP(OR):
@@ -2435,6 +2579,10 @@ static bool def_h32(TranslationBlock *tb, IR1_INST *ir1)
     case WRAP(RCR):
     case WRAP(SHRD):
     case WRAP(SHLD):
+    case WRAP(SHL):
+    case WRAP(SHR):
+    case WRAP(SAR):
+    case WRAP(SAL):
     case WRAP(ADD):
     case WRAP(ADC):
     case WRAP(INC):
@@ -2443,10 +2591,33 @@ static bool def_h32(TranslationBlock *tb, IR1_INST *ir1)
     case WRAP(SBB):
     case WRAP(NEG):
     case WRAP(XADD):
+    case WRAP(BTS):
+    case WRAP(BTR):
+    case WRAP(BTC):
+    case WRAP(BSWAP):
+    case WRAP(POPCNT):
+    case WRAP(TZCNT):
+    case WRAP(LZCNT):
+    case WRAP(LEA):
         des_def_gpr(tb, ir1);
         return true;
+    case WRAP(BSF):
+    case WRAP(BSR):
+        if (ir1->info->bytes[0] == 0xF3) {
+            des_def_gpr(tb, ir1);
+        } else {
+            set_may_def_reg(tb, ir1, ir1_opnd_base_reg_num(des_opnd));
+        }
+        return true;
     case WRAP(XCHG):
-        if (ir1_opnd_is_same_reg(des_opnd, ir1_get_opnd(ir1, 1))) {
+        des_def_gpr(tb, ir1);
+        if (ir1_opnd_is_gpr(ir1_get_opnd(ir1, 1))) {
+            set_def_reg(tb, ir1,
+                        ir1_opnd_base_reg_num(ir1_get_opnd(ir1, 1)));
+        }
+        return true;
+    case WRAP(IMUL):
+        if (ir1_get_opnd_num(ir1) > 1) {
             des_def_gpr(tb, ir1);
             return true;
         }
@@ -2514,18 +2685,20 @@ static void deal_hide_opnd_use(TranslationBlock *tb, IR1_INST *ir1)
         set_use_reg(tb, ir1, esi_index);
         set_use_reg(tb, ir1, ecx_index);
         break;
-    case WRAP(MUL):
-    case WRAP(RDTSC):
     case WRAP(CQO):
+    case WRAP(RDTSC):
         set_use_reg(tb, ir1, eax_index);
+        break;
+    case WRAP(MUL):
+    case WRAP(IMUL):
+        if (ir1_opnd_num(ir1) == 1 &&
+            ir1_opnd_size(ir1_get_opnd(ir1, 0)) == 64) {
+            set_use_reg(tb, ir1, eax_index);
+        }
         break;
     case WRAP(DIV):
     case WRAP(IDIV):
-        set_use_reg(tb, ir1, eax_index);
-        set_use_reg(tb, ir1, edx_index);
-        break;
-    case WRAP(IMUL):
-        if (ir1_opnd_num(ir1) == 1) {
+        if (ir1_opnd_size(ir1_get_opnd(ir1, 0)) == 64) {
             set_use_reg(tb, ir1, eax_index);
             set_use_reg(tb, ir1, edx_index);
         }
@@ -2576,14 +2749,15 @@ static void deal_hide_opnd_use(TranslationBlock *tb, IR1_INST *ir1)
     }
 }
 
-static void use_h32(TranslationBlock *tb, IR1_INST *ir1)
+static void use_h32(TranslationBlock *tb, IR1_INST *ir1,
+                    bool has_explicit_def)
 {
     deal_hide_opnd_use(tb, ir1);
     int opnd_num = ir1_get_opnd_num(ir1);
     /* We roughly assume that the high 32 bit of all gpr in curr ins will be used,
      * except for updating their own h32 des opnd without using their own h32 bit. */
     int i = 0;
-    if (ir1->gpr_def) {
+    if (has_explicit_def) {
         i = 1;
     }
     for (; i < opnd_num; ++i) {
@@ -2617,18 +2791,34 @@ static void get_gpr_use_def(TranslationBlock *tb)
     for (int i = 0; i < tb_ir1_num(tb); ++i) {
         ir1 = tb_ir1_inst(tb, i);
         ir1->gpr_def = 0;
+        ir1->gpr_may_def = 0;
         ir1->gpr_use = 0;
-        def_h32(tb, ir1);
-        use_h32(tb, ir1);
+        bool has_explicit_def = def_h32(tb, ir1);
+        use_h32(tb, ir1, has_explicit_def);
+        /* Inputs observe the value before this instruction's writes. */
+        tb->s_data->gpr_def |= ir1->gpr_def;
     }
 }
 
 static void do_gpr_opt(TranslationBlock **tb_list, int tb_num_in_tu)
 {
+    bool stats = ghbr_stats_on();
+    if (stats) {
+        ghbr_stats = (GHBRStats){0};
+    }
     for (int i = 0; i < tb_num_in_tu; i++) {
         get_gpr_use_def(tb_list[i]);
     }
-    over_tb_gpr_opt(tb_list, tb_num_in_tu);
+    over_tb_gpr_opt(tb_list, tb_num_in_tu, stats);
+    if (stats) {
+        fprintf(stderr,
+                "[GHBR][TU] tb=" TARGET_FMT_lx " defs=%" PRIu64
+                " candidates=%" PRIu64 " hits=%" PRIu64
+                " external_edges=%" PRIu64 "\n",
+                tb_list[0]->pc, ghbr_stats.modeled_def_instructions,
+                ghbr_stats.candidates, ghbr_stats.hits,
+                ghbr_stats.external_edges);
+    }
 }
 #endif
 

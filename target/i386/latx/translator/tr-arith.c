@@ -1132,7 +1132,11 @@ static bool translate_imul_(IR1_INST *pir1,
             /* -> mul.w temp, reg2, temp' */
             IR2_OPND temp = ra_alloc_itemp();
             la_mul_w(temp, src0_ir2, src1_ir2);
-            la_mov32_zx(dest_ir2, temp);
+            if (!GHBR_ON(pir1)) {
+                la_mov32_zx(dest_ir2, temp);
+            } else {
+                la_mov64(dest_ir2, temp);
+            }
             ra_free_temp(temp);
         }
     } else {

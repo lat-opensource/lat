@@ -146,4 +146,11 @@ if 'i386-linux-user' in target_dirs
       files('../../fd-transform-race-shim.c'),
     ],
   }]
+  latx_integration_tests += [{
+    'name': 'test-latx-lea-i386-addr16',
+    'runner': find_program('../../test-latx-lea-i386-addr16.py'),
+    'args': [
+      emulators['latx-i386'],
+    ],
+  }]
 endif

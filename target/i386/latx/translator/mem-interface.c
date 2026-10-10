@@ -96,7 +96,7 @@ static void index_add_base(IR2_OPND dest, IR2_OPND base,
 * @return
 */
 static IR2_OPND adjust_dest(IR2_OPND dest_op, IR2_OPND *arg_dest_op,
-                        int dest_size, int addr_size)
+                            int dest_size, int addr_size, bool clear_high32)
 {
     IR2_OPND ret_dest_op;
 
@@ -130,8 +130,7 @@ static IR2_OPND adjust_dest(IR2_OPND dest_op, IR2_OPND *arg_dest_op,
         return ret_dest_op;
     case 32:
         if (addr_size == 16) {
-            la_bstrins_d(ret_dest_op, dest_op, 15, 0);
-            la_bstrpick_d(ret_dest_op, ret_dest_op, 31, 0);
+            la_bstrpick_d(ret_dest_op, dest_op, 15, 0);
             return ret_dest_op;
         }
         break;
@@ -146,7 +145,11 @@ static IR2_OPND adjust_dest(IR2_OPND dest_op, IR2_OPND *arg_dest_op,
         lsassertm(0, "%s:%d", __func__, __LINE__);
     }
 
-    la_bstrpick_d(ret_dest_op, dest_op, 31, 0);
+    if (!clear_high32) {
+        la_mov64(ret_dest_op, dest_op);
+    } else {
+        la_bstrpick_d(ret_dest_op, dest_op, 31, 0);
+    }
     return ret_dest_op;
 }
 
@@ -167,7 +170,7 @@ static IR2_OPND adjust_dest(IR2_OPND dest_op, IR2_OPND *arg_dest_op,
 */
 __attribute__((unused))
 static IR2_OPND convert_mem_helper(IR1_OPND *opnd1, IR2_OPND *arg_dest_op,
-                        int dest_size, int *host_off)
+                        int dest_size, int *host_off, bool clear_high32)
 {
     longx offset;
     bool has_index, has_base, has_seg;
@@ -555,22 +558,24 @@ skip:
     }
 
     addr_size = ir1_addr_size(pir1);
-    return adjust_dest(dest_op, arg_dest_op, dest_size, addr_size);
+    return adjust_dest(dest_op, arg_dest_op, dest_size, addr_size,
+                       clear_high32);
 }
 
-void convert_mem_to_specific_gpr(IR1_OPND *opnd, IR2_OPND dest, int dest_size)
+void convert_mem_to_specific_gpr(IR1_OPND *opnd, IR2_OPND dest, int dest_size,
+                                 bool clear_high32)
 {
-    convert_mem_helper(opnd, &dest, dest_size, NULL);
+    convert_mem_helper(opnd, &dest, dest_size, NULL, clear_high32);
 }
 
 IR2_OPND convert_mem_no_offset(IR1_OPND *opnd1)
 {
-    return convert_mem_helper(opnd1, NULL, 0, NULL);
+    return convert_mem_helper(opnd1, NULL, 0, NULL, true);
 }
 
 IR2_OPND convert_mem(IR1_OPND *opnd1, int *host_off)
 {
-    return convert_mem_helper(opnd1, NULL, 0, host_off);
+    return convert_mem_helper(opnd1, NULL, 0, host_off, true);
 }
 
 IR2_OPND mem_imm_add_disp(IR2_OPND mem_op, int *old_imm, int disp)

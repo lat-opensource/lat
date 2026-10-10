@@ -11,6 +11,7 @@
 #include "lsenv.h"
 #include "translate.h"
 #include "larchintrin.h"
+#include "hbr.h"
 
 int have_scq(void)
 {
@@ -547,6 +548,16 @@ static void store_ireg_to_ir1_gpr(IR2_OPND opnd2, IR1_OPND *opnd1)
 
     /* 1. 32 bits gpr needs SHIFT operation to handle the extension mode */
     if (ir1_opnd_size(opnd1) == 32) {
+#if defined(TARGET_X86_64) && defined(CONFIG_LATX_HBR)
+        IR1_INST *curr = lsenv->tr_data->curr_ir1_inst;
+        uint32_t tracked_defs = curr ?
+            (curr->gpr_def | curr->gpr_may_def) : 0;
+
+        if (curr && GHBR_ON(curr) && (tracked_defs & (1U << gpr_num))) {
+            la_mov64(gpr_opnd, opnd2);
+            return;
+        }
+#endif
         /* In x64, if opnd_size is 32 bits, high 32 bits will clean */
         la_mov32_zx(gpr_opnd, opnd2);
     } else if (ir1_opnd_size(opnd1) == 64) {

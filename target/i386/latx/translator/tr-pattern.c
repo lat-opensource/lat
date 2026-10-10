@@ -2103,7 +2103,9 @@ static bool translate_and_jcc(IR1_INST *pir1)
     /* write back */
     if (ir1_opnd_is_gpr(opnd0)) {
         if (opnd0_size == 32 && !low_mask) {
-            la_mov32_zx(dest, dest);
+            if (!GHBR_ON(curr)) {
+                la_mov32_zx(dest, dest);
+            }
         } else
         /* r16/r8 */
         if (opnd0_size < 32) {
