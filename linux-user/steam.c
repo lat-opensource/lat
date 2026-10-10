@@ -4,13 +4,45 @@
 #include "qemu/envlist.h"
 #include "qemu.h"
 #include "qemu/path.h"
-#include "qemu/pressure-vessel.h"
-#include "pressure-vessel.h"
+#include "qemu/steam.h"
+#include "steam.h"
 #include "elf.h"
+#if defined(CONFIG_LATX_KZT)
+#include "latx-options.h"
+#endif
 
 #ifdef CONFIG_LATX
 
 static char **pressure_vessel_payload;
+static bool steam_context;
+
+#define LATX_STEAM_KZT_ENV "LATX_STEAM_KZT"
+
+#if defined(CONFIG_LATX_KZT)
+static bool latx_steam_installation_entry(const char *program)
+{
+    g_autofree char *resolved = NULL;
+    const char *marker;
+
+    if (!program) {
+        return false;
+    }
+    resolved = realpath(program, NULL);
+    if (!resolved || !g_file_test(resolved, G_FILE_TEST_IS_REGULAR)) {
+        return false;
+    }
+    marker = strstr(resolved, "/ubuntu12_32/");
+    if (!marker) {
+        marker = strstr(resolved, "/ubuntu12_64/");
+    }
+    return marker && marker != resolved && marker[-1] != '/';
+}
+#endif
+
+bool latx_steam_context_active(void)
+{
+    return steam_context;
+}
 
 /*
  * This is a lineage marker, not a Runtime discovery input.  It is written
@@ -233,6 +265,19 @@ out:
 
 #endif
 
+static bool latx_pressure_vessel_path_is_within(const char *parent,
+                                                const char *path)
+{
+    size_t length;
+
+    if (!parent || !path) {
+        return false;
+    }
+    length = strlen(parent);
+    return !strncmp(parent, path, length) &&
+           (path[length] == '\0' || path[length] == '/');
+}
+
 #if defined(TARGET_I386) && !defined(TARGET_X86_64)
 static bool latx_pressure_vessel_elf_is_i386(const char *path)
 {
@@ -316,19 +361,6 @@ static bool latx_pressure_vessel_guest_path_present(const char *library_path,
         }
     }
     return false;
-}
-
-static bool latx_pressure_vessel_path_is_within(const char *parent,
-                                                const char *path)
-{
-    size_t length;
-
-    if (!parent || !path) {
-        return false;
-    }
-    length = strlen(parent);
-    return !strncmp(parent, path, length) &&
-           (path[length] == '\0' || path[length] == '/');
 }
 
 static char *latx_pressure_vessel_find_i386_sysroot(
@@ -416,19 +448,94 @@ static void latx_pressure_vessel_append_i386_sysroot(envlist_t *envlist)
 }
 #endif
 
-void latx_pressure_vessel_prepare(const char *program, char **target_argv,
+#if defined(TARGET_X86_64)
+/*
+ * The guest sysroot may only reach the process Steam was asked to run.  The
+ * Runtime and the compatibility tool resolve loader and libc from their own
+ * installation, and their children inherit this environment, so the guest
+ * loader directory is put in front of the application payload and removed
+ * from every other process.  Without install metadata the payload behaviour is
+ * kept, except for the programs the Runtime hands the environment to directly.
+ */
+static char *latx_pressure_vessel_library_path(const envlist_t *envlist,
+                                               const char *program,
+                                               const char *directory,
+                                               bool wrapper)
+{
+    const char *library_path = envlist_getenv(envlist, "LD_LIBRARY_PATH");
+    const char *install = envlist_getenv(envlist,
+                                         "STEAM_COMPAT_INSTALL_PATH");
+    g_autofree char *install_real = NULL;
+    g_autofree char *program_real = realpath(program, NULL);
+    g_auto(GStrv) directories = NULL;
+    GString *result = g_string_new(NULL);
+    bool payload;
+    bool present = false;
+
+    if (install && install[0]) {
+        install_real = realpath(install, NULL);
+        payload = install_real && program_real &&
+                  latx_pressure_vessel_path_is_within(install_real,
+                                                      program_real);
+    } else {
+        payload = !wrapper && !latx_pressure_vessel_webhelper(program);
+    }
+
+    directories = g_strsplit(library_path ? library_path : "", ":", -1);
+    for (char **item = directories; *item; item++) {
+        if (!strcmp(*item, directory)) {
+            present = true;
+            continue;
+        }
+        if (!(*item)[0]) {
+            continue;
+        }
+        if (result->len) {
+            g_string_append_c(result, ':');
+        }
+        g_string_append(result, *item);
+    }
+
+    if (!payload) {
+        if (!present) {
+            g_string_free(result, true);
+            return NULL;
+        }
+        return g_string_free(result, false);
+    }
+    if (result->len) {
+        g_string_prepend_c(result, ':');
+    }
+    g_string_prepend(result, directory);
+    return g_string_free(result, false);
+}
+#endif
+
+void latx_steam_prepare(const char *program, char **target_argv,
                                   envlist_t *envlist)
 {
     const char *basename = program ? strrchr(program, '/') : NULL;
-    const char *expected_files;
-    bool wrapper_name;
+#if defined(CONFIG_LATX_KZT)
+    const char *kzt_lineage = envlist_getenv(envlist, LATX_STEAM_KZT_ENV);
+#endif
+    const char *expected_files = envlist_getenv(
+        envlist, LATX_PRESSURE_VESSEL_RUNTIME_FILES_ENV);
+    bool wrapper_name = !g_strcmp0(basename ? basename + 1 : program,
+                                   "pressure-vessel-wrap");
 
     pressure_vessel_payload = NULL;
+    steam_context = false;
 
-    expected_files = envlist_getenv(envlist,
-                                    LATX_PRESSURE_VESSEL_RUNTIME_FILES_ENV);
-    wrapper_name = !g_strcmp0(basename ? basename + 1 : program,
-                              "pressure-vessel-wrap");
+#if defined(CONFIG_LATX_KZT)
+    /* Steam's legacy client does not run through pressure-vessel.  Establish
+     * its lineage before the generic Runtime early return. */
+    if (option_kzt != 0 &&
+        (latx_steam_installation_entry(program) ||
+         (kzt_lineage && !strcmp(kzt_lineage, "1")))) {
+        steam_context = true;
+        (void)envlist_setenv(envlist, LATX_STEAM_KZT_ENV "=1");
+    }
+#endif
 
     /* Avoid Runtime discovery for launches outside the pressure-vessel chain. */
     if (!wrapper_name && !expected_files) {
@@ -455,6 +562,40 @@ void latx_pressure_vessel_prepare(const char *program, char **target_argv,
     if (!latx_pressure_vessel_runtime_configure(envlist, expected_files)) {
         return;
     }
+
+#if defined(CONFIG_LATX_KZT)
+    /* Enable the Steam policy only after the Runtime lineage is verified. */
+    steam_context = option_kzt != 0 &&
+                    (steam_context || wrapper_name ||
+                     latx_pressure_vessel_runtime_library_path() ||
+                     (expected_files && expected_files[0]));
+    if (steam_context && (!kzt_lineage || strcmp(kzt_lineage, "1"))) {
+        (void)envlist_setenv(envlist, LATX_STEAM_KZT_ENV "=1");
+    }
+#endif
+
+#if defined(TARGET_X86_64)
+    {
+        g_autofree char *loader = path_get_prefixed(
+            "/lib64/ld-linux-x86-64.so.2");
+        g_autofree char *resolved = realpath(loader, NULL);
+
+        if (resolved) {
+            g_autofree char *directory = g_path_get_dirname(resolved);
+            g_autofree char *updated = latx_pressure_vessel_library_path(
+                envlist, program, directory, wrapper_name);
+
+            if (updated) {
+                g_autofree char *assignment = g_strdup_printf(
+                    "LD_LIBRARY_PATH=%s", updated);
+
+                (void)envlist_setenv(envlist, assignment);
+                (void)latx_pressure_vessel_runtime_configure(envlist,
+                                                             expected_files);
+            }
+        }
+    }
+#endif
 
 #if defined(TARGET_I386) && !defined(TARGET_X86_64)
     latx_pressure_vessel_append_i386_sysroot(envlist);

@@ -1,7 +1,7 @@
 /* Helpers for Steam pressure-vessel Runtime paths. */
 
-#ifndef QEMU_PRESSURE_VESSEL_H
-#define QEMU_PRESSURE_VESSEL_H
+#ifndef QEMU_STEAM_H
+#define QEMU_STEAM_H
 
 #include <stdbool.h>
 
@@ -23,4 +23,4 @@ bool latx_pressure_vessel_runtime_is_i386_library_path(const char *path);
 bool latx_pressure_vessel_runtime_is_wrapper(const char *program);
 char *latx_pressure_vessel_runtime_resolve_path(const char *name);
 
-#endif /* QEMU_PRESSURE_VESSEL_H */
+#endif /* QEMU_STEAM_H */

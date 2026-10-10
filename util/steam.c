@@ -3,7 +3,7 @@
 #include "qemu/osdep.h"
 #include "qemu/envlist.h"
 #include "qemu/path.h"
-#include "qemu/pressure-vessel.h"
+#include "qemu/steam.h"
 
 static char *runtime_base;
 static char *runtime_files;
@@ -510,11 +510,21 @@ char *latx_pressure_vessel_runtime_resolve_path(const char *name)
           G_N_ELEMENTS(runtime_i386_dirs), "/usr/lib",
           "/usr/lib/xorg/modules/dri" },
     };
+    bool absolute_runtime_path;
     size_t i;
 
     if (!runtime_active || !runtime_files || !name ||
         !runtime_library_path_active) {
         return NULL;
+    }
+
+    absolute_runtime_path = pressure_vessel_path_is_within(runtime_files,
+                                                            name);
+    if (absolute_runtime_path) {
+        if (g_file_test(name, G_FILE_TEST_IS_REGULAR)) {
+            return NULL;
+        }
+        name += strlen(runtime_files);
     }
 
     if (!strcmp(name, "/etc/ld.so.cache")) {
@@ -552,6 +562,15 @@ char *latx_pressure_vessel_runtime_resolve_path(const char *name)
         relative = name + strlen(libraries[i].guest_dir);
         if (!pressure_vessel_relative_path_is_safe(relative)) {
             return NULL;
+        }
+        if (absolute_runtime_path && !strchr(relative, '/')) {
+            g_autofree char *guest = g_build_filename(
+                libraries[i].prefix_library_dir, relative, NULL);
+            g_autofree char *prefixed = path_get_prefixed(guest);
+
+            if (g_file_test(prefixed, G_FILE_TEST_IS_REGULAR)) {
+                return NULL;
+            }
         }
         file = pressure_vessel_runtime_library_file(
             libraries[i].runtime_dirs, libraries[i].runtime_dir_count,
