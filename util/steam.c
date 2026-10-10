@@ -536,6 +536,21 @@ char *latx_steam_runtime_resolve_path(const char *name)
     };
     size_t i;
 
+    if (runtime_files && name && name[0] == '/') {
+        g_autofree char *directory = g_path_get_dirname(name);
+        g_autofree char *canonical_directory = realpath(directory, NULL);
+
+        if (canonical_directory &&
+            pressure_vessel_path_is_within(runtime_files,
+                                           canonical_directory) &&
+            !g_file_test(name, G_FILE_TEST_IS_REGULAR)) {
+            g_autofree char *basename = g_path_get_basename(name);
+
+            return pressure_vessel_runtime_versioned_file(
+                canonical_directory, basename);
+        }
+    }
+
     if (!runtime_active || !runtime_files || !name ||
         !runtime_library_path_active) {
         return NULL;

@@ -22,6 +22,7 @@
 
 #include "debug.h"
 #include "fileutils.h"
+#include "qemu/steam.h"
 
 static const char* x86lib  = "\x7f" "ELF" "\x01" "\x01" "\x01" "\x03" "\x00" "\x00" "\x00" "\x00" "\x00" "\x00" "\x00" "\x00" "\x02" "\x00" "\x03" "\x00";
 static const char* x64lib  = "\x7f" "ELF" "\x02" "\x01" "\x01" "\x03" "\x00" "\x00" "\x00" "\x00" "\x00" "\x00" "\x00" "\x00" "\x02" "\x00" "\x3e" "\x00";
@@ -74,8 +75,14 @@ char* ResolveFile(const char* filename, path_collection_t* paths)
         } else
             strcpy(p, paths->paths[i]);
         strcat(p, filename);
-        if(FileExist(p, IS_FILE))
+        if (FileExist(p, IS_FILE)) {
             return realpath(p, NULL);
+        } else {
+            char *runtime_file = latx_steam_runtime_resolve_path(p);
+            if (runtime_file) {
+                return runtime_file;
+            }
+        }
     }
 
     return box_strdup(filename); //NULL;
