@@ -1,5 +1,14 @@
 if 'x86_64-linux-user' in target_dirs
   latx_integration_tests += [{
+    'name': 'test-statx-fork-race',
+    'runner': find_program('../../test-statx-fork-race.sh'),
+    'args': [
+      emulators['latx-x86_64'],
+      files('../../statx-fork-race.c'),
+    ],
+    'timeout': 90,
+  }]
+  latx_integration_tests += [{
     'name': 'test-signal-return-bridge',
     'runner': find_program('../../test-signal-return-bridge.sh'),
     'args': [

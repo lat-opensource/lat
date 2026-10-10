@@ -7,6 +7,7 @@ helper_source=$3
 workdir=$(mktemp -d)
 helper_pid=
 helper_nlink=
+ordinary_root="$workdir/ordinary"
 
 cleanup()
 {
@@ -39,6 +40,7 @@ fi
     -o "$workdir/cef-procfs-other-task"
 "$workdir/cef-procfs-other-task" &
 helper_pid=$!
+mkdir -p "$ordinary_root/self/task" "$ordinary_root/task"
 
 i=0
 while [ "$(stat -c %h "/proc/$helper_pid/task")" -lt 4 ]; do
@@ -53,7 +55,8 @@ helper_nlink=$(stat -c %h "/proc/$helper_pid/task")
 
 set +e
 SBX_USER_NS=1 LATX_AOT=0 LATX_KZT=0 \
-    "$emulator" "$workdir/cef-procfs-chroot" "$helper_pid" "$helper_nlink"
+    "$emulator" "$workdir/cef-procfs-chroot" "$helper_pid" "$helper_nlink" \
+    "$ordinary_root"
 ret=$?
 set -e
 
@@ -133,9 +136,243 @@ case $ret in
 54)
     echo "FAIL: relative statx rewrote another task count" >&2
     ;;
+55)
+    echo "FAIL: opening the ordinary directory root failed" >&2
+    ;;
+56)
+    echo "FAIL: opening the ordinary self/task directory failed" >&2
+    ;;
+57)
+    echo "FAIL: fchdir to the saved procfd failed" >&2
+    ;;
+58)
+    echo "FAIL: fstatat relative to AT_FDCWD failed" >&2
+    ;;
+59)
+    echo "FAIL: relative AT_FDCWD fstatat exposed translator threads" >&2
+    ;;
+60)
+    echo "FAIL: statx relative to AT_FDCWD failed" >&2
+    ;;
+61)
+    echo "FAIL: relative AT_FDCWD statx exposed translator threads" >&2
+    ;;
+62)
+    echo "FAIL: relative AT_FDCWD fstatat on another task failed" >&2
+    ;;
+63)
+    echo "FAIL: relative AT_FDCWD fstatat rewrote another task" >&2
+    ;;
+64)
+    echo "FAIL: relative AT_FDCWD statx on another task failed" >&2
+    ;;
+65)
+    echo "FAIL: relative AT_FDCWD statx rewrote another task" >&2
+    ;;
+66)
+    echo "FAIL: fchdir to the saved self-task fd failed" >&2
+    ;;
+67)
+    echo "FAIL: AT_EMPTY_PATH fstatat through AT_FDCWD failed" >&2
+    ;;
+68)
+    echo "FAIL: AT_FDCWD empty-path fstatat exposed translator threads" >&2
+    ;;
+69)
+    echo "FAIL: AT_EMPTY_PATH statx through AT_FDCWD failed" >&2
+    ;;
+70)
+    echo "FAIL: AT_FDCWD empty-path statx exposed translator threads" >&2
+    ;;
+71)
+    echo "FAIL: fchdir to another process task fd failed" >&2
+    ;;
+72)
+    echo "FAIL: AT_FDCWD empty-path fstatat on another task failed" >&2
+    ;;
+73)
+    echo "FAIL: AT_FDCWD empty-path fstatat rewrote another task" >&2
+    ;;
+74)
+    echo "FAIL: AT_FDCWD empty-path statx on another task failed" >&2
+    ;;
+75)
+    echo "FAIL: AT_FDCWD empty-path statx rewrote another task" >&2
+    ;;
+76)
+    echo "FAIL: fchdir to the ordinary directory root failed" >&2
+    ;;
+77)
+    echo "FAIL: relative fstatat on an ordinary directory failed" >&2
+    ;;
+78)
+    echo "FAIL: relative AT_FDCWD fstatat rewrote an ordinary directory" >&2
+    ;;
+79)
+    echo "FAIL: relative statx on an ordinary directory failed" >&2
+    ;;
+80)
+    echo "FAIL: relative AT_FDCWD statx rewrote an ordinary directory" >&2
+    ;;
+81)
+    echo "FAIL: fchdir to the ordinary self/task directory failed" >&2
+    ;;
+82)
+    echo "FAIL: empty-path fstatat on an ordinary directory failed" >&2
+    ;;
+83)
+    echo "FAIL: empty-path AT_FDCWD fstatat rewrote an ordinary directory" >&2
+    ;;
+84)
+    echo "FAIL: empty-path statx on an ordinary directory failed" >&2
+    ;;
+85)
+    echo "FAIL: empty-path AT_FDCWD statx rewrote an ordinary directory" >&2
+    ;;
+86)
+    echo "FAIL: opening /proc/self relative to the saved procfd failed" >&2
+    ;;
+87)
+    echo "FAIL: fchdir to the saved /proc/self fd failed" >&2
+    ;;
+88)
+    echo "FAIL: fstatat of task relative to /proc/self failed" >&2
+    ;;
+89)
+    echo "FAIL: /proc/self-relative fstatat exposed translator threads" >&2
+    ;;
+90)
+    echo "FAIL: statx of task relative to /proc/self failed" >&2
+    ;;
+91)
+    echo "FAIL: /proc/self-relative statx exposed translator threads" >&2
+    ;;
+92)
+    echo "FAIL: fstatat of dot from /proc/self/task failed" >&2
+    ;;
+93)
+    echo "FAIL: dot-relative fstatat exposed translator threads" >&2
+    ;;
+94)
+    echo "FAIL: statx of dot from /proc/self/task failed" >&2
+    ;;
+95)
+    echo "FAIL: dot-relative statx exposed translator threads" >&2
+    ;;
+96)
+    echo "FAIL: cloning the cwd-racing guest thread failed" >&2
+    ;;
+97)
+    echo "FAIL: fstatat failed while another thread changed cwd" >&2
+    ;;
+98)
+    echo "FAIL: racing fstatat returned an invalid task link count" >&2
+    ;;
+99)
+    echo "FAIL: statx failed while another thread changed cwd" >&2
+    ;;
+100)
+    echo "FAIL: racing statx returned an invalid task link count" >&2
+    ;;
+101)
+    echo "FAIL: the cwd-racing guest thread could not change cwd" >&2
+    ;;
+102)
+    echo "FAIL: cwd race missed a task-directory case" >&2
+    ;;
+103)
+    echo "FAIL: fstatat failed while another thread replaced dirfd" >&2
+    ;;
+104)
+    echo "FAIL: racing dirfd fstatat returned an invalid link count" >&2
+    ;;
+105)
+    echo "FAIL: statx failed while another thread replaced dirfd" >&2
+    ;;
+106)
+    echo "FAIL: racing dirfd statx returned an invalid link count" >&2
+    ;;
+107)
+    echo "FAIL: duplicating the race dirfd failed" >&2
+    ;;
+108)
+    echo "FAIL: the racing guest thread could not replace dirfd" >&2
+    ;;
+109)
+    echo "FAIL: fstat on /proc/self before the race failed" >&2
+    ;;
+110)
+    echo "FAIL: fstatat failed while another thread changed pathname" >&2
+    ;;
+111)
+    echo "FAIL: racing pathname fstatat returned an invalid link count" >&2
+    ;;
+112)
+    echo "FAIL: statx failed while another thread changed pathname" >&2
+    ;;
+113)
+    echo "FAIL: racing pathname statx returned an invalid link count" >&2
+    ;;
+114)
+    echo "FAIL: pathname race missed one of the valid target paths" >&2
+    ;;
+115)
+    echo "FAIL: opening the host root failed" >&2
+    ;;
+116)
+    echo "FAIL: opening the sandbox root failed" >&2
+    ;;
+117)
+    echo "FAIL: cloning the root-racing guest thread failed" >&2
+    ;;
+118)
+    echo "FAIL: stat returned an unexpected error during root changes" >&2
+    ;;
+119)
+    echo "FAIL: racing stat exposed translator-only threads" >&2
+    ;;
+120)
+    echo "FAIL: lstat returned an unexpected error during root changes" >&2
+    ;;
+121)
+    echo "FAIL: racing lstat exposed translator-only threads" >&2
+    ;;
+122)
+    echo "FAIL: the root-racing guest thread could not change root" >&2
+    ;;
+123)
+    echo "FAIL: root race did not exercise both root views" >&2
+    ;;
+124)
+    echo "FAIL: long relative fstatat failed" >&2
+    ;;
+125)
+    echo "FAIL: long relative fstatat exposed translator threads" >&2
+    ;;
+126)
+    echo "FAIL: long relative statx failed" >&2
+    ;;
+127)
+    echo "FAIL: long relative statx exposed translator threads" >&2
+    ;;
+128)
+    echo "FAIL: long relative fstatat on another task failed" >&2
+    ;;
+129)
+    echo "FAIL: long relative fstatat rewrote another task" >&2
+    ;;
+130)
+    echo "FAIL: long relative statx on another task failed" >&2
+    ;;
+131)
+    echo "FAIL: long relative statx rewrote another task" >&2
+    ;;
 *)
     echo "FAIL: unexpected guest exit status $ret" >&2
     ;;
 esac
 
-exit "$ret"
+# Meson reserves exit 77 for the prerequisite checks above, not guest failures.
+if [ "$ret" -ne 0 ]; then
+    exit 1
+fi
