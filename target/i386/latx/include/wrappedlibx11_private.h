@@ -515,7 +515,7 @@ GO(XInitExtension, pFpp)
 GOM(XInitImage, iFEp)
 // _XInitImageFuncPtrs
 // _XInitKeysymDB
-GO(XInitThreads, iFv)
+GOM(XInitThreads, iFv)
 //GO(XInsertModifiermapEntry
 GO(XInstallColormap, iFpp)
 GO(XInternalConnectionNumbers, iFppp)
@@ -838,7 +838,7 @@ GO(XNoOp, iFp)
 GO(XOffsetRegion, iFpii)
 GO(XOMOfOC, pFp)
 GOM(XOpenDisplay, pFEp)
-GOM(XOpenIM, pFpppp)
+GO(XOpenIM, pFpppp)
 // _XOpenLC
 GO(XOpenOM, pFpppp)
 // _XParseBaseFontNameList

@@ -1132,6 +1132,25 @@ EXPORT int32_t my_XPeekIfEvent(my_XDisplay_t *dpy, void* ev,
 
 void sub_image_wrapper(uintptr_t fnc);
 typedef void* (*sub_image_wrapper_t)(void*, int32_t, int32_t, uint32_t, uint32_t);
+void destroy_image_wrapper(uintptr_t fnc);
+typedef int32_t (*destroy_image_wrapper_t)(void*);
+
+extern void *x86free;
+abi_ulong latx_is_shm(abi_ulong maddr);
+
+static void XImageTransferGuestData(XImage *img)
+{
+    if (img->data && (uintptr_t)img->data < reserved_va &&
+        !latx_is_shm((abi_ulong)img->data)) {
+        size_t len = img->bytes_per_line * img->height;
+        void *host_data = malloc(len);
+
+        memcpy(host_data, img->data, len);
+        lsassert(x86free);
+        RunFunctionWithState((uintptr_t)x86free, 1, img->data);
+        img->data = host_data;
+    }
+}
 
 void BridgeImageFunc(XImage *img);
 void BridgeImageFunc(XImage *img)
@@ -1146,7 +1165,7 @@ void BridgeImageFunc(XImage *img)
     uintptr_t fnc;
 
     GO(create_image, pFppuiipuuii)
-    GO(destroy_image, iFp)
+    GO(destroy_image, destroy_image_wrapper)
     GO(get_pixel, LFpii)
     GO(put_pixel, iFpiiL)
     GO(sub_image, sub_image_wrapper)
@@ -1189,6 +1208,16 @@ void sub_image_wrapper(uintptr_t fnc)
     R_RAX=(uintptr_t)img;
 }
 
+void destroy_image_wrapper(uintptr_t fnc)
+{
+    __CPU;
+    iFp_t destroy_image = (iFp_t)fnc;
+    void *img = (void*)R_RDI;
+
+    XImageTransferGuestData((XImage*)img);
+    R_RAX = (uintptr_t)destroy_image(img);
+}
+
 #undef __CPU
 #undef R_RAX
 #undef R_RDI
@@ -1196,8 +1225,6 @@ void sub_image_wrapper(uintptr_t fnc)
 #undef R_RDX
 #undef R_RCX
 #undef R_R8
-extern void * x86free;
-abi_ulong latx_is_shm(abi_ulong maddr);
 EXPORT void* my_XCreateImage(void* disp, void* vis, uint32_t depth, int32_t fmt, int32_t off
                     , void* data, uint32_t w, uint32_t h, int32_t pad, int32_t bpl)
 {
@@ -1259,16 +1286,7 @@ EXPORT int32_t my_XDestroyImage(void* image)
 {
 
     UnbridgeImageFunc((XImage*)image);
-    XImage* img = image;
-    if (img->data && (uintptr_t)img->data  < reserved_va &&
-        !latx_is_shm((abi_ulong)img->data)) {
-        size_t len = img->bytes_per_line * img->height;
-        void *la_data = malloc(len);
-        memcpy(la_data, img->data, len);
-        lsassert(x86free);
-        RunFunctionWithState((uintptr_t)x86free ,1, img->data);
-        img->data = la_data;
-    }
+    XImageTransferGuestData((XImage*)image);
     return my->XDestroyImage(image);
 }
 
@@ -1415,6 +1433,28 @@ GO(0)
 GO(1)
 #undef GO
 
+static void bridge_XMutexFunctions(void)
+{
+    void *lock = dlsym(my_lib->priv.w.lib, "_XLockMutex_fn");
+    void *unlock = dlsym(my_lib->priv.w.lib, "_XUnlockMutex_fn");
+
+    if (lock && *(void **)lock) {
+        AddAutomaticBridge(my_lib->priv.w.bridge, vFp, *(void **)lock, 0);
+    }
+    if (unlock && *(void **)unlock) {
+        AddAutomaticBridge(my_lib->priv.w.bridge, vFp, *(void **)unlock, 0);
+    }
+}
+
+EXPORT int32_t my_XInitThreads(void);
+EXPORT int32_t my_XInitThreads(void)
+{
+    int32_t ret = my->XInitThreads();
+
+    bridge_XMutexFunctions();
+    return ret;
+}
+
 EXPORT void* my_XOpenDisplay(void* d);
 EXPORT void* my_XOpenDisplay(void* d)
 {
@@ -1426,6 +1466,8 @@ EXPORT void* my_XOpenDisplay(void* d)
     my_XDisplay_t* dpy = (my_XDisplay_t*)ret;
     if(!ret)
         return ret;
+
+    bridge_XMutexFunctions();
 
     kzt_resource_alloc = dpy->resource_alloc;
     kzt_tbbridge_insert((uintptr_t)kzt_resource_alloc, (ADDR)kzt_resource_allocPre, LFp);
@@ -1734,6 +1776,7 @@ EXPORT void* my_XOpenIM(my_XDisplay_t* dpy, void* v2, void* v3, void* v4)
 
 #define CUSTOM_INIT                 \
     getMy(lib);                     \
+    bridge_XMutexFunctions();       \
     setNeededLibs(lib, 1,           \
         "libXcursor.so.1");
 #define CUSTOM_FINI \

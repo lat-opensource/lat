@@ -23,6 +23,7 @@
 #include "wrappedlibs.h"
 #include "callback.h"
 #include "myalign.h"
+#include "qemu.h"
 
 const char* libglName = "libGL.so.1";
 #define LIBNAME libgl
@@ -187,7 +188,13 @@ EXPORT void* my_glXGetProcAddress(void* name)
     return getGLProcAddress(my_lib->priv.w.priv, rname);
     */
     khint_t k;
-    const char* rname = (const char*)name;
+    abi_ulong guest_name = (abi_ulong)(uintptr_t)name;
+    const char* rname = lock_user_string(guest_name);
+    void* result = NULL;
+
+    if (!rname) {
+        return NULL;
+    }
     printf_dlsym(LOG_DEBUG, "Calling glXGetProcAddress(\"%s\") => ", rname);
     if(!my_context->glwrappers)
         fillGLProcWrapper();
@@ -215,26 +222,30 @@ EXPORT void* my_glXGetProcAddress(void* name)
     }
     if(!symbol) {
         printf_dlsym(LOG_DEBUG, "%p\n", NULL);
-        return NULL;    // easy
+        goto out;
     }
     // check if alread bridged
     uintptr_t ret = CheckBridged(my_context->system, symbol);
     if(ret) {
         printf_dlsym(LOG_DEBUG, "%p\n", (void*)ret);
-        return (void*)ret; // already bridged
+        result = (void*)ret;
+        goto out;
     }
     // get wrapper
     k = find_gl_wrapper(my_context->glwrappers, rname);
     if(k==kh_end(my_context->glwrappers)) {
         printf_dlsym(LOG_DEBUG, "%p\n", NULL);
         printf_dlsym(LOG_INFO, "Warning, no wrapper for %s\n", rname);
-        return NULL;
+        goto out;
     }
     const char* constname = kh_key(my_context->glwrappers, k);
     AddOffsetSymbol(my_context->maplib, symbol, rname);
     ret = AddBridge(my_context->system, kh_value(my_context->glwrappers, k), symbol, 0, constname);
     printf_dlsym(LOG_DEBUG, "%p\n", (void*)ret);
-    return (void*)ret;
+    result = (void*)ret;
+out:
+    unlock_user((void *)rname, guest_name, 0);
+    return result;
 }
 
 EXPORT void* my_glXGetProcAddressARB(void* name) __attribute__((alias("my_glXGetProcAddress")));

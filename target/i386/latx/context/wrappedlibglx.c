@@ -21,6 +21,7 @@
 #include "library.h"
 #include "wrappedlibs.h"
 #include "myalign.h"
+#include "qemu.h"
 
 const char* libglxName = "libGLX.so.0";
 #define LIBNAME libglx
@@ -103,6 +104,7 @@ GO(3)   \
 #undef SUPER
 
 typedef void* (*glprocaddress_t)(const char* name);
+void *getGLProcAddress(glprocaddress_t procaddr, const char *rname);
 
 typedef struct gl_wrappers_s {
     glprocaddress_t      procaddress;
@@ -245,7 +247,7 @@ static void* getGLXProcAddress(glprocaddress_t procaddr, const char* rname)
     if(k==kh_end(wrappers->glwrappers)) {
         printf_dlsym(LOG_DEBUG, "%p\n", NULL);
         printf_dlsym(LOG_INFO, "Warning, no wrapper for %s\n", rname);
-        return NULL;
+        return getGLProcAddress(procaddr, rname);
     }
     const char* constname = kh_key(wrappers->glwrappers, k);
     AddOffsetSymbol(my_context->maplib, symbol, rname);
@@ -257,13 +259,31 @@ static void* getGLXProcAddress(glprocaddress_t procaddr, const char* rname)
 EXPORT void* myx_glXGetProcAddress(void* name);
 EXPORT void* myx_glXGetProcAddress(void* name)
 {
-    const char* rname = (const char*)name;
-    return getGLXProcAddress((glprocaddress_t)my->glXGetProcAddress, rname);
+    abi_ulong guest_name = (abi_ulong)(uintptr_t)name;
+    const char* rname = lock_user_string(guest_name);
+    void* result;
+
+    if (!rname) {
+        return NULL;
+    }
+    result = getGLXProcAddress((glprocaddress_t)my->glXGetProcAddress,
+                               rname);
+    unlock_user((void *)rname, guest_name, 0);
+    return result;
 }
 
 EXPORT void* myx_glXGetProcAddressARB(void* name);
 EXPORT void* myx_glXGetProcAddressARB(void* name)
 {
-    const char* rname = (const char*)name;
-    return getGLXProcAddress((glprocaddress_t)my->glXGetProcAddressARB, rname);
+    abi_ulong guest_name = (abi_ulong)(uintptr_t)name;
+    const char* rname = lock_user_string(guest_name);
+    void* result;
+
+    if (!rname) {
+        return NULL;
+    }
+    result = getGLXProcAddress((glprocaddress_t)my->glXGetProcAddressARB,
+                               rname);
+    unlock_user((void *)rname, guest_name, 0);
+    return result;
 }
