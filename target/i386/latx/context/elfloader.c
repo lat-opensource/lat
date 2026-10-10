@@ -801,7 +801,7 @@ void CheckEnableKZT(elfheader_t *h, char **target_argv, int target_argc)
     //disable kzt chrome app
     for(int i = 0; i < target_argc; i++) {
         if (!strcmp(target_argv[i], "--no-sandbox")) {
-            if (isChromeApp(h, 5)) {
+            if (isChromeApp(h, 10)) {
                 kzt_groups_disable_all(
                     "main executable matched the Chrome compatibility gate");
             }
