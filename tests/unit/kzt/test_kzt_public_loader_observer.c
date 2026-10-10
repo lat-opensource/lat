@@ -255,7 +255,7 @@ static void write_gnu_hash_dlopen_object(fixture_t *fixture)
         .symbol_offset = 1,
         .bloom_size = 1,
         .bucket = 1,
-        .chain = 1,
+        .chain = UINT32_C(0xf9040207),
     };
     const test_x86_64_symbol_t symbols[] = {
         { 0 },
@@ -267,6 +267,54 @@ static void write_gnu_hash_dlopen_object(fixture_t *fixture)
         },
     };
     static const char strings[] = "\0dlopen";
+
+    fixture_write(fixture, SYMBOL_DYNAMIC_ADDR,
+                  dynamic, sizeof(dynamic));
+    fixture_write(fixture, SYMBOL_HASH_ADDR, &hash, sizeof(hash));
+    fixture_write(fixture, SYMBOL_TABLE_ADDR,
+                  symbols, sizeof(symbols));
+    fixture_write(fixture, SYMBOL_STRING_ADDR,
+                  strings, sizeof(strings));
+}
+
+static void write_sysv_hash_dlopen_object(fixture_t *fixture)
+{
+    const kzt_x86_64_dynamic_entry_t dynamic[] = {
+        { .tag = 4,
+          .value = SYMBOL_HASH_ADDR - SYMBOL_ELF_BASE },
+        { .tag = 5, .value = SYMBOL_STRING_ADDR - SYMBOL_ELF_BASE },
+        { .tag = 6, .value = SYMBOL_TABLE_ADDR - SYMBOL_ELF_BASE },
+        { .tag = 10, .value = sizeof("\0other\0dlopen") },
+        { .tag = 11, .value = sizeof(test_x86_64_symbol_t) },
+        { .tag = KZT_X86_64_DT_NULL, .value = 0 },
+    };
+    const struct {
+        uint32_t bucket_count;
+        uint32_t chain_count;
+        uint32_t bucket;
+        uint32_t chains[3];
+    } hash = {
+        .bucket_count = 1,
+        .chain_count = 3,
+        .bucket = 1,
+        .chains = { 0, 2, 0 },
+    };
+    const test_x86_64_symbol_t symbols[] = {
+        { 0 },
+        {
+            .name = 1,
+            .info = 0x12,
+            .section_index = 1,
+            .value = 0x90000,
+        },
+        {
+            .name = 7,
+            .info = 0x12,
+            .section_index = 1,
+            .value = 0x905d0,
+        },
+    };
+    static const char strings[] = "\0other\0dlopen";
 
     fixture_write(fixture, SYMBOL_DYNAMIC_ADDR,
                   dynamic, sizeof(dynamic));
@@ -608,6 +656,7 @@ static void test_object_relro_classification_uses_guest_memory(void)
 
 static void test_symbol_lookup_uses_live_gnu_hash_object(void)
 {
+    static const char object_name[] = "/usr/lib/libc.so.6";
     fixture_t fixture;
     visit_log_t log = { 0 };
     kzt_public_loader_observer_t observer;
@@ -622,6 +671,7 @@ static void test_symbol_lookup_uses_live_gnu_hash_object(void)
     write_debug(&fixture, KZT_LOADER_DEBUG_CONSISTENT, MAP1_ADDR);
     write_map(&fixture, MAP1_ADDR, SYMBOL_ELF_BASE, NAME1_ADDR,
               SYMBOL_DYNAMIC_ADDR, 0, 0);
+    fixture_write(&fixture, NAME1_ADDR, object_name, sizeof(object_name));
     write_gnu_hash_dlopen_object(&fixture);
     kzt_public_loader_observer_reset(&observer);
     CHECK(kzt_public_loader_observer_activate(
@@ -632,9 +682,46 @@ static void test_symbol_lookup_uses_live_gnu_hash_object(void)
               &observer, &reader, "dlopen", &symbol_addr) ==
           KZT_PUBLIC_LOADER_OK);
     CHECK(symbol_addr == SYMBOL_ELF_BASE + 0x905d0);
+    CHECK(kzt_public_loader_find_symbol_in_object(
+              &observer, &reader, "libc.so.6", "dlopen", &symbol_addr) ==
+          KZT_PUBLIC_LOADER_OK);
+    CHECK(symbol_addr == SYMBOL_ELF_BASE + 0x905d0);
+    CHECK(kzt_public_loader_find_symbol_in_object(
+              &observer, &reader, "libm.so.6", "dlopen", &symbol_addr) ==
+          KZT_PUBLIC_LOADER_NOT_FOUND);
     CHECK(kzt_public_loader_find_symbol(
               &observer, &reader, "missing", &symbol_addr) ==
           KZT_PUBLIC_LOADER_NOT_FOUND);
+}
+
+static void test_symbol_lookup_walks_sysv_hash_chain(void)
+{
+    static const char object_name[] = "/usr/lib/libc.so.6";
+    fixture_t fixture;
+    visit_log_t log = { 0 };
+    kzt_public_loader_observer_t observer;
+    const kzt_public_loader_reader_t reader = {
+        .read_memory = fixture_read,
+        .opaque = &fixture,
+    };
+    uintptr_t symbol_addr = 0;
+
+    memset(&fixture, 0, sizeof(fixture));
+    write_dynamic(&fixture, R_DEBUG_ADDR);
+    write_debug(&fixture, KZT_LOADER_DEBUG_CONSISTENT, MAP1_ADDR);
+    write_map(&fixture, MAP1_ADDR, SYMBOL_ELF_BASE, NAME1_ADDR,
+              SYMBOL_DYNAMIC_ADDR, 0, 0);
+    fixture_write(&fixture, NAME1_ADDR, object_name, sizeof(object_name));
+    write_sysv_hash_dlopen_object(&fixture);
+    kzt_public_loader_observer_reset(&observer);
+    CHECK(kzt_public_loader_observer_activate(
+              &observer, DYNAMIC_ADDR, 16, &reader,
+              record_visit, &log) == KZT_PUBLIC_LOADER_OK);
+
+    CHECK(kzt_public_loader_find_symbol_in_object(
+              &observer, &reader, "libc.so.6", "dlopen", &symbol_addr) ==
+          KZT_PUBLIC_LOADER_OK);
+    CHECK(symbol_addr == SYMBOL_ELF_BASE + 0x905d0);
 }
 
 int main(void)
@@ -649,6 +736,7 @@ int main(void)
     test_observed_processed_and_reported_states_are_distinct();
     test_object_relro_classification_uses_guest_memory();
     test_symbol_lookup_uses_live_gnu_hash_object();
+    test_symbol_lookup_walks_sysv_hash_chain();
     puts("kzt public loader observer tests: PASS");
     return 0;
 }

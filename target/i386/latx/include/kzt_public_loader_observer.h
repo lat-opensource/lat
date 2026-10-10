@@ -185,6 +185,14 @@ kzt_public_loader_result_t kzt_public_loader_find_symbol(
     const char *symbol_name,
     uintptr_t *symbol_addr);
 
+/* Resolve one defined symbol from the live object with the given soname. */
+kzt_public_loader_result_t kzt_public_loader_find_symbol_in_object(
+    const kzt_public_loader_observer_t *observer,
+    const kzt_public_loader_reader_t *reader,
+    const char *object_name,
+    const char *symbol_name,
+    uintptr_t *symbol_addr);
+
 const char *kzt_public_loader_result_name(
     kzt_public_loader_result_t result);
 

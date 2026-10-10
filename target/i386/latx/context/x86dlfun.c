@@ -39,15 +39,18 @@ int init_x86dlfun_from(const char *primary, const char *fallback)
 
 #if defined(CONFIG_LOONGARCH_NEW_WORLD) && defined(CONFIG_LATX_KZT)
     if (latx_kzt_runtime_enabled()) {
+        int kzt_resolved_count = 0;
+
         for (int index = 0; index < X86_DL_SYMBOL_COUNT; ++index) {
             resolved[index] =
-                (void *)kzt_resolve_guest_symbol(symbols[index]);
-            if (!resolved[index]) {
-                return -1;
-            }
+                (void *)kzt_resolve_guest_symbol(primary, symbols[index]);
+            kzt_resolved_count += resolved[index] != NULL;
         }
-        set_x86dlfun(resolved);
-        return 0;
+        if (kzt_resolved_count == X86_DL_SYMBOL_COUNT) {
+            set_x86dlfun(resolved);
+            return 0;
+        }
+        resolved_count = kzt_resolved_count;
     }
 #endif
 

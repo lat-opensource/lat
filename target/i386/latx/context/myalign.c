@@ -2489,7 +2489,7 @@ static void kzt_request_header_cleanup(CPUX86State *env)
     }
 }
 
-uintptr_t kzt_resolve_guest_symbol(const char *name)
+uintptr_t kzt_resolve_guest_symbol(const char *soname, const char *name)
 {
     kzt_public_loader_observer_t snapshot;
     kzt_public_loader_result_t result;
@@ -2497,7 +2497,7 @@ uintptr_t kzt_resolve_guest_symbol(const char *name)
     uintptr_t dynamic_addr = 0;
     size_t dynamic_count = 0;
 
-    if (!name || !elf_header) {
+    if (!soname || !name || !elf_header) {
         return 0;
     }
     mmap_lock();
@@ -2515,8 +2515,8 @@ uintptr_t kzt_resolve_guest_symbol(const char *name)
         result = KZT_PUBLIC_LOADER_NOT_FOUND;
     }
     if (result == KZT_PUBLIC_LOADER_OK) {
-        result = kzt_public_loader_find_symbol(
-            &snapshot, &kzt_public_loader_reader, name, &address);
+        result = kzt_public_loader_find_symbol_in_object(
+            &snapshot, &kzt_public_loader_reader, soname, name, &address);
     }
     mmap_unlock();
     return result == KZT_PUBLIC_LOADER_OK ? address : 0;
