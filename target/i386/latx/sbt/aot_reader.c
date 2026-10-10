@@ -43,7 +43,8 @@ int aot_get_tb_num(char *lib_name, char *aot_file_name, CPUState *cpu)
         goto out;
     }
     file_sz = file_size;
-    if (file_sz < sizeof(aot_header)) {
+    /* The version footer must not overlap the header. */
+    if (file_sz < sizeof(aot_header) + strlen(AOT_VERSION)) {
         qemu_log_mask(LAT_LOG_AOT, "aot file is too short %s\n", lib_name);
         remove(aot_file_path);
         goto out;
@@ -136,7 +137,7 @@ lib_info *aot_load(char *lib_name, char *aot_file_name,
     if (fseek(pf, 0, SEEK_END) || (file_size = ftell(pf)) < 0) {
         goto out;
     }
-    if ((size_t)file_size < sizeof(aot_header)) {
+    if ((size_t)file_size < sizeof(aot_header) + strlen(AOT_VERSION)) {
         qemu_log_mask(LAT_LOG_AOT, "aot file is too short %s\n", lib_name);
         remove_curr_aot_file(fd);
         goto out;

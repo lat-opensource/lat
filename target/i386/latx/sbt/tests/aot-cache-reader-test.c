@@ -87,22 +87,27 @@ static void assert_stream_closed(void)
     sentinel_fd = -1;
 }
 
-static void write_cache(const char *name, bool has_header, bool has_footer,
+static void write_cache(const char *name, size_t header_size, bool has_footer,
                         char *path)
 {
     g_autofree char *dir = NULL;
     g_autofree uint8_t *contents = NULL;
+    aot_header header = {
+        .aot_file_type = CACHE_AOT_FILE,
+        .parallel_tb_num = 11,
+        .unparallel_tb_num = 7,
+    };
     size_t footer_size = strlen(AOT_VERSION);
-    size_t size = (has_header ? sizeof(aot_header) : 0) +
-                  (has_footer ? footer_size : 0);
+    size_t size = header_size + (has_footer ? footer_size : 0);
 
+    g_assert(header_size <= sizeof(header));
     g_assert(get_aot_path(name, path, PATH_MAX) == 0);
     dir = g_path_get_dirname(path);
     g_assert(g_mkdir_with_parents(dir, 0700) == 0);
 
     contents = g_malloc0(size);
-    if (has_header) {
-        ((aot_header *)contents)->aot_file_type = CACHE_AOT_FILE;
+    if (header_size) {
+        memcpy(contents, &header, header_size);
     }
     if (has_footer) {
         memcpy(contents + size - footer_size, AOT_VERSION, footer_size);
@@ -146,6 +151,10 @@ int main(void)
     g_autofree char *old_home = NULL;
     g_autofree char *stale_footer = g_strdup_printf(
         "Version: stale-%s", AOT_VERSION + strlen("Version: "));
+    static const size_t truncated_headers[] = {
+        0, 1, sizeof(aot_header) - 1,
+    };
+    CPUState cpu = { 0 };
     char lib_name[] = "test-library";
     char bad_footer_name[] = "bad-footer";
     char truncated_name[] = "truncated";
@@ -171,24 +180,34 @@ int main(void)
     lib_tree_init();
     for (int i = 0; i < 16; i++) {
         reset_stream_counts();
-        write_cache(bad_footer_name, true, false, cache_path);
+        write_cache(bad_footer_name, sizeof(aot_header), false, cache_path);
         g_assert_cmpint(aot_get_tb_num(lib_name, bad_footer_name, NULL),
                         ==, 0);
         g_assert(!g_file_test(cache_path, G_FILE_TEST_EXISTS));
         assert_stream_closed();
 
-        reset_stream_counts();
-        buffer = NULL;
-        write_cache(truncated_name, false, true, cache_path);
-        g_assert(aot_load(lib_name, truncated_name, &buffer) == NULL);
-        g_assert(buffer == NULL);
-        g_assert(!g_file_test(cache_path, G_FILE_TEST_EXISTS));
-        assert_stream_closed();
+        for (size_t j = 0; j < G_N_ELEMENTS(truncated_headers); j++) {
+            reset_stream_counts();
+            buffer = NULL;
+            write_cache(truncated_name, truncated_headers[j], true,
+                        cache_path);
+            g_assert(aot_load(lib_name, truncated_name, &buffer) == NULL);
+            g_assert(buffer == NULL);
+            g_assert(!g_file_test(cache_path, G_FILE_TEST_EXISTS));
+            assert_stream_closed();
+
+            reset_stream_counts();
+            write_cache(truncated_name, truncated_headers[j], true,
+                        cache_path);
+            g_assert(aot_get_tb_num(lib_name, truncated_name, &cpu) == 0);
+            g_assert(!g_file_test(cache_path, G_FILE_TEST_EXISTS));
+            assert_stream_closed();
+        }
     }
 
     reset_stream_counts();
     buffer = NULL;
-    write_cache(complete_name, true, true, cache_path);
+    write_cache(complete_name, sizeof(aot_header), true, cache_path);
     lib = aot_load(lib_name, complete_name, &buffer);
     g_assert(lib != NULL);
     g_assert(buffer != NULL);
@@ -196,8 +215,16 @@ int main(void)
     g_assert(lib_tree_remove(complete_name));
 
     reset_stream_counts();
+    g_assert(aot_get_tb_num(lib_name, complete_name, &cpu) == 7);
+    assert_stream_closed();
+    reset_stream_counts();
+    cpu.tcg_cflags = CF_PARALLEL;
+    g_assert(aot_get_tb_num(lib_name, complete_name, &cpu) == 11);
+    assert_stream_closed();
+
+    reset_stream_counts();
     buffer = NULL;
-    write_cache(stale_version_name, true, true, cache_path);
+    write_cache(stale_version_name, sizeof(aot_header), true, cache_path);
     replace_cache_footer(cache_path, stale_footer);
     g_assert(aot_load(lib_name, stale_version_name, &buffer) == NULL);
     g_assert(buffer == NULL);
@@ -206,7 +233,7 @@ int main(void)
 
     reset_stream_counts();
     buffer = NULL;
-    write_cache(wrong_mode_name, true, true, cache_path);
+    write_cache(wrong_mode_name, sizeof(aot_header), true, cache_path);
     replace_cache_footer(cache_path, wrong_mode_footer);
     g_assert(aot_load(lib_name, wrong_mode_name, &buffer) == NULL);
     g_assert(buffer == NULL);
@@ -216,7 +243,7 @@ int main(void)
     reset_stream_counts();
     fail_fdopen = true;
     buffer = NULL;
-    write_cache(fdopen_failure_name, true, true, cache_path);
+    write_cache(fdopen_failure_name, sizeof(aot_header), true, cache_path);
     g_assert(aot_load(lib_name, fdopen_failure_name, &buffer) == NULL);
     g_assert(buffer == NULL);
     g_assert_cmpuint(fdopen_count, ==, 1);
