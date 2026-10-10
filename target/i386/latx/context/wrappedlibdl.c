@@ -268,7 +268,8 @@ EXPORT void* my_dlopen(void *filename, int flag){
         const char* libs[] = {rfilename};
         my_context->deferedInit = 1;
         int bindnow = (flag&0x2)?1:0;
-        if (!FindLibIsWrapped(basename(rfilename))) {
+        if (strchr(rfilename, '/') ||
+            !FindLibIsWrapped(basename(rfilename))) {
 #if FORWORDBACK
             lsassert(dl->x86dlopen);
             __MY_CPU;
