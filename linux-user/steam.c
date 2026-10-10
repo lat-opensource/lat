@@ -7,6 +7,9 @@
 #include "qemu/steam.h"
 #include "steam.h"
 #include "elf.h"
+#if defined(CONFIG_LATX_KZT)
+#include "kzt-runtime.h"
+#endif
 
 #ifdef CONFIG_LATX
 
@@ -83,15 +86,25 @@ static void latx_steam_apply_runtime_paths(
     const char *old_xdg_data_dirs)
 {
     const char *files = latx_steam_runtime_files();
+    g_autofree char *application_paths = NULL;
     g_autofree char *library_path = NULL;
     g_autofree char *assignment = NULL;
-
     if (!files) {
         return;
     }
 
-    library_path = latx_steam_runtime_make_library_path(
-        app_library_path);
+    /*
+     * Keep the guest sysroot and Steam Runtime ahead of the application
+     * fallback so a bundled library cannot split the Runtime dependency set.
+     * Passthrough wrappers are still selected by soname when enabled.
+     */
+    application_paths = g_strdup("/usr/lib64:/usr/lib");
+    library_path = latx_steam_runtime_make_library_path(application_paths);
+    if (library_path && app_library_path && app_library_path[0]) {
+        g_autofree char *runtime_path = g_steal_pointer(&library_path);
+
+        library_path = g_strconcat(runtime_path, ":", app_library_path, NULL);
+    }
     if (library_path) {
         assignment = g_strdup_printf("LD_LIBRARY_PATH=%s", library_path);
         (void)envlist_setenv(envlist, assignment);
@@ -428,6 +441,8 @@ void latx_steam_prepare(const char *program, char **target_argv,
                                     LATX_STEAM_RUNTIME_FILES_ENV);
     wrapper_name = !g_strcmp0(basename ? basename + 1 : program,
                               "pressure-vessel-wrap");
+    latx_steam_context_configure(envlist,
+                                 wrapper_name || expected_files != NULL);
 
     /* Avoid Runtime discovery for launches outside the pressure-vessel chain. */
     if (!wrapper_name && !expected_files) {

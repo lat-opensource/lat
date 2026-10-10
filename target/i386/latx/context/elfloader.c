@@ -736,56 +736,63 @@ void CheckEnableKZT(elfheader_t *h, char **target_argv, int target_argc)
     for (int i=0; i<lib_path.size; ++i)
         printf_log(LOG_INFO, "%s\n", lib_path.paths[i]);
     for_needed_check(h, needlibcnt, &lib_path, &private_lib_path);
-    /* check KZT libs in paths */
-    int nb = sizeof(wrappedlibs_name) / sizeof(char*);
-    for (int i=0; i<nb; ++i) {
-        if (!kzt_library_is_enabled(wrappedlibs_name[i])) {
-            continue;
-        }
-        for (int j = 0; j < private_lib_path.size; ++j) {
-            DIR *dir = opendir(private_lib_path.paths[j]);
-            if (dir == NULL) {
-                printf_log(LOG_INFO, "dir %s not exist\n",
-                           private_lib_path.paths[j]);
+    /*
+     * Steam provides its own versioned libraries, including copies in the
+     * application path.  For Steam processes, supported libraries must keep
+     * their passthrough wrappers instead of being shadowed by those copies.
+     */
+    if (!latx_steam_context_active()) {
+        /* check KZT libs in paths */
+        int nb = sizeof(wrappedlibs_name) / sizeof(char*);
+        for (int i=0; i<nb; ++i) {
+            if (!kzt_library_is_enabled(wrappedlibs_name[i])) {
                 continue;
             }
+            for (int j = 0; j < private_lib_path.size; ++j) {
+                DIR *dir = opendir(private_lib_path.paths[j]);
+                if (dir == NULL) {
+                    printf_log(LOG_INFO, "dir %s not exist\n",
+                               private_lib_path.paths[j]);
+                    continue;
+                }
 
-            struct dirent *entry;
-            while ((entry = readdir(dir)) != NULL) {
-                char candidate[PATH_MAX];
-                char reason[PATH_MAX + 96];
-                KztLibraryGroup group;
-                int candidate_length;
+                struct dirent *entry;
+                while ((entry = readdir(dir)) != NULL) {
+                    char candidate[PATH_MAX];
+                    char reason[PATH_MAX + 96];
+                    KztLibraryGroup group;
+                    int candidate_length;
 
-                if (!kzt_soname_matches_filename(wrappedlibs_name[i],
-                                                 entry->d_name)) {
-                    continue;
+                    if (!kzt_soname_matches_filename(wrappedlibs_name[i],
+                                                     entry->d_name)) {
+                        continue;
+                    }
+                    candidate_length = snprintf(
+                        candidate, sizeof(candidate), "%s%s%s",
+                        private_lib_path.paths[j],
+                        private_lib_path.paths[j][
+                            strlen(private_lib_path.paths[j]) - 1] == '/'
+                            ? "" : "/",
+                        entry->d_name);
+                    if (candidate_length < 0 ||
+                        (size_t)candidate_length >= sizeof(candidate)) {
+                        continue;
+                    }
+                    if (!FileExist(candidate, IS_FILE) ||
+                        !FileIsX64ELF(candidate)) {
+                        continue;
+                    }
+                    group = kzt_group_for_library(wrappedlibs_name[i]);
+                    snprintf(reason, sizeof(reason),
+                             "guest %s resolved from application path %s",
+                             entry->d_name, private_lib_path.paths[j]);
+                    kzt_group_disable(group, reason);
+                    break;
                 }
-                candidate_length = snprintf(
-                    candidate, sizeof(candidate), "%s%s%s",
-                    private_lib_path.paths[j],
-                    private_lib_path.paths[j][
-                        strlen(private_lib_path.paths[j]) - 1] == '/'
-                        ? "" : "/",
-                    entry->d_name);
-                if (candidate_length < 0 ||
-                    (size_t)candidate_length >= sizeof(candidate)) {
-                    continue;
+                closedir(dir);
+                if (!kzt_library_is_enabled(wrappedlibs_name[i])) {
+                    break;
                 }
-                if (!FileExist(candidate, IS_FILE) ||
-                    !FileIsX64ELF(candidate)) {
-                    continue;
-                }
-                group = kzt_group_for_library(wrappedlibs_name[i]);
-                snprintf(reason, sizeof(reason),
-                         "guest %s resolved from application path %s",
-                         entry->d_name, private_lib_path.paths[j]);
-                kzt_group_disable(group, reason);
-                break;
-            }
-            closedir(dir);
-            if (!kzt_library_is_enabled(wrappedlibs_name[i])) {
-                break;
             }
         }
     }

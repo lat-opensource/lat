@@ -10,6 +10,7 @@ static char *runtime_files;
 static char *runtime_library_path;
 static bool runtime_active;
 static bool runtime_library_path_active;
+static bool steam_context;
 
 static const char *const runtime_x86_64_dirs[] = {
     "lib/x86_64-linux-gnu",
@@ -241,6 +242,20 @@ const char *latx_steam_runtime_files(void)
     return runtime_files;
 }
 
+void latx_steam_context_configure(const envlist_t *envlist, bool in_runtime)
+{
+    const char *steam_runtime = envlist ?
+        envlist_getenv(envlist, "STEAM_RUNTIME") : NULL;
+
+    steam_context = in_runtime ||
+                    (steam_runtime && steam_runtime[0] == '/');
+}
+
+bool latx_steam_context_active(void)
+{
+    return steam_context;
+}
+
 const char *latx_steam_runtime_library_path(void)
 {
     return runtime_active ? runtime_library_path : NULL;
@@ -256,6 +271,9 @@ char *latx_steam_runtime_make_library_path(const char *suffix)
     }
 
     library_path = g_string_new(NULL);
+    if (suffix && suffix[0]) {
+        g_string_append(library_path, suffix);
+    }
     for (i = 0; i < G_N_ELEMENTS(runtime_library_dirs); i++) {
         g_autofree char *directory = g_build_filename(runtime_files,
                                                        runtime_library_dirs[i],
@@ -268,12 +286,6 @@ char *latx_steam_runtime_make_library_path(const char *suffix)
             g_string_append_c(library_path, ':');
         }
         g_string_append(library_path, directory);
-    }
-    if (suffix && suffix[0]) {
-        if (library_path->len) {
-            g_string_append_c(library_path, ':');
-        }
-        g_string_append(library_path, suffix);
     }
     if (!library_path->len) {
         g_string_free(library_path, true);
@@ -497,24 +509,49 @@ char *latx_steam_runtime_resolve_path(const char *name)
         const char *prefix_library_dir;
         const char *prefix_dri_dir;
     } libraries[] = {
+        { "/lib64/", runtime_x86_64_dirs,
+          G_N_ELEMENTS(runtime_x86_64_dirs), "/usr/lib64",
+          "/usr/lib64/dri" },
+        { "/usr/lib64/", runtime_x86_64_dirs,
+          G_N_ELEMENTS(runtime_x86_64_dirs), "/usr/lib64",
+          "/usr/lib64/dri" },
         { "/lib/x86_64-linux-gnu/", runtime_x86_64_dirs,
-          G_N_ELEMENTS(runtime_x86_64_dirs), "/usr/lib",
-          "/usr/lib/xorg/modules/dri" },
+          G_N_ELEMENTS(runtime_x86_64_dirs), "/usr/lib64",
+          "/usr/lib64/dri" },
         { "/usr/lib/x86_64-linux-gnu/", runtime_x86_64_dirs,
-          G_N_ELEMENTS(runtime_x86_64_dirs), "/usr/lib",
-          "/usr/lib/xorg/modules/dri" },
+          G_N_ELEMENTS(runtime_x86_64_dirs), "/usr/lib64",
+          "/usr/lib64/dri" },
         { "/lib/i386-linux-gnu/", runtime_i386_dirs,
           G_N_ELEMENTS(runtime_i386_dirs), "/usr/lib",
-          "/usr/lib/xorg/modules/dri" },
+          "/usr/lib/dri" },
         { "/usr/lib/i386-linux-gnu/", runtime_i386_dirs,
           G_N_ELEMENTS(runtime_i386_dirs), "/usr/lib",
-          "/usr/lib/xorg/modules/dri" },
+          "/usr/lib/dri" },
+        { "/lib/", runtime_i386_dirs,
+          G_N_ELEMENTS(runtime_i386_dirs), "/usr/lib",
+          "/usr/lib/dri" },
+        { "/usr/lib/", runtime_i386_dirs,
+          G_N_ELEMENTS(runtime_i386_dirs), "/usr/lib",
+          "/usr/lib/dri" },
     };
     size_t i;
 
     if (!runtime_active || !runtime_files || !name ||
         !runtime_library_path_active) {
         return NULL;
+    }
+
+    /*
+     * Enabled wrappers still win by soname.  For every other object, an
+     * existing guest sysroot file is the only coherent ABI-compatible
+     * implementation; falling through would select the older Runtime copy.
+     */
+    if (steam_context) {
+        g_autofree char *guest_file = path_get_prefixed(name);
+
+        if (g_file_test(guest_file, G_FILE_TEST_IS_REGULAR)) {
+            return NULL;
+        }
     }
 
     if (!strcmp(name, "/etc/ld.so.cache")) {
