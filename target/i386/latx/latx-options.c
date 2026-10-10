@@ -163,6 +163,7 @@ void load_conf_file(const char *file, const char *program,
         }
     }
     free(line);
+    fclose(fp);
 }
 
 char* guest_program(char **argv)
