@@ -14,7 +14,7 @@ linux_user_ss.add(files(
   'uaccess.c',
   'uname.c',
   'vm86.c',
-  'pressure-vessel.c'
+  'steam.c'
 ))
 linux_user_ss.add(rt)
 

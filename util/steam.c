@@ -3,7 +3,7 @@
 #include "qemu/osdep.h"
 #include "qemu/envlist.h"
 #include "qemu/path.h"
-#include "qemu/pressure-vessel.h"
+#include "qemu/steam.h"
 
 static char *runtime_base;
 static char *runtime_files;

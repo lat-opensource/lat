@@ -54,7 +54,7 @@
 #include "cpu_loop-common.h"
 #include "crypto/init.h"
 #ifdef CONFIG_LATX
-#include "pressure-vessel.h"
+#include "steam.h"
 #endif
 int mydebug = 1;
 

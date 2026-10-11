@@ -4,8 +4,8 @@
 #include "qemu/envlist.h"
 #include "qemu.h"
 #include "qemu/path.h"
-#include "qemu/pressure-vessel.h"
-#include "pressure-vessel.h"
+#include "qemu/steam.h"
+#include "steam.h"
 #include "elf.h"
 
 #ifdef CONFIG_LATX

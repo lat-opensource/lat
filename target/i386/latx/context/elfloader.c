@@ -32,7 +32,7 @@
 #include "symbols.h"
 #include "lsenv.h"
 #include "qemu.h"
-#include "qemu/pressure-vessel.h"
+#include "qemu/steam.h"
 #include "kzt-groups.h"
 #include "kzt_relocation_transaction.h"
 
