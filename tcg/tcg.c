@@ -159,6 +159,9 @@ static int tcg_out_ldst_finalize(TCGContext *s);
 
 static TCGContext **tcg_ctxs;
 static unsigned int n_tcg_ctxs;
+static unsigned int max_tcg_ctxs = 1;
+static void *aot_tb_region_start;
+static size_t aot_tb_region_size;
 TCGv_env cpu_env = 0;
 const void *tcg_code_gen_epilogue;
 uintptr_t tcg_splitwx_diff;
@@ -761,6 +764,11 @@ static void tcg_region_assign(TCGContext *s, size_t curr_region)
     }
 #endif
 
+    if (aot_tb_region_start && aot_tb_region_size) {
+        s->tb_gen_buffer = aot_tb_region_start +
+                           curr_region * aot_tb_region_size;
+        s->tb_gen_highwater = s->tb_gen_buffer + aot_tb_region_size - 1024;
+    }
     s->tb_gen_ptr = s->tb_gen_buffer;
 #if defined(CONFIG_LATX_TBMINI_ENABLE)
     /* leave space for TBMini for the 1st TB */
@@ -799,6 +807,11 @@ static bool tcg_region_alloc(TCGContext *s)
     return err;
 }
 
+bool tcg_region_alloc_aot(TCGContext *s)
+{
+    return tcg_region_alloc(s);
+}
+
 /*
  * Perform a context's first region allocation.
  * This function does _not_ increment region.agg_size_full.
@@ -832,9 +845,35 @@ void tcg_region_reset_all(void)
 }
 
 #ifdef CONFIG_USER_ONLY
+static unsigned int tcg_aot_thread_count(void)
+{
+    const char *value = getenv("LATC_AOT_THREADS");
+    unsigned long requested;
+
+    /* Export workers have private contexts; guest threads share the JIT. */
+    if (!getenv("LATC_EMIT_AOT")) {
+        return 1;
+    }
+
+    if (value && *value) {
+        requested = strtoul(value, NULL, 10);
+    } else if (getenv("LATC_EMIT_AOT")) {
+        long online = sysconf(_SC_NPROCESSORS_ONLN);
+        requested = online > 0 ? online : 1;
+        requested = MIN(requested, 8ul);
+    } else {
+        requested = 1;
+    }
+    return MIN(MAX(requested, 1ul), 32ul);
+}
+
 static size_t tcg_n_regions(void)
 {
-    return 1;
+    max_tcg_ctxs = tcg_aot_thread_count();
+    /* Address ranges do not produce equal amounts of host code.  Keep a
+     * second region per compiler thread in the shared allocator so a busy
+     * worker can continue instead of truncating its TB slice. */
+    return max_tcg_ctxs * 2;
 }
 #else
 /*
@@ -912,6 +951,12 @@ void tcg_region_init(void)
     size_t i;
 
     n_regions = tcg_n_regions();
+#ifdef CONFIG_USER_ONLY
+    if (n_regions > 1 && tcg_init_ctx.tb_gen_buffer) {
+        aot_tb_region_start = tcg_init_ctx.tb_gen_buffer;
+        aot_tb_region_size = tcg_init_ctx.code_gen_buffer_size / n_regions;
+    }
+#endif
 
     /* The first region will be 'aligned - buf' bytes larger than the others */
     aligned = QEMU_ALIGN_PTR_UP(buf, page_size);
@@ -1021,7 +1066,32 @@ static void alloc_tcg_plugin_context(TCGContext *s)
 #ifdef CONFIG_USER_ONLY
 void tcg_register_thread(void)
 {
-    tcg_ctx = &tcg_init_ctx;
+    unsigned int i, n;
+    bool err;
+
+    if (max_tcg_ctxs == 1) {
+        tcg_ctx = &tcg_init_ctx;
+        return;
+    }
+
+    TCGContext *s = g_malloc(sizeof(*s));
+    *s = tcg_init_ctx;
+    for (i = 0, n = tcg_init_ctx.nb_globals; i < n; ++i) {
+        if (tcg_init_ctx.temps[i].mem_base) {
+            ptrdiff_t b = tcg_init_ctx.temps[i].mem_base - tcg_init_ctx.temps;
+            tcg_debug_assert(b >= 0 && b < n);
+            s->temps[i].mem_base = &s->temps[b];
+        }
+    }
+    n = qatomic_fetch_inc(&n_tcg_ctxs);
+    g_assert(n < max_tcg_ctxs);
+    qatomic_set(&tcg_ctxs[n], s);
+    alloc_tcg_plugin_context(s);
+    tcg_ctx = s;
+    qemu_mutex_lock(&region.lock);
+    err = tcg_region_initial_alloc__locked(s);
+    g_assert(!err);
+    qemu_mutex_unlock(&region.lock);
 }
 #else
 void tcg_register_thread(void)
@@ -1253,7 +1323,9 @@ void tcg_context_init(TCGContext *s)
      * In softmmu we will have at most max_cpus TCG threads.
      */
 #ifdef CONFIG_USER_ONLY
-    tcg_ctxs = &tcg_ctx;
+    max_tcg_ctxs = tcg_aot_thread_count();
+    tcg_ctxs = g_new0(TCGContext *, max_tcg_ctxs);
+    tcg_ctxs[0] = tcg_ctx;
     n_tcg_ctxs = 1;
 #else
     MachineState *ms = MACHINE(qdev_get_machine());

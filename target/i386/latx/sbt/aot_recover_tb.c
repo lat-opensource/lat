@@ -21,6 +21,7 @@
 #include "aot_smc.h"
 #include "smc_reload.h"
 #ifdef CONFIG_LATX_TU
+#include "aot_recover_tu.h"
 #include "tu.h"
 #endif
 
@@ -186,6 +187,19 @@ static void recover_tb_range(target_ulong page, struct aot_tb *p_aot_tbs,
 /* AOT + TU */
 #else
     TranslationBlock *tb_in_order[MAX_TB_IN_CACHE];
+    aot_recover_tb_member *member_info;
+
+    if (num <= 0) {
+        return;
+    }
+    member_info = g_new0(aot_recover_tb_member, num);
+    for (int i = 0; i < num; i++) {
+        member_info[i].tu_id = p_aot_tbs[i].tu_id;
+        member_info[i].cflags = p_aot_tbs[i].cflags;
+        member_info[i].is_first_tb = p_aot_tbs[i].is_first_tb;
+        member_info[i].offset_in_tu = p_aot_tbs[i].offset_in_tu;
+    }
+
     for (int i = 0; i < num;) {
 #ifdef CONFIG_LATX_DEBUG
         /* Dump this tb. */
@@ -198,19 +212,49 @@ static void recover_tb_range(target_ulong page, struct aot_tb *p_aot_tbs,
         while ((i < num) && (p_aot_tbs[i].is_first_tb == 0)) {
             i++;
         }
-        int j;
-        for (j = i; j < num; j++) {
-            if ((p_aot_tbs[i].tu_id != p_aot_tbs[j].tu_id) || 
-			((j != i) && p_aot_tbs[j].is_first_tb)) {
-                break;
-            }
-            tb_in_order[j - i] = creat_tb(&p_aot_tbs[j], start, base, NULL);
-	    if (unlikely(!tb_in_order[j - i])) {
-		return;
-	    }
+        if (i >= num) {
+            break;
         }
+        int tu_indices[MAX_TB_IN_CACHE];
+        int tu_count = 0;
+        int first_count = 0;
+
+        /*
+         * A TU can own non-contiguous members in the AOT table because the
+         * table is ordered by guest PC.  Collect the complete TU before
+         * copying its code cache; otherwise a member copied with the TU can
+         * execute without registration and relocation.
+         */
+        if (!aot_recover_collect_tu_members(member_info, num, i,
+                MAX_TB_IN_CACHE, tu_indices, &tu_count, &first_count)) {
+            qemu_log_mask(LAT_LOG_AOT,
+                    "TU 0x%x has too many members\n",
+                    p_aot_tbs[i].tu_id);
+            goto out;
+        }
+        if (tu_count == 0 || first_count != 1) {
+            qemu_log_mask(LAT_LOG_AOT,
+                    "invalid TU 0x%x members=%d first=%d\n",
+                    p_aot_tbs[i].tu_id, tu_count, first_count);
+            goto out;
+        }
+        aot_tb *tu_first = &p_aot_tbs[tu_indices[0]];
+        if (tu_first->offset_in_tu != 0 || tu_first->tu_size == 0) {
+            qemu_log_mask(LAT_LOG_AOT,
+                    "invalid TU 0x%x first offset=0x%x size=0x%x\n",
+                    tu_first->tu_id, tu_first->offset_in_tu,
+                    tu_first->tu_size);
+            goto out;
+        }
+        for (int k = 0; k < tu_count; k++) {
+            tb_in_order[k] = creat_tb(&p_aot_tbs[tu_indices[k]],
+                                      start, base, NULL);
+            if (unlikely(!tb_in_order[k])) {
+                goto out;
+            }
+        }
+        int tb_num_in_tu = tu_count;
 #if defined(CONFIG_LATX_TBMINI_ENABLE)
-        int tb_num_in_tu = j - i;
         /* Reserve space for tu tbmin table. */
         TBMini *tbmini_ptr= (TBMini *)
             ROUND_UP((uintptr_t)tcg_ctx->code_gen_ptr, CODE_GEN_ALIGN);
@@ -219,8 +263,8 @@ static void recover_tb_range(target_ulong page, struct aot_tb *p_aot_tbs,
                     sizeof(struct TBMini) * (tb_num_in_tu + 1), qemu_icache_linesize));
         /* First tbm save tb_num_in_tu and TB_MAGIC. */
         aot_tbmini_set_pointer((uintptr_t)tbmini_ptr, tb_num_in_tu, TB_MAGIC);
-        for (int k = i; k < j; k++) {
-            TranslationBlock *tb = tb_in_order[k - i];
+        for (int k = 0; k < tb_num_in_tu; k++) {
+            TranslationBlock *tb = tb_in_order[k];
             aot_tbmini_set_pointer((uintptr_t)++tbmini_ptr, (uint64_t)tb, (uint64_t)tb->tc.size);
         }
 #else
@@ -229,15 +273,15 @@ static void recover_tb_range(target_ulong page, struct aot_tb *p_aot_tbs,
 #endif
 
         void *tu_begin_ptr = tcg_ctx->code_gen_ptr;
-        memcpy(tcg_ctx->code_gen_ptr, aot_buffer + p_aot_tbs[i].tb_cache_offset,
-                    p_aot_tbs[i].tu_size);
+        memcpy(tcg_ctx->code_gen_ptr, aot_buffer + tu_first->tb_cache_offset,
+                    tu_first->tu_size);
         uintptr_t new_buf_ptr = 
-            (uintptr_t)(tcg_ctx->code_gen_ptr + p_aot_tbs[i].tu_size);
+            (uintptr_t)(tcg_ctx->code_gen_ptr + tu_first->tu_size);
         qatomic_set(&tcg_ctx->code_gen_ptr, (void *)
                 ROUND_UP(new_buf_ptr, CODE_GEN_ALIGN));
-        for (int k = i; k < j; k++) {
-            TranslationBlock *tb = tb_in_order[k - i];
-            aot_tb *curr_aot_tb = &p_aot_tbs[k];
+        for (int k = 0; k < tb_num_in_tu; k++) {
+            TranslationBlock *tb = tb_in_order[k];
+            aot_tb *curr_aot_tb = &p_aot_tbs[tu_indices[k]];
             tb->tc.ptr = tu_begin_ptr + curr_aot_tb->offset_in_tu;
             assert((tb->pc & TARGET_PAGE_MASK) == page);
             assert((tb->cflags & CF_PARALLEL) == (tcg_ctx->tb_cflags & CF_PARALLEL));
@@ -266,8 +310,10 @@ static void recover_tb_range(target_ulong page, struct aot_tb *p_aot_tbs,
 #endif
             aot_tb_register(tb, AOT_TB_RECOVERED);
         }
-        i = j;
+        i++;
     }
+out:
+    g_free(member_info);
 #endif
 }
 
@@ -358,7 +404,28 @@ inline int load_page(target_ulong pc, uint32_t cflags, seg_info *info)
         p_aot_tbs = (struct aot_tb *)(aot_buffer + pt[pt_id].page_tbs_offset);
     }
 
-    if (tb_num_in_page == 0) {
+    const char *debug_pc_text = getenv("LATC_DEBUG_PC");
+    if (debug_pc_text && *debug_pc_text) {
+        target_ulong debug_pc = strtoull(debug_pc_text, NULL, 0);
+        if ((debug_pc & TARGET_PAGE_MASK) == (pc & TARGET_PAGE_MASK)) {
+            int matches = 0;
+            for (int i = 0; i < tb_num_in_page; i++) {
+                target_ulong tb_pc = info->seg_begin +
+                    p_aot_tbs[i].offset_in_segment;
+                if (tb_pc == debug_pc) {
+                    fprintf(stderr, "latc-aot: page record pc=0x%lx cflags=0x%x size=%u first=%u\n",
+                            (unsigned long)debug_pc, p_aot_tbs[i].cflags,
+                            p_aot_tbs[i].size, p_aot_tbs[i].is_first_tb);
+                    matches++;
+                }
+            }
+            fprintf(stderr, "latc-aot: page pc=0x%lx state=%d records=%d matches=%d flags=0x%x\n",
+                    (unsigned long)debug_pc, page_state, tb_num_in_page,
+                    matches, cflags);
+        }
+    }
+
+    if (!aot_recover_page_count_usable(tb_num_in_page)) {
         return 0;
     }
 
@@ -401,6 +468,13 @@ int load_aot(target_ulong pc, uint32_t cflags)
     }
 
     seg_info *info = segment_tree_lookup(pc);
+    const char *debug_pc_text = getenv("LATC_DEBUG_PC");
+    if (debug_pc_text && *debug_pc_text &&
+        pc == strtoull(debug_pc_text, NULL, 0)) {
+        fprintf(stderr, "latc-aot: load pc=0x%lx flags=0x%x info=%p buffer=%p state=%d mode=%d\n",
+                (unsigned long)pc, cflags, info, info ? info->buffer : NULL,
+                page_get_page_state(pc), option_aot);
+    }
     if (info == NULL || info->buffer == NULL) {
         if (smc_page_reload(pc & TARGET_PAGE_MASK, cflags)) {
             return 1;

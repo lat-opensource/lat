@@ -905,6 +905,7 @@ TranslationBlock *tcg_tb_alloc(TCGContext *s);
 TranslationBlock *tcg_tb_alloc_full(TCGContext *s);
 
 void tcg_region_init(void);
+bool tcg_region_alloc_aot(TCGContext *s);
 void tb_destroy(TranslationBlock *tb);
 void tcg_region_reset_all(void);
 

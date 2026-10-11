@@ -1,0 +1,110 @@
+STRUCT(drm_amdgpu_gem_create_in,
+    TYPE_ULONGLONG,
+    TYPE_ULONGLONG,
+    TYPE_ULONGLONG,
+    TYPE_ULONGLONG)
+STRUCT(drm_amdgpu_gem_mmap_in,
+    TYPE_INT,
+    TYPE_INT)
+STRUCT(drm_amdgpu_ctx_in,
+    TYPE_INT,
+    TYPE_INT,
+    TYPE_INT,
+    TYPE_INT)
+STRUCT(drm_amdgpu_bo_list_in,
+    TYPE_INT,
+    TYPE_INT,
+    TYPE_INT,
+    TYPE_INT,
+    TYPE_ULONGLONG)
+STRUCT(drm_amdgpu_cs_in,
+    TYPE_INT,
+    TYPE_INT,
+    TYPE_INT,
+    TYPE_INT,
+    TYPE_ULONGLONG)
+STRUCT(drm_amdgpu_info,
+    TYPE_ULONGLONG,
+    TYPE_INT,
+    TYPE_INT,
+    MK_STRUCT(STRUCT_drm_amdgpu_query_fw))
+STRUCT(drm_data,
+    TYPE_ULONGLONG,
+    TYPE_ULONGLONG,
+    TYPE_INT,
+    MK_ARRAY(TYPE_INT, 64))
+STRUCT(drm_amdgpu_gem_metadata,
+    TYPE_INT,
+    TYPE_INT,
+    MK_STRUCT(STRUCT_drm_data))
+STRUCT(drm_amdgpu_gem_wait_idle_in,
+    TYPE_INT,
+    TYPE_INT,
+    TYPE_ULONGLONG)
+#ifdef CONFIG_AMDGPU_GEN_VA_OLD
+STRUCT(drm_amdgpu_gem_va,
+    TYPE_INT,
+    TYPE_INT,
+    TYPE_INT,
+    TYPE_INT,
+    TYPE_ULONGLONG,
+    TYPE_ULONGLONG,
+    TYPE_ULONGLONG)
+#else
+STRUCT(drm_amdgpu_gem_va,
+    TYPE_INT,
+    TYPE_INT,
+    TYPE_INT,
+    TYPE_INT,
+    TYPE_ULONGLONG,
+    TYPE_ULONGLONG,
+    TYPE_ULONGLONG,
+    TYPE_ULONGLONG,
+    TYPE_INT,
+    TYPE_INT,
+    TYPE_ULONGLONG)
+#endif
+STRUCT(drm_amdgpu_wait_cs_in,
+    TYPE_ULONGLONG,
+    TYPE_ULONGLONG,
+    TYPE_INT,
+    TYPE_INT,
+    TYPE_INT,
+    TYPE_INT)
+STRUCT(drm_amdgpu_gem_op,
+    TYPE_INT,
+    TYPE_INT,
+    TYPE_ULONGLONG)
+STRUCT(drm_amdgpu_gem_userptr,
+    TYPE_ULONGLONG,
+    TYPE_ULONGLONG,
+    TYPE_INT,
+    TYPE_INT)
+STRUCT(drm_amdgpu_wait_fences_in,
+    TYPE_ULONGLONG,
+    TYPE_INT,
+    TYPE_INT,
+    TYPE_ULONGLONG)
+STRUCT(drm_amdgpu_vm_in,
+    TYPE_INT,
+    TYPE_INT)
+STRUCT(drm_amdgpu_fence_to_handle_in,
+    MK_STRUCT(STRUCT_drm_amdgpu_fence),
+    TYPE_INT,
+    TYPE_INT)
+STRUCT(drm_amdgpu_sched_in,
+    TYPE_INT,
+    TYPE_INT,
+    TYPE_INT,
+    TYPE_INT)
+STRUCT(drm_amdgpu_query_fw,
+    TYPE_INT,
+    TYPE_INT,
+    TYPE_INT,
+    TYPE_INT)
+STRUCT(drm_amdgpu_fence,
+    TYPE_INT,
+    TYPE_INT,
+    TYPE_INT,
+    TYPE_INT,
+    TYPE_ULONGLONG)

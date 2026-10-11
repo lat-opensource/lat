@@ -1,0 +1,289 @@
+{
+  "added": [
+    {
+      "path": "lat/include/latc-bundle-format.h",
+      "generated": true,
+      "reason": "shared stable on-disk bundle layout"
+    },
+    {
+      "path": "lat/linux-user/latc-bundle-loader.h",
+      "generated": true,
+      "reason": "self-contained runner argument injection interface"
+    },
+    {
+      "path": "lat/linux-user/latc-bundle-loader.c",
+      "generated": true,
+      "reason": "verify and restore embedded x86 guest, CFG, and LAT AOT data"
+    },
+    {
+      "path": "lat/target/i386/latx/include/latc-verify.h",
+      "reason": "stable CFG to LAT TB boundary verification interface"
+    },
+    {
+      "path": "lat/target/i386/latx/include/hbr-semantic.h",
+      "generated": true,
+      "reason": "share SHBR lane semantics with the standalone AOT translator"
+    },
+    {
+      "path": "lat/target/i386/latx/optimization/hbr-xmm-semantics.inc",
+      "generated": true,
+      "reason": "share generated SHBR instruction semantics with the standalone AOT translator"
+    },
+    {
+      "path": "lat/target/i386/latx/ir1/latc-verify.c",
+      "reason": "decode CFG TBs with the copied LAT IR1 decoder"
+    },
+    {
+      "path": "lat/target/i386/latx/sbt/latc_native_export.c",
+      "generated": true,
+      "reason": "export LAT AOT code into the stable standalone image format and reject invalid executable targets"
+    },
+    {
+      "path": "lat/target/i386/latx/sbt/latc_native_export.h",
+      "generated": true,
+      "reason": "native image exporter interface"
+    },
+    {
+      "path": "lat/include/latc-aot-v2-runner.h",
+      "generated": true,
+      "reason": "AOT v2 module lookup adapter interface for the disposable LAT runner"
+    },
+    {
+      "path": "lat/linux-user/latc-aot-v2-runner.c",
+      "generated": true,
+      "reason": "load per-ELF AOT v2 modules, track mappings, and submit missing source FDs to latcd"
+    },
+    {
+      "path": "lat/linux-user/latc-aot-v2-runner-stub.c",
+      "reason": "canonical disabled runtime for unsupported guests and static exporters",
+      "generated": true
+    },
+    {
+      "path": "lat/target/i386/latx/ir1/ir1-decode.h",
+      "generated": true,
+      "reason": "synchronized upstream support for merged decoder and legacy AOT identity"
+    },
+    {
+      "path": "lat/target/i386/latx/include/aot-version.h",
+      "generated": true,
+      "reason": "synchronized upstream support for merged decoder and legacy AOT identity"
+    }
+  ],
+  "modified": [
+    {
+      "path": "lat/linux-user/main.c",
+      "generated": true,
+      "reason": "detect bundles, pretranslate CFG input, and support compile-time AOT emission"
+    },
+    {
+      "path": "lat/linux-user/syscall.c",
+      "generated": true,
+      "reason": "share x86-64 syscall ABI definitions and drain deferred AOT v2 ELF mappings after releasing the outer mmap lock"
+    },
+    {
+      "path": "lat/linux-user/elfload.c",
+      "generated": true,
+      "reason": "disable the runner-provided guest vDSO while a static AOT v2 module is selected"
+    },
+    {
+      "path": "lat/linux-user/mmap.c",
+      "generated": true,
+      "reason": "notify AOT v2 about successful mappings and unmaps after releasing the mmap lock"
+    },
+    {
+      "path": "lat/linux-user/signal.c",
+      "generated": true,
+      "reason": "recognize synchronous exceptions raised inside AOT v2 module text before restoring guest state from the generated PC map"
+    },
+    {
+      "path": "lat/accel/tcg/translate-all.c",
+      "generated": true,
+      "reason": "count and reject runtime TB generation for strict AOT verification"
+    },
+    {
+      "path": "lat/accel/tcg/tb-flush.c",
+      "generated": true,
+      "reason": "snapshot existing JIT TBs immediately before the global TB table is cleared"
+    },
+    {
+      "path": "lat/target/i386/latx/sbt/aot_recover_tb.c",
+      "generated": true,
+      "reason": "provide opt-in diagnostics for static AOT loading"
+    },
+    {
+      "path": "lat/target/i386/latx/sbt/aot.c",
+      "generated": true,
+      "reason": "provide AOT coverage diagnostics, parallel translation, bounded CFG bodies, and indexed successor completion without repeated full-TB scans"
+    },
+    {
+      "path": "lat/target/i386/latx/include/aot.h",
+      "generated": true,
+      "reason": "expose relocation table checkpoint and rollback for TU retries"
+    },
+    {
+      "path": "lat/target/i386/latx/include/aot_recover_tu.h",
+      "generated": true,
+      "reason": "share standalone-versus-TU recovery grouping rules between LAT and their deterministic fixture"
+    },
+    {
+      "path": "lat/target/i386/latx/include/ir1.h",
+      "generated": true,
+      "reason": "classify memory index registers before GPR-only analysis"
+    },
+    {
+      "path": "lat/target/i386/latx/include/env.h",
+      "reason": "synchronized from canonical main LAT source after upstream integration",
+      "generated": true
+    },
+    {
+      "path": "lat/target/i386/latx/include/hbr.h",
+      "generated": true,
+      "reason": "share SHBR optimization controls with the standalone AOT translator"
+    },
+    {
+      "path": "lat/target/i386/latx/include/translate.h",
+      "reason": "synchronized from canonical main LAT source after upstream integration",
+      "generated": true
+    },
+    {
+      "path": "lat/target/i386/latx/include/optimize-config.h",
+      "reason": "synchronized from canonical main LAT source after upstream integration",
+      "generated": true
+    },
+    {
+      "path": "lat/target/i386/latx/ir1/ir1.c",
+      "generated": true,
+      "reason": "distinguish VSIB vector indices from GPR address indices"
+    },
+    {
+      "path": "lat/target/i386/latx/optimization/hbr.c",
+      "generated": true,
+      "reason": "exclude VSIB vector indices from GPR high-half analysis"
+    },
+    {
+      "path": "lat/target/i386/latx/optimization/ir2-optimization.c",
+      "reason": "synchronized from canonical main LAT source after upstream integration",
+      "generated": true
+    },
+    {
+      "path": "lat/target/i386/latx/optimization/tu.c",
+      "generated": true,
+      "reason": "roll back relocation and search state before retrying a TU, and preserve bounded AOT selection provenance"
+    },
+    {
+      "path": "lat/accel/tcg/cpu-exec.c",
+      "generated": true,
+      "reason": "query the AOT v2 module registry after a normal TB lookup miss"
+    },
+    {
+      "path": "lat/target/i386/latx/latx-config.c",
+      "generated": true,
+      "reason": "allocate per-thread guest address slots and a module-aware AOT v2 indirect jump cache"
+    },
+    {
+      "path": "lat/include/exec/fasttb.h",
+      "generated": true,
+      "reason": "define generation-checked AOT v2 fast jump entries alongside the original LAT cache"
+    },
+    {
+      "path": "lat/include/exec/exec-all.h",
+      "generated": true,
+      "reason": "mark compiler-added function-body TBs so AOT translation does not recursively follow their call graph"
+    },
+    {
+      "path": "lat/target/i386/cpu.h",
+      "generated": true,
+      "reason": "hold the per-thread AOT v2 fast cache and active module context"
+    },
+    {
+      "path": "lat/target/i386/latx/include/lsenv.h",
+      "generated": true,
+      "reason": "expose AOT v2 cache fields to generated indirect jump code"
+    },
+    {
+      "path": "lat/target/i386/latx/translator/tr-opnd-process.c",
+      "reason": "synchronized from canonical main LAT source after upstream integration",
+      "generated": true
+    },
+    {
+      "path": "lat/target/i386/latx/translator/tr-mov.c",
+      "reason": "synchronized from canonical main LAT source after upstream integration",
+      "generated": true
+    },
+    {
+      "path": "lat/target/i386/latx/translator/tr-simd-cvt.c",
+      "generated": true,
+      "reason": "share SHBR scalar conversion code generation with the standalone AOT translator"
+    },
+    {
+      "path": "lat/target/i386/latx/translator/tr-simd-mov.c",
+      "reason": "synchronized from canonical main LAT source after upstream integration",
+      "generated": true
+    },
+    {
+      "path": "lat/target/i386/latx/translator/tr-simd.c",
+      "generated": true,
+      "reason": "share SHBR scalar arithmetic code generation with the standalone AOT translator"
+    },
+    {
+      "path": "lat/target/i386/latx/translator/translate.c",
+      "generated": true,
+      "reason": "check module context and generation before an AOT v2 indirect fast jump, allocate per-thread AOT translation scratch buffers, and avoid accessor calls in the AOT translation hot loop"
+    },
+    {
+      "path": "lat/target/i386/tcg/translate.c",
+      "reason": "synchronized from canonical main LAT source after upstream integration",
+      "generated": true
+    },
+    {
+      "path": "lat/target/i386/latx/ir2/ir2-assemble.c",
+      "generated": true,
+      "reason": "avoid repeated opcode accessor calls while assembling AOT native instructions"
+    },
+    {
+      "path": "lat/target/i386/latx/include/capstone_git.h",
+      "reason": "synchronized from canonical main LAT source after upstream integration",
+      "generated": true
+    },
+    {
+      "path": "lat/target/i386/latx/include/latx-config.h",
+      "reason": "synchronized from canonical main LAT source after upstream integration",
+      "generated": true
+    },
+    {
+      "path": "lat/target/i386/latx/include/latx-disassemble-trace.h",
+      "reason": "synchronized from canonical main LAT source after upstream integration",
+      "generated": true
+    },
+    {
+      "path": "lat/target/i386/latx/include/ts.h",
+      "reason": "synchronized from canonical main LAT source after upstream integration",
+      "generated": true
+    },
+    {
+      "path": "lat/target/i386/latx/latx-disassemble-trace/capstone_git.c",
+      "reason": "synchronized from canonical main LAT source after upstream integration",
+      "generated": true
+    },
+    {
+      "path": "lat/target/i386/latx/optimization/imm-cache.c",
+      "reason": "synchronized from canonical main LAT source after upstream integration",
+      "generated": true
+    },
+    {
+      "path": "lat/target/i386/latx/optimization/ts.c",
+      "generated": true,
+      "reason": "translate disjoint final TB-set partitions concurrently"
+    },
+    {
+      "path": "lat/tcg/tcg.c",
+      "generated": true,
+      "reason": "provide independent TCG code and TB storage regions to AOT compiler threads"
+    },
+    {
+      "path": "lat/include/tcg/tcg.h",
+      "generated": true,
+      "reason": "expose spare TCG region allocation to the parallel AOT translator"
+    }
+  ]
+}

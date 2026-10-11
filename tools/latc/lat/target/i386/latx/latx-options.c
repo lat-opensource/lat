@@ -1,0 +1,545 @@
+/*
+ * SPDX-FileCopyrightText: 2021-2026 LAT Project Authors
+ *
+ * SPDX-License-Identifier: GPL-2.0-only
+ */
+
+#include "latx-options.h"
+#include "error.h"
+#include "qemu/cutils.h"
+#include "reg-alloc.h"
+#include "latx-debug.h"
+#include "latx-runtime.h"
+#include "latx-string-utils.h"
+#include "translate.h"
+#if defined(CONFIG_LATX_KZT)
+#include "kzt-groups.h"
+#endif
+
+#if defined(CONFIG_LATX_KZT)
+int option_kzt = 0;
+int option_kzt_log = 0;
+char *option_kzt_libs;
+char *option_kzt_error;
+char *option_kzt_log_error;
+#endif
+
+#ifdef CONFIG_LATX_AVX_OPT
+int option_avx_cpuid = 0;
+#endif
+
+#ifdef CONFIG_LATX_FLAG_REDUCTION
+int option_flag_reduction = 1;
+#endif
+
+int option_lative = 0;
+#if defined(CONFIG_LATX_JRRA_STACK) && defined(CONFIG_LATX_LSFPU)
+
+int option_jr_ra_stack = 1;
+int option_jr_ra = 0;
+#else
+#if defined(CONFIG_LATX_JRRA) && defined(CONFIG_LATX_LSFPU)
+/* when using jr_ra, lsfpu should be on */
+int option_jr_ra_stack = 0;
+int option_jr_ra = 0;
+#else
+int option_jr_ra = 0;
+int option_jr_ra_stack = 0;
+#endif
+#endif
+
+
+#ifdef CONFIG_LATX_TUNNEL_LIB
+int option_tunnel_lib = 1;
+#else
+int option_tunnel_lib;
+#endif
+
+#ifdef CONFIG_LATX_INSTS_PATTERN
+int option_instptn = 0x3ffffff;
+#endif
+
+int close_latx_parallel;
+
+uint64_t option_begin_trace_addr;
+uint64_t option_end_trace_addr;
+
+int option_enable_fcsr_exc;
+int option_dump;
+int option_dump_host;
+int option_dump_ir1;
+int option_dump_ir2;
+int option_dump_profile;
+int option_trace_tb;
+int option_trace_ir1;
+int option_latx_disassemble_trace_cmp;
+int option_debug_lative;
+int option_aot;
+int option_load_aot;
+int option_aot_wine;
+int option_smc_reload;
+int option_debug_aot;
+int option_imm_reg;
+int option_imm_rip;
+int option_imm_precache;
+int option_imm_complex;
+int option_debug_imm_reg;
+uint64_t imm_skip_pc;
+uint64_t debug_tb_pc;
+uint64_t latx_trace_mem;
+uint64_t latx_break_insn;
+uint64_t latx_unlink_count;
+uint32_t latx_unlink_cpu;
+int option_softfpu;
+int option_softfpu_fast;
+int option_prlimit;
+int option_fputag;
+int option_save_xmm;
+int option_enable_lasx;
+int option_vpaes;
+int option_split_tb;
+int option_anonym;
+int option_mem_test;
+int option_real_maps;
+int option_monitor_shared_mem;
+int option_private_mmap_shadow;
+int option_shadow_file;
+int option_smc_opt;
+/* Disabled by default; LATX_FORK_UNLINK enables the internal signal. */
+int option_fork_unlink;
+int option_set_rounding_opt;
+int option_cvt_opt;
+int option_fast_atomic;
+char *option_wine_pe_fixed_base;
+char *option_wine_pe_fixed_address;
+int option_aot_pe_profile;
+
+unsigned long long counter_tb_exec;
+unsigned long long counter_tb_tr;
+
+unsigned long long counter_ir1_tr;
+unsigned long long counter_mips_tr;
+
+void load_conf_file(const char *file, const char *program,
+                    LatxRuntimeSource runtime_source)
+{
+    FILE *fp = fopen(file, "r");
+    char *line = NULL;
+    size_t len = 0;
+    int flag = 0;
+
+    if (!fp) {
+        return;
+    }
+
+    latx_runtime_option_source_set(runtime_source);
+
+    while(getline(&line, &len, fp) != -1) {
+        char *option_name, *option_value;
+        // env var
+        if (flag != 1 &&
+            latx_option_line_init(line, &option_name, &option_value)) {
+            find_option(option_name, option_value);
+        }
+        // guest name
+        if (line[0] == '[') {
+            char *end = strchr(line, ']');
+            if(!end) continue;
+            if (flag == 2)
+                break;
+            if (!program) {
+                /* Without a guest name, only global options apply. */
+                flag = 1;
+                continue;
+            }
+            size_t size = end - line;
+            line[size] = '\0';
+            if (!strcmp(line + 1, program)) {
+                flag = 2;
+            }
+            else {flag = 1;}
+        }
+    }
+    free(line);
+}
+
+char* guest_program(char **argv)
+{
+    if (!argv || !argv[0])
+        return NULL;
+
+    for (int i = 0; argv[i]; i++) {
+        char *arg = argv[i];
+        if (!arg) continue;
+        char *last_slash = strrchr(arg, '/');
+        char *last_backslash = strrchr(arg, '\\');
+        char *p;
+
+        if (last_slash && last_backslash) {
+            p = (last_slash > last_backslash) ? last_slash : last_backslash;
+        } else if (last_slash) {
+            p = last_slash;
+        } else if (last_backslash) {
+            p = last_backslash;
+        } else {
+            p = arg - 1;
+        }
+        p = p + 1;
+
+        // skip wine
+        if (strstr(p, "wine-preloader") ||
+            strstr(p, "wine64-preloader") ||
+            strstr(p, "wineserver") ||
+            strstr(p, "wine") ||
+            (!p)) {
+            continue;
+        }
+        return p;
+    }
+    return NULL;
+}
+
+void conf_init(char **argv)
+{
+    char path[PATH_MAX];
+    char *program = guest_program(argv);
+    const char *home_path = getenv("HOME");
+
+    /* load /etc/latx-*.conf */
+    load_conf_file(LATX_SYSTEM_CONFIG_FILE, program,
+                   LATX_RUNTIME_SOURCE_SYSTEM_CONFIG);
+    if (latx_user_config_path(path, sizeof(path), home_path,
+                              LATX_USER_CONFIG_FILE)) {
+        load_conf_file(path, program, LATX_RUNTIME_SOURCE_USER_CONFIG);
+    }
+}
+
+void options_init(void)
+{
+    latx_runtime_reset();
+#if defined(CONFIG_LATX_KZT)
+    option_kzt = 0;
+    option_kzt_log = 0;
+    g_clear_pointer(&option_kzt_libs, g_free);
+    g_clear_pointer(&option_kzt_error, g_free);
+    g_clear_pointer(&option_kzt_log_error, g_free);
+    kzt_groups_reset();
+#endif
+    option_debug_lative = 0;
+    option_save_xmm = 0xff;
+    option_dump_host = 0;
+    option_dump_ir1 = 0;
+    option_dump_ir2 = 0;
+    option_dump = 0;
+    option_trace_tb = 0;
+    option_trace_ir1 = 0;
+    option_latx_disassemble_trace_cmp = 0;
+    option_enable_lasx = 1;
+    option_vpaes = 0;
+
+    counter_tb_exec = 0;
+    counter_tb_tr = 0;
+
+    counter_ir1_tr = 0;
+    counter_mips_tr = 0;
+
+#ifdef CONFIG_LATX_AVX_OPT
+    option_avx_cpuid = 1;
+#endif /*CONFIG_LATX_AVX_OPT*/
+
+#ifdef CONFIG_LATX_AOT
+    option_aot = 1;
+    option_load_aot = 1;
+    option_aot_wine = 0;
+    option_debug_aot = 0;
+#endif
+    option_smc_reload = 0;
+#ifdef CONFIG_LATX_IMM_REG
+    option_imm_reg = 0;
+    option_imm_rip = 0;
+    // complex:base+index*scale
+    option_imm_complex = 0;
+    option_imm_precache = 0;
+    option_debug_imm_reg = 0;
+    imm_skip_pc = 0;
+#endif
+#ifdef CONFIG_LATX_SPLIT_TB
+    option_split_tb = 1;
+#endif
+    option_anonym = 0;
+    option_mem_test = 0;
+    option_real_maps = 0;
+    option_monitor_shared_mem = 0;
+    option_private_mmap_shadow = 0;
+#ifdef LOW_MEM_MODE_0
+    option_shadow_file = 1;
+#endif
+
+#ifdef CONFIG_LATX_SMC_OPT
+    option_smc_opt = 0;//latx_smc_default();
+#endif
+
+    option_set_rounding_opt = 1;
+    option_cvt_opt = 1;
+    if (have_am())
+        option_fast_atomic = 1;
+    else
+        option_fast_atomic = 0;
+}
+
+bool latx_options_finalize(void)
+{
+#if defined(CONFIG_LATX_KZT)
+    if (option_kzt_log_error) {
+        kzt_groups_reject_configuration(option_kzt_log_error, true);
+        option_kzt = 0;
+        return false;
+    }
+    if (option_kzt_error) {
+        kzt_groups_reject_configuration(option_kzt_error,
+                                        option_kzt_log != 0);
+        option_kzt = 0;
+        return false;
+    }
+    if (option_kzt == 0) {
+        kzt_groups_reset();
+        return true;
+    }
+    if (!kzt_groups_configure(option_kzt_libs,
+                              option_kzt_log != 0 && option_kzt != 0)) {
+        option_kzt = 0;
+        return false;
+    }
+#endif
+    return true;
+}
+
+#define OPTIONS_IMM_REG 0
+#define OPTIONS_IMM_RIP 1
+#define OPTIONS_IMM_COMPLEX 2
+#define OPTIONS_IMM_PRECACHE 3
+
+void options_parse_imm_reg(const char *bits)
+{
+    if (!bits) {
+        return;
+    }
+
+    if (bits[OPTIONS_IMM_REG] == '1') {
+        option_imm_reg = 1;
+    } else if (bits[OPTIONS_IMM_REG] == '0') {
+        option_imm_reg = 0;
+    } else {
+        lsassertm(0, "wrong options for imm_reg.");
+    }
+
+    if (bits[OPTIONS_IMM_RIP] == '1') {
+        option_imm_rip = 1;
+    } else if (bits[OPTIONS_IMM_RIP] == '0') {
+        option_imm_rip = 0;
+    } else {
+        lsassertm(0, "wrong options for imm_reg_rip.");
+    }
+
+    if (bits[OPTIONS_IMM_COMPLEX] == '1') {
+        option_imm_complex = 1;
+    } else if (bits[OPTIONS_IMM_COMPLEX] == '0') {
+        option_imm_complex = 0;
+    } else {
+        lsassertm(0, "wrong options for imm_reg_complex.");
+    }
+
+    if (bits[OPTIONS_IMM_PRECACHE] == '1') {
+        option_imm_precache = 1;
+    } else if (bits[OPTIONS_IMM_PRECACHE] == '0') {
+        option_imm_precache = 0;
+    } else {
+        lsassertm(0, "wrong options for imm_reg_precache.");
+    }
+}
+
+#define OPTIONS_DUMP_FUNC 0
+#define OPTIONS_DUMP_IR1 1
+#define OPTIONS_DUMP_IR2 2
+#define OPTIONS_DUMP_HOST 3
+#define OPTIONS_DUMP_PROFILE 4
+
+void options_parse_dump(const char *bits)
+{
+    if (!bits) {
+        return;
+    }
+
+    if (bits[OPTIONS_DUMP_PROFILE] == '1') {
+        option_dump_profile = 1;
+    } else if (bits[OPTIONS_DUMP_PROFILE] == '0') {
+        option_dump_profile = 0;
+    } else {
+        lsassertm(0, "wrong options for dump profile.");
+    }
+
+    if (bits[OPTIONS_DUMP_IR1] == '1') {
+        option_dump_ir1 = 1;
+    } else if (bits[OPTIONS_DUMP_IR1] == '0') {
+        option_dump_ir1 = 0;
+    } else {
+        lsassertm(0, "wrong options for dump ir1.");
+    }
+
+    if (bits[OPTIONS_DUMP_IR2] == '1') {
+        option_dump_ir2 = 1;
+    } else if (bits[OPTIONS_DUMP_IR2] == '0') {
+        option_dump_ir2 = 0;
+    } else {
+        lsassertm(0, "wrong options for dump ir2.");
+    }
+
+    if (bits[OPTIONS_DUMP_HOST] == '1') {
+        option_dump_host = 1;
+    } else if (bits[OPTIONS_DUMP_HOST] == '0') {
+        option_dump_host = 0;
+    } else {
+        lsassertm(0, "wrong options for dump host.");
+    }
+
+    if (bits[OPTIONS_DUMP_FUNC] == '1') {
+        option_dump = 1;
+    } else if (bits[OPTIONS_DUMP_FUNC] == '0') {
+        option_dump = 0;
+    } else {
+        lsassertm(0, "wrong options for dump func.");
+    }
+}
+
+void options_parse_opt(const char *arg)
+{
+    if (arg && !strcmp(arg, "tunnel-lib")) {
+        option_tunnel_lib = true;
+    } else if (arg && !strcmp(arg, "vpaes")) {
+        option_vpaes = true;
+    }
+}
+
+void options_parse_show_tb(const char *pc)
+{
+    if (!pc) {
+        return;
+    }
+
+    qemu_strtou64(pc, NULL, 0, &debug_tb_pc);
+    printf("debug_tb_pc = 0x%lx\n", debug_tb_pc);
+}
+
+void options_parse_trace_mem(const char *pc)
+{
+    if (!pc) {
+        return;
+    }
+
+    qemu_strtou64(pc, NULL, 0, &latx_trace_mem);
+    printf("latx_trace_mem = 0x%lx\n", latx_trace_mem);
+}
+
+void options_parse_break_insn(const char *pc)
+{
+    if (!pc) {
+        return;
+    }
+
+    qemu_strtou64(pc, NULL, 0, &latx_break_insn);
+    printf("latx_break_insn = 0x%lx\n", latx_break_insn);
+}
+
+void options_parse_debug_lative(void)
+{
+    debug_tb_pc = 0x30000;
+    latx_break_insn = 0x30000;
+    option_debug_lative = 1;
+}
+
+void options_parse_latx_unlink(const char *arg)
+{
+    if (!arg) {
+        return;
+    }
+    gchar **arr = NULL;
+    arr = g_strsplit(arg, ",", 0);
+    latx_unlink_count = atol(arr[0]);
+    if (arr[1]) {
+        latx_unlink_cpu = atoi(arr[1]);
+    }
+    printf("latx_unlink_count = %ld latx_unlink_cpu = %d\n",
+            latx_unlink_count, latx_unlink_cpu);
+    g_strfreev(arr);
+}
+
+#define OPTIONS_TRACE_TB 0
+#define OPTIONS_TRACE_IR1 1
+
+void options_parse_trace(const char *bits)
+{
+    if (!bits) {
+        return;
+    }
+
+    if (bits[OPTIONS_TRACE_TB] == '1') {
+        option_trace_tb = 1;
+    } else if (bits[OPTIONS_TRACE_TB] == '0') {
+        option_trace_tb = 0;
+    } else {
+        lsassertm(0, "wrong options for trace tb.");
+    }
+
+    if (bits[OPTIONS_TRACE_IR1] == '1') {
+        option_trace_ir1 = 1;
+    } else if (bits[OPTIONS_TRACE_IR1] == '0') {
+        option_trace_ir1 = 0;
+    } else {
+        lsassertm(0, "wrong options for trace ir1 .");
+    }
+}
+
+void options_parse_latx_disassemble_trace_cmp(const char *args)
+{
+    if (!args) {
+        return;
+    }
+    const char *findSpil = strstr(args, ":");
+    if (!findSpil) {
+        lsassertm(0, "Can't find \':\' from args.\n");
+        return;
+    }
+    char strtmp[100] = {0};
+    option_latx_disassemble_trace_cmp = 0;
+    lsassert(findSpil - args <= 100);
+    strncpy(strtmp, args, findSpil - args);
+    if (!strcmp(strtmp, "lacapstone")) {
+        option_latx_disassemble_trace_cmp |= OPT_V1LACAPSTONE;
+    } else if (!strcmp(strtmp, "nextcapstone")) {
+        option_latx_disassemble_trace_cmp |= OPT_V1NEXTCAPSTONE;
+    } else if (!strcmp(strtmp, "lazydis")) {
+        option_latx_disassemble_trace_cmp |= OPT_V1LAZYDIS;
+    } else {
+        lsassertm(0, "V1 must be lacapstone, lazydis, "
+            "or nextcapstone, but this V1=%s\n", strtmp);
+        return;
+    }
+    strncpy(strtmp, findSpil + 1, 99);
+    if (!strcmp(strtmp, "lacapstone")) {
+        option_latx_disassemble_trace_cmp |= OPT_V2LACAPSTONE;
+    } else if (!strcmp(strtmp, "nextcapstone")) {
+        option_latx_disassemble_trace_cmp |= OPT_V2NEXTCAPSTONE;
+    } else if (!strcmp(strtmp, "lazydis")) {
+        option_latx_disassemble_trace_cmp |= OPT_V2LAZYDIS;
+    } else if (strlen(strtmp) == 0) {
+        /*Only want to choose la_disa_v1, No cmp.*/
+    } else {
+        lsassertm(0, "V2 must be lacapstone, lazydis, "
+            "nextcapstone or NULL, but this V2=%s\n", strtmp);
+    }
+}
+uint8 options_to_save(void)
+{
+    uint8 option_bitmap = 0;
+    return option_bitmap;
+}

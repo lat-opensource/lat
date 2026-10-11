@@ -63,6 +63,7 @@ extern struct elfheader_s * elf_header;
 #ifdef CONFIG_LATX
 #include "jrra.h"
 #endif
+#include "latc-aot-v2-runner.h"
 /* -icount align implementation. */
 
 typedef struct SyncClocks {
@@ -270,6 +271,7 @@ cpu_tb_exec(CPUState *cpu, TranslationBlock *itb, int *tb_exit)
 
     env->fpu_clobber = false;
     ret = tcg_qemu_tb_exec(env, tb_ptr);
+    latc_aot_v2_drain_signal_recovery(cpu);
 
     int tbexit = ret & TB_EXIT_MASK;
     ret = (ret & ~TB_EXIT_MASK) - 4;
@@ -377,6 +379,87 @@ cpu_tb_exec(CPUState *cpu, TranslationBlock *itb, int *tb_exit)
 
     return last_tb;
 }
+
+#ifdef CONFIG_LATX
+static inline TranslationBlock * QEMU_DISABLE_CFI
+cpu_aot_v2_exec(CPUState *cpu, const LatcAotV2Target *target, int *tb_exit)
+{
+    CPUArchState *env = cpu->env_ptr;
+    uintptr_t ret;
+    TranslationBlock *last_tb;
+
+    qemu_log_mask_and_addr(CPU_LOG_EXEC, target->guest_pc,
+                           "Trace cpu%d: %p [" TARGET_FMT_lx "] AOT v2\n",
+                           cpu->cpu_index, target->host_address,
+                           target->guest_pc);
+    qemu_thread_jit_execute();
+    env->fpu_clobber = false;
+    ret = tcg_qemu_tb_exec(env, target->host_address);
+    latc_aot_v2_drain_signal_recovery(cpu);
+    latc_aot_v2_release_target(cpu, (LatcAotV2Target *)target);
+
+    int tbexit = ret & TB_EXIT_MASK;
+    uintptr_t return_host_pc = (ret & ~TB_EXIT_MASK) - 4;
+    TranslationBlock *rettb = tcg_tb_lookup(return_host_pc);
+    ret = tbexit;
+    if (rettb) {
+        uint64_t lazypc;
+        if (tbexit) {
+            if (rettb->canlink[1]) {
+                ret |= (uint64_t)rettb;
+            }
+            lazypc = rettb->pc + rettb->lazypc[1];
+        } else {
+            if (rettb->canlink[0]) {
+                ret |= (uint64_t)rettb;
+            }
+            lazypc = rettb->pc + rettb->lazypc[0];
+        }
+        env->eip = lazypc;
+    }
+
+#ifdef CONFIG_LATX_MONITOR_SHARED_MEM
+    if (option_monitor_shared_mem && env->checksum_fail_tb) {
+        TranslationBlock *tb_fail = (TranslationBlock *)env->checksum_fail_tb;
+        lsassert(tb_fail->checksum && tb_fail->pc == env->eip);
+        mmap_lock();
+        tb_phys_invalidate(tb_fail, tb_page_addr0(tb_fail));
+        mmap_unlock();
+        env->checksum_fail_tb = NULL;
+    }
+#endif
+
+    if (env->insn_save[0]) {
+        link_indirect_jmp(env);
+    }
+    cpu->can_do_io = 1;
+    if (option_split_tb) {
+        last_tb = (void *)(ret & ~TB_EXIT_MASK);
+    } else {
+        last_tb = tcg_splitwx_to_rw((void *)(ret & ~TB_EXIT_MASK));
+    }
+    *tb_exit = ret & TB_EXIT_MASK;
+    trace_exec_tb_exit(last_tb, *tb_exit);
+
+    if (last_tb) {
+        if (tb_is_unlink(last_tb, 0)) {
+            set_tb_relink_flag(last_tb, 0);
+        }
+        if (tb_is_unlink(last_tb, 1)) {
+            set_tb_relink_flag(last_tb, 1);
+        }
+    }
+    if (*tb_exit > TB_EXIT_IDX1) {
+        CPUClass *cc = CPU_GET_CLASS(cpu);
+        if (cc->set_pc) {
+            cc->set_pc(cpu, target->guest_pc);
+        } else {
+            env->eip = target->guest_pc;
+        }
+    }
+    return last_tb;
+}
+#endif
 
 
 static void cpu_exec_enter(CPUState *cpu)
@@ -733,9 +816,14 @@ inline void tb_add_jump(TranslationBlock *tb, int n,
 #include "tu.h"
 #endif
 
+#ifdef CONFIG_LATX
+static __thread LatcAotV2Target *cpu_aot_v2_target_cache;
+#endif
+
 static inline TranslationBlock *tb_find(CPUState *cpu,
                                         TranslationBlock *last_tb,
-                                        int tb_exit, uint32_t cflags)
+                                        int tb_exit, uint32_t cflags,
+                                        LatcAotV2Target *aot_target)
 {
     CPUArchState *env = (CPUArchState *)cpu->env_ptr;
     TranslationBlock *tb;
@@ -744,9 +832,62 @@ static inline TranslationBlock *tb_find(CPUState *cpu,
 
     cpu_get_tb_cpu_state(env, &pc, &cs_base, &flags);
 
-    tb = tb_lookup(cpu, pc, cs_base, flags, cflags);
+    tb = NULL;
+    bool aot_v2 = false;
 #if defined(TARGET_X86_64) && defined(CONFIG_LATX_JRRA)
-    if (tb == NULL) {
+retry_guest_lookup:
+#endif
+#ifdef CONFIG_LATX
+    if (aot_target) {
+        uint32_t hash = tb_jmp_cache_hash_func(pc);
+        bool lookup_target = true;
+        LatcAotV2Target *cached = cpu_aot_v2_target_cache ?
+            &cpu_aot_v2_target_cache[hash] : NULL;
+        if (cached && cached->guest_pc == pc &&
+            cached->cflags == cflags && cached->generation_address &&
+            cached->generation == atomic_load_explicit(
+                cached->generation_address, memory_order_acquire)) {
+            *aot_target = *cached;
+            if (cached->host_address) {
+                /*
+                 * Generated fast jumps update env->aot_v2_current_context
+                 * without returning here.  Revalidate the real context
+                 * instead of keeping a second C-side context value that can
+                 * go stale.
+                 */
+                aot_v2 = latc_aot_v2_activate_target(cpu, cached);
+                if (aot_v2) {
+                    aot_target->reader_held = true;
+                }
+                lookup_target = !aot_v2;
+            } else {
+                /* A registry generation change invalidates this miss. */
+                if (cached->context) {
+                    latc_aot_v2_note_cached_miss(cached);
+                }
+                lookup_target = false;
+            }
+        }
+        if (!aot_v2 && lookup_target) {
+            aot_v2 = latc_aot_v2_find_target(cpu, pc, cflags, aot_target);
+            if (aot_v2 || aot_target->generation_address) {
+                if (!cpu_aot_v2_target_cache) {
+                    cpu_aot_v2_target_cache = g_new0(
+                        LatcAotV2Target, TB_JMP_CACHE_SIZE);
+                }
+                if (cpu_aot_v2_target_cache) {
+                    cpu_aot_v2_target_cache[hash] = *aot_target;
+                    cpu_aot_v2_target_cache[hash].reader_held = false;
+                }
+            }
+        }
+    }
+#endif
+    if (!aot_v2) {
+        tb = tb_lookup(cpu, pc, cs_base, flags, cflags);
+    }
+#if defined(TARGET_X86_64) && defined(CONFIG_LATX_JRRA)
+    if (tb == NULL && !aot_v2) {
         target_ulong guest_pc;
 
         if (resolve_signal_return_bridge(pc, &guest_pc)) {
@@ -754,12 +895,12 @@ static inline TranslationBlock *tb_find(CPUState *cpu,
             env->eip = pc - cs_base;
             /* Do not link or cache a host bridge as a guest code address. */
             last_tb = NULL;
-            tb = tb_lookup(cpu, pc, cs_base, flags, cflags);
+            goto retry_guest_lookup;
         }
     }
 #endif
 #ifdef CONFIG_LATX_AOT
-    if (tb == NULL && option_aot) {
+    if (tb == NULL && !aot_v2 && option_aot) {
         mmap_lock();
         if (load_aot(pc, cflags)) {
             tb = tb_lookup(cpu, pc, cs_base, flags, cflags);
@@ -767,7 +908,7 @@ static inline TranslationBlock *tb_find(CPUState *cpu,
         mmap_unlock();
     }
 #endif
-    if (tb == NULL) {
+    if (tb == NULL && !aot_v2) {
 #if (defined CONFIG_LATX_AOT) && (defined CONFIG_LATX_DEBUG)
         if (option_debug_aot && option_load_aot) {
             static long long cnt;
@@ -804,12 +945,12 @@ static inline TranslationBlock *tb_find(CPUState *cpu,
      * system emulation. So it's not safe to make a direct jump to a TB
      * spanning two pages because the mapping for the second page can change.
      */
-    if (tb->page_addr[1] != -1) {
+    if (tb && tb->page_addr[1] != -1) {
         last_tb = NULL;
     }
 #endif
     /* See if we can patch the calling TB. */
-    if (last_tb) {
+    if (last_tb && tb && !aot_v2) {
         tb_add_jump(last_tb, tb_exit, tb);
     }
     return tb;
@@ -864,7 +1005,7 @@ TranslationBlock * kzt_tb_find_exp(
             TranslationBlock *last_tb,
             int tb_exit, uint32_t cflags)
 {
-    return tb_find(cpu, last_tb, tb_exit, cflags);
+    return tb_find(cpu, last_tb, tb_exit, cflags, NULL);
 }
 
 #endif
@@ -1076,12 +1217,21 @@ static inline bool cpu_handle_interrupt(CPUState *cpu,
 }
 
 static inline void cpu_loop_exec_tb(CPUState *cpu, TranslationBlock *tb,
+                                    const LatcAotV2Target *aot_target,
                                     TranslationBlock **last_tb, int *tb_exit)
 {
     int32_t insns_left;
 
-    trace_exec_tb(tb, tb->pc);
-    tb = cpu_tb_exec(cpu, tb, tb_exit);
+    if (tb) {
+        trace_exec_tb(tb, tb->pc);
+        tb = cpu_tb_exec(cpu, tb, tb_exit);
+#ifdef CONFIG_LATX
+    } else if (aot_target && aot_target->host_address) {
+        tb = cpu_aot_v2_exec(cpu, aot_target, tb_exit);
+#endif
+    } else {
+        g_assert_not_reached();
+    }
     if (*tb_exit != TB_EXIT_REQUESTED) {
         *last_tb = tb;
         return;
@@ -1149,6 +1299,9 @@ int cpu_exec(CPUState *cpu)
 
     /* prepare setjmp context for exception handling */
     if (sigsetjmp(cpu->jmp_env, 0) != 0) {
+#ifdef CONFIG_LATX
+        latc_aot_v2_release_current_execution(cpu);
+#endif
 #if defined(__clang__)
         /*
          * Some compilers wrongly smash all local variables after
@@ -1206,6 +1359,7 @@ int cpu_exec(CPUState *cpu)
         while (!cpu_handle_interrupt(cpu, &last_tb)) {
             uint32_t cflags = cpu->cflags_next_tb;
             TranslationBlock *tb;
+            LatcAotV2Target aot_target = { 0 };
 
             /* When requested, use an exact setting for cflags for the next
                execution.  This is used for icount, precise smc, and stop-
@@ -1218,15 +1372,19 @@ int cpu_exec(CPUState *cpu)
                 cpu->cflags_next_tb = -1;
             }
 
-            tb = tb_find(cpu, last_tb, tb_exit, cflags);
+            tb = tb_find(cpu, last_tb, tb_exit, cflags, &aot_target);
 #ifdef CONFIG_LATX_DEBUG
-            trace_tb_execution(tb);
+            if (tb) {
+                trace_tb_execution(tb);
+            }
 #endif
 #ifdef CONFIG_LATX_PROFILER
-            ADD_TB_PROFILE(tb, exit_times, 1);
+            if (tb) {
+                ADD_TB_PROFILE(tb, exit_times, 1);
+            }
 #endif
 
-            cpu_loop_exec_tb(cpu, tb, &last_tb, &tb_exit);
+            cpu_loop_exec_tb(cpu, tb, &aot_target, &last_tb, &tb_exit);
             /* Try to align the host and virtual clocks
                if the guest is in advance */
             align_clocks(&sc, cpu);

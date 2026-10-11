@@ -17,7 +17,7 @@
 #include "reg-map.h"
 #include "translate.h"
 
-int itemp_stat[4] = {1, 1, 1, 1};
+static __thread int itemp_stat[4] = {1, 1, 1, 1};
 
 /**
  * itemp_stat index map itemp
@@ -55,8 +55,8 @@ const int itemp_reverse_map[11] = {
 //=====================
 //     stastic
 //=====================
-long cache_call = 0;
-long cache_hit = 0;
+static __thread long cache_call;
+static __thread long cache_hit;
 
 // ========================
 //      util functions
@@ -133,6 +133,19 @@ static inline int compare_imm_cache(const void *a, const void *b)
 // sort by use frequency, range: cache_count
 inline void imm_cache_sort(IMM_CACHE *cache)
 {
+    if (cache->cache_count <= 16) {
+        for (int i = 1; i < cache->cache_count; i++) {
+            IMM_CACHE_BUCKET value = cache->bucket[i];
+            int j = i;
+            while (j > 0 &&
+                   cache->bucket[j - 1].use_count < value.use_count) {
+                cache->bucket[j] = cache->bucket[j - 1];
+                j--;
+            }
+            cache->bucket[j] = value;
+        }
+        return;
+    }
     qsort(cache->bucket, cache->cache_count, sizeof(IMM_CACHE_BUCKET),
           compare_imm_cache);
 }
@@ -471,7 +484,7 @@ IMM_CACHE_RES imm_cache_allocate(IMM_CACHE *cache, int base, int index,
 {
     cache_call++;
     // skip imm opt if pc == 0x...
-    static bool stop_opt = false;
+    static __thread bool stop_opt;
 
     if (unlikely(imm_skip_pc != 0)) {
         if (!stop_opt && cache->curr_pc == imm_skip_pc) {

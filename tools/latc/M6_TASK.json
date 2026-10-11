@@ -1,0 +1,99 @@
+{
+  "title": "AOT v2 M6：修复生产缺口并完成旧 AOT 对照",
+  "requirement": "修复 T-307 代码审查发现的假并发验收、长期运行对象不释放、共享链表并发风险、信号状态和 unwind 诊断不完整、失效后不能重新注册、CPU 特性硬编码、latcd 资源控制不足、动态覆盖率低以及旧 AOT/M4/真原生对照缺失。",
+  "objective": "使 AOT v2 在长期动态程序、并发信号和模块生命周期变化下保持正确且内存有界，并用同条件数据说明相对旧 AOT、M4 和原生 LoongArch 的性能。",
+  "scope": "tools/latc 的 AOT v2 runner、registry、signal、mmap、latcd、测试与性能脚本，以及 3a6000-25g 真机验证。",
+  "acceptance_criteria": [
+    "真实双线程信号与卸载/失效测试通过，完整支持的 x86 signal frame 和模块/guest PC 诊断均有断言。",
+    "十万次生命周期压力后保留对象数量有界，并发测试和可用 sanitizer 无数据竞争或释放后访问。",
+    "RX 恢复和 mremap 只在重新校验和新注册后恢复 AOT；CPU 特性、缓存权限、容量、淘汰和编译并发均有测试。",
+    "真实动态应用完成冷暖缓存和长期运行验证，动态 AOT 覆盖、JIT fallback、RSS/PSS 和共享页均有原始数据。",
+    "AOT v2、旧 AOT、M4 和可用真原生在同输入同 CPU 条件下各至少 5 次，报告中位数和几何平均。"
+  ],
+  "impact_scope": "AOT v2 动态模块执行、信号恢复、内存生命周期、latcd 缓存行为和性能结论；不改 tools/latc 之外的 LAT 核心源码。",
+  "dependencies": ["T-307"],
+  "open_questions": ["3a6000-25g 上可用的旧 AOT 启动方式和真原生 SPEC 二进制需在性能 WI 开始时确认。"],
+  "risk_level": "L4",
+  "status": "active",
+  "work_items": [
+    {
+      "key": "signal",
+      "title": "补齐真实并发信号恢复和 unwind 诊断",
+      "description": "用真实双线程替换空的 concurrent_invalidation 分支，补齐完整信号状态和模块/guest PC 诊断。",
+      "goal": "信号恢复与模块卸载或失效真实重叠时，不读取过期模块信息，并恢复准确 guest 状态。",
+      "scope": "AOT v2 PC map 索引、信号恢复接口、dlopen/signal fixtures 和诊断测试。",
+      "boundary": "不改变非 AOT 的既有 JIT 信号语义。",
+      "acceptance_criteria": [
+        "测试包含两个真实线程，并用 barrier 明确证明 signal PC-map 查询与卸载或失效发生重叠。",
+        "边界、内部、结束和 helper fault 检查支持的 GPR、RFLAGS、向量状态、signal mask、altstack、嵌套和 sigreturn。",
+        "诊断接口返回模块摘要、实例 generation 和准确 guest PC；失效或歧义输入安全失败。"
+      ],
+      "risk_level": "L4",
+      "item_type": "bug"
+    },
+    {
+      "key": "lifetime",
+      "title": "实现有界对象回收并消除共享索引并发风险",
+      "description": "替换永久 retired 链表，统一 runtime instances、host snapshots、registry snapshots 和 stats 的发布与回收。",
+      "goal": "长期动态加载期间内存有界，dispatch、信号和映射更新并发时没有释放后访问或数据竞争。",
+      "scope": "runner/registry 生命周期、只读索引、统计结构、对象计数和高循环压力测试。",
+      "boundary": "不要求在 signal handler 中获取 pthread mutex。",
+      "acceptance_criteria": [
+        "十万次注册、失效和卸载后，经过读者退出周期，live/retired 对象数量回到规定上限。",
+        "dispatch、信号查找、映射更新和统计输出并发压力通过；支持时 TSAN 无报告。",
+        "现有 M1-M5 生命周期与失效测试全部通过。"
+      ],
+      "risk_level": "L4",
+      "item_type": "bug",
+      "depends_on": ["signal"]
+    },
+    {
+      "key": "runtime",
+      "title": "补齐重新注册、CPU 特性和缓存服务安全控制",
+      "description": "实现 RX/mremap 重新验证，按 HWCAP 选择模块，并为 latcd 加入缓存配额、淘汰、worker 上限和不可变加载。",
+      "goal": "映射恢复、不同 LoongArch CPU 和长期缓存服务场景下行为安全且资源可控。",
+      "scope": "mmap 通知、module loader、feature selection、latcd 配置和对应测试。",
+      "boundary": "不实现模块签名分发，不为匿名 JIT 映射生成 AOT。",
+      "acceptance_criteria": [
+        "成功 RX 恢复或可识别 mremap 只有在摘要校验和新 generation 注册后恢复 AOT，失败系统调用不无谓失效。",
+        "LASX/LSX 特性按 HWCAP 选择，不支持的模块稳定回退 JIT。",
+        "latcd 缓存容量、淘汰、worker 数量和外部可写模块处理均有确定性测试。"
+      ],
+      "risk_level": "L4",
+      "item_type": "feature",
+      "depends_on": ["lifetime"]
+    },
+    {
+      "key": "dynamic",
+      "title": "验证真实动态应用覆盖率和长期资源使用",
+      "description": "选择真实多 DSO 应用，测量冷暖缓存、插件反复加载、长时间 AOT/JIT 覆盖和跨进程共享页。",
+      "goal": "用真实应用证明动态路径的覆盖率、稳定性和共享收益。",
+      "scope": "可复现实验脚本、应用 fixture、长时间运行和 smaps/PSS 采样。",
+      "boundary": "不以单个 synthetic hello 代替真实应用结论。",
+      "acceptance_criteria": [
+        "至少一个真实多 DSO 应用完成冷、暖和长时间运行，退出结果正确。",
+        "报告逐模块 AOT hits、JIT fallback、runtime TB、注册时间和随时间变化的 RSS/PSS。",
+        "两个并发进程的 PSS/smaps 数据证明或否定 AOT 可执行页共享。"
+      ],
+      "risk_level": "L3",
+      "item_type": "feature",
+      "depends_on": ["runtime"]
+    },
+    {
+      "key": "performance",
+      "title": "完成旧 AOT、M4、AOT v2 和真原生同条件对照",
+      "description": "统一 runner、输入、CPU、频率和缓存状态，重测四种执行模式并更新 M6 结果。",
+      "goal": "给出能直接回答 AOT v2 相对旧 AOT 和原生效率的重复测量。",
+      "scope": "SPECint2000 train、启动/注册/RSS/共享页脚本、原始样本和 M6_RESULTS。",
+      "boundary": "不运行 SPEC ref；缺失的真原生输入必须明确说明，不能用 native-image 冒充。",
+      "acceptance_criteria": [
+        "AOT v2、旧 AOT、M4 和可获得的真原生使用相同输入与 host 设置，每项至少 5 次。",
+        "报告逐项中位数、效率、几何平均、冷暖启动、注册时间、RSS/PSS 和共享页原始数据。",
+        "M1-M6 回归和 SPECint2000 train 12/12 通过，所有限制单独列出。"
+      ],
+      "risk_level": "L4",
+      "item_type": "feature",
+      "depends_on": ["dynamic"]
+    }
+  ]
+}

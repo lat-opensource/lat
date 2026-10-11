@@ -6,6 +6,7 @@
 #include "qemu.h"
 #include "segment.h"
 #include "latx-options.h"
+#include "latc-x86-syscall-abi.h"
 
 /* Unmodified production IPC code, without unrelated syscall tables. */
 #include "aot-shm-syscall-test-body.h"

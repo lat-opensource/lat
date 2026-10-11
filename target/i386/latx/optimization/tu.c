@@ -58,6 +58,8 @@ void get_last_info(TranslationBlock *tb, IR1_INST* pir1)
     } else if (ir1_opcode(pir1) == dt_X86_INS_JMP &&
         ir1_is_indirect_jmp(pir1)) {
         tb->s_data->last_ir1_type = (int8)IR1_TYPE_JUMPIN;
+    } else if (ir1_is_syscall(pir1)) {
+        tb->s_data->last_ir1_type = (int8)IR1_TYPE_SYSCALL;
     } else {
         tb->s_data->last_ir1_type = (int8)IR1_TYPE_NORMAL;
     }
@@ -253,7 +255,8 @@ TranslationBlock* tb_create(CPUState *cpu, target_ulong pc,
         env->eip = pc;
         cpu_get_tb_cpu_state(env, &pc, &cs_base, &flags);
     }
-    tb->bool_flags |= (bool_flags & (IS_CODE64 | TBSMC_OPTED));
+    tb->bool_flags |= (bool_flags &
+                       (IS_CODE64 | TBSMC_OPTED | IS_AOT_BOUNDED));
 #ifdef CONFIG_LATX_SMC_OPT
     if (bool_flags & TBSMC_OPTED) {
         tb->smc_data = TBSMC_OPTED_MASK;
@@ -698,7 +701,7 @@ uint bcc_ins_convert(uint convert_insn)
     return fix_insn;
 }
 
-static bool bcc_jmp_fail;
+static __thread bool bcc_jmp_fail;
 
 int tu_relocat_target_branch(TranslationBlock * tb)
 {
@@ -1015,6 +1018,12 @@ void translate_tu(uint32 tb_num_in_tu, TranslationBlock **tb_list)
     uint32_t search_size = 0;
     TranslationBlock *tb;
     bcc_jmp_fail = false;
+#ifdef CONFIG_LATX_AOT
+    int rel_checkpoint = -1;
+    if (option_aot && in_pre_translate) {
+        rel_checkpoint = aot_rel_table_checkpoint();
+    }
+#endif
 
 #if defined(CONFIG_LATX_TBMINI_ENABLE)
     uintptr_t tbmini_ptr = (uintptr_t)
@@ -1068,6 +1077,16 @@ retry:
                 qatomic_set(&tcg_ctx->code_gen_ptr, (void *)
                     ROUND_UP((uintptr_t)(tb_list[0]->tc.ptr), CODE_GEN_ALIGN));
                 assert(bcc_jmp_fail);
+#ifdef CONFIG_LATX_AOT
+                if (rel_checkpoint >= 0) {
+                    aot_rel_table_rollback(rel_checkpoint);
+                    for (uint32_t j = 0; j < tb_num_in_tu; j++) {
+                        tb_list[j]->s_data->rel_start = -1;
+                        tb_list[j]->s_data->rel_end = -1;
+                    }
+                }
+#endif
+                search_size = 0;
                 goto retry;
             }
             tb->tu_unlink.ins = *(uint32_t *)(tb->tc.ptr +

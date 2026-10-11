@@ -59,6 +59,20 @@ static inline int lsenv_offset_of_tb_jmp_cache_ptr(ENV *lsenv)
     return (int)((ADDR)(&cpu->tb_jmp_cache_ptr) - (ADDR)lsenv->cpu_state);
 }
 
+static inline int lsenv_offset_of_aot_v2_jmp_cache_ptr(ENV *lsenv)
+{
+    CPUX86State *cpu = (CPUX86State *)lsenv->cpu_state;
+    return (int)((ADDR)(&cpu->aot_v2_jmp_cache_ptr) -
+                 (ADDR)lsenv->cpu_state);
+}
+
+static inline int lsenv_offset_of_aot_v2_current_context(ENV *lsenv)
+{
+    CPUX86State *cpu = (CPUX86State *)lsenv->cpu_state;
+    return (int)((ADDR)(&cpu->aot_v2_current_context) -
+                 (ADDR)lsenv->cpu_state);
+}
+
 static inline int lsenv_offset_of_eip(ENV *lsenv)
 {
     CPUX86State *cpu = (CPUX86State *)lsenv->cpu_state;

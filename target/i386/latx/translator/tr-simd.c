@@ -1048,6 +1048,62 @@ bool translate_mulps(IR1_INST *pir1)
 
 bool translate_mulsd(IR1_INST *pir1)
 {
+    if (SHBR_FUSED_MEM64_PAIR(pir1)) {
+        return true;
+    }
+    if (SHBR_FUSE_MEM64_PAIR(pir1)) {
+        IR1_INST *second = pir1 + 1;
+        IR1_OPND *src_mem = ir1_get_opnd(pir1, 1);
+        int offset;
+        IR2_OPND mem = convert_mem(src_mem, &offset);
+
+        IR2_OPND dest =
+            load_freg128_from_ir1(ir1_get_opnd(pir1, 0));
+        IR2_OPND src = ra_alloc_ftemp();
+        gen_test_page_flag(mem, offset, PAGE_READ, 8);
+        la_fld_d(src, mem, offset);
+        bool restore_zero = SHBR_RESTORE_64(pir1);
+        if (SHBR_ON_64(pir1) || restore_zero) {
+            la_fmul_d(dest, dest, src);
+            if (restore_zero) {
+                clear_xmm_high64(dest);
+            }
+        } else {
+            IR2_OPND temp = ra_alloc_ftemp();
+            la_fmul_d(temp, dest, src);
+            if (option_enable_lasx) {
+                la_xvinsve0_d(dest, temp, 0);
+            } else {
+                la_vextrins_d(dest, temp, 0);
+            }
+        }
+
+        IR2_OPND ir2_opnd_addr;
+        ir2_opnd_build(&ir2_opnd_addr, IR2_OPND_IMM, ir1_addr(second));
+        la_x86_inst(ir2_opnd_addr);
+        mem = mem_imm_add_disp(mem, &offset, 8);
+        gen_test_page_flag(mem, offset, PAGE_READ, 8);
+
+        dest = load_freg128_from_ir1(ir1_get_opnd(second, 0));
+        src = ra_alloc_ftemp();
+        la_fld_d(src, mem, offset);
+        restore_zero = SHBR_RESTORE_64(second);
+        if (SHBR_ON_64(second) || restore_zero) {
+            la_fmul_d(dest, dest, src);
+            if (restore_zero) {
+                clear_xmm_high64(dest);
+            }
+        } else {
+            IR2_OPND temp = ra_alloc_ftemp();
+            la_fmul_d(temp, dest, src);
+            if (option_enable_lasx) {
+                la_xvinsve0_d(dest, temp, 0);
+            } else {
+                la_vextrins_d(dest, temp, 0);
+            }
+        }
+        return true;
+    }
     lsassert(ir1_opnd_is_xmm(ir1_get_opnd(pir1, 0)));
     IR2_OPND dest = load_freg128_from_ir1(ir1_get_opnd(pir1, 0));
     IR2_OPND src = load_freg128_from_ir1(ir1_get_opnd(pir1, 1));

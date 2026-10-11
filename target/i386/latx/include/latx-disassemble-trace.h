@@ -155,6 +155,7 @@ void disassemble_trace_loop(const uint8_t *code, size_t code_size,
 void lacapstone_init(int abi_bits);
 void nextcapstone_init(int abi_bits);
 void gitcapstone_init(int abi_bits);
+void gitcapstone_thread_init(void);
 void lazydis_init(int abi_bits);
 int lacapstone_get(const uint8_t *code, size_t code_size,
         uint64_t address,

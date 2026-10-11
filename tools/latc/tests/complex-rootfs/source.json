@@ -1,0 +1,14 @@
+{
+  "architecture": "amd64",
+  "base_image": "debian@sha256:6ebd97fa83deb272194a2cf015b3d26a4d538e9ad3a7a79d544c8af5b0a01443",
+  "debian_snapshot": "20260824T000000Z",
+  "packages": [
+    "ca-certificates",
+    "git",
+    "openssl",
+    "python3",
+    "redis-server",
+    "redis-tools",
+    "sqlite3"
+  ]
+}

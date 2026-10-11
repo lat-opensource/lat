@@ -7,7 +7,7 @@
 #include "capstone_git.h"
 #include "target/i386/latx/ir1/ir1-decode.h"
 
-csh handle[2];
+__thread csh handle[2];
 
 static unsigned int checked;
 static unsigned int failures;
@@ -181,6 +181,51 @@ static void test_threads(void)
     }
 }
 
+static void test_static_vector_boundary(void)
+{
+    uint8_t evex[15] = { 0x62, 0xf3, 0x5d, 0x4a, 0x3f, 0xc1, 0x04 };
+    struct la_dt_insn decoded = { 0 }, *full = NULL;
+    g_assert_cmpint(gitcapstone_get(evex, 15, 0x1000, 1, &full,
+                                   0, &decoded, 1), ==, 1);
+    g_assert_nonnull(ir1_static_vector_rejection(full, 1));
+    g_assert_nonnull(ir1_static_vector_rejection(full, 0));
+    uint8_t evex_xmm[15] = {
+        0x62, 0xf1, 0xfd, 0x08, 0x7f, 0x44, 0x24, 0x04,
+    };
+    g_assert_cmpint(gitcapstone_get(evex_xmm, 15, 0x2000, 1, &full,
+                                   0, &decoded, 1), ==, 1);
+    g_assert_cmpuint(full->x86.op_count, >, 0);
+    g_assert_null(ir1_static_vector_rejection(full, 1));
+    ir1_decode_template_insert(evex_xmm, 15, 1, full);
+    struct la_dt_insn cached = { 0 };
+    g_assert_nonnull(ir1_decode_template_lookup(
+        evex_xmm, 15, 0x3000, 0, &cached, 1));
+    g_assert_null(ir1_static_vector_rejection(&cached, 1));
+    /* Existing EVEX XMM paths are not rejected solely for their encoding. */
+    decoded = (struct la_dt_insn) {
+        .size = 7, .bytes = { 0x67, 0x62, 0xf1, 0x7c, 0x08, 0x58, 0xc1 },
+    };
+    g_assert_null(ir1_static_vector_rejection(&decoded, 1));
+    decoded = (struct la_dt_insn) { .size = 2, .bytes = { 0x62, 0x00 } };
+    g_assert_null(ir1_static_vector_rejection(&decoded, 0)); /* BOUND */
+    decoded = (struct la_dt_insn) {
+        .size = 4, .bytes = { 0xc5, 0xf5, 0x74, 0xc2 },
+        .x86.op_count = 1,
+    };
+    decoded.x86.operands[0].type = dt_X86_OP_REG;
+    decoded.x86.operands[0].reg = dt_X86_REG_YMM15;
+    g_assert_null(ir1_static_vector_rejection(&decoded, 1));
+    g_assert_nonnull(ir1_static_vector_rejection(&decoded, 0));
+    decoded.x86.operands[0].reg = dt_X86_REG_XMM16;
+    g_assert_nonnull(ir1_static_vector_rejection(&decoded, 1));
+    decoded.x86.operands[0].reg = dt_X86_REG_ZMM0;
+    g_assert_nonnull(ir1_static_vector_rejection(&decoded, 1));
+    decoded.x86.operands[0].reg = dt_X86_REG_K0;
+    g_assert_nonnull(ir1_static_vector_rejection(&decoded, 1));
+    decoded.x86.operands[0].reg = dt_X86_REG_XMM7;
+    g_assert_null(ir1_static_vector_rejection(&decoded, 0));
+}
+
 int main(void)
 {
     gitcapstone_init(64);
@@ -232,6 +277,7 @@ int main(void)
     test_collision();
     test_modes();
     test_threads();
+    test_static_vector_boundary();
     g_assert_cmpuint(checked, >, 250000);
     printf("fast decoder checked=%u field mismatches=%u\n", checked, failures);
     return failures ? 1 : 0;

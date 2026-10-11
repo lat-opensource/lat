@@ -7,6 +7,7 @@
 #include "lsenv.h"
 #include "reg-alloc.h"
 #include "flag-lbt.h"
+#include "lat-eflags-link.h"
 #include <string.h>
 #include "latx-options.h"
 #include "fpu/softfloat.h"
@@ -20,6 +21,9 @@
 #include "latx-smc.h"
 #include "jrra.h"
 #include "latx-native-asm.h"
+#include "qemu.h"
+#include "ts.h"
+#include "hbr.h"
 
 extern void *helper_tb_lookup_ptr(CPUArchState *);
 static int ss_generate_match_fail_native_code(void* code_buf);
@@ -107,6 +111,9 @@ void tr_init(void *tb)
               t->curr_tb);
     t->curr_tb = tb;
     t->curr_ir1_inst = NULL;
+#ifdef CONFIG_LATX_OPT_PUSH_POP_TRANS
+    t->sp_delta = 0;
+#endif
 
     /* register allocation init */
     ra_free_all();
@@ -148,6 +155,9 @@ void tr_fini(bool check_the_extension)
     /* set current tb and ir1 */
     t->curr_tb = NULL;
     t->curr_ir1_inst = NULL;
+#ifdef CONFIG_LATX_OPT_PUSH_POP_TRANS
+    t->sp_delta = 0;
+#endif
 
     /* reset ir2 array */
     t->ir2_inst_num_current = 0;
@@ -169,31 +179,42 @@ void tr_fini(bool check_the_extension)
 /* func to access QEMU's data */
 static inline uint8_t cpu_read_code_via_qemu(void *cpu, ADDRX pc)
 {
+    if (aot_parallel_translate) {
+        return *(const uint8_t *)g2h_untagged(pc);
+    }
     return cpu_ldub_code((CPUX86State *)cpu, (target_ulong)pc);
 }
 
 #ifdef CONFIG_LATX_TU
-static char insn_info[MAX_IR1_IN_TU * IR1_INST_SIZE] = {0};
-static IR1_INST ir1_list_rel[MAX_IR1_IN_TU];
+/*
+ * These buffers are tens of MiB.  Keeping them in static TLS leaves newly
+ * created AOT compiler threads with almost no usable stack on LoongArch.
+ */
+static __thread char *insn_info;
+static __thread IR1_INST *ir1_list_rel;
 #else
 /* we creat an array to fill all 255 ir1's info. */
 #ifdef CONFIG_LATX_TU
-static char insn_info[MAX_TB_IN_TU * MAX_IR1_NUM_PER_TB * IR1_INST_SIZE] = {0};
+static __thread char insn_info[MAX_TB_IN_TU * MAX_IR1_NUM_PER_TB * IR1_INST_SIZE];
 #else
-static char insn_info[MAX_IR1_NUM_PER_TB * IR1_INST_SIZE] = {0};
+static __thread char insn_info[MAX_IR1_NUM_PER_TB * IR1_INST_SIZE];
 #endif
-static IR1_INST ir1_list[MAX_IR1_NUM_PER_TB];
+static __thread IR1_INST ir1_list[MAX_IR1_NUM_PER_TB];
 #endif
 
 IR1_INST *get_ir1_list(struct TranslationBlock *tb, ADDRX pc, int max_insns)
 {
-    static uint8_t inst_cache[TCG_MAX_INSNS];
+    static __thread uint8_t inst_cache[TCG_MAX_INSNS];
     uint8_t  *pins = inst_cache;
     IR1_INST *pir1 = NULL;
     void *pir1_base = insn_info;
     ADDRX start_pc = pc;
 
 #ifdef CONFIG_LATX_TU
+    if (unlikely(insn_info == NULL)) {
+        insn_info = g_malloc(MAX_IR1_IN_TU * IR1_INST_SIZE);
+        ir1_list_rel = g_new(IR1_INST, MAX_IR1_IN_TU);
+    }
     uint32_t *ir1_num_in_tu = &(tu_data->ir1_num_in_tu);
     if (tb->s_data->tu_tb_mode == TB_GEN_CODE) {
         *ir1_num_in_tu = 0;
@@ -371,7 +392,8 @@ int label_dispose(TranslationBlock *tb, TRANSLATION_DATA *lat_ctx)
     int ir2_num = 0;
     IR2_INST *ir2_current = lat_ctx->first_ir2;
     while (ir2_current != NULL) {
-        if (ir2_opcode(ir2_current) == LISA_LABEL) {
+        IR2_OPCODE opcode = (IR2_OPCODE)ir2_current->_opcode;
+        if (opcode == LISA_LABEL) {
             int label_num = ir2_opnd_label_id(&ir2_current->_opnd[0]);
             lsassertm(ir2_label[label_num] == -1,
                       "label %d is in multiple positions\n", label_num);
@@ -387,14 +409,15 @@ int label_dispose(TranslationBlock *tb, TRANSLATION_DATA *lat_ctx)
             }
         } else
 #endif
-        if (ir2_opcode(ir2_current) > LISA_PSEUDO_END) {
+        if (opcode > LISA_PSEUDO_END) {
             ir2_num++;
         } else {
             /* we need do some relocate works */
             ir2_current =
                 ir2_relocate(lat_ctx, ir2_current, &ir2_num, ir2_label, ir2_data);
         }
-        ir2_current = ir2_next(ir2_current);
+        ir2_current = ir2_current->_next == -1 ? NULL :
+            lat_ctx->ir2_inst_array + ir2_current->_next;
     }
 
     /**
@@ -468,38 +491,39 @@ int label_dispose(TranslationBlock *tb, TRANSLATION_DATA *lat_ctx)
     ir2_num = 0;
     ir2_current = lat_ctx->first_ir2;
     while (ir2_current != NULL) {
-        IR2_OPCODE opcode = ir2_opcode(ir2_current);
-        if (ir2_opcode_is_branch(opcode) || ir2_opcode_is_f_branch(opcode)) {
+        IR2_OPCODE opcode = (IR2_OPCODE)ir2_current->_opcode;
+        bool is_branch = (opcode >= LISA_BEQZ && opcode <= LISA_BCNEZ) ||
+                         (opcode >= LISA_B && opcode <= LISA_BGEU) ||
+                         opcode == LISA_FAR_JUMP;
+        if (is_branch) {
             IR2_OPND *label_opnd = NULL;
-            if (ir2_opcode(ir2_current) == LISA_B ||
-                ir2_opcode(ir2_current) == LISA_BL) {
+            if (opcode == LISA_B || opcode == LISA_BL) {
                 label_opnd = &ir2_current->_opnd[0];
-            } else if (ir2_opcode_is_branch_with_3opnds(opcode)) {
+            } else if (opcode >= LISA_BEQ && opcode <= LISA_BGEU) {
                 label_opnd = &ir2_current->_opnd[2];
-            } else if (ir2_opcode_is_f_branch(opcode) ||
-                       ir2_opcode_is_branch_with_2opnds(opcode)) {
+            } else if (opcode == LISA_BCEQZ || opcode == LISA_BCNEZ ||
+                       opcode == LISA_BEQZ || opcode == LISA_BNEZ) {
                 label_opnd = &ir2_current->_opnd[1];
             }
-            if (label_opnd && ir2_opnd_is_label(label_opnd)) {
+            if (label_opnd && label_opnd->_type == IR2_OPND_LABEL) {
                 int label_num = label_opnd->_label_id;
                 lsassert(label_num >= 0 &&
                          label_num < lat_ctx->label_num);
                 lsassertm(ir2_label[label_num] != -1,
                           "label %d is not inserted\n", label_num);
                 int target_ir2_num = ir2_label[label_num] >> 2;
-                ir2_opnd_convert_label_to_imm(label_opnd,
-                                              target_ir2_num - ir2_num);
+                label_opnd->_type = IR2_OPND_IMM;
+                label_opnd->_imm32 = target_ir2_num - ir2_num;
             }
         }
 
-        if (ir2_opcode(ir2_current) != LISA_LABEL &&
-            ir2_opcode(ir2_current) != LISA_X86_INST &&
-            ir2_opcode(ir2_current) != LISA_PROFILE) {
+        if (opcode != LISA_LABEL && opcode != LISA_X86_INST &&
+            opcode != LISA_PROFILE) {
             ir2_num++;
-            lsassert(ir2_opcode(ir2_current) == LISA_CODE ||
-                     ir2_opcode(ir2_current) > LISA_PSEUDO_END);
+            lsassert(opcode == LISA_CODE || opcode > LISA_PSEUDO_END);
         }
-        ir2_current = ir2_next(ir2_current);
+        ir2_current = ir2_current->_next == -1 ? NULL :
+            lat_ctx->ir2_inst_array + ir2_current->_next;
     }
 
 #ifdef CONFIG_LATX_PROFILER
@@ -560,15 +584,15 @@ int tr_ir2_assemble(const void *code_start_addr, const IR2_INST *pir2)
 #endif
 
     while (pir2 != NULL) {
+        IR2_OPCODE opcode = (IR2_OPCODE)pir2->_opcode;
 #if defined(CONFIG_LATX_PROFILER) && defined(CONFIG_LATX_DEBUG)
-        if (ir2_opcode(pir2) == LISA_PROFILE) {
+        if (opcode == LISA_PROFILE) {
             ir2_id++;
             pir2 = ir2_next(pir2);
             continue;
         } else
 #endif
-        if (ir2_opcode(pir2) != LISA_LABEL &&
-            ir2_opcode(pir2) != LISA_X86_INST) {
+        if (opcode != LISA_LABEL && opcode != LISA_X86_INST) {
             uint32 result = ir2_assemble(pir2);
 
 #ifdef CONFIG_LATX_DEBUG
@@ -586,7 +610,8 @@ int tr_ir2_assemble(const void *code_start_addr, const IR2_INST *pir2)
 #ifdef CONFIG_LATX_DEBUG
         ir2_id++;
 #endif
-        pir2 = ir2_next(pir2);
+        pir2 = pir2->_next == -1 ? NULL :
+            lsenv->tr_data->ir2_inst_array + pir2->_next;
     }
 
     return code_nr;
@@ -2034,19 +2059,23 @@ bool ir1_translate(IR1_INST *ir1)
 
 static inline void tr_init_for_each_ir1_in_tb(IR1_INST *pir1, int nr, int index)
  {
+    IR2_OPND ir2_opnd_addr;
+
     lsenv->tr_data->curr_ir1_inst = pir1;
     lsenv->tr_data->curr_ir1_count = index;
 
     /* TODO: this addr only stored low 32 bits */
 #ifdef CONFIG_LATX_INSTS_PATTERN
-    if (pir1->instptn.opc == INSTPTN_OPC_NOP_DIV) {}
-    else
-#endif
-    {
-        IR2_OPND ir2_opnd_addr;
-        ir2_opnd_build(&ir2_opnd_addr, IR2_OPND_IMM, ir1_addr(pir1));
-        la_x86_inst(ir2_opnd_addr);
+    if (pir1->instptn.opc == INSTPTN_OPC_NOP_DIV) {
+        return;
     }
+#endif
+    if (SHBR_FUSED_MEM64_PAIR(pir1)) {
+        return;
+    }
+
+    ir2_opnd_build(&ir2_opnd_addr, IR2_OPND_IMM, ir1_addr(pir1));
+    la_x86_inst(ir2_opnd_addr);
 }
 
 bool need_trace;
@@ -2392,7 +2421,7 @@ int tr_ir2_generate(struct TranslationBlock *tb)
                     if (has_base) {
                         base_op = ir1_opnd_base_reg_num(opnd);
                     }
-                    if (has_index) {
+                    if (has_index && ir1_opnd_index_is_gpr(opnd)) {
                         index_op = ir1_opnd_index_reg_num(opnd);
                         scale = ir1_opnd_scale(opnd);
                         if (scale != 1 && scale != 2 && scale != 4 &&
@@ -2414,12 +2443,22 @@ int tr_ir2_generate(struct TranslationBlock *tb)
     }
 #endif
     for (i = 0; i < ir1_nr; ++i) {
+#ifdef CONFIG_LATX_OPT_PUSH_POP_TRANS
+        if (!latx_sp_merge_can_delay(pir1)) {
+            latx_sp_merge_flush();
+        }
+#endif
         /*
          * handle segv scenario, store host pc to gen_insn_data and encode to a BYTE
          * at the end of TB translate cache.
          */
         tcg_ctx->gen_insn_data[i][0] = pir1->info->address;
+#ifdef CONFIG_LATX_OPT_PUSH_POP_TRANS
+        tcg_ctx->gen_insn_data[i][1] =
+            (target_ulong)(target_long)lsenv->tr_data->sp_delta;
+#else
         tcg_ctx->gen_insn_data[i][1] = 0;
+#endif
 
 #ifdef CONFIG_LATX_IMM_REG
         imm_cache->curr_ir1_index = i;
@@ -2474,6 +2513,9 @@ int tr_ir2_generate(struct TranslationBlock *tb)
 
         pir1++;
     }
+#ifdef CONFIG_LATX_OPT_PUSH_POP_TRANS
+    latx_sp_merge_flush();
+#endif
 #ifdef CONFIG_LATX_DEBUG
     if (option_dump_ir1) {
         pir1 = tb_ir1_inst(tb, 0);
@@ -2679,6 +2721,10 @@ static void generate_indirect_goto(void *code_buf)
     IR2_OPND base = ra_alloc_data();
     la_data_li(base, (ADDR)code_buf);
     IR2_OPND label_miss = ra_alloc_label();
+#if defined(CONFIG_LATX_FAST_JMPCACHE) && !defined(CONFIG_LATX_GLUE_MASK)
+    IR2_OPND label_aot_v2_lookup = ra_alloc_label();
+    IR2_OPND label_aot_v2_context_ready = ra_alloc_label();
+#endif
 
     /* indirect jmp */
     IR2_OPND jmp_entry = ra_alloc_itemp();
@@ -2713,10 +2759,50 @@ static void generate_indirect_goto(void *code_buf)
 #else
     la_alsl_d(next_tb, next_tb, jmp_cache_addr, 3);
     la_ld_d(jmp_entry, next_tb, 0);
-    la_bne(jmp_entry, next_x86_addr, label_miss);
+    la_bne(jmp_entry, next_x86_addr, label_aot_v2_lookup);
     la_ld_d(next_tb, next_tb, 8);
-#endif
     la_jirl(zero_ir2_opnd, next_tb, 0);
+
+    la_label(label_aot_v2_lookup);
+    IR2_OPND aot_v2_cache_addr = ra_alloc_itemp();
+    IR2_OPND aot_v2_entry = ra_alloc_itemp();
+    la_ld_d(aot_v2_cache_addr, env_ir2_opnd,
+            lsenv_offset_of_aot_v2_jmp_cache_ptr(lsenv));
+    la_beq(aot_v2_cache_addr, zero_ir2_opnd, label_miss);
+
+    la_srli_d(aot_v2_entry, next_x86_addr, TB_JMP_CACHE_BITS);
+    la_xor(aot_v2_entry, next_x86_addr, aot_v2_entry);
+    la_bstrpick_d(aot_v2_entry, aot_v2_entry,
+                  TB_JMP_CACHE_BITS - 1, 0);
+    la_slli_d(aot_v2_entry, aot_v2_entry, 6);
+    la_add_d(aot_v2_entry, aot_v2_entry, aot_v2_cache_addr);
+
+    la_ld_d(jmp_entry, aot_v2_entry,
+            offsetof(LatxAotV2FastTB, pc));
+    la_bne(jmp_entry, next_x86_addr, label_miss);
+    la_ld_d(jmp_entry, aot_v2_entry,
+            offsetof(LatxAotV2FastTB, generation_address));
+    la_beq(jmp_entry, zero_ir2_opnd, label_miss);
+    la_ld_d(next_tb, jmp_entry, 0);
+    la_ld_d(jmp_entry, aot_v2_entry,
+            offsetof(LatxAotV2FastTB, generation));
+    la_bne(jmp_entry, next_tb, label_miss);
+
+    la_ld_d(jmp_entry, aot_v2_entry,
+            offsetof(LatxAotV2FastTB, context));
+    la_ld_d(next_tb, env_ir2_opnd,
+            lsenv_offset_of_aot_v2_current_context(lsenv));
+    /* A cross-instance transition must return to the C dispatcher so it can
+     * transfer the execution reader before entering the new module. */
+    la_bne(jmp_entry, next_tb, label_miss);
+
+    la_label(label_aot_v2_context_ready);
+    la_ld_d(next_tb, aot_v2_entry,
+            offsetof(LatxAotV2FastTB, ptr));
+    la_jirl(zero_ir2_opnd, next_tb, 0);
+    ra_free_temp(aot_v2_entry);
+    ra_free_temp(aot_v2_cache_addr);
+#endif
 #else
     la_slli_d(next_tb, next_tb, 3);
     la_ldx_d(next_tb, next_tb, jmp_cache_addr);
@@ -3524,16 +3610,20 @@ void latx_tb_set_jmp_target(TranslationBlock *tb, int n,
             tb->bool_flags |= TARGET1_ELIMINATE;
         }
     }
-    /* TODO: TU */
-    /* Eflags elimination */
-    if (!next_tb->eflag_use &&
-        tb->eflags_target_arg[n] != TB_JMP_RESET_OFFSET_INVALID)
-        tb_eflag_eliminate(tb, n);
+    uint16_t stub_offset = UINT16_MAX;
 #ifdef CONFIG_LATX_XCOMISX_OPT
-    /* stub select */
-    if (!next_tb->eflag_use &&
-        tb->jmp_stub_reset_offset[n] != TB_JMP_RESET_OFFSET_INVALID)
+    stub_offset = tb->jmp_stub_reset_offset[n];
+#endif
+    unsigned actions = lat_eflags_link_actions(next_tb->eflag_use,
+        n && (tb->bool_flags & OPT_BCC), tb->eflags_target_arg[n],
+        stub_offset);
+    if (actions & LAT_EFLAGS_LINK_NOP) {
+        tb_eflag_eliminate(tb, n);
+    }
+#ifdef CONFIG_LATX_XCOMISX_OPT
+    if (actions & LAT_EFLAGS_LINK_BYPASS) {
         tb_stub_bypass(tb, n, (uintptr_t)next_tb->tc.ptr);
+    }
 #ifdef CONFIG_LATX_DEBUG
     eflags_eliminate_debugger(tb, n, next_tb);
 #endif

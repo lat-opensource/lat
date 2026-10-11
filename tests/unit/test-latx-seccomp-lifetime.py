@@ -36,6 +36,9 @@ typedef struct { GuestSeccompFilter *seccomp_filter; int ts_tid; bool seccomp_ex
 typedef struct CPUState { TaskState *opaque; struct CPUState *next; } CPUState;
 typedef CPUState CPUArchState;
 static CPUState *cpus, *thread_cpu;
+static void latc_aot_v2_fork_end(CPUState *cpu, bool child) {
+    (void)cpu; (void)child;
+}
 static unsigned allocations;
 static unsigned root_publications;
 #define qatomic_store_release(p, v) do { \

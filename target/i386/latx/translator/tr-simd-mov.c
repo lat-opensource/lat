@@ -515,9 +515,77 @@ bool translate_movlhps(IR1_INST *pir1)
 
 bool translate_movsd(IR1_INST *pir1)
 {
+    if (SHBR_FUSED_MEM64_PAIR(pir1)) {
+        return true;
+    }
     IR1_OPND *dest = ir1_get_opnd(pir1, 0);
     IR1_OPND *src = ir1_get_opnd(pir1, 1);
     if (ir1_opnd_is_xmm(dest) && ir1_opnd_is_mem(src)) {
+        if (SHBR_FUSE_MEM64_PAIR(pir1) &&
+            ir1_opcode(pir1 + 1) == dt_X86_INS_MOVSD) {
+            IR1_INST *second = pir1 + 1;
+            IR2_OPND first_dest =
+                ra_alloc_xmm(ir1_opnd_base_reg_num(dest));
+            int offset;
+            IR2_OPND mem = convert_mem(src, &offset);
+
+            gen_test_page_flag(mem, offset, PAGE_READ, 8);
+            if (SHBR_ON_64(pir1)) {
+                la_fld_d(first_dest, mem, offset);
+            } else {
+                IR2_OPND temp = ra_alloc_ftemp();
+                la_fld_d(temp, mem, offset);
+                if (option_enable_lasx) {
+                    la_xvpickve_d(first_dest, temp, 0);
+                } else {
+                    la_vandi_b(first_dest, first_dest, 0);
+                    la_vextrins_d(first_dest, temp, 0);
+                }
+            }
+
+            IR2_OPND ir2_opnd_addr;
+            ir2_opnd_build(&ir2_opnd_addr, IR2_OPND_IMM,
+                           ir1_addr(second));
+            la_x86_inst(ir2_opnd_addr);
+            mem = mem_imm_add_disp(mem, &offset, 8);
+            gen_test_page_flag(mem, offset, PAGE_READ, 8);
+
+            IR2_OPND second_dest = ra_alloc_xmm(
+                ir1_opnd_base_reg_num(ir1_get_opnd(second, 0)));
+            if (SHBR_ON_64(second)) {
+                la_fld_d(second_dest, mem, offset);
+            } else {
+                IR2_OPND temp = ra_alloc_ftemp();
+                la_fld_d(temp, mem, offset);
+                if (option_enable_lasx) {
+                    la_xvpickve_d(second_dest, temp, 0);
+                } else {
+                    la_vandi_b(second_dest, second_dest, 0);
+                    la_vextrins_d(second_dest, temp, 0);
+                }
+            }
+            return true;
+        }
+        if (SHBR_FUSE_MEM64_PAIR(pir1)) {
+            IR2_OPND xmm_dest =
+                ra_alloc_xmm(ir1_opnd_base_reg_num(dest));
+            IR2_OPND high = ra_alloc_itemp();
+            int offset;
+            IR2_OPND mem = convert_mem(src, &offset);
+
+            gen_test_page_flag(mem, offset, PAGE_READ, 8);
+            la_fld_d(xmm_dest, mem, offset);
+
+            IR2_OPND ir2_opnd_addr;
+            ir2_opnd_build(&ir2_opnd_addr, IR2_OPND_IMM,
+                           ir1_addr(pir1 + 1));
+            la_x86_inst(ir2_opnd_addr);
+            mem = mem_imm_add_disp(mem, &offset, 8);
+            gen_test_page_flag(mem, offset, PAGE_READ, 8);
+            la_ld_d(high, mem, offset);
+            la_vinsgr2vr_d(xmm_dest, high, 1);
+            return true;
+        }
         if (SHBR_ON_64(pir1)) {
             IR2_OPND dest_opnd = ra_alloc_xmm(ir1_opnd_base_reg_num(dest));
             load_freg_from_ir1_2(dest_opnd, src, IS_INTEGER);
@@ -596,6 +664,9 @@ bool translate_movss(IR1_INST *pir1)
 
 bool translate_movhpd(IR1_INST *pir1)
 {
+    if (SHBR_FUSED_MEM64_PAIR(pir1)) {
+        return true;
+    }
     IR1_OPND *dest = ir1_get_opnd(pir1, 0);
     IR1_OPND *src = ir1_get_opnd(pir1, 1);
     if (ir1_opnd_is_mem(src) && ir1_opnd_is_xmm(dest)) {
@@ -627,7 +698,26 @@ bool translate_movlpd(IR1_INST *pir1)
         la_vinsgr2vr_d(ra_alloc_xmm(ir1_opnd_base_reg_num(dest)), temp, 0);
         return true;
     } else if (ir1_opnd_is_mem(dest) && ir1_opnd_is_xmm(src)) {
-        store_freg_to_ir1(ra_alloc_xmm(ir1_opnd_base_reg_num(src)), dest, false, false);
+        IR2_OPND xmm_src = ra_alloc_xmm(ir1_opnd_base_reg_num(src));
+        if (SHBR_FUSE_MEM64_PAIR(pir1)) {
+            IR2_OPND high = ra_alloc_itemp();
+            int offset;
+            IR2_OPND mem = convert_mem(dest, &offset);
+
+            gen_test_page_flag(mem, offset, PAGE_WRITE | PAGE_WRITE_ORG, 8);
+            la_fst_d(xmm_src, mem, offset);
+
+            IR2_OPND ir2_opnd_addr;
+            ir2_opnd_build(&ir2_opnd_addr, IR2_OPND_IMM,
+                           ir1_addr(pir1 + 1));
+            la_x86_inst(ir2_opnd_addr);
+            la_vpickve2gr_d(high, xmm_src, 1);
+            mem = mem_imm_add_disp(mem, &offset, 8);
+            gen_test_page_flag(mem, offset, PAGE_WRITE | PAGE_WRITE_ORG, 8);
+            la_st_d(high, mem, offset);
+            return true;
+        }
+        store_freg_to_ir1(xmm_src, dest, false, false);
         return true;
     } else {
         lsassert(0);

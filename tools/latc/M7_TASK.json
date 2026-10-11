@@ -1,0 +1,85 @@
+{
+  "title": "AOT v2 M7：消除模块执行路径性能退化",
+  "requirement": "解决 T-308/M6 测得的 AOT v2 性能退化：SPECint2000 train 几何平均效率 42.47%，明显低于 M4 的 67.12% 和旧 AOT 的 64.78%；动态 Bash 暖运行也慢于冷运行。",
+  "objective": "用可重复 profile 定位并修复 AOT v2 热执行路径的主要额外开销，使完整静态模块恢复到接近 M4 的性能，同时改善真实动态应用的暖运行。",
+  "scope": "tools/latc 的 AOT v2 dispatch、模块索引、地址转换、动态命中、性能脚本、回归测试和 3a6000-25g 测量。",
+  "acceptance_criteria": [
+    "在固定 CPU 4 上用真实 SPEC train 输入稳定复现退化，并用 perf 计数和热点归因主要差异。",
+    "修复不移除 M6 的并发、信号、失效、HWCAP、W^X 和缓存安全保证。",
+    "四模式各 5 轮复测中，AOT v2 相对 M4 的 12 项几何平均速度比至少 0.95x，SPEC train 12/12 通过。",
+    "动态 Bash 暖运行相对 M6 的 10265 ms 有可重复改善，并报告剩余 AOT/JIT 覆盖限制。"
+  ],
+  "impact_scope": "AOT v2 模块热执行、动态模块回退和性能测试；错误优化可能影响所有 AOT v2 程序，因此按 L4 验证。",
+  "dependencies": ["T-308"],
+  "open_questions": [
+    "Loongnix 4.19 内核是否允许当前用户采集 perf call graph；若不允许则使用 perf stat、符号化 sampled PC 和单变量 A/B。"
+  ],
+  "risk_level": "L4",
+  "status": "active",
+  "work_items": [
+    {
+      "key": "diagnose",
+      "title": "建立快速差分测试并归因 AOT v2 热路径开销",
+      "description": "用 176.gcc 和 252.eon 复现 M4/AOT v2 差异，采集 perf 计数和热点，逐项检验可证伪原因。",
+      "goal": "给出能直接指导实现的主要性能损失归因，而不是仅有总时间。",
+      "scope": "远端差分脚本、输入/二进制摘要、perf stat/record、热点符号和诊断报告。",
+      "boundary": "本项不提交未经 profile 支持的生产优化；不运行 SPEC ref。",
+      "acceptance_criteria": [
+        "176.gcc 五次交替样本在 30 秒内稳定复现 AOT v2 相对 M4 的退化，全部通过 SPEC 输出校验。",
+        "252.eon 复现相同方向差异，排除单一程序特例。",
+        "至少三项可证伪原因有对应单变量实验，perf 数据能归因大部分额外 cycles。",
+        "诊断报告给出代码路径、预期收益、正确性风险和下一项实现顺序。"
+      ],
+      "risk_level": "L3",
+      "item_type": "explore"
+    },
+    {
+      "key": "hotpath",
+      "title": "修复 AOT v2 基准模块配置并增加防误测门禁",
+      "description": "修复四模式脚本未传入 AOT v2 模块、source、strict 和 pretranslation-disable 环境的问题，统一严格 wrapper 生成并增加回归。",
+      "goal": "确保任何标记为 AOT v2 的性能样本都真实加载对应模块，缺失配置时立即失败。",
+      "scope": "compare-native-train.py、focused 差分脚本、共享 wrapper 环境生成和测试。",
+      "boundary": "不修改生产 runtime 热路径；诊断已证明原 2-3x 退化是 benchmark 配置错误。",
+      "acceptance_criteria": [
+        "完整四模式脚本要求 module/runtime 目录并生成 strict AOT v2 环境。",
+        "focused 与完整脚本复用同一环境生成函数，测试断言 module/source/strict/pretranslation-disable/runtime 配置全部存在。",
+        "176.gcc 和 252.eon 严格五轮继续通过且 AOT v2/M4 均不低于 0.90x；本机单测通过。"
+      ],
+      "risk_level": "L3",
+      "item_type": "bug",
+      "depends_on": ["diagnose"]
+    },
+    {
+      "key": "dynamic",
+      "title": "降低部分动态模块的回退和启动开销",
+      "description": "在完整模块热路径修复后，针对 Bash loader/libc/libtinfo 的低 AOT 覆盖和启动开销做测量驱动优化。",
+      "goal": "真实动态应用暖运行相对 M6 明显改善，并明确剩余 JIT 回退来源。",
+      "scope": "动态模块发现/提交/命中、覆盖统计、Bash 冷暖与长期资源测试。",
+      "boundary": "不把未验证 guest 代码当作 AOT 命中，不牺牲跨进程共享和缓存安全。",
+      "acceptance_criteria": [
+        "Bash 暖运行中位数相对 M6 的 10265 ms 至少改善 15%，或在无法达到时证明剩余时间不属于 AOT v2 可优化路径。",
+        "逐模块报告 AOT hits、JIT fallback、runtime TB、注册和启动时间。",
+        "长期 RSS/PSS 和双进程共享测试不低于 M6 正确性与资源结果。"
+      ],
+      "risk_level": "L4",
+      "item_type": "feature",
+      "depends_on": ["hotpath"]
+    },
+    {
+      "key": "validate",
+      "title": "完成四模式五轮复测和 M1-M7 回归",
+      "description": "在同一机器和输入上复测四模式，运行完整功能回归并记录 M7 结果。",
+      "goal": "确认优化对全部 SPEC 和真实动态应用有效，且没有正确性或资源回归。",
+      "scope": "SPECint2000 train 12 项、动态 Bash、完整回归、原始样本和 M7_RESULTS。",
+      "boundary": "不运行 SPEC ref，不省略不利样本。",
+      "acceptance_criteria": [
+        "四模式每项各 5 个有效样本，AOT v2/M4 几何平均速度比至少 0.95x。",
+        "SPEC train 12/12、本机单测、TSAN 和远端 M1-M7 回归全部通过。",
+        "报告保留原始样本、输入摘要、perf 变化、动态资源数据和所有限制。"
+      ],
+      "risk_level": "L4",
+      "item_type": "feature",
+      "depends_on": ["dynamic"]
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+IOCTL(DRM_IOCTL_AMDGPU_GEM_CREATE, IOC_RW,
+      MK_PTR(MK_STRUCT(STRUCT_drm_amdgpu_gem_create_in)))
+IOCTL(DRM_IOCTL_AMDGPU_GEM_MMAP, IOC_RW,
+      MK_PTR(MK_STRUCT(STRUCT_drm_amdgpu_gem_mmap_in)))
+IOCTL(DRM_IOCTL_AMDGPU_CTX, IOC_RW,
+      MK_PTR(MK_STRUCT(STRUCT_drm_amdgpu_ctx_in)))
+IOCTL(DRM_IOCTL_AMDGPU_BO_LIST, IOC_RW,
+      MK_PTR(MK_STRUCT(STRUCT_drm_amdgpu_bo_list_in)))
+IOCTL(DRM_IOCTL_AMDGPU_CS, IOC_RW,
+      MK_PTR(MK_STRUCT(STRUCT_drm_amdgpu_cs_in)))
+IOCTL_SPECIAL(DRM_IOCTL_AMDGPU_INFO, IOC_W, do_ioctl_amdgpu_drm,
+      MK_PTR(MK_STRUCT(STRUCT_drm_amdgpu_info)))
+IOCTL_SPECIAL(DRM_IOCTL_AMDGPU_GEM_METADATA, IOC_RW, do_ioctl_amdgpu_drm,
+      MK_PTR(MK_STRUCT(STRUCT_drm_amdgpu_gem_metadata)))
+IOCTL(DRM_IOCTL_AMDGPU_GEM_WAIT_IDLE, IOC_RW,
+      MK_PTR(MK_STRUCT(STRUCT_drm_amdgpu_gem_wait_idle_in)))
+IOCTL(DRM_IOCTL_AMDGPU_GEM_VA, IOC_RW,
+      MK_PTR(MK_STRUCT(STRUCT_drm_amdgpu_gem_va)))
+IOCTL(DRM_IOCTL_AMDGPU_WAIT_CS, IOC_RW,
+      MK_PTR(MK_STRUCT(STRUCT_drm_amdgpu_wait_cs_in)))
+IOCTL(DRM_IOCTL_AMDGPU_GEM_OP, IOC_RW,
+      MK_PTR(MK_STRUCT(STRUCT_drm_amdgpu_gem_op)))
+IOCTL(DRM_IOCTL_AMDGPU_GEM_USERPTR, IOC_RW,
+      MK_PTR(MK_STRUCT(STRUCT_drm_amdgpu_gem_userptr)))
+IOCTL(DRM_IOCTL_AMDGPU_WAIT_FENCES, IOC_RW,
+      MK_PTR(MK_STRUCT(STRUCT_drm_amdgpu_wait_fences_in)))
+IOCTL(DRM_IOCTL_AMDGPU_VM, IOC_RW, MK_PTR(MK_STRUCT(STRUCT_drm_amdgpu_vm_in)))
+IOCTL_SPECIAL(DRM_IOCTL_AMDGPU_FENCE_TO_HANDLE, IOC_RW, do_ioctl_amdgpu_drm,
+                MK_PTR(MK_STRUCT(STRUCT_drm_amdgpu_fence_to_handle_in)))
+IOCTL(DRM_IOCTL_AMDGPU_SCHED, IOC_W, MK_PTR(MK_STRUCT(STRUCT_drm_amdgpu_sched_in)))

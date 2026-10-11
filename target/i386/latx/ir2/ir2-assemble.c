@@ -93,13 +93,14 @@ GM_LA_OPCODE_FORMAT lisa_format_table[] = {
  */
 uint32 ir2_assemble(const IR2_INST *ir2)
 {
-    if (ir2_opcode(ir2) == LISA_CODE) {
-        lsassert(ir2_opnd_is_pseudo(&ir2->_opnd[0]));
+    IR2_OPCODE opcode = (IR2_OPCODE)ir2->_opcode;
+    if (opcode == LISA_CODE) {
+        lsassert(ir2->_opnd[0]._type == IR2_OPND_PSEUDO);
         return ir2->_opnd[0]._val;
     }
-    lsassert(ir2_opcode(ir2) > LISA_PSEUDO_END);
-    GM_LA_OPCODE_FORMAT format = lisa_format_table[ir2_opcode(ir2) - LISA_INVALID];
-    lsassert(format.type == ir2_opcode(ir2));
+    lsassert(opcode > LISA_PSEUDO_END);
+    GM_LA_OPCODE_FORMAT format = lisa_format_table[opcode - LISA_INVALID];
+    lsassert(format.type == opcode);
     lsassert(format.opcode != 0);
 
     uint32_t ins = format.opcode;
@@ -119,8 +120,8 @@ uint32 ir2_assemble(const IR2_INST *ir2)
         int val = ir2->_opnd[i]._val;
         int mask = (1 << bit_len) - 1;
 
-        lsassert(!(ir2_opnd_is_pseudo(&ir2->_opnd[i]) ||
-                   ir2_opnd_is_data(&ir2->_opnd[i])));
+        lsassert(ir2->_opnd[i]._type != IR2_OPND_PSEUDO &&
+                 ir2->_opnd[i]._type != IR2_OPND_DATA);
 
         ins |= (val & mask) << start;
 

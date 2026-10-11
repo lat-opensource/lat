@@ -9,7 +9,7 @@
 #include "latx-disassemble-trace.h"
 #include "../capstone_git/include/capstone/capstone.h"
 
-extern csh handle[2];
+extern __thread csh handle[2];
 struct la_dt_insn *nextcapstone_get_from_insn(cs_insn *inputinfo,
         int ir1_num, void *pir1_base);
 cs_insn *nextcapstone_post(struct la_dt_insn *inputinfo,

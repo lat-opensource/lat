@@ -27,9 +27,13 @@ uint8_t get_inst_type(IR1_INST *ir1);
 bool can_shbr_opt64(IR1_INST *ir1);
 bool can_shbr_opt32(IR1_INST *ir1);
 bool need_shbr_restore_zero64(IR1_INST *ir1);
+bool can_shbr_fuse_mem64_pair(IR1_INST *ir1);
+bool is_shbr_fused_mem64_pair(IR1_INST *ir1);
 #define SHBR_ON_64(_ir1) can_shbr_opt64(_ir1)
 #define SHBR_ON_32(_ir1) can_shbr_opt32(_ir1)
 #define SHBR_RESTORE_64(_ir1) need_shbr_restore_zero64(_ir1)
+#define SHBR_FUSE_MEM64_PAIR(_ir1) can_shbr_fuse_mem64_pair(_ir1)
+#define SHBR_FUSED_MEM64_PAIR(_ir1) is_shbr_fused_mem64_pair(_ir1)
 #define SHBR_OPT(_tb, _tb_num)              \
     do {                                    \
         hbr_opt((_tb), (_tb_num));          \
@@ -46,6 +50,8 @@ bool can_ghbr_opt(IR1_INST *ir1);
 #define SHBR_ON_64(_ir1) (0)
 #define SHBR_ON_32(_ir1) (0)
 #define SHBR_RESTORE_64(_ir1) (0)
+#define SHBR_FUSE_MEM64_PAIR(_ir1) (0)
+#define SHBR_FUSED_MEM64_PAIR(_ir1) (0)
 #define SHBR_OPT(_tb, _tb_num) do { } while (0)
 #define GHBR_ON(_ir1) (0)
 #endif

@@ -1,0 +1,2647 @@
+/*
+ * SPDX-FileCopyrightText: 2021-2026 LAT Project Authors
+ *
+ * SPDX-License-Identifier: GPL-2.0-only
+ */
+
+#include "common.h"
+#include "reg-alloc.h"
+#include "latx-options.h"
+#include "flag-lbt.h"
+#include "translate.h"
+#include "insts-pattern.h"
+#include "tu.h"
+#include "hbr.h"
+
+#ifdef CONFIG_LATX_INSTS_PATTERN
+
+#define WRAP(ins) (dt_X86_INS_##ins)
+#define PARSE_R_IFC_REG(n)                     \
+    ".ifc \\r, $r" #n "\n\t"                 \
+    "\\var = " #n "\n\t"                     \
+    ".endif\n\t"
+/*
+ * LTO may duplicate or reorder file-scope assembly.  Keep the assembler
+ * macro with its users and give each extended asm statement a unique name.
+ */
+#define DEFINE_PARSE_R                         \
+    ".macro parse_r_%= var r\n\t"              \
+    "\\var = -1\n\t"                          \
+    PARSE_R_IFC_REG(0)  PARSE_R_IFC_REG(1)  \
+    PARSE_R_IFC_REG(2)  PARSE_R_IFC_REG(3)  \
+    PARSE_R_IFC_REG(4)  PARSE_R_IFC_REG(5)  \
+    PARSE_R_IFC_REG(6)  PARSE_R_IFC_REG(7)  \
+    PARSE_R_IFC_REG(8)  PARSE_R_IFC_REG(9)  \
+    PARSE_R_IFC_REG(10) PARSE_R_IFC_REG(11) \
+    PARSE_R_IFC_REG(12) PARSE_R_IFC_REG(13) \
+    PARSE_R_IFC_REG(14) PARSE_R_IFC_REG(15) \
+    PARSE_R_IFC_REG(16) PARSE_R_IFC_REG(17) \
+    PARSE_R_IFC_REG(18) PARSE_R_IFC_REG(19) \
+    PARSE_R_IFC_REG(20) PARSE_R_IFC_REG(21) \
+    PARSE_R_IFC_REG(22) PARSE_R_IFC_REG(23) \
+    PARSE_R_IFC_REG(24) PARSE_R_IFC_REG(25) \
+    PARSE_R_IFC_REG(26) PARSE_R_IFC_REG(27) \
+    PARSE_R_IFC_REG(28) PARSE_R_IFC_REG(29) \
+    PARSE_R_IFC_REG(30) PARSE_R_IFC_REG(31) \
+    ".iflt \\var\n\t"                         \
+    ".error \"Unable to parse register name \\r\"\n\t" \
+    ".endif\n\t"                                \
+    ".endm\n\t"
+#define EFLAGS_CACULATE(opnd0, opnd1, inst, i, flags)            \
+    do {                                                             \
+        bool need_calc_flag = ir1_need_calculate_any_flag(inst);     \
+        if (!need_calc_flag)                                         \
+            break;                                                   \
+        TranslationBlock *tb = lsenv->tr_data->curr_tb;              \
+        IR2_OPND eflags = ra_alloc_label();                          \
+        la_label(eflags);                                            \
+        tb->eflags_target_arg[i] = ir2_opnd_label_id(&eflags);       \
+        generate_eflag_calculation(opnd0, opnd0, opnd1, inst, flags); \
+    } while (0)
+
+static inline void cmp_jcc_gen_bcc(IR2_OPND src_opnd_0, IR2_OPND src_opnd_1,
+        IR2_OPND target_label_opnd, IR1_INST *jcc_inst)
+{
+    switch (ir1_opcode(jcc_inst)) {
+    case WRAP(JB):
+        la_bltu(src_opnd_0, src_opnd_1, target_label_opnd);
+        break;
+    case WRAP(JAE):
+        la_bgeu(src_opnd_0, src_opnd_1, target_label_opnd);
+        break;
+    case WRAP(JE):
+        la_beq(src_opnd_0, src_opnd_1, target_label_opnd);
+        break;
+    case WRAP(JNE):
+        la_bne(src_opnd_0, src_opnd_1, target_label_opnd);
+        break;
+    case WRAP(JBE):
+        la_bgeu(src_opnd_1, src_opnd_0, target_label_opnd);
+        break;
+    case WRAP(JA):
+        la_bltu(src_opnd_1, src_opnd_0, target_label_opnd);
+        break;
+    case WRAP(JL):
+        la_blt(src_opnd_0, src_opnd_1, target_label_opnd);
+        break;
+    case WRAP(JGE):
+        la_bge(src_opnd_0, src_opnd_1, target_label_opnd);
+        break;
+    case WRAP(JLE):
+        la_bge(src_opnd_1, src_opnd_0, target_label_opnd);
+        break;
+    case WRAP(JG):
+        la_blt(src_opnd_1, src_opnd_0, target_label_opnd);
+        break;
+    default:
+        lsassert(0);
+        break;
+    }
+}
+
+static bool translate_cmp_jcc(IR1_INST *ir1)
+{
+    IR1_INST *curr = ir1;
+    IR1_INST *next = ir1->instptn.next;
+
+    curr->info->id = WRAP(CMP);
+
+    int em = ZERO_EXTENSION;
+    switch (ir1_opcode(next)) {
+    case WRAP(JL):
+    case WRAP(JGE):
+    case WRAP(JLE):
+    case WRAP(JG):
+        em = SIGN_EXTENSION;
+        break;
+    default:
+        break;
+    }
+
+    IR2_OPND src_opnd_0 = load_ireg_from_ir1(ir1_get_opnd(curr, 0), em, false);
+    IR2_OPND src_opnd_1 = load_ireg_from_ir1(ir1_get_opnd(curr, 1), em, false);
+
+    IR2_OPND target_label_opnd = ra_alloc_label();
+#ifdef CONFIG_LATX_TU
+    TranslationBlock *tb = lsenv->tr_data->curr_tb;
+    if (judge_tu_eflag_gen(tb)) {
+        IR2_OPND tu_reset_label_opnd = ra_alloc_label();
+        TranslationBlock *tb_next = tb->s_data->next_tb[TU_TB_INDEX_NEXT];
+        TranslationBlock *tb_target = tb->s_data->next_tb[TU_TB_INDEX_TARGET];
+
+        if (tb_next->eflag_use && tb_target->eflag_use) {
+            generate_eflag_calculation(src_opnd_0, src_opnd_0, src_opnd_1, curr, true);
+        }
+
+        la_label(tu_reset_label_opnd);
+        tb->tu_jmp[TU_TB_INDEX_TARGET] = tu_reset_label_opnd._label_id;
+        cmp_jcc_gen_bcc(src_opnd_0, src_opnd_1, target_label_opnd, next);
+        tu_jcc_nop_gen(tb);
+
+        if (tb_next->eflag_use && !tb_target->eflag_use) {
+            generate_eflag_calculation(src_opnd_0, src_opnd_0, src_opnd_1, curr, true);
+        }
+
+        if (tb->tu_jmp[TU_TB_INDEX_NEXT] != TB_JMP_RESET_OFFSET_INVALID) {
+            IR2_OPND translated_label_opnd = ra_alloc_label();
+            la_label(translated_label_opnd);
+            la_b(imm_zero_ir2_opnd);
+            la_nop();
+            tb->tu_jmp[TU_TB_INDEX_NEXT] = translated_label_opnd._label_id;
+        }
+
+        IR2_OPND unlink_label_opnd = ra_alloc_label();
+        la_label(unlink_label_opnd);
+        tb->tu_unlink.stub_offset = unlink_label_opnd._label_id;
+        tb->tu_unlink.rel_num = 2;
+        set_use_tu_jmp(tb);
+    }
+#endif
+
+    cmp_jcc_gen_bcc(src_opnd_0, src_opnd_1, target_label_opnd, next);
+
+    /* not taken */
+    EFLAGS_CACULATE(src_opnd_0, src_opnd_1, curr, 0, true);
+    tr_generate_exit_tb(next, 0);
+
+    la_label(target_label_opnd);
+    /* taken */
+    EFLAGS_CACULATE(src_opnd_0, src_opnd_1, curr, 1, true);
+    tr_generate_exit_tb(next, 1);
+
+    /*
+     * the backup of the eflags instruction, which is used
+     * to recover the eflags instruction when unlink a tb.
+     */
+    EFLAGS_CACULATE(src_opnd_0, src_opnd_1, curr, EFLAG_BACKUP, true);
+    return true;
+}
+
+static inline void gen_sub(IR2_OPND dest, IR2_OPND src_opnd_0, IR2_OPND src_opnd_1,
+        IR2_OPND mem_opnd, int imm, IR1_INST *ir1, IR1_OPND *opnd0, int opnd0_size)
+{
+    la_sub_d(dest, src_opnd_0, src_opnd_1);
+#ifdef TARGET_X86_64
+    if (!GHBR_ON(ir1) && CODEIS64 && ir1_opnd_is_gpr(opnd0) && opnd0_size == 32) {
+        la_mov32_zx(dest, dest);
+    }
+#endif
+    /* write back */
+    if (ir1_opnd_is_gpr(opnd0)) {
+        /* r16/r8 */
+        if (opnd0_size < 32) {
+            store_ireg_to_ir1(dest, opnd0, false);
+        }
+    } else {
+        la_st_by_op_size(dest, mem_opnd, imm, opnd0_size);
+    }
+}
+
+static IR2_OPND load_opnd_from_opnd(IR2_OPND src_opnd, EXTENSION_MODE em, int opnd_size)
+{
+    lsassert(em == SIGN_EXTENSION || em == ZERO_EXTENSION ||
+             em == UNKNOWN_EXTENSION);
+    IR2_OPND ret_opnd = ra_alloc_itemp();
+    if (opnd_size == 64 || em == UNKNOWN_EXTENSION) {
+        la_mov64(ret_opnd, src_opnd);
+    } else if (opnd_size == 32) {
+        if (em == SIGN_EXTENSION ) {
+            la_mov32_sx(ret_opnd, src_opnd);
+        } else if (em == ZERO_EXTENSION ) {
+            la_mov32_zx(ret_opnd, src_opnd);
+        }
+    } else if (opnd_size == 16) {
+        if (em == SIGN_EXTENSION) {
+            la_ext_w_h(ret_opnd, src_opnd);
+        }
+        else if (em == ZERO_EXTENSION ) {
+            la_bstrpick_d(ret_opnd, src_opnd, 15, 0);
+        }
+    } else {
+        if (em == SIGN_EXTENSION) {
+            la_ext_w_b(ret_opnd, src_opnd);
+        } else if (em == ZERO_EXTENSION ) {
+            la_andi(ret_opnd, src_opnd, 0xff);
+        }
+    }
+    return ret_opnd;
+}
+
+static inline void jcc_gen_bcc(IR2_OPND src_opnd_0, IR2_OPND src_opnd_1,
+        IR2_OPND target_label_opnd, IR1_INST *jcc_inst) {
+    switch (ir1_opcode(jcc_inst)) {
+    case WRAP(JB):
+        la_bltu(src_opnd_0, src_opnd_1, target_label_opnd);
+        break;
+    case WRAP(JAE):
+        la_bgeu(src_opnd_0, src_opnd_1, target_label_opnd);
+        break;
+    case WRAP(JE):
+        la_beq(src_opnd_0, src_opnd_1, target_label_opnd);
+        break;
+    case WRAP(JNE):
+        la_bne(src_opnd_0, src_opnd_1, target_label_opnd);
+        break;
+    case WRAP(JBE):
+        la_bgeu(src_opnd_1, src_opnd_0, target_label_opnd);
+        break;
+    case WRAP(JA):
+        la_bltu(src_opnd_1, src_opnd_0, target_label_opnd);
+        break;
+    case WRAP(JL):
+        la_blt(src_opnd_0, src_opnd_1, target_label_opnd);
+        break;
+    case WRAP(JGE):
+        la_bge(src_opnd_0, src_opnd_1, target_label_opnd);
+        break;
+    case WRAP(JLE):
+        la_bge(src_opnd_1, src_opnd_0, target_label_opnd);
+        break;
+    case WRAP(JG):
+        la_blt(src_opnd_1, src_opnd_0, target_label_opnd);
+        break;
+    default:
+        lsassert(0);
+        break;
+    }
+}
+
+static bool translate_sub_jcc(IR1_INST *ir1)
+{
+    IR1_INST *curr = ir1;
+    IR1_INST *next = ir1->instptn.next;
+
+    CPUArchState* env = (CPUArchState*)(lsenv->cpu_state);
+    CPUState *cpu = env_cpu(env);
+    IR1_OPND *opnd0 = ir1_get_opnd(ir1, 0);
+    IR1_OPND *opnd1 = ir1_get_opnd(ir1, 1);
+    IR2_OPND src_opnd_0, src_opnd_1;
+    IR2_OPND bcc_src0, bcc_src1;
+    IR2_OPND dest, mem_opnd;
+    int imm, opnd0_size;
+
+    curr->info->id = WRAP(SUB);
+    opnd0_size = ir1_opnd_size(opnd0);
+
+    bool is_lock = ir1_is_prefix_lock(ir1) && ir1_opnd_is_mem(opnd0);
+    if (!close_latx_parallel) {
+        is_lock = is_lock && (cpu->tcg_cflags & CF_PARALLEL);
+    }
+    if (is_lock) {
+        translate_sub(curr);
+        translate_jcc(next);
+        return true;
+    }
+
+    /* int em = SIGN_EXTENSION; */
+    int em = ZERO_EXTENSION;
+    switch (ir1_opcode(next)) {
+    case WRAP(JL):
+    case WRAP(JGE):
+    case WRAP(JLE):
+    case WRAP(JG):
+        em = SIGN_EXTENSION;
+        break;
+    default:
+        break;
+    }
+
+    src_opnd_1 = load_ireg_from_ir1(opnd1, UNKNOWN_EXTENSION, false);
+    if (ir1_opnd_is_gpr(opnd0)) {
+        src_opnd_0 = convert_gpr_opnd(opnd0, UNKNOWN_EXTENSION);
+        if (opnd0_size >= 32) {
+            dest = src_opnd_0;
+        } else {
+            dest = ra_alloc_itemp();
+        }
+    } else {
+        src_opnd_0 = ra_alloc_itemp();
+        dest = src_opnd_0;
+        mem_opnd = convert_mem(opnd0, &imm);
+        la_ld_by_op_size(src_opnd_0, mem_opnd, imm, opnd0_size);
+    }
+
+    int opnd1_size = ir1_opnd_size(opnd1);
+    if (opnd1_size == 64 || em == UNKNOWN_EXTENSION) {
+        bcc_src1 = src_opnd_1;
+    } else {
+        bcc_src1 = load_opnd_from_opnd(src_opnd_1, em, opnd1_size);
+    }
+
+    IR2_OPND target_label_opnd = ra_alloc_label();
+#ifdef CONFIG_LATX_TU
+    TranslationBlock *tb = lsenv->tr_data->curr_tb;
+    /* if (judge_tu_eflag_gen(lsenv->tr_data->curr_tb)) { */
+    if (tb->s_data->next_tb[TU_TB_INDEX_NEXT] && tb->s_data->next_tb[TU_TB_INDEX_TARGET]) {
+        IR2_OPND tu_reset_label_opnd = ra_alloc_label();
+        TranslationBlock *tb_next = tb->s_data->next_tb[TU_TB_INDEX_NEXT];
+        TranslationBlock *tb_target = tb->s_data->next_tb[TU_TB_INDEX_TARGET];
+
+        /* cmp_jcc_gen_bcc() is after gen_sub(), so we must store src_opnd_0 into a temp reg. */
+        bcc_src0 = load_opnd_from_opnd(src_opnd_0, em, opnd0_size);
+        if (tb_next->eflag_use || tb_target->eflag_use) {
+            /* Sometimes an extra calculation of eflags is performed. */
+            generate_eflag_calculation(src_opnd_0, src_opnd_0, src_opnd_1, curr, true);
+        }
+
+        gen_sub(dest, src_opnd_0, src_opnd_1, mem_opnd, imm, ir1, opnd0, opnd0_size);
+
+        la_label(tu_reset_label_opnd);
+        tb->tu_jmp[TU_TB_INDEX_TARGET] = tu_reset_label_opnd._label_id;
+        cmp_jcc_gen_bcc(bcc_src0, bcc_src1, target_label_opnd, next);
+        tu_jcc_nop_gen(tb);
+
+        if (tb->tu_jmp[TU_TB_INDEX_NEXT] != TB_JMP_RESET_OFFSET_INVALID) {
+            IR2_OPND translated_label_opnd = ra_alloc_label();
+            la_label(translated_label_opnd);
+            la_b(imm_zero_ir2_opnd);
+            la_nop();
+            tb->tu_jmp[TU_TB_INDEX_NEXT] = translated_label_opnd._label_id;
+        }
+        IR2_OPND unlink_label_opnd = ra_alloc_label();
+        la_label(unlink_label_opnd);
+        tb->tu_unlink.stub_offset = unlink_label_opnd._label_id;
+        tb->tu_unlink.rel_num = 2;
+        set_use_tu_jmp(tb);
+        /* For unlink. */
+        cmp_jcc_gen_bcc(bcc_src0, bcc_src1, target_label_opnd, next);
+        tr_generate_exit_tb(next, 0);
+        la_label(target_label_opnd);
+        tr_generate_exit_tb(next, 1);
+        return true;
+    }
+#endif
+
+    if (opnd0_size == 64 || em == UNKNOWN_EXTENSION) {
+        bcc_src0 = src_opnd_0;
+    } else {
+        bcc_src0 = load_opnd_from_opnd(src_opnd_0, em, opnd1_size);
+    }
+    cmp_jcc_gen_bcc(bcc_src0, bcc_src1, target_label_opnd, next);
+
+    /* not taken */
+    EFLAGS_CACULATE(src_opnd_0, src_opnd_1, curr, 0, true);
+    gen_sub(dest, src_opnd_0, src_opnd_1, mem_opnd, imm,
+            ir1, opnd0, opnd0_size);
+    tr_generate_exit_tb(next, 0);
+
+    la_label(target_label_opnd);
+    /* taken */
+    EFLAGS_CACULATE(src_opnd_0, src_opnd_1, curr, 1, true);
+    gen_sub(dest, src_opnd_0, src_opnd_1, mem_opnd, imm,
+            ir1, opnd0, opnd0_size);
+    tr_generate_exit_tb(next, 1);
+    /*
+     * the backup of the eflags instruction, which is used
+     * to recover the eflags instruction when unlink a tb.
+     */
+    EFLAGS_CACULATE(src_opnd_0, src_opnd_1, curr, EFLAG_BACKUP, true);
+    /* ra_free_temp(bcc_src0); */
+    /* ra_free_temp(bcc_src1); */
+
+    return true;
+}
+
+#ifdef CONFIG_LATX_XCOMISX_OPT
+static inline bool xcomisx_jcc(IR1_INST *ir1, bool is_double, bool qnan_exp)
+{
+    IR1_INST *curr = ir1;
+    IR1_INST *next = ir1->instptn.next;
+    bool (*trans)(IR1_INST *) = translate_xcomisx;
+    IR2_INST* (*la_fcmp)(IR2_OPND, IR2_OPND, IR2_OPND, int);
+
+    if (is_double) {
+        la_fcmp = la_fcmp_cond_d;
+        if (qnan_exp) {
+            curr->info->id = WRAP(COMISD);
+        } else {
+            curr->info->id = WRAP(UCOMISD);
+        }
+    } else {
+        la_fcmp = la_fcmp_cond_s;
+        if (qnan_exp) {
+            curr->info->id = WRAP(COMISS);
+        } else {
+            curr->info->id = WRAP(UCOMISS);
+        }
+    }
+
+    IR2_OPND dest = load_freg128_from_ir1(ir1_get_opnd(ir1, 0));
+    IR2_OPND src = load_freg128_from_ir1(ir1_get_opnd(ir1, 1));
+    IR2_OPND target_label_opnd = ra_alloc_label();
+#ifdef CONFIG_LATX_TU
+    TranslationBlock *tb = lsenv->tr_data->curr_tb;
+#endif
+
+    switch (ir1_opcode(next)) {
+    case WRAP(JA):
+        la_fcmp(fcc7_ir2_opnd, src, dest, FCMP_COND_CLT + qnan_exp);
+        break;
+    case WRAP(JAE):
+        la_fcmp(fcc7_ir2_opnd, src, dest, FCMP_COND_CLE + qnan_exp);
+        break;
+    case WRAP(JB):
+	/* below or NAN, x86 special define */
+        la_fcmp(fcc7_ir2_opnd, dest, src, FCMP_COND_CULT + qnan_exp);
+        break;
+    case WRAP(JBE):
+	/* below or equal or NAN, x86 special define */
+        la_fcmp(fcc7_ir2_opnd, dest, src, FCMP_COND_CULE + qnan_exp);
+        break;
+    case WRAP(JE):
+    case WRAP(JLE):
+	/* equal or NAN, x86 special define */
+        la_fcmp(fcc7_ir2_opnd, dest, src, FCMP_COND_CUEQ + qnan_exp);
+        break;
+    case WRAP(JNE):
+    case WRAP(JG):
+        la_fcmp(fcc7_ir2_opnd, dest, src, FCMP_COND_CNE + qnan_exp);
+        break;
+    case WRAP(JL):
+        break;
+    case WRAP(JGE):
+#ifdef CONFIG_LATX_TU
+        if (!tb->s_data->next_tb[TU_TB_INDEX_NEXT] ||
+                !tb->s_data->next_tb[TU_TB_INDEX_TARGET]) {
+            la_b(target_label_opnd);
+        }
+#else
+        la_b(target_label_opnd);
+#endif
+        break;
+    default:
+        lsassert(0);
+        break;
+    }
+
+#ifdef CONFIG_LATX_TU
+    if (judge_tu_eflag_gen(tb)) {
+        IR2_OPND tu_reset_label_opnd = ra_alloc_label();
+        TranslationBlock *tb_next = tb->s_data->next_tb[TU_TB_INDEX_NEXT];
+        TranslationBlock *tb_target = tb->s_data->next_tb[TU_TB_INDEX_TARGET];
+
+        if (tb_next->eflag_use && tb_target->eflag_use) {
+            translate_xcomisx(curr);
+        }
+
+        la_label(tu_reset_label_opnd);
+        tb->tu_jmp[TU_TB_INDEX_TARGET] = tu_reset_label_opnd._label_id;
+        if (ir1_opcode(next) != WRAP(JL)) {
+            la_bcnez(fcc7_ir2_opnd, target_label_opnd);
+            tu_jcc_nop_gen(tb);
+        } else {
+            /* For unlink. */
+            la_nop();
+        }
+
+        if (tb_next->eflag_use && !tb_target->eflag_use) {
+            translate_xcomisx(curr);
+        }
+
+        if (tb->tu_jmp[TU_TB_INDEX_NEXT] != TB_JMP_RESET_OFFSET_INVALID) {
+            IR2_OPND translated_label_opnd = ra_alloc_label();
+            la_label(translated_label_opnd);
+            la_b(imm_zero_ir2_opnd);
+            la_nop();
+            tb->tu_jmp[TU_TB_INDEX_NEXT] = translated_label_opnd._label_id;
+        }
+
+        IR2_OPND unlink_label_opnd = ra_alloc_label();
+        la_label(unlink_label_opnd);
+        tb->tu_unlink.stub_offset = unlink_label_opnd._label_id;
+        tb->tu_unlink.rel_num = 2;
+        set_use_tu_jmp(tb);
+    }
+#endif
+
+    if (ir1_opcode(next) != WRAP(JL))
+        la_bcnez(fcc7_ir2_opnd, target_label_opnd);
+
+    /* not taken */
+    tr_generate_exit_stub_tb(next, 0, trans, curr);
+
+    la_label(target_label_opnd);
+    /* taken */
+    tr_generate_exit_stub_tb(next, 1, trans, curr);
+
+    return true;
+}
+
+static bool translate_comisd_jcc(IR1_INST *ir1)
+{
+    return xcomisx_jcc(ir1, true, true);
+}
+
+static bool translate_comiss_jcc(IR1_INST *ir1)
+{
+    return xcomisx_jcc(ir1, false, true);
+}
+
+static bool translate_ucomisd_jcc(IR1_INST *ir1)
+{
+    return xcomisx_jcc(ir1, true, false);
+}
+
+static bool translate_ucomiss_jcc(IR1_INST *ir1)
+{
+    return xcomisx_jcc(ir1, false, false);
+}
+#endif
+
+static bool translate_bt_jcc(IR1_INST *ir1)
+{
+    IR1_INST *curr = ir1;
+    IR1_INST *next = ir1->instptn.next;
+
+    curr->info->id = WRAP(BT);
+    IR1_OPND *bt_opnd0 = ir1_get_opnd(curr, 0);
+    IR1_OPND *bt_opnd1 = ir1_get_opnd(curr, 1);
+    IR2_OPND src_opnd_0, src_opnd_1, bit_offset;
+    int imm;
+
+    src_opnd_1 = load_ireg_from_ir1(bt_opnd1, ZERO_EXTENSION, false);
+
+    bit_offset = ra_alloc_itemp();
+    la_bstrpick_d(bit_offset, src_opnd_1,
+        __builtin_ctz(ir1_opnd_size(bt_opnd0)) - 1, 0);
+    if (ir1_opnd_is_gpr(bt_opnd0)) {
+        /* r16/r32/r64 */
+        src_opnd_0 = convert_gpr_opnd(bt_opnd0, UNKNOWN_EXTENSION);
+    } else {
+        src_opnd_0 = ra_alloc_itemp();
+        IR2_OPND tmp_mem_op = convert_mem(bt_opnd0, &imm);
+        IR2_OPND mem_opnd = ra_alloc_itemp();
+        la_or(mem_opnd, tmp_mem_op, zero_ir2_opnd);
+#ifdef CONFIG_LATX_IMM_REG
+        imm_cache_free_temp_helper(tmp_mem_op);
+#else
+        ra_free_temp_auto(tmp_mem_op);
+#endif
+
+        if (ir1_opnd_is_gpr(bt_opnd1)) {
+            IR2_OPND tmp = ra_alloc_itemp();
+            IR2_OPND src1 = convert_gpr_opnd(bt_opnd1, UNKNOWN_EXTENSION);
+            int opnd_size = ir1_opnd_size(bt_opnd0);
+            int ctz_opnd_size = __builtin_ctz(opnd_size);
+            int ctz_align_size = __builtin_ctz(opnd_size / 8);
+            lsassertm((opnd_size == 16) || (opnd_size == 32) ||
+                (opnd_size == 64), "%s opnd_size error!", __func__);
+            la_srai_d(tmp, src1, ctz_opnd_size);
+            la_alsl_d(mem_opnd, tmp, mem_opnd, ctz_align_size - 1);
+            ra_free_temp(tmp);
+        }
+
+        if (ir1_opnd_size(bt_opnd0) == 64) {
+            /* m64 */
+            la_ld_d(src_opnd_0, mem_opnd, imm);
+        } else {
+            /* m16/m32 */
+            la_ld_w(src_opnd_0, mem_opnd, imm);
+        }
+        ra_free_temp(mem_opnd);
+    }
+
+    IR2_OPND temp_opnd = ra_alloc_itemp();
+    la_srl_d(temp_opnd, src_opnd_0, bit_offset);
+    la_andi(temp_opnd, temp_opnd, 1);
+    IR2_OPND target_label_opnd = ra_alloc_label();
+
+#ifdef CONFIG_LATX_TU
+    TranslationBlock *tb = lsenv->tr_data->curr_tb;
+    if (judge_tu_eflag_gen(tb)) {
+        TranslationBlock *tb_next = tb->s_data->next_tb[TU_TB_INDEX_NEXT];
+        TranslationBlock *tb_target = tb->s_data->next_tb[TU_TB_INDEX_TARGET];
+        IR2_OPND tu_reset_label_opnd = ra_alloc_label();
+
+        if (tb_next->eflag_use && tb_target->eflag_use) {
+            generate_eflag_calculation(src_opnd_0, src_opnd_0, src_opnd_1, curr, true);
+        }
+
+        la_label(tu_reset_label_opnd);
+        tb->tu_jmp[TU_TB_INDEX_TARGET] = tu_reset_label_opnd._label_id;
+        switch (ir1_opcode(next)) {
+            case WRAP(JB):   /*CF=1*/
+                la_bne(temp_opnd, zero_ir2_opnd, target_label_opnd);
+                break;
+            case WRAP(JAE):  /*CF=0*/
+                la_beq(temp_opnd, zero_ir2_opnd, target_label_opnd);
+                break;
+            default:
+                lsassert(0);
+                break;
+        }
+        tu_jcc_nop_gen(tb);
+
+        if (tb_next->eflag_use && !tb_target->eflag_use) {
+            generate_eflag_calculation(src_opnd_0, src_opnd_0, src_opnd_1, curr, true);
+        }
+
+        if (tb->tu_jmp[TU_TB_INDEX_NEXT] != TB_JMP_RESET_OFFSET_INVALID) {
+            IR2_OPND translated_label_opnd = ra_alloc_label();
+            la_label(translated_label_opnd);
+            la_b(imm_zero_ir2_opnd);
+            la_nop();
+            tb->tu_jmp[TU_TB_INDEX_NEXT] = translated_label_opnd._label_id;
+        }
+
+        IR2_OPND unlink_label_opnd = ra_alloc_label();
+        la_label(unlink_label_opnd);
+        tb->tu_unlink.stub_offset = unlink_label_opnd._label_id;
+        tb->tu_unlink.rel_num = 2;
+        set_use_tu_jmp(tb);
+    }
+#endif
+
+    switch (ir1_opcode(next)) {
+    case WRAP(JB):   /*CF=1*/
+        la_bne(temp_opnd, zero_ir2_opnd, target_label_opnd);
+        break;
+    case WRAP(JAE):  /*CF=0*/
+        la_beq(temp_opnd, zero_ir2_opnd, target_label_opnd);
+        break;
+    default:
+        lsassert(0);
+        break;
+    }
+
+    /* not taken */
+    EFLAGS_CACULATE(src_opnd_0, bit_offset, curr, 0, true);
+    tr_generate_exit_tb(next, 0);
+
+    la_label(target_label_opnd);
+    /* taken */
+    EFLAGS_CACULATE(src_opnd_0, src_opnd_1, curr, 1, true);
+    tr_generate_exit_tb(next, 1);
+
+    /*
+     * the backup of the eflags instruction, which is used
+     * to recover the eflags instruction when unlink a tb.
+     */
+    EFLAGS_CACULATE(src_opnd_0, bit_offset, curr, EFLAG_BACKUP, true);
+
+    ra_free_temp_auto(src_opnd_0);
+    ra_free_temp(bit_offset);
+    ra_free_temp_auto(src_opnd_1);
+    return true;
+}
+
+static bool translate_cqo_idiv(IR1_INST *ir1)
+{
+    IR1_INST *next = ir1->instptn.next;
+
+    IR2_OPND ir2_opnd_addr;
+    ir2_opnd_build(&ir2_opnd_addr, IR2_OPND_IMM, ir1_addr(next));
+    la_x86_inst(ir2_opnd_addr);
+
+    IR2_OPND src_opnd_0 =
+        load_ireg_from_ir1(ir1_get_opnd(next, 0), SIGN_EXTENSION, false);
+
+    IR2_OPND label_z = ra_alloc_label();
+    la_bne(src_opnd_0, zero_ir2_opnd, label_z);
+    la_break(0x7);
+    la_label(label_z);
+
+    if (ir1_opnd_size(ir1_get_opnd(next, 0)) != 64) {
+        lsassert(0);
+    } else {
+        IR2_OPND src_opnd_1 =
+            load_ireg_from_ir1(&rax_ir1_opnd, SIGN_EXTENSION, false);
+        IR2_OPND temp_src = ra_alloc_itemp();
+        IR2_OPND temp1_opnd = ra_alloc_itemp();
+
+        la_or(temp_src, zero_ir2_opnd, src_opnd_1);
+
+        la_mod_d(temp1_opnd, temp_src, src_opnd_0);
+        la_div_d(temp_src, temp_src, src_opnd_0);
+
+        store_ireg_to_ir1(temp_src, &rax_ir1_opnd, false);
+        store_ireg_to_ir1(temp1_opnd, &rdx_ir1_opnd, false);
+
+        ra_free_temp(temp_src);
+        ra_free_temp(temp1_opnd);
+    }
+
+    return true;
+}
+
+static bool translate_cmp_sbb(IR1_INST *ir1)
+{
+    IR1_INST *curr = ir1;
+    IR1_INST *next = ir1->instptn.next;
+
+    /* cmp */
+    IR1_OPND *cmp_opnd0 = ir1_get_opnd(curr, 0);
+    IR1_OPND *cmp_opnd1 = ir1_get_opnd(curr, 1);
+
+    bool cmp_opnd1_is_imm = ir1_opnd_is_simm12(cmp_opnd1);
+
+    IR2_OPND cmp_opnd_0 = load_ireg_from_ir1(cmp_opnd0, SIGN_EXTENSION, false);
+    IR2_OPND cmp_opnd_1;
+
+    /* sbb */
+    IR1_OPND *sbb_opnd0 = ir1_get_opnd(next, 0);
+    lsassert(ir1_opnd_is_same_reg(sbb_opnd0, ir1_get_opnd(next, 1)));
+    bool opnd_clobber = ir1_opnd_size(sbb_opnd0) != 64;
+
+    IR2_OPND cond = opnd_clobber
+                        ? ra_alloc_itemp()
+                        : ra_alloc_gpr(ir1_opnd_base_reg_num(sbb_opnd0));
+    /* caculate cmp */
+    if (cmp_opnd1_is_imm) {
+        la_sltui(cond, cmp_opnd_0, ir1_opnd_simm(cmp_opnd1));
+    } else {
+        cmp_opnd_1 = load_ireg_from_ir1(cmp_opnd1, SIGN_EXTENSION, false);
+        la_sltu(cond, cmp_opnd_0, cmp_opnd_1);
+    }
+
+    /* we need change to sub because sbb uses CF (not calculate) */
+    next->info->id = WRAP(SUB);
+    generate_eflag_calculation(zero_ir2_opnd, zero_ir2_opnd, cond, next, true);
+
+    la_sub_d(cond, zero_ir2_opnd, cond);
+    if (opnd_clobber) {
+        store_ireg_to_ir1(cond, sbb_opnd0, false);
+        ra_free_temp(cond);
+    }
+
+    return true;
+}
+
+/* Return true when it is a branch. */
+static inline bool test_jcc_gen_bcc(IR2_OPND src_opnd_0, IR2_OPND target_label_opnd,
+        IR2_OPND temp, int is_same_reg, IR1_INST *jcc_inst)
+{
+    switch (ir1_opcode(jcc_inst)) {
+    case WRAP(JE):
+        la_beq(is_same_reg ? src_opnd_0 : temp, zero_ir2_opnd, target_label_opnd);
+        // la_beqz(src_opnd_0, target_label_opnd);
+        break;
+    case WRAP(JNE):
+        // la_bnez(src_opnd_0, target_label_opnd);
+        la_bne(is_same_reg ? src_opnd_0 : temp, zero_ir2_opnd, target_label_opnd);
+        break;
+    case WRAP(JS):
+        la_blt(src_opnd_0, zero_ir2_opnd, target_label_opnd);
+        break;
+    case WRAP(JNS):
+        la_bge(src_opnd_0, zero_ir2_opnd, target_label_opnd);
+        break;
+    case WRAP(JLE):
+        la_bge(zero_ir2_opnd, src_opnd_0, target_label_opnd);
+        break;
+    case WRAP(JG):
+        la_blt(zero_ir2_opnd, src_opnd_0, target_label_opnd);
+        break;
+    case WRAP(JNO):
+        /*
+         * OF = 0
+         * For compatibility with bcc+b.
+         */
+        la_beq(zero_ir2_opnd, zero_ir2_opnd, target_label_opnd);
+        // la_beqz(zero_ir2_opnd, target_label_opnd);
+        break;
+    case WRAP(JO):
+        /* OF = 1 */
+        return false;
+        break;
+    case WRAP(JB):
+        /* CF = 1 */
+        return false;
+        break;
+    case WRAP(JBE):
+        /* CF = 1 or ZF = 1 */
+        la_beq(is_same_reg ? src_opnd_0 : temp, zero_ir2_opnd, target_label_opnd);
+        // la_beqz(src_opnd_0, target_label_opnd);
+        break;
+    case WRAP(JA):
+        la_bne(is_same_reg ? src_opnd_0 : temp, zero_ir2_opnd, target_label_opnd);
+        /* CF = 0 and ZF = 0 */
+        // la_bnez(src_opnd_0, target_label_opnd);
+        break;
+    case WRAP(JAE):
+        /*
+         * CF = 0
+         * For compatibility with bcc+b.
+         */
+        la_beq(zero_ir2_opnd, zero_ir2_opnd, target_label_opnd);
+        // la_beqz(zero_ir2_opnd, target_label_opnd);
+        break;
+    default:
+        lsassert(0);
+        break;
+    }
+    return true;
+}
+
+static bool translate_test_jcc(IR1_INST *ir1)
+{
+    IR1_INST *curr = ir1;
+    IR1_INST *next = ir1->instptn.next;
+    IR1_OPND *opnd0 = ir1_get_opnd(ir1, 0);
+    IR1_OPND *opnd1 = ir1_get_opnd(ir1, 1);
+
+    IR2_OPND src_opnd_0 =
+        load_ireg_from_ir1(opnd0, SIGN_EXTENSION, false);
+
+    IR2_OPND src_opnd_1;
+    IR2_OPND temp;
+    int is_same_reg = ir1_opnd_is_same_reg(opnd0, opnd1);
+    if (!is_same_reg) {
+        src_opnd_1 = load_ireg_from_ir1(opnd1, SIGN_EXTENSION, false);
+        temp = ra_alloc_itemp();
+        la_and(temp, src_opnd_0, src_opnd_1);
+    }
+
+    IR2_OPND target_label_opnd = ra_alloc_label();
+
+#ifdef CONFIG_LATX_TU
+    TranslationBlock *tb = lsenv->tr_data->curr_tb;
+    if (judge_tu_eflag_gen(tb)) {
+	IR2_OPND tu_reset_label_opnd = ra_alloc_label();
+	TranslationBlock *tb_next = tb->s_data->next_tb[TU_TB_INDEX_NEXT];
+	TranslationBlock *tb_target = tb->s_data->next_tb[TU_TB_INDEX_TARGET];
+
+	if (tb_next->eflag_use && tb_target->eflag_use) {
+            generate_eflag_calculation(src_opnd_0, src_opnd_0,
+                    is_same_reg ? src_opnd_0 : src_opnd_1, curr, true);
+	}
+
+	la_label(tu_reset_label_opnd);
+	tb->tu_jmp[TU_TB_INDEX_TARGET] = tu_reset_label_opnd._label_id;
+	bool is_branch = test_jcc_gen_bcc(src_opnd_0, target_label_opnd,
+                temp, is_same_reg, next);
+        /* For unlink. */
+        if (!is_branch) {
+            la_nop();
+        }
+	tu_jcc_nop_gen(tb);
+
+	if (tb_next->eflag_use && !tb_target->eflag_use) {
+            generate_eflag_calculation(src_opnd_0, src_opnd_0,
+                    is_same_reg ? src_opnd_0 : src_opnd_1, curr, true);
+	}
+
+	if (tb->tu_jmp[TU_TB_INDEX_NEXT] != TB_JMP_RESET_OFFSET_INVALID) {
+	    IR2_OPND translated_label_opnd = ra_alloc_label();
+	    la_label(translated_label_opnd);
+	    la_b(ir2_opnd_new(IR2_OPND_IMM, 0));
+	    la_nop();
+	    tb->tu_jmp[TU_TB_INDEX_NEXT] = translated_label_opnd._label_id;
+	}
+
+	IR2_OPND unlink_label_opnd = ra_alloc_label();
+	la_label(unlink_label_opnd);
+	tb->tu_unlink.stub_offset = unlink_label_opnd._label_id;
+	tb->tu_unlink.rel_num = 2;
+	set_use_tu_jmp(tb);
+    }
+#endif
+
+    test_jcc_gen_bcc(src_opnd_0, target_label_opnd, temp, is_same_reg, next);
+
+    /* not taken */
+    EFLAGS_CACULATE(src_opnd_0, is_same_reg ? src_opnd_0 : src_opnd_1, curr, 0, true);
+    tr_generate_exit_tb(next, 0);
+
+    la_label(target_label_opnd);
+    /* taken */
+    EFLAGS_CACULATE(src_opnd_0, is_same_reg ? src_opnd_0 : src_opnd_1, curr, 1, true);
+    tr_generate_exit_tb(next, 1);
+
+    /*
+     * the backup of the eflags instruction, which is used
+     * to recover the eflags instruction when unlink a tb.
+     */
+    EFLAGS_CACULATE(src_opnd_0, is_same_reg ? src_opnd_0 : src_opnd_1, curr, EFLAG_BACKUP, true);
+    return true;
+}
+
+static bool translate_xor_div(IR1_INST *ir1)
+{
+    IR1_INST *next = ir1->instptn.next;
+
+    IR2_OPND ir2_opnd_addr;
+    ir2_opnd_build(&ir2_opnd_addr, IR2_OPND_IMM, ir1_addr(next));
+    la_x86_inst(ir2_opnd_addr);
+
+    IR2_OPND src_opnd_0 =
+        load_ireg_from_ir1(ir1_get_opnd(next, 0), ZERO_EXTENSION, false);
+
+    IR2_OPND label_z = ra_alloc_label();
+    la_bne(src_opnd_0, zero_ir2_opnd, label_z);
+    la_break(0x7);
+    la_label(label_z);
+
+    IR2_OPND temp_src = ra_alloc_itemp();
+    IR2_OPND temp1_opnd = ra_alloc_itemp();
+    if (ir1_opnd_size(ir1_get_opnd(next, 0)) == 32) {
+        IR2_OPND src_opnd_1 =
+            load_ireg_from_ir1(&eax_ir1_opnd, ZERO_EXTENSION, false);
+        la_or(temp_src, zero_ir2_opnd, zero_ir2_opnd);
+        la_or(temp_src, zero_ir2_opnd, src_opnd_1);
+
+        la_mod_du(temp1_opnd, temp_src, src_opnd_0);
+        la_div_du(temp_src, temp_src, src_opnd_0);
+
+        store_ireg_to_ir1(temp_src, &eax_ir1_opnd, false);
+        store_ireg_to_ir1(temp1_opnd, &edx_ir1_opnd, false);
+    } else if (ir1_opnd_size(ir1_get_opnd(next, 0)) == 64) {
+        IR2_OPND src_opnd_1 =
+            load_ireg_from_ir1(&rax_ir1_opnd, ZERO_EXTENSION, false);
+
+        la_or(temp_src, zero_ir2_opnd, src_opnd_1);
+
+        la_mod_du(temp1_opnd, temp_src, src_opnd_0);
+        la_div_du(temp_src, temp_src, src_opnd_0);
+
+        store_ireg_to_ir1(temp_src, &rax_ir1_opnd, false);
+        store_ireg_to_ir1(temp1_opnd, &rdx_ir1_opnd, false);
+    } else {
+        lsassert(0);
+    }
+    ra_free_temp(temp_src);
+    ra_free_temp(temp1_opnd);
+
+    return true;
+}
+
+static bool translate_cdq_idiv(IR1_INST *ir1)
+{
+    IR1_INST *next = ir1->instptn.next;
+
+    IR2_OPND ir2_opnd_addr;
+    ir2_opnd_build(&ir2_opnd_addr, IR2_OPND_IMM, ir1_addr(next));
+    la_x86_inst(ir2_opnd_addr);
+
+    IR2_OPND src_opnd_0 =
+        load_ireg_from_ir1(ir1_get_opnd(next, 0), SIGN_EXTENSION, false);
+
+    IR2_OPND label_z = ra_alloc_label();
+    la_bne(src_opnd_0, zero_ir2_opnd, label_z);
+    la_break(0x7);
+    la_label(label_z);
+
+    if (ir1_opnd_size(ir1_get_opnd(next, 0)) != 32) {
+        lsassert(0);
+    } else {
+        IR2_OPND src_opnd_1 =
+            load_ireg_from_ir1(&eax_ir1_opnd, SIGN_EXTENSION, false);
+        IR2_OPND temp_src = ra_alloc_itemp();
+        IR2_OPND temp1_opnd = ra_alloc_itemp();
+
+        la_or(temp_src, zero_ir2_opnd, src_opnd_1);
+
+        la_mod_d(temp1_opnd, temp_src, src_opnd_0);
+        la_div_d(temp_src, temp_src, src_opnd_0);
+
+        store_ireg_to_ir1(temp_src, &eax_ir1_opnd, false);
+        store_ireg_to_ir1(temp1_opnd, &edx_ir1_opnd, false);
+
+        ra_free_temp(temp_src);
+        ra_free_temp(temp1_opnd);
+    }
+    return true;
+}
+
+// static bool ir1_is_same_opnd(IR1_OPND *opnd0, IR1_OPND *opnd1)
+// {
+//     if (ir1_opnd_is_same_reg(opnd0, opnd1)) {
+//         if (opnd0->reg != dt_X86_REG_RIP && opnd0->reg != dt_X86_REG_EIP)
+//             return true;
+//     } else if (ir1_opnd_is_mem(opnd0) && ir1_opnd_is_mem(opnd1)) {
+//         if (opnd0->mem.base == opnd1->mem.base &&
+//             opnd0->mem.index == opnd1->mem.index &&
+//             opnd0->mem.segment == opnd1->mem.segment &&
+//             opnd0->mem.scale == opnd1->mem.scale &&
+//             opnd0->mem.disp == opnd1->mem.disp) {
+//             if (!ir1_opnd_is_pc_relative(opnd0))
+//                 return true;
+//         }
+//     }
+//     return false;
+// }
+
+static bool translate_cmp_xxcc(IR1_INST *ir1)
+{
+    IR1_INST *curr = ir1;
+    IR1_INST *next = ir1->instptn.next;
+
+    int em = ZERO_EXTENSION;
+    int is_cmovcc = 0;
+    switch (ir1_opcode(next)) {
+    case WRAP(CMOVL):
+    case WRAP(CMOVGE):
+    case WRAP(CMOVLE):
+    case WRAP(CMOVG):
+        em = SIGN_EXTENSION;  __attribute__((fallthrough));
+    case WRAP(CMOVB):
+    case WRAP(CMOVAE):
+    case WRAP(CMOVE):
+    case WRAP(CMOVNE):
+    case WRAP(CMOVBE):
+    case WRAP(CMOVA):
+        is_cmovcc = 1;
+        break;
+    case WRAP(SETL):
+    case WRAP(SETGE):
+    case WRAP(SETLE):
+    case WRAP(SETG):
+        em = SIGN_EXTENSION;  __attribute__((fallthrough));
+    case WRAP(SETB):
+    case WRAP(SETAE):
+    case WRAP(SETE):
+    case WRAP(SETNE):
+    case WRAP(SETBE):
+    case WRAP(SETA):
+        break;
+    default:
+        lsassert(0);
+        break;
+    }
+
+    IR1_OPND *cmp_opnd0 = ir1_get_opnd(curr, 0);
+    IR1_OPND *cmp_opnd1 = ir1_get_opnd(curr, 1);
+    IR2_OPND src0 = load_ireg_from_ir1(cmp_opnd0, em, false);
+    IR2_OPND src1 = load_ireg_from_ir1(cmp_opnd1, em, false);
+    generate_eflag_calculation(src0, src0, src1, curr, true);
+
+    lsenv->tr_data->curr_ir1_inst = next;
+    lsenv->tr_data->curr_ir1_count++;
+    IR1_OPND *next_opnd0 = ir1_get_opnd(next, 0);
+    IR2_OPND next_dest, next_src;
+    if (is_cmovcc) {
+        IR1_OPND *next_opnd1 = ir1_get_opnd(next, 1);
+        next_dest = ra_alloc_gpr(ir1_opnd_base_reg_num(next_opnd0));
+        next_src = load_ireg_from_ir1(next_opnd1, UNKNOWN_EXTENSION, false);
+    }
+
+    IR2_OPND temp1;
+    IR2_OPND temp2 = ra_alloc_itemp();
+    switch (ir1_opcode(next)) {
+    case WRAP(CMOVB): {
+        temp1 = ra_alloc_itemp();
+        la_sltu(temp2, src0, src1);
+        la_masknez(temp1, next_dest, temp2);
+        la_maskeqz(temp2, next_src, temp2);
+    }
+    break;
+    case WRAP(SETB): {
+        la_sltu(temp2, src0, src1);
+    }
+    break;
+    case WRAP(CMOVAE): {
+        temp1 = ra_alloc_itemp();
+        la_sltu(temp2, src0, src1);
+        la_maskeqz(temp1, next_dest, temp2);
+        la_masknez(temp2, next_src, temp2);
+    }
+    break;
+    case WRAP(SETAE): {
+        la_sltu(temp2, src0, src1);
+        la_xori(temp2, temp2, 1);
+    }
+    break;
+    case WRAP(CMOVE): {
+        temp1 = ra_alloc_itemp();
+        la_sub_d(temp2, src0, src1);
+        la_maskeqz(temp1, next_dest, temp2);
+        la_masknez(temp2, next_src, temp2);
+    }
+    break;
+    case WRAP(SETE): {
+        la_sub_d(temp2, src0, src1);
+        la_sltu(temp2, zero_ir2_opnd, temp2);
+        la_xori(temp2, temp2, 1);
+    }
+    break;
+    case WRAP(CMOVNE): {
+        temp1 = ra_alloc_itemp();
+        la_sub_d(temp2, src0, src1);
+        la_masknez(temp1, next_dest, temp2);
+        la_maskeqz(temp2, next_src, temp2);
+    }
+    break;
+    case WRAP(SETNE): {
+        la_sub_d(temp2, src0, src1);
+        la_sltu(temp2, zero_ir2_opnd, temp2);
+    }
+    break;
+    case WRAP(CMOVBE): {
+        temp1 = ra_alloc_itemp();
+        la_sltu(temp2, src1, src0);
+        la_maskeqz(temp1, next_dest, temp2);
+        la_masknez(temp2, next_src, temp2);
+    }
+    break;
+    case WRAP(SETBE): {
+        la_sltu(temp2, src1, src0);
+        la_xori(temp2, temp2, 1);
+    }
+    break;
+    case WRAP(CMOVA): {
+        temp1 = ra_alloc_itemp();
+        la_sltu(temp2, src1, src0);
+        la_masknez(temp1, next_dest, temp2);
+        la_maskeqz(temp2, next_src, temp2);
+    }
+    break;
+    case WRAP(SETA): {
+        la_sltu(temp2, src1, src0);
+    }
+    break;
+    case WRAP(CMOVL): {
+        temp1 = ra_alloc_itemp();
+        la_slt(temp2, src0, src1);
+        la_masknez(temp1, next_dest, temp2);
+        la_maskeqz(temp2, next_src, temp2);
+    }
+    break;
+    case WRAP(SETL): {
+        la_slt(temp2, src0, src1);
+    }
+    break;
+    case WRAP(CMOVGE): {
+        temp1 = ra_alloc_itemp();
+        la_slt(temp2, src0, src1);
+        la_maskeqz(temp1, next_dest, temp2);
+        la_masknez(temp2, next_src, temp2);
+    }
+    break;
+    case WRAP(SETGE): {
+        la_slt(temp2, src0, src1);
+        la_xori(temp2, temp2, 1);
+    }
+    break;
+    case WRAP(CMOVLE): {
+        temp1 = ra_alloc_itemp();
+        la_slt(temp2, src1, src0);
+        la_maskeqz(temp1, next_dest, temp2);
+        la_masknez(temp2, next_src, temp2);
+    }
+    break;
+    case WRAP(SETLE): {
+        la_slt(temp2, src1, src0);
+        la_xori(temp2, temp2, 1);
+    }
+    break;
+    case WRAP(CMOVG): {
+        temp1 = ra_alloc_itemp();
+        la_slt(temp2, src1, src0);
+        la_masknez(temp1, next_dest, temp2);
+        la_maskeqz(temp2, next_src, temp2);
+    }
+    break;
+    case WRAP(SETG): {
+        la_slt(temp2, src1, src0);
+    }
+    break;
+    default:        lsassert(0);        break;
+    }
+
+    if (is_cmovcc) {
+        if (ir1_opnd_size(next_opnd0) == 64) {
+            la_or(next_dest, temp1, temp2);
+        } else {
+            la_or(temp1, temp1, temp2);
+            store_ireg_to_ir1(temp1, next_opnd0, false);
+        }
+    } else {
+        store_ireg_to_ir1(temp2, next_opnd0, false);
+    }
+
+    return true;
+}
+
+static bool translate_test_xxcc(IR1_INST *pir1)
+{
+    IR1_INST *curr = pir1;
+    IR1_INST *next = pir1->instptn.next;
+
+    int is_cmovcc = 0;
+    if ( WRAP(CMOVA)<= ir1_opcode(next) && ir1_opcode(next) <= WRAP(CMOVS)) {
+        is_cmovcc = 1;
+    }
+
+    IR1_OPND *test_opnd0 = ir1_get_opnd(curr, 0);
+    IR1_OPND *test_opnd1 = ir1_get_opnd(curr, 1);
+
+    int is_same_reg = ir1_opnd_is_same_reg(test_opnd0, test_opnd1);
+
+    IR2_OPND src0 = load_ireg_from_ir1(test_opnd0, SIGN_EXTENSION, false);
+    IR2_OPND src1;
+    IR2_OPND temp;
+    if (is_same_reg) {
+        generate_eflag_calculation(src0, src0, src0, curr, true);
+    } else {
+        src1 = load_ireg_from_ir1(test_opnd1, SIGN_EXTENSION, false);
+        generate_eflag_calculation(src0, src0, src1, curr, true);
+        temp = ra_alloc_itemp();
+        la_and(temp, src0, src1);
+    }
+
+    lsenv->tr_data->curr_ir1_inst = next;
+    lsenv->tr_data->curr_ir1_count++;
+    IR1_OPND *next_opnd0 = ir1_get_opnd(next, 0);
+    IR2_OPND next_dest, next_src;
+    if (is_cmovcc) {
+        IR1_OPND *next_opnd1 = ir1_get_opnd(next, 1);
+        next_dest = ra_alloc_gpr(ir1_opnd_base_reg_num(next_opnd0));
+        next_src = load_ireg_from_ir1(next_opnd1, UNKNOWN_EXTENSION, false);
+    }
+
+    IR2_OPND temp1;
+    IR2_OPND temp2 = ra_alloc_itemp();
+    switch (ir1_opcode(next)) {
+    case WRAP(CMOVE): {
+        temp1 = ra_alloc_itemp();
+        la_maskeqz(temp1, next_dest, is_same_reg ? src0 : temp);
+        la_masknez(temp2, next_src, is_same_reg ? src0 : temp);
+    }
+    break;
+    case WRAP(SETE): {
+        la_sltu(temp2, zero_ir2_opnd, is_same_reg ? src0 : temp);
+        la_xori(temp2, temp2, 1);
+    }
+    break;
+    case WRAP(CMOVNE):
+    case WRAP(CMOVA): {
+        temp1 = ra_alloc_itemp();
+        la_masknez(temp1, next_dest, is_same_reg ? src0 : temp);
+        la_maskeqz(temp2, next_src, is_same_reg ? src0 : temp);
+    }
+    break;
+    case WRAP(SETNE):
+    case WRAP(SETA): {
+        la_sltu(temp2, zero_ir2_opnd, is_same_reg ? src0 : temp);
+    }
+    break;
+    case WRAP(CMOVS): {
+        lsassert(is_same_reg);
+        la_slt(temp2, src0, zero_ir2_opnd);
+        temp1 = ra_alloc_itemp();
+        la_masknez(temp1, next_dest, temp2);
+        la_maskeqz(temp2, next_src, temp2);
+    }
+    break;
+    case WRAP(SETS): {
+        lsassert(is_same_reg);
+        la_slt(temp2, src0, zero_ir2_opnd);
+    }
+    break;
+    case WRAP(CMOVNS): {
+        lsassert(is_same_reg);
+        la_slt(temp2, src0, zero_ir2_opnd);
+        temp1 = ra_alloc_itemp();
+        la_maskeqz(temp1, next_dest, temp2);
+        la_masknez(temp2, next_src, temp2);
+    }
+    break;
+    case WRAP(SETNS): {
+        lsassert(is_same_reg);
+        la_slt(temp2, src0, zero_ir2_opnd);
+        la_xori(temp2, temp2, 1);
+    }
+    break;
+    case WRAP(CMOVLE): {
+        lsassert(is_same_reg);
+        la_slt(temp2, zero_ir2_opnd, src0);
+        temp1 = ra_alloc_itemp();
+        la_maskeqz(temp1, next_dest, temp2);
+        la_masknez(temp2, next_src, temp2);
+    }
+    break;
+    case WRAP(SETLE): {
+        lsassert(is_same_reg);
+        la_slt(temp2, zero_ir2_opnd, src0);
+        la_xori(temp2, temp2, 1);
+    }
+    break;
+    case WRAP(CMOVG): {
+        lsassert(is_same_reg);
+        la_slt(temp2, zero_ir2_opnd, src0);
+        temp1 = ra_alloc_itemp();
+        la_masknez(temp1, next_dest, temp2);
+        la_maskeqz(temp2, next_src, temp2);
+    }
+    break;
+    case WRAP(SETG): {
+        lsassert(is_same_reg);
+        la_slt(temp2, zero_ir2_opnd, src0);
+    }
+    break;
+    case WRAP(CMOVNO):
+    case WRAP(CMOVAE): {
+        ra_free_temp(temp2);
+        temp2 = next_src;
+        temp1 = next_src;
+    }
+    break;
+    case WRAP(SETNO):
+    case WRAP(SETAE): {
+        la_ori(temp2, zero_ir2_opnd, 1);
+    }
+    break;
+    case WRAP(CMOVO):
+    case WRAP(CMOVB): {
+        ra_free_temp(temp2);
+        temp2 = next_dest;
+        temp1 = next_dest;
+    }
+    break;
+    case WRAP(SETO):
+    case WRAP(SETB): {
+        ra_free_temp(temp2);
+        temp2 = zero_ir2_opnd;
+    }
+    break;
+    case WRAP(CMOVBE): {
+        temp1 = ra_alloc_itemp();
+        la_maskeqz(temp1, next_dest, is_same_reg ? src0 : temp);
+        la_masknez(temp2, next_src, is_same_reg ? src0 : temp);
+    }
+    break;
+    case WRAP(SETBE): {
+        la_sltu(temp2, zero_ir2_opnd, is_same_reg ? src0 : temp);
+        la_xori(temp2, temp2, 1);
+    }
+    break;
+    default:        lsassert(0);        break;
+    }
+
+    if (is_cmovcc) {
+        if ((ir1_opnd_size(next_opnd0) == 64) && (!ir2_opnd_cmp(&next_dest, &temp1))) {
+            la_or(next_dest, temp1, temp2);
+        } else {
+            la_or(temp1, temp1, temp2);
+            store_ireg_to_ir1(temp1, next_opnd0, false);
+        }
+    } else {
+        store_ireg_to_ir1(temp2, next_opnd0, false);
+    }
+
+    return true;
+}
+
+static bool translate_ucomisd_seta(IR1_INST *pir1)
+{
+    IR1_INST *curr = pir1;
+    IR1_INST *next = curr->instptn.next;
+
+    IR1_OPND *opnd0 = ir1_get_opnd(curr, 0);
+    IR1_OPND *opnd1 = ir1_get_opnd(curr, 1);
+    IR2_OPND dest = load_freg128_from_ir1(opnd0);
+    IR2_OPND src = load_freg128_from_ir1(opnd1);
+    /* 0. set flag = 0 */
+    IR2_OPND flag_zf = ra_alloc_itemp();
+    IR2_OPND flag_pf = ra_alloc_itemp();
+    IR2_OPND flag = ra_alloc_itemp();
+    la_mov64(flag, zero_ir2_opnd);
+
+    /* 1. check ZF, are they equal & unordered? */
+    la_fcmp_cond_d(fcc0_ir2_opnd, dest, src, FCMP_COND_CUEQ);
+    la_movcf2gr(flag_zf, fcc0_ir2_opnd);
+
+    /* 2. check CF, are they less & unordered? */
+    la_fcmp_cond_d(fcc2_ir2_opnd, dest, src, FCMP_COND_CULT);
+    la_movcf2gr(flag, fcc2_ir2_opnd);
+
+    /* 3. check PF, are they unordered? (= ZF & CF) */
+    la_and(flag_pf, flag, flag_zf);
+
+    la_bstrins_w(flag, flag_zf, ZF_BIT_INDEX, ZF_BIT_INDEX);
+    la_bstrins_w(flag, flag_pf, PF_BIT_INDEX, PF_BIT_INDEX);
+
+    ra_free_temp(flag_pf);
+    ra_free_temp(flag_zf);
+    /* 4. mov flag to EFLAGS */
+    la_x86mtflag(flag, 0x3f);
+
+    lsenv->tr_data->curr_ir1_inst = next;
+    lsenv->tr_data->curr_ir1_count++;
+    switch (ir1_opcode(next)) {
+    case WRAP(SETA):
+        la_fcmp_cond_d(fcc0_ir2_opnd, src, dest, FCMP_COND_CLT);
+        break;
+    default:
+        lsassert(0);
+        break;
+    }
+
+    la_movcf2gr(flag, fcc0_ir2_opnd);
+    store_ireg_to_ir1(flag, ir1_get_opnd(next, 0), false);
+
+    ra_free_temp(flag);
+    return true;
+}
+
+static bool translate_neg_cmovcc(IR1_INST *pir1)
+{
+    IR1_INST *curr = pir1;
+    IR1_INST *next = curr->instptn.next;
+
+    CPUArchState* env = (CPUArchState*)(lsenv->cpu_state);
+    CPUState *cpu = env_cpu(env);
+
+    IR1_OPND *opnd0 = ir1_get_opnd(curr, 0);
+
+    bool is_lock = ir1_is_prefix_lock(curr) && ir1_opnd_is_mem(opnd0);
+    if (!close_latx_parallel) {
+        is_lock = is_lock && (cpu->tcg_cflags & CF_PARALLEL);
+    }
+
+    if (is_lock) {
+        translate_neg(curr);
+        lsenv->tr_data->curr_ir1_inst = next;
+        lsenv->tr_data->curr_ir1_count++;
+        translate_cmovcc(next);
+        return true;
+    }
+
+    IR2_OPND dest, src0, mem_opnd;
+    int imm;
+    int opnd0_size = ir1_opnd_size(opnd0);
+
+    dest = ra_alloc_itemp();
+
+    if (ir1_opnd_is_gpr(opnd0)) {
+        src0 = convert_gpr_opnd(opnd0, ZERO_EXTENSION);
+    } else {
+        src0 = ra_alloc_itemp();
+        mem_opnd = convert_mem(opnd0, &imm);
+        la_ld_by_op_size(src0, mem_opnd, imm, opnd0_size);
+    }
+
+    generate_eflag_calculation(dest, zero_ir2_opnd, src0, curr, true);
+
+    la_sub_d(dest, zero_ir2_opnd, src0);
+    if (ir1_opnd_is_gpr(opnd0)) {
+        store_ireg_to_ir1(dest, opnd0, false);
+    } else {
+        la_st_by_op_size(dest, mem_opnd, imm, opnd0_size);
+    }
+    ra_free_temp_auto(src0);
+
+    la_bstrpick_d(dest, dest, opnd0_size - 1, opnd0_size - 1);
+    if (ir1_opcode(next) == WRAP(CMOVNS))
+        la_xori(dest, dest, 1);
+
+    lsenv->tr_data->curr_ir1_inst = next;
+    lsenv->tr_data->curr_ir1_count++;
+    IR1_OPND *next_opnd0 = ir1_get_opnd(next, 0);
+    IR1_OPND *next_opnd1 = ir1_get_opnd(next, 1);
+
+    IR2_OPND next_src = load_ireg_from_ir1(next_opnd1, UNKNOWN_EXTENSION, false);
+    IR2_OPND next_dest = ra_alloc_gpr(ir1_opnd_base_reg_num(next_opnd0));
+
+    IR2_OPND cond1 = ra_alloc_itemp();
+    IR2_OPND cond2 = ra_alloc_itemp();
+
+    la_masknez(cond1, next_dest, dest);
+    la_maskeqz(cond2, next_src, dest);
+
+    if (ir1_opnd_size(next_opnd0) == 64) {
+        la_or(next_dest, cond1, cond2);
+    } else {
+        la_or(cond1, cond1, cond2);
+        store_ireg_to_ir1(cond1, next_opnd0, false);
+    }
+    ra_free_temp(cond1);
+    ra_free_temp(cond2);
+    ra_free_temp(dest);
+    return true;
+}
+
+static
+bool translate_cmp_xx_jcc(IR1_INST *pir1)
+{
+    TRANSLATION_DATA *td = lsenv->tr_data;
+
+    if (ir1_opcode(pir1) == WRAP(CMP)) {
+        IR1_OPND *opnd0 = ir1_get_opnd(pir1, 0);
+        IR1_OPND *opnd1 = ir1_get_opnd(pir1, 1);
+
+        td->ptn_itemp0 = a0_ir2_opnd;
+        td->ptn_itemp1 = a1_ir2_opnd;
+        load_ireg_from_ir1_2(td->ptn_itemp0, opnd0, SIGN_EXTENSION, false);
+        load_ireg_from_ir1_2(td->ptn_itemp1, opnd1, SIGN_EXTENSION, false);
+    } else {
+        IR2_OPND target_label_opnd = ra_alloc_label();
+#ifdef CONFIG_LATX_TU
+        TranslationBlock *tb = lsenv->tr_data->curr_tb;
+        if (judge_tu_eflag_gen(tb)) {
+            IR2_OPND tu_reset_label_opnd = ra_alloc_label();
+            TranslationBlock *tb_next = tb->s_data->next_tb[TU_TB_INDEX_NEXT];
+            TranslationBlock *tb_target = tb->s_data->next_tb[TU_TB_INDEX_TARGET];
+
+            if (tb_next->eflag_use && tb_target->eflag_use) {
+                generate_eflag_calculation(td->ptn_itemp0, td->ptn_itemp0,
+                        td->ptn_itemp1, pir1->instptn.next, true);
+            }
+
+            la_label(tu_reset_label_opnd);
+            tb->tu_jmp[TU_TB_INDEX_TARGET] = tu_reset_label_opnd._label_id;
+            cmp_jcc_gen_bcc(td->ptn_itemp0, td->ptn_itemp1, target_label_opnd, pir1);
+            tu_jcc_nop_gen(tb);
+
+            if (tb_next->eflag_use && !tb_target->eflag_use) {
+                generate_eflag_calculation(td->ptn_itemp0, td->ptn_itemp0,
+                        td->ptn_itemp1, pir1->instptn.next, true);
+            }
+            if (tb->tu_jmp[TU_TB_INDEX_NEXT] != TB_JMP_RESET_OFFSET_INVALID) {
+                IR2_OPND translated_label_opnd = ra_alloc_label();
+                la_label(translated_label_opnd);
+                la_b(ir2_opnd_new(IR2_OPND_IMM, 0));
+                la_nop();
+                tb->tu_jmp[TU_TB_INDEX_NEXT] = translated_label_opnd._label_id;
+            }
+
+            IR2_OPND unlink_label_opnd = ra_alloc_label();
+            la_label(unlink_label_opnd);
+            tb->tu_unlink.stub_offset = unlink_label_opnd._label_id;
+            tb->tu_unlink.rel_num = 2;
+            set_use_tu_jmp(tb);
+        }
+#endif
+        cmp_jcc_gen_bcc(td->ptn_itemp0, td->ptn_itemp1, target_label_opnd, pir1);
+
+        /* not taken */
+        EFLAGS_CACULATE(td->ptn_itemp0, td->ptn_itemp1, pir1->instptn.next, 0, true);
+        tr_generate_exit_tb(pir1, 0);
+
+        la_label(target_label_opnd);
+        /* taken */
+        EFLAGS_CACULATE(td->ptn_itemp0, td->ptn_itemp1, pir1->instptn.next, 1, true);
+        tr_generate_exit_tb(pir1, 1);
+
+        EFLAGS_CACULATE(td->ptn_itemp0, td->ptn_itemp1, pir1->instptn.next, EFLAG_BACKUP, true);
+    }
+
+    return true;
+}
+
+/* Return true when it is a branch. */
+static inline bool test_xx_jcc_gen_bcc(IR2_OPND itemp,
+        IR2_OPND target_label_opnd, IR1_INST *jcc_inst)
+{
+    switch (ir1_opcode(jcc_inst)) {
+        case WRAP(JE):
+            la_beqz(itemp, target_label_opnd);
+            break;
+        case WRAP(JNE):
+            la_bnez(itemp, target_label_opnd);
+            break;
+        case WRAP(JS):
+            la_blt(itemp, zero_ir2_opnd, target_label_opnd);
+            break;
+        case WRAP(JNS):
+            la_bge(itemp, zero_ir2_opnd, target_label_opnd);
+            break;
+        case WRAP(JLE):
+            la_bge(zero_ir2_opnd, itemp, target_label_opnd);
+            break;
+        case WRAP(JG):
+            la_blt(zero_ir2_opnd, itemp, target_label_opnd);
+            break;
+        case WRAP(JNO):
+            /* OF = 0 For compatibility with bcc+b */
+            la_b(target_label_opnd);
+            break;
+        case WRAP(JO):
+            /* TODO tb->opt_bcc = false;*/
+            /* OF = 1 */
+            return false;
+            break;
+        case WRAP(JB):
+            /* TODO tb->opt_bcc = false;*/
+            /* CF = 1 */
+            return false;
+            break;
+        case WRAP(JBE):
+            /* CF = 1 or ZF = 1 */
+            la_beqz(itemp, target_label_opnd);
+            break;
+        case WRAP(JA):
+            /* CF = 0 and ZF = 0 */
+            la_bnez(itemp, target_label_opnd);
+            break;
+        case WRAP(JAE):
+            /* CF = 0 For compatibility with bcc+b */
+            //latxs_append_ir2_opnd2(LISA_BEQZ, zero, &target_label);
+            la_b(target_label_opnd);
+            break;
+        default:
+            lsassert(0);
+            break;
+    }
+    return true;
+}
+
+static
+bool translate_test_xx_jcc(IR1_INST *pir1)
+{
+    TRANSLATION_DATA *td = lsenv->tr_data;
+
+    if (ir1_opcode(pir1) == WRAP(TEST)) {
+        IR1_OPND *opnd0 = ir1_get_opnd(pir1, 0);
+        IR1_OPND *opnd1 = ir1_get_opnd(pir1, 1);
+
+        td->ptn_itemp0 = a0_ir2_opnd;
+        load_ireg_from_ir1_2(td->ptn_itemp0, opnd0, SIGN_EXTENSION, false);
+
+        bool is_same_reg = ir1_opnd_is_same_reg(opnd0, opnd1);
+        if (!is_same_reg) {
+            td->ptn_itemp1 = a1_ir2_opnd;
+            load_ireg_from_ir1_2(td->ptn_itemp1, opnd1, SIGN_EXTENSION, false);
+        } else {
+            td->ptn_itemp1 = td->ptn_itemp0;
+        }
+    } else {
+        IR1_INST *next = pir1->instptn.next;
+        IR2_OPND itemp;
+        if (ir1_opnd_is_same_reg(ir1_get_opnd(next, 0), ir1_get_opnd(next, 1))) {
+            itemp = td->ptn_itemp0;
+        } else {
+            itemp = ra_alloc_itemp();
+            la_and(itemp, td->ptn_itemp0, td->ptn_itemp1);
+        }
+
+        IR2_OPND target_label_opnd = ra_alloc_label();
+
+#ifdef CONFIG_LATX_TU
+        TranslationBlock *tb = lsenv->tr_data->curr_tb;
+        if (judge_tu_eflag_gen(tb)) {
+            IR2_OPND tu_reset_label_opnd = ra_alloc_label();
+            TranslationBlock *tb_next = tb->s_data->next_tb[TU_TB_INDEX_NEXT];
+            TranslationBlock *tb_target = tb->s_data->next_tb[TU_TB_INDEX_TARGET];
+
+            if (tb_next->eflag_use && tb_target->eflag_use) {
+                generate_eflag_calculation(td->ptn_itemp0, td->ptn_itemp0,
+                        td->ptn_itemp1, next, true);
+            }
+
+            la_label(tu_reset_label_opnd);
+            tb->tu_jmp[TU_TB_INDEX_TARGET] = tu_reset_label_opnd._label_id;
+            bool is_branch
+                = test_xx_jcc_gen_bcc(itemp, target_label_opnd, pir1);
+            /* For unlink. */
+            if (!is_branch) {
+                la_nop();
+            }
+            tu_jcc_nop_gen(tb);
+
+            if (tb_next->eflag_use && !tb_target->eflag_use) {
+                generate_eflag_calculation(td->ptn_itemp0, td->ptn_itemp0,
+                        td->ptn_itemp1, next, true);
+            }
+
+            if (tb->tu_jmp[TU_TB_INDEX_NEXT] != TB_JMP_RESET_OFFSET_INVALID) {
+                IR2_OPND translated_label_opnd = ra_alloc_label();
+                la_label(translated_label_opnd);
+                la_b(ir2_opnd_new(IR2_OPND_IMM, 0));
+                la_nop();
+                tb->tu_jmp[TU_TB_INDEX_NEXT] = translated_label_opnd._label_id;
+            }
+
+            IR2_OPND unlink_label_opnd = ra_alloc_label();
+            la_label(unlink_label_opnd);
+            tb->tu_unlink.stub_offset = unlink_label_opnd._label_id;
+            tb->tu_unlink.rel_num = 2;
+            set_use_tu_jmp(tb);
+        }
+#endif
+
+        test_xx_jcc_gen_bcc(itemp, target_label_opnd, pir1);
+
+        /* not taken */
+        EFLAGS_CACULATE(td->ptn_itemp0, td->ptn_itemp1, next, 0, true);
+        tr_generate_exit_tb(pir1, 0);
+
+        la_label(target_label_opnd);
+
+        /* taken */
+        EFLAGS_CACULATE(td->ptn_itemp0, td->ptn_itemp1, next, 1, true);
+        tr_generate_exit_tb(pir1, 1);
+
+        EFLAGS_CACULATE(td->ptn_itemp0, td->ptn_itemp1, next, EFLAG_BACKUP, true);
+    }
+
+    return true;
+}
+
+static
+bool translate_bt_xx_jcc(IR1_INST *pir1)
+{
+    IR1_INST *curr = pir1;
+    TRANSLATION_DATA *td = lsenv->tr_data;
+
+    if (ir1_opcode(curr) == WRAP(BT)) {
+
+        IR1_OPND *bt_opnd0 = ir1_get_opnd(curr, 0);
+        IR1_OPND *bt_opnd1 = ir1_get_opnd(curr, 1);
+
+        td->ptn_itemp0 = a0_ir2_opnd;
+        td->ptn_itemp1 = a1_ir2_opnd;
+        int imm;
+
+        IR2_OPND src_opnd_1 = load_ireg_from_ir1(bt_opnd1, ZERO_EXTENSION, false);
+
+        la_bstrpick_d(td->ptn_itemp1, src_opnd_1,
+            __builtin_ctz(ir1_opnd_size(bt_opnd0)) - 1, 0);
+        ra_free_temp_auto(src_opnd_1);
+        if (ir1_opnd_is_gpr(bt_opnd0)) {
+            /* r16/r32/r64 */
+            load_ireg_from_ir1_2(td->ptn_itemp0, bt_opnd0, UNKNOWN_EXTENSION, false);
+        } else {
+            IR2_OPND tmp_mem_op = convert_mem(bt_opnd0, &imm);
+            IR2_OPND mem_opnd = ra_alloc_itemp();
+            la_or(mem_opnd, tmp_mem_op, zero_ir2_opnd);
+    #ifdef CONFIG_LATX_IMM_REG
+            imm_cache_free_temp_helper(tmp_mem_op);
+    #else
+            ra_free_temp_auto(tmp_mem_op);
+    #endif
+
+            if (ir1_opnd_is_gpr(bt_opnd1)) {
+                IR2_OPND tmp = ra_alloc_itemp();
+                IR2_OPND src1 = convert_gpr_opnd(bt_opnd1, UNKNOWN_EXTENSION);
+                int opnd_size = ir1_opnd_size(bt_opnd0);
+                int ctz_opnd_size = __builtin_ctz(opnd_size);
+                int ctz_align_size = __builtin_ctz(opnd_size / 8);
+                lsassertm((opnd_size == 16) || (opnd_size == 32) ||
+                    (opnd_size == 64), "%s opnd_size error!", __func__);
+                la_srai_d(tmp, src1, ctz_opnd_size);
+                la_alsl_d(mem_opnd, tmp, mem_opnd, ctz_align_size - 1);
+                ra_free_temp(tmp);
+            }
+
+            if (ir1_opnd_size(bt_opnd0) == 64) {
+                /* m64 */
+                la_ld_d(td->ptn_itemp0, mem_opnd, imm);
+            } else {
+                /* m16/m32 */
+                la_ld_w(td->ptn_itemp0, mem_opnd, imm);
+            }
+            ra_free_temp(mem_opnd);
+        }
+    } else {
+        IR1_INST *next = pir1->instptn.next;
+        IR2_OPND tempi = ra_alloc_itemp();
+        la_srl_d(tempi, td->ptn_itemp0, td->ptn_itemp1);
+        la_andi(tempi, tempi, 1);
+
+        IR2_OPND target_label_opnd = ra_alloc_label();
+
+#ifdef CONFIG_LATX_TU
+        TranslationBlock *tb = lsenv->tr_data->curr_tb;
+        if (judge_tu_eflag_gen(tb)) {
+            TranslationBlock *tb_next = tb->s_data->next_tb[TU_TB_INDEX_NEXT];
+            TranslationBlock *tb_target = tb->s_data->next_tb[TU_TB_INDEX_TARGET];
+            IR2_OPND tu_reset_label_opnd = ra_alloc_label();
+
+            if (tb_next->eflag_use && tb_target->eflag_use) {
+                generate_eflag_calculation(td->ptn_itemp0, td->ptn_itemp0,
+                        td->ptn_itemp1, next, true);
+            }
+
+            la_label(tu_reset_label_opnd);
+            tb->tu_jmp[TU_TB_INDEX_TARGET] = tu_reset_label_opnd._label_id;
+            switch (ir1_opcode(curr)) {
+                case WRAP(JB):   /*CF=1*/
+                    la_bne(tempi, zero_ir2_opnd, target_label_opnd);
+                    break;
+                case WRAP(JAE):  /*CF=0*/
+                    la_beq(tempi, zero_ir2_opnd, target_label_opnd);
+                    break;
+                default:
+                    lsassert(0);
+                    break;
+            }
+            tu_jcc_nop_gen(tb);
+
+            if (tb_next->eflag_use && !tb_target->eflag_use) {
+                generate_eflag_calculation(td->ptn_itemp0, td->ptn_itemp0,
+                        td->ptn_itemp1, next, true);
+            }
+            if (tb->tu_jmp[TU_TB_INDEX_NEXT] != TB_JMP_RESET_OFFSET_INVALID) {
+                IR2_OPND translated_label_opnd = ra_alloc_label();
+                /* la_code_align(2, 0x03400000); */
+                la_label(translated_label_opnd);
+                la_b(ir2_opnd_new(IR2_OPND_IMM, 0));
+                la_nop();
+                tb->tu_jmp[TU_TB_INDEX_NEXT] = translated_label_opnd._label_id;
+            }
+
+            IR2_OPND unlink_label_opnd = ra_alloc_label();
+            la_label(unlink_label_opnd);
+            tb->tu_unlink.stub_offset = unlink_label_opnd._label_id;
+            tb->tu_unlink.rel_num = 2;
+            set_use_tu_jmp(tb);
+        }
+#endif
+
+        switch (ir1_opcode(curr)) {
+            case WRAP(JB):   /*CF=1*/
+                la_bne(tempi, zero_ir2_opnd, target_label_opnd);
+                break;
+            case WRAP(JAE):  /*CF=0*/
+                la_beq(tempi, zero_ir2_opnd, target_label_opnd);
+                break;
+            default:
+                lsassert(0);
+                break;
+        }
+
+        EFLAGS_CACULATE(td->ptn_itemp0, td->ptn_itemp1, next, 0, true);
+        tr_generate_exit_tb(curr, 0);
+
+        la_label(target_label_opnd);
+        /* taken */
+        EFLAGS_CACULATE(td->ptn_itemp0, td->ptn_itemp1, next, 1, true);
+        tr_generate_exit_tb(curr, 1);
+
+        EFLAGS_CACULATE(td->ptn_itemp0, td->ptn_itemp1, next, EFLAG_BACKUP, true);
+    }
+
+    return true;
+}
+
+static bool translate_shr_jcc(IR1_INST *pir1)
+{
+    IR1_INST *curr = pir1;
+    IR1_INST *next = curr->instptn.next;
+
+    IR1_OPND *opnd0 = ir1_get_opnd(curr, 0);
+    IR1_OPND *opnd1 = ir1_get_opnd(curr, 1);
+
+    int opnd_size = ir1_opnd_size(opnd0);
+    uint32 mask = (opnd_size == 64) ? 63 : 31;
+    uint8 shift = ir1_opnd_uimm(opnd1) & mask;
+
+    IR2_OPND dest, src;
+
+    if (ir1_opnd_is_gpr(opnd0) && (opnd_size >= 32)) {
+        dest = ra_alloc_gpr(ir1_opnd_base_reg_num(opnd0));
+        if (shift) {
+            if (opnd_size == 64) {
+                src = ra_alloc_itemp();
+                la_mov64(src, dest);
+            } else {
+                src = load_ireg_from_ir1(opnd0, ZERO_EXTENSION, false);
+            }
+        }
+    } else {
+        src = load_ireg_from_ir1(opnd0, ZERO_EXTENSION, false);
+        dest = ra_alloc_itemp();
+    }
+
+    IR2_INST *(*shifti_inst)(IR2_OPND, IR2_OPND, int);
+    shifti_inst = (opnd_size == 64) ? la_srli_d : la_srli_w;
+
+    lsassert(ir1_opnd_is_imm(opnd1));
+    bool can_use_imm = shift < opnd_size;
+    if (shift) {
+        shifti_inst(dest, src, shift);
+    }
+    if (shift || (ir1_opnd_is_gpr(opnd0) && (opnd_size == 32))) {
+        store_ireg_to_ir1(dest, opnd0, false);
+    }
+
+    if (!shift) {
+        translate_jcc(next);
+        return true;
+    }
+
+    IR2_OPND src1 = ir2_opnd_new(IR2_OPND_IMM, shift);
+    IR2_OPND target_label_opnd = ra_alloc_label();
+
+#ifdef CONFIG_LATX_TU
+    TranslationBlock *tb = lsenv->tr_data->curr_tb;
+    if (judge_tu_eflag_gen(tb)) {
+        IR2_OPND tu_reset_label_opnd = ra_alloc_label();
+        TranslationBlock *tb_next = tb->s_data->next_tb[TU_TB_INDEX_NEXT];
+        TranslationBlock *tb_target = tb->s_data->next_tb[TU_TB_INDEX_TARGET];
+
+        if (shift && tb_next->eflag_use && tb_target->eflag_use) {
+            generate_eflag_calculation(src, src, src1, curr, can_use_imm);
+        }
+
+        la_label(tu_reset_label_opnd);
+        tb->tu_jmp[TU_TB_INDEX_TARGET] = tu_reset_label_opnd._label_id;
+        switch (ir1_opcode(next)) {
+            case WRAP(JNE): //dest!=0
+                la_bnez(dest, target_label_opnd);
+                break;
+            default:
+                lsassert(0);
+                break;
+        }
+        tu_jcc_nop_gen(tb);
+
+        if (shift && tb_next->eflag_use && !tb_target->eflag_use) {
+            generate_eflag_calculation(src, src, src1, curr, can_use_imm);
+        }
+
+        if (tb->tu_jmp[TU_TB_INDEX_NEXT] != TB_JMP_RESET_OFFSET_INVALID) {
+            IR2_OPND translated_label_opnd = ra_alloc_label();
+            la_label(translated_label_opnd);
+            la_b(ir2_opnd_new(IR2_OPND_IMM, 0));
+            la_nop();
+            tb->tu_jmp[TU_TB_INDEX_NEXT] = translated_label_opnd._label_id;
+        }
+
+        IR2_OPND unlink_label_opnd = ra_alloc_label();
+        la_label(unlink_label_opnd);
+        tb->tu_unlink.stub_offset = unlink_label_opnd._label_id;
+        tb->tu_unlink.rel_num = 2;
+        set_use_tu_jmp(tb);
+    }
+#endif
+
+    switch (ir1_opcode(next)) {
+        case WRAP(JNE): //dest!=0
+            la_bnez(dest, target_label_opnd);
+            break;
+        default:
+            lsassert(0);
+            break;
+    }
+
+    if (shift) {
+        EFLAGS_CACULATE(src, src1, curr, 0, can_use_imm);
+    }
+    tr_generate_exit_tb(next, 0);
+
+    la_label(target_label_opnd);
+
+    if (shift) {
+        EFLAGS_CACULATE(src, src1, curr, 1, can_use_imm);
+    }
+    tr_generate_exit_tb(next, 1);
+    if (shift) {
+        EFLAGS_CACULATE(src, src1, curr, EFLAG_BACKUP, can_use_imm);
+    }
+    return true;
+}
+
+static inline bool imm_mask(int32_t imm, bool *low, uint32_t *pos)
+{
+    *low = imm > 0;
+    /* if 0xff00: ~imm + 1; then imm + 1; */
+    imm = (*low ? imm : ~imm) + 1;
+    /* now src_imm is 0b0..010..0 if in special mode */
+    uint32_t t_pos = __builtin_ctz(imm);
+    uint32_t l_pos = __builtin_clz(imm);
+    if (t_pos + l_pos == sizeof(imm) * 8 - 1) {
+       *pos = t_pos;
+       return true;
+    }
+    *pos = 0;
+    *low = false;
+    return false;
+}
+
+static bool translate_and_jcc(IR1_INST *pir1)
+{
+    IR1_INST *curr = pir1;
+    IR1_INST *next = curr->instptn.next;
+
+    IR1_OPND *opnd0 = ir1_get_opnd(curr, 0);
+    IR1_OPND *opnd1 = ir1_get_opnd(curr, 1);
+
+    CPUArchState* env = (CPUArchState*)(lsenv->cpu_state);
+    CPUState *cpu = env_cpu(env);
+    bool is_lock = ir1_is_prefix_lock(curr) && ir1_opnd_is_mem(opnd0);
+    if (!close_latx_parallel) {
+        is_lock = is_lock && (cpu->tcg_cflags & CF_PARALLEL);
+    }
+    if (is_lock) {
+        translate_and(curr);
+        translate_jcc(next);
+        return true;
+    }
+
+    IR2_OPND src0, src1, dest;
+    IR2_OPND mem_opnd;
+    int imm, opnd0_size;
+    bool opt_imm, eflags_calc;
+
+    opnd0_size = ir1_opnd_size(opnd0);
+    opt_imm = ir1_opnd_is_s2uimm12(opnd1);
+    eflags_calc = ir1_need_calculate_any_flag(pir1);
+
+    bool special_mask = false, low_mask = false;
+    uint32_t mask_pos = 0;
+
+    if (ir1_opnd_is_imm(opnd1)) {
+        special_mask = imm_mask(ir1_opnd_simm(opnd1), &low_mask, &mask_pos);
+        opt_imm |= special_mask;
+    }
+
+    if (opt_imm && !eflags_calc) {
+        src1 = zero_ir2_opnd;
+    } else {
+        src1 = load_ireg_from_ir1(opnd1, UNKNOWN_EXTENSION, false);
+    }
+
+    if (ir1_opnd_is_gpr(opnd0)) {
+        if (opnd0_size == 64) {
+            src0 = ra_alloc_itemp();
+            la_mov64(src0, ra_alloc_gpr(ir1_opnd_base_reg_num(opnd0)));
+        } else {
+            src0 = convert_gpr_opnd(opnd0, ZERO_EXTENSION);
+        }
+
+        /* special_mask can clear origin register directly */
+        if (opnd0_size >= 32 || special_mask) {
+            dest = convert_gpr_opnd(opnd0, UNKNOWN_EXTENSION);
+        } else {
+            dest = ra_alloc_itemp();
+        }
+    } else {
+        src0 = ra_alloc_itemp();
+        dest = src0;
+        mem_opnd = convert_mem(opnd0, &imm);
+        la_ld_by_op_size(src0, mem_opnd, imm, opnd0_size);
+    }
+
+    /* calculate */
+    if (special_mask) {
+        if (low_mask) {
+            /* low mask, clear high bits */
+            int _high_pos = (opnd0_size >= 32) ? 63 : (opnd0_size - 1);
+            la_bstrins_d(dest, zero_ir2_opnd, _high_pos, mask_pos);
+        } else if (mask_pos > 0) {
+            /* high mask, clear low bits (pos cannot be 0 -> 0xff) */
+            la_bstrins_d(dest, zero_ir2_opnd, mask_pos - 1, 0);
+        }
+    } else if (opt_imm) {
+        la_andi(dest, src0, ir1_opnd_s2uimm(opnd1));
+    } else {
+        la_and(dest, src0, src1);
+    }
+
+    /* write back */
+    if (ir1_opnd_is_gpr(opnd0)) {
+        if (opnd0_size == 32 && !low_mask) {
+            la_mov32_zx(dest, dest);
+        } else
+        /* r16/r8 */
+        if (opnd0_size < 32) {
+            store_ireg_to_ir1(dest, opnd0, false);
+        }
+    } else {
+        la_st_by_op_size(dest, mem_opnd, imm, opnd0_size);
+    }
+
+    if (opnd0_size <= 32) {
+        IR2_OPND dest_t = ra_alloc_itemp();
+        la_bstrpick_d(dest_t, dest, opnd0_size - 1, 0);
+        ra_free_temp_auto(dest);
+        dest = dest_t;
+    }
+
+    IR2_OPND target_label_opnd = ra_alloc_label();
+
+#ifdef CONFIG_LATX_TU
+    TranslationBlock *tb = lsenv->tr_data->curr_tb;
+    if (judge_tu_eflag_gen(tb)) {
+        IR2_OPND tu_reset_label_opnd = ra_alloc_label();
+        TranslationBlock *tb_next = tb->s_data->next_tb[TU_TB_INDEX_NEXT];
+        TranslationBlock *tb_target = tb->s_data->next_tb[TU_TB_INDEX_TARGET];
+
+        if (tb_next->eflag_use && tb_target->eflag_use) {
+            generate_eflag_calculation(src0, src0, src1, curr, true);
+        }
+
+        la_label(tu_reset_label_opnd);
+        tb->tu_jmp[TU_TB_INDEX_TARGET] = tu_reset_label_opnd._label_id;
+        switch (ir1_opcode(next)) {
+            case WRAP(JNE): //dest!=0
+                la_bnez(dest, target_label_opnd);
+                break;
+            default:
+                lsassert(0);
+                break;
+        }
+        tu_jcc_nop_gen(tb);
+
+        if (tb_next->eflag_use && !tb_target->eflag_use) {
+            generate_eflag_calculation(src0, src0, src1, curr, true);
+        }
+
+        if (tb->tu_jmp[TU_TB_INDEX_NEXT] != TB_JMP_RESET_OFFSET_INVALID) {
+            IR2_OPND translated_label_opnd = ra_alloc_label();
+            la_label(translated_label_opnd);
+            la_b(ir2_opnd_new(IR2_OPND_IMM, 0));
+            la_nop();
+            tb->tu_jmp[TU_TB_INDEX_NEXT] = translated_label_opnd._label_id;
+        }
+
+        IR2_OPND unlink_label_opnd = ra_alloc_label();
+        la_label(unlink_label_opnd);
+        tb->tu_unlink.stub_offset = unlink_label_opnd._label_id;
+        tb->tu_unlink.rel_num = 2;
+        set_use_tu_jmp(tb);
+    }
+#endif
+
+    switch (ir1_opcode(next)) {
+    case WRAP(JNE):
+        la_bnez(dest, target_label_opnd);
+        break;
+    default:
+        lsassert(0);
+        break;
+    }
+
+    /* not taken */
+    EFLAGS_CACULATE(src0, src1, curr, 0, true);
+    tr_generate_exit_tb(next, 0);
+
+    la_label(target_label_opnd);
+    /* taken */
+    EFLAGS_CACULATE(src0, src1, curr, 1, true);
+    tr_generate_exit_tb(next, 1);
+
+    EFLAGS_CACULATE(src0, src1, curr, EFLAG_BACKUP, true);
+
+    return true;
+}
+
+#ifdef CONFIG_LATX_XCOMISX_OPT
+static inline bool xcomisx_xx_jcc(IR1_INST *pir1, bool is_jcc, bool is_double, bool qnan_exp)
+{
+    IR1_INST *curr = pir1;
+    IR1_INST *next = curr->instptn.next;
+
+    if (!is_jcc) {
+        IR1_OPND *opnd0 = ir1_get_opnd(curr, 0);
+        IR1_OPND *opnd1 = ir1_get_opnd(curr, 1);
+        IR2_OPND dest = load_freg128_from_ir1(opnd0);
+        IR2_OPND src = load_freg128_from_ir1(opnd1);
+
+        translate_xcomisx(curr);
+
+        IR2_INST* (*la_fcmp)(IR2_OPND, IR2_OPND, IR2_OPND, int);
+        if (is_double) {
+            la_fcmp = la_fcmp_cond_d;
+        } else {
+            la_fcmp = la_fcmp_cond_s;
+        }
+
+        switch (ir1_opcode(next)) {
+        case WRAP(JA):
+            la_fcmp(fcc0_ir2_opnd, src, dest, FCMP_COND_CLT + qnan_exp);
+            break;
+        case WRAP(JAE):
+            la_fcmp(fcc0_ir2_opnd, src, dest, FCMP_COND_CLE + qnan_exp);
+            break;
+        case WRAP(JB):
+            la_fcmp(fcc0_ir2_opnd, dest, src, FCMP_COND_CULT + qnan_exp);
+        /* below or NAN, x86 special define */
+            break;
+        case WRAP(JBE):
+        /* below or equal or NAN, x86 special define */
+            la_fcmp(fcc0_ir2_opnd, dest, src, FCMP_COND_CULE + qnan_exp);
+            break;
+        case WRAP(JE):
+        case WRAP(JLE):
+            la_fcmp(fcc0_ir2_opnd, dest, src, FCMP_COND_CUEQ + qnan_exp);
+        /* equal or NAN, x86 special define */
+            break;
+        case WRAP(JNE):
+        case WRAP(JG):
+            la_fcmp(fcc0_ir2_opnd, dest, src, FCMP_COND_CNE + qnan_exp);
+            break;
+        case WRAP(JL):
+        case WRAP(JGE):
+            break;
+        default:
+            lsassert(0);
+            break;
+        }
+    } else {
+
+        IR2_OPND target_label_opnd = ra_alloc_label();
+
+#ifdef CONFIG_LATX_TU
+        TranslationBlock *tb = lsenv->tr_data->curr_tb;
+        if (judge_tu_eflag_gen(tb)) {
+            IR2_OPND tu_reset_label_opnd = ra_alloc_label();
+            /* TranslationBlock *tb_next = tb->s_data->next_tb[TU_TB_INDEX_NEXT]; */
+            /* TranslationBlock *tb_target = tb->s_data->next_tb[TU_TB_INDEX_TARGET]; */
+
+            /* if (tb_next->eflag_use && tb_target->eflag_use) { */
+            /*     translate_xcomisx(curr); */
+            /* } */
+
+            la_label(tu_reset_label_opnd);
+            tb->tu_jmp[TU_TB_INDEX_TARGET] = tu_reset_label_opnd._label_id;
+            if (ir1_opcode(curr) == WRAP(JGE)) {
+                la_b(target_label_opnd);
+            } else if (ir1_opcode(curr) == WRAP(JL)) {
+                /* Just for unlink. */
+                la_nop();
+            } else {
+                la_bcnez(fcc0_ir2_opnd, target_label_opnd);
+            }
+            tu_jcc_nop_gen(tb);
+
+            /* if (tb_next->eflag_use && !tb_target->eflag_use) { */
+            /*     translate_xcomisx(curr); */
+            /* } */
+
+            if (tb->tu_jmp[TU_TB_INDEX_NEXT] != TB_JMP_RESET_OFFSET_INVALID) {
+                IR2_OPND translated_label_opnd = ra_alloc_label();
+                la_label(translated_label_opnd);
+                la_b(ir2_opnd_new(IR2_OPND_IMM, 0));
+                la_nop();
+                tb->tu_jmp[TU_TB_INDEX_NEXT] = translated_label_opnd._label_id;
+            }
+
+            IR2_OPND unlink_label_opnd = ra_alloc_label();
+            la_label(unlink_label_opnd);
+            tb->tu_unlink.stub_offset = unlink_label_opnd._label_id;
+            tb->tu_unlink.rel_num = 2;
+            set_use_tu_jmp(tb);
+        }
+#endif
+
+        if (ir1_opcode(curr) == WRAP(JGE)) {
+            la_b(target_label_opnd);
+        } else if (ir1_opcode(curr) == WRAP(JL)) {
+        } else {
+            la_bcnez(fcc0_ir2_opnd, target_label_opnd);
+        }
+
+        /* not taken */
+        tr_generate_exit_tb(curr, 0);
+
+        la_label(target_label_opnd);
+
+        /* taken */
+        tr_generate_exit_tb(curr, 1);
+
+    }
+    return true;
+}
+
+static bool translate_comisd_xx_jcc(IR1_INST *pir1)
+{
+    if (ir1_opcode(pir1) == WRAP(COMISD)) {
+        return xcomisx_xx_jcc(pir1, false, true, true);
+    } else {
+        lsassert(ir1_opcode(pir1) == WRAP(JA) ||
+            ir1_opcode(pir1) == WRAP(JAE) ||
+            ir1_opcode(pir1) == WRAP(JB) ||
+            ir1_opcode(pir1) == WRAP(JBE) ||
+            ir1_opcode(pir1) == WRAP(JNE) ||
+            ir1_opcode(pir1) == WRAP(JE) ||
+            ir1_opcode(pir1) == WRAP(JL) ||
+            ir1_opcode(pir1) == WRAP(JGE) ||
+            ir1_opcode(pir1) == WRAP(JLE) ||
+            ir1_opcode(pir1) == WRAP(JG));
+        return xcomisx_xx_jcc(pir1, true, true, true);
+    }
+}
+
+static bool translate_comiss_xx_jcc(IR1_INST *pir1)
+{
+    if (ir1_opcode(pir1) == WRAP(COMISS)) {
+        return xcomisx_xx_jcc(pir1, false, false, true);
+    } else {
+        lsassert(ir1_opcode(pir1) == WRAP(JA) ||
+            ir1_opcode(pir1) == WRAP(JAE) ||
+            ir1_opcode(pir1) == WRAP(JB) ||
+            ir1_opcode(pir1) == WRAP(JBE) ||
+            ir1_opcode(pir1) == WRAP(JNE) ||
+            ir1_opcode(pir1) == WRAP(JE) ||
+            ir1_opcode(pir1) == WRAP(JL) ||
+            ir1_opcode(pir1) == WRAP(JGE) ||
+            ir1_opcode(pir1) == WRAP(JLE) ||
+            ir1_opcode(pir1) == WRAP(JG));
+        return xcomisx_xx_jcc(pir1, true, false, true);
+    }
+}
+
+static bool translate_ucomisd_xx_jcc(IR1_INST *pir1)
+{
+    if (ir1_opcode(pir1) == WRAP(UCOMISD)) {
+        return xcomisx_xx_jcc(pir1, false, true, false);
+    } else {
+        lsassert(ir1_opcode(pir1) == WRAP(JA) ||
+            ir1_opcode(pir1) == WRAP(JAE) ||
+            ir1_opcode(pir1) == WRAP(JB) ||
+            ir1_opcode(pir1) == WRAP(JBE) ||
+            ir1_opcode(pir1) == WRAP(JNE) ||
+            ir1_opcode(pir1) == WRAP(JE) ||
+            ir1_opcode(pir1) == WRAP(JL) ||
+            ir1_opcode(pir1) == WRAP(JGE) ||
+            ir1_opcode(pir1) == WRAP(JLE) ||
+            ir1_opcode(pir1) == WRAP(JG));
+        return xcomisx_xx_jcc(pir1, true, true, false);
+    }
+}
+
+static bool translate_ucomiss_xx_jcc(IR1_INST *pir1)
+{
+    if (ir1_opcode(pir1) == WRAP(UCOMISS)) {
+        return xcomisx_xx_jcc(pir1, false, false, false);
+    } else {
+        lsassert(ir1_opcode(pir1) == WRAP(JA) ||
+            ir1_opcode(pir1) == WRAP(JAE) ||
+            ir1_opcode(pir1) == WRAP(JB) ||
+            ir1_opcode(pir1) == WRAP(JBE) ||
+            ir1_opcode(pir1) == WRAP(JNE) ||
+            ir1_opcode(pir1) == WRAP(JE) ||
+            ir1_opcode(pir1) == WRAP(JL) ||
+            ir1_opcode(pir1) == WRAP(JGE) ||
+            ir1_opcode(pir1) == WRAP(JLE) ||
+            ir1_opcode(pir1) == WRAP(JG));
+        return xcomisx_xx_jcc(pir1, true, false, false);
+    }
+}
+#endif
+
+
+bool try_translate_instptn(IR1_INST *pir1)
+{
+    instptn_check_false();
+
+    switch (pir1->instptn.opc) {
+    case INSTPTN_OPC_NONE:
+        return false;
+    case INSTPTN_OPC_NOP:
+    case INSTPTN_OPC_NOP_DIV:
+        return true;
+    case INSTPTN_OPC_CMP_JCC:
+        return translate_cmp_jcc(pir1);
+    case INSTPTN_OPC_TEST_JCC:
+        return translate_test_jcc(pir1);
+    case INSTPTN_OPC_CQO_IDIV:
+        return translate_cqo_idiv(pir1);
+    case INSTPTN_OPC_BT_JCC:
+        return translate_bt_jcc(pir1);
+#ifdef CONFIG_LATX_XCOMISX_OPT
+    case INSTPTN_OPC_COMISD_JCC:
+        return translate_comisd_jcc(pir1);
+    case INSTPTN_OPC_COMISS_JCC:
+        return translate_comiss_jcc(pir1);
+    case INSTPTN_OPC_UCOMISD_JCC:
+        return translate_ucomisd_jcc(pir1);
+    case INSTPTN_OPC_UCOMISS_JCC:
+        return translate_ucomiss_jcc(pir1);
+#endif
+    case INSTPTN_OPC_XOR_DIV:
+        return translate_xor_div(pir1);
+    case INSTPTN_OPC_CDQ_IDIV:
+        return translate_cdq_idiv(pir1);
+    case INSTPTN_OPC_CMP_SBB:
+        return translate_cmp_sbb(pir1);
+
+    case INSTPTN_OPC_CMP_XXCC:
+        return translate_cmp_xxcc(pir1);
+    case INSTPTN_OPC_TEST_XXCC:
+        return translate_test_xxcc(pir1);
+
+    case INSTPTN_OPC_UCOMISD_SETA:
+        return translate_ucomisd_seta(pir1);
+    case INSTPTN_OPC_SUB_JCC:
+        return translate_sub_jcc(pir1);
+
+    case INSTPTN_OPC_CMP_XX_JCC:
+        return translate_cmp_xx_jcc(pir1);
+    case INSTPTN_OPC_TEST_XX_JCC:
+        return translate_test_xx_jcc(pir1);
+    case INSTPTN_OPC_BT_XX_JCC:
+        return translate_bt_xx_jcc(pir1);
+#ifdef CONFIG_LATX_XCOMISX_OPT
+    case INSTPTN_OPC_COMISD_XX_JCC:
+        return translate_comisd_xx_jcc(pir1);
+    case INSTPTN_OPC_COMISS_XX_JCC:
+        return translate_comiss_xx_jcc(pir1);
+    case INSTPTN_OPC_UCOMISD_XX_JCC:
+        return translate_ucomisd_xx_jcc(pir1);
+    case INSTPTN_OPC_UCOMISS_XX_JCC:
+        return translate_ucomiss_xx_jcc(pir1);
+#endif
+#ifdef CONFIG_LATX_SMC_OPT
+    case INSTPTN_OPC_MOVAPS_VST_X4:{
+        if (translate_movaps_vst_x4(pir1)) {
+            return true;
+        } else {
+            pir1[0].instptn.opc = INSTPTN_OPC_NONE;
+            pir1[1].instptn.opc = INSTPTN_OPC_NONE;
+            pir1[2].instptn.opc = INSTPTN_OPC_NONE;
+            pir1[3].instptn.opc = INSTPTN_OPC_NONE;
+            return false;
+        }
+    }
+#endif
+    case INSTPTN_OPC_NEG_CMOVCC:
+        return translate_neg_cmovcc(pir1);
+    case INSTPTN_OPC_SHR_JCC:
+        return translate_shr_jcc(pir1);
+    case INSTPTN_OPC_AND_JCC:
+        return translate_and_jcc(pir1);
+    default:
+        lsassert(0);
+        break;
+    }
+
+    return false;
+}
+
+void opt_instptn_fix(CPUState *cpu, TranslationBlock *tb, int index)
+{
+    CPUArchState *env = cpu->env_ptr;
+    // int num_insns = tb->icount;
+    for (int i = 0; i < index; i++) {
+        IR1_INST *pir1 = tb_ir1_inst(tb, i);
+        if (pir1->instptn.opc == INSTPTN_OPC_CMP_XX_JCC ||
+            pir1->instptn.opc == INSTPTN_OPC_TEST_XX_JCC ||
+            pir1->instptn.opc == INSTPTN_OPC_BT_XX_JCC) {
+
+            int opnd_size = ir1_opnd_size(ir1_get_opnd(pir1, 0));
+            ucontext_t *uc = env->puc;
+
+            switch (ir1_opcode(pir1))
+            {
+            case WRAP(CMP):
+            {
+                uint64_t a0 = UC_GR(uc)[4];
+                uint64_t a1 = UC_GR(uc)[5];
+                uint64_t eflags = 0;
+                switch (opnd_size)
+                {
+                case 8:
+                    asm volatile (
+                        DEFINE_PARSE_R
+                        "parse_r_%= __src, %[src]  \n\t"
+                        "parse_r_%= __dst, %[dst]  \n\t"
+                        ".word (0x003f0008 | (__src << 10) | (__dst << 5))\n\t" /*x86sub.b*/
+                        "parse_r_%= __flags, %[flags]  \n\t"
+                        ".word (0x005c0000 | (0x3f << 10) | __flags)\n\t"  /*x86mfflag*/
+                        : [dst]"+r"(a0),
+                        [flags]"=r"(eflags)
+                        : [src]"r"(a1)
+                        : "cc"
+                    );
+                break;
+                case 16:
+                    asm volatile (
+                        DEFINE_PARSE_R
+                        "parse_r_%= __src, %[src]  \n\t"
+                        "parse_r_%= __dst, %[dst]  \n\t"
+                        ".word (0x003f0009 | (__src << 10) | (__dst << 5))\n\t" /*x86sub.h*/
+                        "parse_r_%= __flags, %[flags]  \n\t"
+                        ".word (0x005c0000 | (0x3f << 10) | __flags)\n\t"  /*x86mfflag*/
+                        : [dst]"+r"(a0),
+                        [flags]"=r"(eflags)
+                        : [src]"r"(a1)
+                        : "cc"
+                    );
+                break;
+                case 32:
+                    asm volatile (
+                        DEFINE_PARSE_R
+                        "parse_r_%= __src, %[src]  \n\t"
+                        "parse_r_%= __dst, %[dst]  \n\t"
+                        ".word (0x003f000a | (__src << 10) | (__dst << 5))\n\t" /*x86sub.w*/
+                        "parse_r_%= __flags, %[flags]  \n\t"
+                        ".word (0x005c0000 | (0x3f << 10) | __flags)\n\t"  /*x86mfflag*/
+                        : [dst]"+r"(a0),
+                        [flags]"=r"(eflags)
+                        : [src]"r"(a1)
+                        : "cc"
+                    );
+                break;
+                case 64:
+                    asm volatile (
+                        DEFINE_PARSE_R
+                        "parse_r_%= __src, %[src]  \n\t"
+                        "parse_r_%= __dst, %[dst]  \n\t"
+                        ".word (0x003f000b | (__src << 10) | (__dst << 5))\n\t" /*x86sub.d*/
+                        "parse_r_%= __flags, %[flags]  \n\t"
+                        ".word (0x005c0000 | (0x3f << 10) | __flags)\n\t"  /*x86mfflag*/
+                        : [dst]"+r"(a0),
+                        [flags]"=r"(eflags)
+                        : [src]"r"(a1)
+                        : "cc"
+                    );
+                break;
+                default:
+                    break;
+                }
+                env->eflags = env->eflags & ~(0b100011010101);
+                env->eflags = env->eflags | (eflags & 0b100011010101);
+            }
+            break;
+            case WRAP(TEST):
+            {
+                IR1_OPND *opnd0 = ir1_get_opnd(pir1, 0);
+                IR1_OPND *opnd1 = ir1_get_opnd(pir1, 1);
+
+                bool is_same_reg = ir1_opnd_is_same_reg(opnd0, opnd1);
+                uint64_t a0 = UC_GR(uc)[4];
+                uint64_t a1 = is_same_reg ? a0 : UC_GR(uc)[5];
+                uint64_t eflags = 0;
+
+                switch (opnd_size)
+                {
+                case 8:
+                    asm volatile (
+                        DEFINE_PARSE_R
+                        "parse_r_%= __src, %[src]  \n\t"
+                        "parse_r_%= __dst, %[dst]  \n\t"
+                        ".word (0x003f8010 | (__src << 10) | (__dst << 5))\n\t" /*x86and.b*/
+                        "parse_r_%= __flags, %[flags]  \n\t"
+                        ".word (0x005c0000 | (0x3f << 10) | __flags)\n\t"  /*x86mfflag*/
+                        : [dst]"+r"(a0),
+                        [flags]"=r"(eflags)
+                        : [src]"r"(a1)
+                        : "cc"
+                    );
+                break;
+                case 16:
+                    asm volatile (
+                        DEFINE_PARSE_R
+                        "parse_r_%= __src, %[src]  \n\t"
+                        "parse_r_%= __dst, %[dst]  \n\t"
+                        ".word (0x003f8011 | (__src << 10) | (__dst << 5))\n\t" /*x86and.h*/
+                        "parse_r_%= __flags, %[flags]  \n\t"
+                        ".word (0x005c0000 | (0x3f << 10) | __flags)\n\t"  /*x86mfflag*/
+                        : [dst]"+r"(a0),
+                        [flags]"=r"(eflags)
+                        : [src]"r"(a1)
+                        : "cc"
+                    );
+                break;
+                case 32:
+                    asm volatile (
+                        DEFINE_PARSE_R
+                        "parse_r_%= __src, %[src]  \n\t"
+                        "parse_r_%= __dst, %[dst]  \n\t"
+                        ".word (0x003f8012 | (__src << 10) | (__dst << 5))\n\t" /*x86and.w*/
+                        "parse_r_%= __flags, %[flags]  \n\t"
+                        ".word (0x005c0000 | (0x3f << 10) | __flags)\n\t"  /*x86mfflag*/
+                        : [dst]"+r"(a0),
+                        [flags]"=r"(eflags)
+                        : [src]"r"(a1)
+                        : "cc"
+                    );
+                break;
+                case 64:
+                    asm volatile (
+                        DEFINE_PARSE_R
+                        "parse_r_%= __src, %[src]  \n\t"
+                        "parse_r_%= __dst, %[dst]  \n\t"
+                        ".word (0x003f8013 | (__src << 10) | (__dst << 5))\n\t" /*x86and.d*/
+                        "parse_r_%= __flags, %[flags]  \n\t"
+                        ".word (0x005c0000 | (0x3f << 10) | __flags)\n\t"  /*x86mfflag*/
+                        : [dst]"+r"(a0),
+                        [flags]"=r"(eflags)
+                        : [src]"r"(a1)
+                        : "cc"
+                    );
+                break;
+                default:
+                    break;
+                }
+                env->eflags = env->eflags & ~(0b100011000101);
+                env->eflags = env->eflags | (eflags & 0b100011000101);
+            }
+            break;
+            case WRAP(BT):
+            {
+                uint64_t a0 = UC_GR(uc)[4];
+                uint64_t a1 = UC_GR(uc)[5];
+                env->eflags = env->eflags & ~(1); // clear CF
+                env->eflags = env->eflags | ((a0 >> a1) & 1); // set CF
+            }
+            break;
+            case WRAP(JB):
+            case WRAP(JAE):
+            case WRAP(JE):
+            case WRAP(JNE):
+            case WRAP(JBE):
+            case WRAP(JA):
+            case WRAP(JL):
+            case WRAP(JGE):
+            case WRAP(JLE):
+            case WRAP(JG):
+            case WRAP(JS):
+            case WRAP(JNS):
+            case WRAP(JNO):
+            case WRAP(JO):
+            break;
+            default:
+                lsassert(0);
+                break;
+            }
+            return;
+        }
+    }
+}
+#undef WRAP
+#endif

@@ -1,0 +1,6 @@
+LAT_AOT_MODULE_2.0 {
+    global:
+        lat_aot_module_v2;
+    local:
+        *;
+};

@@ -1,0 +1,14 @@
+{
+  "repository": "https://github.com/luzeng87/cfg",
+  "commit": "d951f114b8c0e879da1f4d88f693a075c1acaa1b",
+  "usage": "internal-only",
+  "modified": [
+    "include/cfg_decoder.h",
+    "src/cfg_decoder.c"
+  ],
+  "added": [
+    "include/cfg_program.h",
+    "src/cfg_program.c",
+    "CFG_SOURCE.md"
+  ]
+}

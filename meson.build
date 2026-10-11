@@ -37,6 +37,24 @@ genh = []
 target_dirs = config_host['TARGET_DIRS'].split()
 
 python = import('python').find_installation()
+latc_source_id_args = []
+latc_staged_source_id = meson.current_source_dir() / '.latc-source-id'
+if fs.exists(latc_staged_source_id)
+  latc_source_id_args = ['--source-id', run_command(
+    'cat', latc_staged_source_id, check: true).stdout().strip()]
+endif
+latc_build_id = run_command(
+    python,
+    meson.current_source_dir() / 'tools/latc/scripts/compute-aot-v2-build-id.py',
+    meson.current_source_dir(),
+    '--config', meson.current_build_dir() / 'config-host.mak',
+    latc_source_id_args,
+    check: true,
+  ).stdout().strip()
+add_project_arguments(
+  '-DLATC_BUILD_ID="' + latc_build_id + '"',
+  language: ['c', 'cpp', 'objc'],
+)
 
 supported_oses = ['linux']
 supported_cpus = ['x86', 'x86_64', 'mips', 'mips64', 'loongarch64']
@@ -206,6 +224,7 @@ has_statx = cc.links(statx_test)
 #################
 
 config_host_data.set_quoted('CONFIG_BINDIR', get_option('prefix') / get_option('bindir'))
+config_host_data.set_quoted('CONFIG_LATC_LIBDIR', get_option('prefix') / get_option('libdir'))
 config_host_data.set_quoted('CONFIG_PREFIX', get_option('prefix'))
 config_host_data.set_quoted('CONFIG_QEMU_HELPERDIR', get_option('prefix') / get_option('libexecdir'))
 config_host_data.set_quoted('CONFIG_QEMU_LOCALEDIR', get_option('prefix') / get_option('localedir'))
@@ -487,6 +506,115 @@ subdir('hw')
 subdir('fpu')
 subdir('accel')
 subdir('plugins')
+
+if 'CONFIG_LATX' in config_host
+  lat_aot_runtime_inc = include_directories(
+    'tools/latc/aot-v2/include',
+    'tools/latc/aot-v2/runtime',
+  )
+  lat_aot_runtime_map = files('tools/latc/aot-v2/runtime/runtime.map')
+  lat_aot_runtime = shared_library(
+    'lat-aot-runtime',
+    files(
+      'tools/latc/aot-v2/runtime/runtime-abi.c',
+      'tools/latc/aot-v2/runtime/runtime-entry.S',
+      'tools/latc/aot-v2/runtime/elf-validate.c',
+      'tools/latc/aot-v2/runtime/module-loader.c',
+      'tools/latc/aot-v2/runtime/registry.c',
+    ),
+    include_directories: lat_aot_runtime_inc,
+    dependencies: [libdl, dependency('threads')],
+    link_args: [
+      '-Wl,-z,defs',
+      '-Wl,-z,now',
+      '-Wl,-z,relro',
+      '-Wl,--build-id=sha1',
+      '-Wl,--version-script=' + meson.current_source_dir() +
+        '/tools/latc/aot-v2/runtime/runtime.map',
+    ],
+    link_depends: lat_aot_runtime_map,
+    soversion: '2',
+    install: true,
+  )
+  lat_aot_runtime_dep = declare_dependency(link_with: lat_aot_runtime)
+
+  latc_inc = include_directories(
+    'include',
+    'tools/latc/cfg/include',
+    'tools/latc/format',
+    'tools/latc/native/include',
+    'tools/latc/native/format',
+    'tools/latc/aot-v2/include',
+    'tools/latc/aot-v2/runtime',
+    'tools/latc/aot-v2/compiler',
+    'tools/latc/aot-v2/common',
+  )
+  latc_helper_dir = get_option('prefix') / get_option('libexecdir') / 'latc'
+  latc = executable(
+    'latc',
+    files(
+      'tools/latc/compiler/latc.c',
+      'tools/latc/compiler/tbset.c',
+      'tools/latc/aot-v2/common/tb-key-set.c',
+      'tools/latc/aot-v2/compiler/module-pack.c',
+      'tools/latc/aot-v2/compiler/module-inspect.c',
+      'tools/latc/aot-v2/runtime/elf-validate.c',
+      'tools/latc/format/bundle.c',
+      'tools/latc/native/format/native-image.c',
+      'tools/latc/cfg/src/common.c',
+      'tools/latc/cfg/src/elf_image.c',
+      'tools/latc/cfg/src/function_symbols.c',
+      'tools/latc/cfg/src/ijmp_resolve.c',
+      'tools/latc/cfg/src/cfg_decoder.c',
+      'tools/latc/cfg/src/cfg_program.c',
+    ),
+    include_directories: latc_inc,
+    dependencies: [glib],
+    c_args: [
+      '-DLATC_INSTALLED_SCRIPT_DIR="' + latc_helper_dir / 'scripts' + '"',
+    ],
+    install: true,
+  )
+
+  install_data(
+    'tools/latc/scripts/compile-aot-v2-module.sh',
+    'tools/latc/scripts/compile-native-image.sh',
+    'tools/latc/scripts/compile-aot.sh',
+    'tools/latc/scripts/link-aot-v2-module.sh',
+    install_dir: latc_helper_dir / 'scripts',
+    install_mode: 'rwxr-xr-x',
+  )
+  install_data(
+    'tools/latc/aot-v2/include/lat-aot-v2.h',
+    install_dir: latc_helper_dir / 'aot-v2/include',
+  )
+  install_data(
+    'tools/latc/aot-v2/compiler/module.map',
+    install_dir: latc_helper_dir / 'aot-v2/compiler',
+  )
+
+  latcd_inc = include_directories(
+    'tools/latc/aot-v2/include',
+    'tools/latc/aot-v2/compiler',
+    'tools/latc/aot-v2/runtime',
+    'tools/latc/aot-v2/common',
+  )
+  latcd = executable(
+    'latcd',
+    files(
+      'tools/latc/latcd/main.c',
+      'tools/latc/latcd/protocol.c',
+      'tools/latc/latcd/precompile.c',
+      'tools/latc/aot-v2/common/tb-key-set.c',
+      'tools/latc/aot-v2/compiler/module-inspect.c',
+      'tools/latc/aot-v2/runtime/elf-validate.c',
+    ),
+    include_directories: latcd_inc,
+    dependencies: [glib, libdl, dependency('threads')],
+    install: true,
+  )
+endif
+
 subdir('linux-user')
 
 linux_user_ss.add(files('gdbstub.c', 'thunk.c'))
@@ -769,6 +897,7 @@ foreach target : target_dirs
       files(
         'target/i386/latx/sbt/tests/aot-segment-unmap-test.c',
         'target/i386/latx/sbt/tests/aot-shm-syscall-test.c',
+        'linux-user/latc-aot-v2-runner-stub.c',
         'target/i386/latx/sbt/segment.c',
         'target/i386/latx/sbt/aot_lib.c'
       ) + genh + tcg_trace_genh + [syscall_nr_generated,

@@ -8752,7 +8752,11 @@ static void restore_extcontext(CPUX86State *env, ucontext_t *uc)
 void restore_state_to_opc(CPUX86State *env, TranslationBlock *tb,
                           target_ulong *data)
 {
+#ifdef CONFIG_LATX_OPT_PUSH_POP_TRANS
+    int cc_op = CC_OP_DYNAMIC;
+#else
     int cc_op = data[1];
+#endif
 
     /* env->eip = data[0] - tb->cs_base; */
     env->eip = data[0];

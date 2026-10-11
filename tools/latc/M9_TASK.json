@@ -1,0 +1,83 @@
+{
+  "title": "AOT v2 M9：支持复杂 Linux CLI 与服务应用",
+  "requirement": "在 3A6000/LASX 上，让 Debian 12 amd64 的 Python、Git、SQLite 和 Redis 在 JIT-only、冷 AOT 和暖 AOT 条件下功能正确，补齐多线程 fork 后的 AOT 生命周期，并在验证后将 runner 集成到主 LAT 构建。",
+  "objective": "从固定 fixture 和 SPEC 原型扩展到可重复验证的复杂 Linux CLI/服务应用，同时保持安全 JIT 回退。",
+  "scope": "tools/latc 的复杂应用 rootfs/测试、AOT v2 fork/clone/exec 生命周期、真实应用缺陷修复，以及主 LAT Meson 构建和安装文档。",
+  "acceptance_criteria": [
+    "固定 Debian 12 rootfs 可重复生成并记录摘要，Python/Git/SQLite/Redis 在 JIT-only 和暖 AOT 下各连续通过三次。",
+    "Python、SQLite、Redis 的并发测试各运行 60 秒；Redis BGSAVE 和持久化重启正确。",
+    "多线程 fork 子进程不继承不安全 AOT 可变状态，exec 后可重新加载 AOT。",
+    "latcd 或缓存故障时应用正确回退 JIT，不崩溃、不死锁、不执行陈旧代码。",
+    "主 LAT 可直接构建 runner、runtime library 和 latcd，完整回归通过。"
+  ],
+  "impact_scope": "x86-64 linux-user 的 fork/clone 生命周期、AOT v2 registry 和目标缓存，以及 LAT 构建与安装。",
+  "dependencies": ["T-311"],
+  "open_questions": [],
+  "risk_level": "L4",
+  "status": "active",
+  "work_items": [
+    {
+      "key": "app-matrix",
+      "title": "建立复杂应用 rootfs 和自动测试矩阵",
+      "description": "固定 Debian 12 amd64 rootfs，加入 Python、Git、SQLite、Redis 的 JIT-only、冷 AOT、暖 AOT 和故障降级测试。",
+      "goal": "形成能稳定复现真实应用问题并保留原始输出的自动测试入口。",
+      "scope": "rootfs manifest、复杂应用脚本、进程组超时、隔离 cache/socket/port 和基线运行。",
+      "boundary": "本项只建立测试和记录初始失败，不修复运行时代码。",
+      "acceptance_criteria": [
+        "rootfs 来源、包版本和 SHA256 可追踪，四个应用及所需库完整。",
+        "脚本能独立选择 JIT-only、cold 和 warm 阶段，超时后无遗留子进程。",
+        "Python、Git、SQLite、Redis 每项都有确定输出或数据完整性断言，并保存初始结果。"
+      ],
+      "risk_level": "L3",
+      "item_type": "feature"
+    },
+    {
+      "key": "fork-lifecycle",
+      "title": "实现 AOT fork、clone 和 exec 生命周期",
+      "description": "在 linux-user fork 钩子中冻结 AOT 更新，并在子进程停用和重建可变 AOT 状态。",
+      "goal": "多线程 AOT 进程 fork 后父进程继续正确，子进程在 exec 前安全 JIT、exec 后重新加载 AOT。",
+      "scope": "runner registry、ELF tracker、profile/mapping 队列、TLS/fast cache 和 fork fixture。",
+      "boundary": "不修改 AOT 模块 ABI，不要求 fork 子进程在 exec 前继续使用 AOT。",
+      "acceptance_criteria": [
+        "真实多线程 fixture 证明 fork 与 AOT dispatch/profile/mapping 更新重叠。",
+        "子进程没有继承锁死、reader、当前模块或目标缓存，能执行 guest 代码、线程和信号。",
+        "父进程继续命中 AOT，子进程 exec 后新进程重新注册 AOT。"
+      ],
+      "risk_level": "L4",
+      "item_type": "bug",
+      "depends_on": ["app-matrix"]
+    },
+    {
+      "key": "compatibility",
+      "title": "修复复杂应用兼容问题并完成 60 秒稳定性验证",
+      "description": "按最小复现修复 Python、Git、SQLite、Redis 暴露的翻译、syscall、signal 或 AOT 缺陷。",
+      "goal": "四个应用在 JIT-only 和暖 AOT 条件下达到功能和 60 秒稳定性验收。",
+      "scope": "真实应用暴露的必要 LAT/AOT 代码路径、回归 fixture 和故障降级。",
+      "boundary": "不以跳过功能、关闭检查或只测试有利路径代替修复；不设置性能提升目标。",
+      "acceptance_criteria": [
+        "四个应用两种模式各连续通过三次。",
+        "Python、SQLite、Redis 并发测试各持续 60 秒，Redis BGSAVE 和重启数据正确。",
+        "每个修复都有最小回归，latcd/cache 五类故障正确回退 JIT。"
+      ],
+      "risk_level": "L4",
+      "item_type": "bug",
+      "depends_on": ["fork-lifecycle"]
+    },
+    {
+      "key": "main-integration",
+      "title": "集成主 LAT 构建、安装并完成最终回归",
+      "description": "把隔离 runner 已验证的适配移入主 LAT Meson 构建，定义 runtime/latcd 安装和用户启动方式。",
+      "goal": "生产构建不依赖 staging 源码覆盖，并能用同一复杂应用矩阵验收。",
+      "scope": "主 LAT 源文件、Meson 构建、安装布局、文档和干净构建验证。",
+      "boundary": "保留 tools/latc 独立编译器；不加入 LSX-only、GUI/Wine 或 systemd socket activation。",
+      "acceptance_criteria": [
+        "主 LAT 干净构建直接生成 latx、liblat-aot-runtime.so.2 和 latcd。",
+        "安装后的默认路径和 per-user latcd 启动方法可执行，故障仍可回退 JIT。",
+        "主 LAT 构建重复通过四应用矩阵和 M1-M9 完整回归。"
+      ],
+      "risk_level": "L4",
+      "item_type": "feature",
+      "depends_on": ["compatibility"]
+    }
+  ]
+}

@@ -27,6 +27,9 @@
 #endif
 #ifdef CONFIG_LATX
 #include "latx-config.h"
+#ifdef TARGET_X86_64
+#include "latc-aot-v2-runner.h"
+#endif
 #include "latx-options.h"
 #endif
 #if defined(CONFIG_LATX_KZT) && defined(TARGET_X86_64)
@@ -41,6 +44,7 @@
 #include "aot_smc.h"
 #include "aot_page.h"
 #endif
+#include <elf.h>
 #include <sys/resource.h>
 
 static pthread_mutex_t mmap_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -151,6 +155,10 @@ static int target_mprotect_internal(abi_ulong start, abi_ulong len,
     abi_ulong end, host_start, host_end, addr;
     int prot1, ret, page_flags, host_prot;
     int prot_tmp, shadow_mask;
+#if defined(CONFIG_LATX) && defined(TARGET_X86_64)
+    bool aot_invalidate = false;
+    bool aot_restore = false;
+#endif
 
     trace_target_mprotect(start, len, target_prot);
 
@@ -174,6 +182,19 @@ static int target_mprotect_internal(abi_ulong start, abi_ulong len,
         mmap_unlock();
         return -TARGET_ENOMEM;
     }
+#if defined(CONFIG_LATX) && defined(TARGET_X86_64)
+    bool was_executable = true;
+    for (addr = start; addr < end; addr += TARGET_PAGE_SIZE) {
+        if (!(page_get_flags(addr) & PAGE_EXEC)) {
+            was_executable = false;
+            break;
+        }
+    }
+    aot_invalidate = (target_prot & PROT_WRITE) ||
+                     !(target_prot & PROT_EXEC);
+    aot_restore = (target_prot & PROT_EXEC) &&
+                  !(target_prot & PROT_WRITE) && !was_executable;
+#endif
 
 #if defined(CONFIG_LATX_KZT) && defined(TARGET_X86_64)
     if (guest_request &&
@@ -281,6 +302,12 @@ static int target_mprotect_internal(abi_ulong start, abi_ulong len,
 
     page_set_flags_tb_reload(start, start + len, page_flags, true);
 
+#if defined(CONFIG_LATX) && defined(TARGET_X86_64)
+    if (aot_invalidate) {
+        latc_aot_v2_invalidate_range(thread_cpu, start, len,
+                                     LATC_AOT_V2_INVALIDATE_PROTECTION);
+    }
+#endif
 #if defined(CONFIG_LATX) && defined(TARGET_I386) && TARGET_ABI_BITS == 32
     if (option_minke_16k_page_check && (target_prot & PROT_EXEC)) {
         latx_minke_register_16k_tb_range(start, start + len);
@@ -296,6 +323,11 @@ static int target_mprotect_internal(abi_ulong start, abi_ulong len,
     }
 
     mmap_unlock();
+#if defined(CONFIG_LATX) && defined(TARGET_X86_64)
+    if (aot_restore) {
+        latc_aot_v2_revalidate_range(start, len);
+    }
+#endif
     return 0;
 error:
     mmap_unlock();
@@ -761,6 +793,16 @@ static int create_shadow_file(int fd, uint64 offset, abi_ulong start, abi_ulong 
 #ifdef TARGET_X86_64
 extern int latx_wine;
 void kzt_wine_bridge(abi_ulong start, int fd);
+
+static bool latc_aot_v2_x86_elf_fd(int fd)
+{
+    unsigned char ident[EI_NIDENT];
+
+    return pread(fd, ident, sizeof(ident), 0) == sizeof(ident) &&
+           !memcmp(ident, ELFMAG, SELFMAG) &&
+           ident[EI_CLASS] == ELFCLASS64 &&
+           ident[EI_DATA] == ELFDATA2LSB;
+}
 #endif
 abi_ulong option_mmap_fixed;
 abi_long target_mmap(abi_ulong start, abi_ulong len, int target_prot,
@@ -770,6 +812,16 @@ abi_long target_mmap(abi_ulong start, abi_ulong len, int target_prot,
     int page_flags, temp_flags, host_prot;
     uint64_t host_offset;
     int shadow_fd = -1;
+#if defined(CONFIG_LATX) && defined(TARGET_X86_64)
+    int aot_v2_fd = -1;
+    uint64_t aot_v2_offset = offset;
+    uint64_t aot_v2_size = len;
+    if (fd >= 0 && !(flags & MAP_ANONYMOUS) &&
+        !(target_prot & PROT_WRITE) && latc_aot_v2_mapping_enabled() &&
+        latc_aot_v2_x86_elf_fd(fd)) {
+        aot_v2_fd = dup(fd);
+    }
+#endif
 
     /* Hacking wine user_shared_data mapping to avoid shadow page */
     if (start == 0x7ffe0000 && len == 0x1000 && (flags == (MAP_FIXED | MAP_SHARED)) && fd > 0
@@ -970,7 +1022,6 @@ abi_long target_mmap(abi_ulong start, abi_ulong len, int target_prot,
             errno = ENOMEM;
             goto fail;
         }
-
         /* worst case: we cannot map the file because the offset is not
            aligned, so we read it */
 #ifdef TARGET_X86_64
@@ -1158,6 +1209,12 @@ abi_long target_mmap(abi_ulong start, abi_ulong len, int target_prot,
     }
 
  the_end:
+#if defined(CONFIG_LATX) && defined(TARGET_X86_64)
+    if (flags & MAP_FIXED) {
+        latc_aot_v2_invalidate_range(thread_cpu, start, len,
+                                     LATC_AOT_V2_INVALIDATE_MAP_FIXED);
+    }
+#endif
 #ifdef TARGET_I386
     guest_vma_name_reset(start, len);
 #endif
@@ -1205,11 +1262,26 @@ abi_long target_mmap(abi_ulong start, abi_ulong len, int target_prot,
         close(shadow_fd);
     }
     mmap_unlock();
+#if defined(CONFIG_LATX) && defined(TARGET_X86_64)
+    if (aot_v2_fd >= 0) {
+        if (target_prot & PROT_WRITE) {
+            close(aot_v2_fd);
+        } else {
+            latc_aot_v2_note_mmap(aot_v2_fd, start, aot_v2_size,
+                                  aot_v2_offset);
+        }
+    }
+#endif
     return start;
 fail:
     if (shadow_fd != -1) {
         close(shadow_fd);
     }
+#if defined(CONFIG_LATX) && defined(TARGET_X86_64)
+    if (aot_v2_fd >= 0) {
+        close(aot_v2_fd);
+    }
+#endif
     mmap_unlock();
     return -1;
 }
@@ -1317,6 +1389,9 @@ int target_munmap(abi_ulong start, abi_ulong len, int rlimit_as_account)
     }
 
     mmap_lock();
+#if defined(CONFIG_LATX) && defined(TARGET_X86_64)
+    latc_aot_v2_note_munmap(thread_cpu, start, len);
+#endif
     ret = mmap_unmap_host_range(start, len);
 
     if (ret == 0) {
@@ -1440,7 +1515,6 @@ abi_long target_mremap(abi_ulong old_addr, abi_ulong old_size,
      */
     start_exclusive();
     mmap_lock();
-
     prot = page_get_flags(old_addr);
 #if defined(CONFIG_LATX) && defined(TARGET_I386)
     for (addr = old_addr; addr < old_addr + source_size;
@@ -1691,6 +1765,11 @@ mremap_done:
         }
         page_set_flags(new_addr, new_addr + new_size,
                        prot | PAGE_VALID | PAGE_RESET);
+
+#if defined(CONFIG_LATX) && defined(TARGET_X86_64)
+        latc_aot_v2_note_mremap(thread_cpu, old_addr, source_size,
+                                new_addr, new_size, keep_old);
+#endif
 
 #ifdef CONFIG_LATX_AOT
         if (option_aot) {

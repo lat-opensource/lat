@@ -1,0 +1,82 @@
+{
+  "title": "AOT v2 M8：动态文件 ELF 覆盖率达到 100%",
+  "requirement": "固定动态程序中实际执行的文件型 ELF TB 必须全部命中 AOT，同时静态 SPECint2000 train 的几何平均性能不得下降超过 1%。",
+  "objective": "修复 256 个 guest 地址槽、TB 语义键不稳定和 profile 无法反馈重编译的问题，使动态 hello、动态语义、dlopen/dlclose 和 Bash 在 profile 收敛后的文件 ELF AOT 覆盖率达到 100%。",
+  "scope": "tools/latc 的 AOT v2 TB 键、profile 格式、native image、模块打包、两级 guest 地址表、latcd 合并与版本发布、动态覆盖统计和 SPEC 性能门禁。",
+  "acceptance_criteria": [
+    "固定动态套件最终热运行的 file_aot_dispatch_misses 和 runtime_file_tb_gen_attempts 均为 0，且不新增 profile 键。",
+    "profile 请求 TB 必须全部进入模块，任何删除都使编译失败并报告原因。",
+    "protocol v1、旧模块和旧缓存名保持兼容，信号、失效、并发卸载、W^X 和共享页回归通过。",
+    "3a6000-25g 同机配对 7 轮中，SPEC train 12/12 正确，候选/基线几何平均不低于 0.99x，候选/M4 不低于 0.95x。"
+  ],
+  "impact_scope": "动态 x86-64 主程序、loader 和共享库的 AOT 编译及运行时查找；涉及模块 ABI 扩展、编译服务并发和性能，按 L4 验证。",
+  "dependencies": ["T-310"],
+  "open_questions": [],
+  "risk_level": "L4",
+  "status": "active",
+  "work_items": [
+    {
+      "key": "profile-key",
+      "title": "实现稳定 TB 键、文件覆盖统计和 profile v2",
+      "description": "将运行时 cflags 映射为稳定 code64/parallel 标志，按 source SHA 和 RVA 记录文件 ELF JIT 未命中，并让编译器生成对应变体。",
+      "goal": "ASLR 和并行状态变化后仍能准确记录、编译和查找同一 TB 变体。",
+      "scope": "profile 解析与 bundle、native export、runtime AOT lookup、文件/非文件覆盖统计和单元测试。",
+      "boundary": "本项不实现自动重编译，不改变 guest 地址槽结构。",
+      "acceptance_criteria": [
+        "profile v2 支持 source SHA、RVA、稳定 flags 和 count，旧 ADDRESS COUNT 继续兼容。",
+        "同一 RVA 的普通和 parallel 变体都能进入模块并被运行时分别命中。",
+        "统计能区分文件 ELF 与 vDSO/匿名 TB，ASLR 下 source/RVA 保持稳定。"
+      ],
+      "risk_level": "L4",
+      "item_type": "feature"
+    },
+    {
+      "key": "guest-table",
+      "title": "用两级 guest 地址表消除 256 槽覆盖限制",
+      "description": "扩展模块 guest 地址描述和 PIE 重定位，将一级页指针放入固定上下文槽并从二级页读取实际 guest 地址。",
+      "goal": "Bash 等大型 PIE/DSO 的 profile TB 不再因地址槽和依赖删除而丢失。",
+      "scope": "native relocation、module pack、module loader、runtime instance/context 和格式测试。",
+      "boundary": "最多支持 65536 个 guest RVA；超限明确失败，不静默降级。",
+      "acceptance_criteria": [
+        "超过 256 个不同 guest RVA 的模块可加载和执行，旧平面模块继续工作。",
+        "profile 请求 TB 的 included/requested 数量相等，打包器报告所有删除原因。",
+        "模块 text 保持只读且跨进程共享。"
+      ],
+      "risk_level": "L4",
+      "item_type": "feature",
+      "depends_on": ["profile-key"]
+    },
+    {
+      "key": "feedback-cache",
+      "title": "实现 latcd profile 合并、重编译和 current 版本选择",
+      "description": "通过 protocol v2 接收 source/profile FD，安全合并记录、去抖重编译并原子发布 profile digest 模块。",
+      "goal": "冷运行产生的文件 ELF 未命中可在后续进程中自动变成 AOT 命中。",
+      "scope": "latcd protocol/service、profile 存储、版本化模块名、current index、runtime cache selection 和并发测试。",
+      "boundary": "不在当前进程热替换已注册模块；protocol v1 保持兼容。",
+      "acceptance_criteria": [
+        "并发和重复 profile 提交得到确定、去重的 canonical profile。",
+        "同一 source 同时最多一个编译任务，编译期间更新只追加一次后续任务。",
+        "下一进程通过 current 加载最新 profile digest 模块，损坏 index 安全拒绝或回退旧名。"
+      ],
+      "risk_level": "L4",
+      "item_type": "feature",
+      "depends_on": ["guest-table"]
+    },
+    {
+      "key": "validate",
+      "title": "完成动态 100% 覆盖和静态 SPEC 不退化验证",
+      "description": "在 3a6000-25g 运行固定动态套件、完整回归和同机 SPEC 配对测试，提交原始样本与限制。",
+      "goal": "证明文件 ELF 覆盖率达到 100%，并且静态 SPEC 几何平均性能没有超过 1% 的下降。",
+      "scope": "动态收敛测试、M1-M8 回归、TSAN/变异测试、SPEC train 7 轮和结果文档。",
+      "boundary": "不运行 SPEC ref，不把 vDSO 或匿名 JIT 计入文件 ELF 100%。",
+      "acceptance_criteria": [
+        "动态固定套件最终 file_aot_dispatch_misses=0、runtime_file_tb_gen_attempts=0 且无新 profile 键。",
+        "本机、TSAN、远端信号/失效/并发/资源回归全部通过。",
+        "SPEC train 12/12 正确，候选/基线不低于 0.99x，候选/M4 不低于 0.95x。"
+      ],
+      "risk_level": "L4",
+      "item_type": "feature",
+      "depends_on": ["feedback-cache"]
+    }
+  ]
+}

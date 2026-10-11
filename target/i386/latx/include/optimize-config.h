@@ -78,7 +78,12 @@
 #undef CONFIG_LATX_JRRA
 #define CONFIG_LATX_JRRA            /* jr-ra, */
 #undef CONFIG_LATX_OPT_PUSH_POP
-#define CONFIG_LATX_OPT_PUSH_POP
+#undef CONFIG_LATX_OPT_PUSH_POP_TRANS
+#define CONFIG_LATX_OPT_PUSH_POP_TRANS
+#if defined(CONFIG_LATX_OPT_PUSH_POP) && \
+    defined(CONFIG_LATX_OPT_PUSH_POP_TRANS)
+#error "PUSH/POP optimizations must be mutually exclusive"
+#endif
 #undef CONFIG_LATX_SSSE3_SSE4
 #define CONFIG_LATX_SSSE3_SSE4
 #undef CONFIG_LATX_SPLIT_TB

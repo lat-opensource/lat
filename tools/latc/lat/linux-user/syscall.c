@@ -1,0 +1,21413 @@
+/*
+ *  Linux syscalls
+ *
+ *  Copyright (c) 2003 Fabrice Bellard
+ *
+ *  This program is free software; you can redistribute it and/or modify
+ *  it under the terms of the GNU General Public License as published by
+ *  the Free Software Foundation; either version 2 of the License, or
+ *  (at your option) any later version.
+ *
+ *  This program is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *  GNU General Public License for more details.
+ *
+ *  You should have received a copy of the GNU General Public License
+ *  along with this program; if not, see <http://www.gnu.org/licenses/>.
+ */
+#define _ATFILE_SOURCE
+#include <linux/types.h>
+#include "qemu/osdep.h"
+#include "qemu/cutils.h"
+#include "qemu/path.h"
+#include "qemu/memfd.h"
+#include "qemu/queue.h"
+#include "qemu/rcu.h"
+#include "qemu-common.h"
+#include <elf.h>
+#include <endian.h>
+#include <grp.h>
+#include <sys/ipc.h>
+#include <sys/msg.h>
+#include <sys/wait.h>
+#include <sys/mount.h>
+#include <sys/file.h>
+#include <sys/fsuid.h>
+#include <sys/personality.h>
+#include <sys/prctl.h>
+#include <sys/resource.h>
+#include <sys/statvfs.h>
+#include <sys/swap.h>
+#include <linux/capability.h>
+#include <sched.h>
+#include <sys/timex.h>
+#include <sys/socket.h>
+#include <linux/sockios.h>
+#include <sys/un.h>
+#include <sys/uio.h>
+#include <poll.h>
+#include <sys/times.h>
+#include <sys/shm.h>
+#include <sys/sem.h>
+#include <sys/statfs.h>
+#include <utime.h>
+#include <sys/sysinfo.h>
+#include <sys/signalfd.h>
+//#include <sys/user.h>
+#include <netinet/in.h>
+#include <netinet/ip.h>
+#include <netinet/tcp.h>
+#include <netinet/udp.h>
+#include <linux/wireless.h>
+#include <linux/icmp.h>
+#include <linux/icmpv6.h>
+#include <linux/if_tun.h>
+#include <linux/in6.h>
+#include <linux/errqueue.h>
+#include <linux/random.h>
+#include <linux/magic.h>
+#include <linux/sctp.h>
+#ifdef CONFIG_TIMERFD
+#include <sys/timerfd.h>
+#endif
+#ifdef CONFIG_EVENTFD
+#include <sys/eventfd.h>
+#endif
+#ifdef CONFIG_EPOLL
+#include <sys/epoll.h>
+#endif
+#ifdef CONFIG_ATTR
+#include "qemu/xattr.h"
+#endif
+#ifdef CONFIG_SENDFILE
+#include <sys/sendfile.h>
+#endif
+#ifdef HAVE_SYS_KCOV_H
+#include <sys/kcov.h>
+#endif
+
+#define termios host_termios
+#define winsize host_winsize
+#define termio host_termio
+#define sgttyb host_sgttyb /* same as target */
+#define tchars host_tchars /* same as target */
+#define ltchars host_ltchars /* same as target */
+
+#include <linux/termios.h>
+#include <linux/unistd.h>
+#include <linux/cdrom.h>
+#include <linux/hdreg.h>
+#include <linux/soundcard.h>
+#include <linux/kd.h>
+#include <linux/mtio.h>
+#include <linux/fs.h>
+#include <linux/fd.h>
+#if defined(CONFIG_FIEMAP)
+#include <linux/fiemap.h>
+#endif
+#include <linux/fb.h>
+#if defined(CONFIG_USBFS)
+#include <linux/usbdevice_fs.h>
+#include <linux/usb/ch9.h>
+#endif
+#include <linux/vt.h>
+#include <linux/dm-ioctl.h>
+#include <linux/reboot.h>
+#include <linux/route.h>
+#include <linux/filter.h>
+#include <linux/blkpg.h>
+#include <netpacket/packet.h>
+#include <linux/netlink.h>
+#include <linux/if_alg.h>
+#include <linux/rtc.h>
+#include <sound/asound.h>
+#include <linux/uinput.h>
+#ifdef HAVE_BTRFS_H
+#include <linux/btrfs.h>
+#endif
+#if defined(HAVE_DRM_H)
+#include <drm/drm.h>
+#include <drm/i915_drm.h>
+#include <drm/radeon_drm.h>
+#include <drm/amdgpu_drm.h>
+#include <drm/drm_mode.h>
+#elif defined(HAVE_LIBDRM_H)
+#include <libdrm/drm.h>
+#include <libdrm/i915_drm.h>
+#include <libdrm/radeon_drm.h>
+#include <libdrm/amdgpu_drm.h>
+#include <libdrm/drm_mode.h>
+#endif
+#include <linux/can/raw.h>
+#include <linux/videodev2.h>
+#include <sound/asequencer.h>
+#include "linux_loop.h"
+#include "uname.h"
+#include "ioctl/mpt3sas_ctl.h"
+
+#include "qemu.h"
+#include "latc-aot-v2-runner.h"
+#include "latc-x86-syscall-abi.h"
+#ifdef TARGET_X86_64
+_Static_assert(sizeof(struct target_stat) == sizeof(LatcX86Stat),
+               "LATC x86 stat ABI drifted from linux-user");
+_Static_assert(sizeof(struct target_sigaction) == sizeof(LatcX86Sigaction),
+               "LATC x86 sigaction ABI drifted from linux-user");
+_Static_assert(sizeof(struct target_sysinfo) == sizeof(LatcX86Sysinfo),
+               "LATC x86 sysinfo ABI drifted from linux-user");
+_Static_assert(sizeof(struct target_rlimit64) == sizeof(LatcX86Rlimit64),
+               "LATC x86 rlimit64 ABI drifted from linux-user");
+#endif
+#include "exec/translate-all.h"
+#include "guest-seccomp.h"
+#include "signal-common.h"
+#include "qemu/guest-random.h"
+#include "qemu/selfmap.h"
+#include "user/syscall-trace.h"
+#include "qapi/error.h"
+#include "fd-trans.h"
+#include "tcg/tcg.h"
+#include <linux/nsfs.h>
+#ifdef CONFIG_LATX
+#define TUNNEL_VIRTUAL_SYSCALL_ID 600
+#include "lsenv.h"
+#include <tunnel_lib.h>
+#include "aot.h"
+#include "latx-options.h"
+#endif
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+#include "exec/fasttb.h"
+#endif
+
+#ifdef CONFIG_LATX_TUNNEL_LIB
+static bool is_tunnel_loader_address(const TaskState *ts, abi_ulong addr)
+{
+    if (!ts->info || !ts->info->interpreter_path) {
+        return false;
+    }
+    return addr >= ts->info->interpreter_start_code &&
+           addr < ts->info->interpreter_end_code &&
+           (page_get_flags(addr) & PAGE_TUNNEL_LOADER);
+}
+
+static bool is_tunnel_loader_notification(CPUArchState *env,
+                                          abi_ulong method)
+{
+    CPUState *cpu = env_cpu(env);
+    TaskState *ts = cpu->opaque;
+    abi_ulong return_pc;
+    abi_ulong wrapper_pc;
+    uint8_t *marker;
+    int32_t call_disp;
+    char *method_name;
+    bool valid = false;
+
+#ifdef TARGET_X86_64
+    static const uint8_t marker_prefix[] = {
+        0xbf, 0x58, 0x02, 0x00, 0x00, /* mov $600, %edi */
+        0x31, 0xc0,                   /* xor %eax, %eax */
+        0xe8,                         /* call rel32 */
+    };
+    const abi_ulong marker_len = 12;
+    const abi_ulong call_disp_offset = 8;
+    const abi_ulong wrapper_next_offset = 0x19;
+    abi_ulong return_slot = env->regs[R_ESP];
+#else
+    static const uint8_t marker_prefix[] = {
+        0x68, 0x58, 0x02, 0x00, 0x00, /* push $600 */
+        0xe8,                         /* call rel32 */
+    };
+    const abi_ulong marker_len = 10;
+    const abi_ulong call_disp_offset = 6;
+    const abi_ulong wrapper_next_offset = 0x22;
+    abi_ulong return_slot = env->regs[R_ESP] + 4 * sizeof(abi_ulong);
+#endif
+
+    if (get_user_ual(return_pc, return_slot) || return_pc < marker_len ||
+        env->eip < wrapper_next_offset ||
+        !is_tunnel_loader_address(ts, env->eip) ||
+        !is_tunnel_loader_address(ts, return_pc)) {
+        return false;
+    }
+
+    marker = lock_user(VERIFY_READ, return_pc - marker_len, marker_len, 1);
+    if (!marker || memcmp(marker, marker_prefix, sizeof(marker_prefix))) {
+        goto out_marker;
+    }
+    call_disp = ldl_le_p(marker + call_disp_offset);
+    wrapper_pc = return_pc + call_disp;
+    if (wrapper_pc != env->eip - wrapper_next_offset) {
+        goto out_marker;
+    }
+
+    method_name = lock_user_string(method);
+    if (method_name) {
+        valid = true;
+        unlock_user(method_name, method, 0);
+    }
+
+out_marker:
+    if (marker) {
+        unlock_user(marker, return_pc - marker_len, 0);
+    }
+    return valid;
+}
+#endif
+
+#include <linux/perf_event.h>
+#include <sys/ptrace.h>
+#ifndef CLONE_IO
+#define CLONE_IO                0x80000000      /* Clone io context */
+#endif
+#ifndef CLONE_NEWUSER
+#define CLONE_NEWUSER           0x10000000      /* New user namespace */
+#endif
+#ifndef CLONE_NEWPID
+#define CLONE_NEWPID            0x20000000      /* New pid namespace */
+#endif
+#ifndef CLONE_NEWNET
+#define CLONE_NEWNET            0x40000000      /* New network namespace */
+#endif
+
+#include <linux/netfilter_ipv4.h>
+#include <linux/dma-buf.h>
+
+#include <sys/syscall.h>
+
+/* Generic prctl constants that may be absent from old host headers. */
+#ifndef PR_SET_IO_FLUSHER
+#define PR_SET_IO_FLUSHER 57
+#define PR_GET_IO_FLUSHER 58
+#endif
+#ifndef PR_SET_SYSCALL_USER_DISPATCH
+#define PR_SET_SYSCALL_USER_DISPATCH 59
+#define PR_SYS_DISPATCH_OFF 0
+#define PR_SYS_DISPATCH_ON 1
+#define SYSCALL_DISPATCH_FILTER_ALLOW 0
+#define SYSCALL_DISPATCH_FILTER_BLOCK 1
+#endif
+#ifndef PR_SYS_DISPATCH_INCLUSIVE_ON
+#define PR_SYS_DISPATCH_INCLUSIVE_ON 2
+#endif
+#ifndef PR_SCHED_CORE
+#define PR_SCHED_CORE 62
+#define PR_SCHED_CORE_GET 0
+#endif
+#ifndef PR_SET_MDWE
+#define PR_SET_MDWE 65
+#define PR_MDWE_REFUSE_EXEC_GAIN (1UL << 0)
+#define PR_GET_MDWE 66
+#endif
+#ifndef PR_MDWE_NO_INHERIT
+#define PR_MDWE_NO_INHERIT (1UL << 1)
+#endif
+#ifndef PR_GET_AUXV
+#define PR_GET_AUXV 0x41555856
+#endif
+#ifndef PR_SET_MM_MAP_SIZE
+#define PR_SET_MM_START_CODE 1
+#define PR_SET_MM_END_CODE 2
+#define PR_SET_MM_START_DATA 3
+#define PR_SET_MM_END_DATA 4
+#define PR_SET_MM_START_STACK 5
+#define PR_SET_MM_START_BRK 6
+#define PR_SET_MM_BRK 7
+#define PR_SET_MM_ARG_START 8
+#define PR_SET_MM_ARG_END 9
+#define PR_SET_MM_ENV_START 10
+#define PR_SET_MM_ENV_END 11
+#define PR_SET_MM_AUXV 12
+#define PR_SET_MM_EXE_FILE 13
+#define PR_SET_MM_MAP 14
+#define PR_SET_MM_MAP_SIZE 15
+#endif
+#ifndef PR_SET_VMA
+#define PR_SET_VMA 0x53564d41
+#define PR_SET_VMA_ANON_NAME 0
+#endif
+#ifndef PR_SET_MEMORY_MERGE
+#define PR_SET_MEMORY_MERGE 67
+#define PR_GET_MEMORY_MERGE 68
+#endif
+#ifndef PR_SPEC_DISABLE_NOEXEC
+#define PR_SPEC_STORE_BYPASS 0
+#define PR_SPEC_INDIRECT_BRANCH 1
+#define PR_SPEC_NOT_AFFECTED 0
+#define PR_SPEC_PRCTL (1UL << 0)
+#define PR_SPEC_ENABLE (1UL << 1)
+#define PR_SPEC_DISABLE (1UL << 2)
+#define PR_SPEC_FORCE_DISABLE (1UL << 3)
+#define PR_SPEC_DISABLE_NOEXEC (1UL << 4)
+#endif
+#ifndef PR_SPEC_L1D_FLUSH
+#define PR_SPEC_L1D_FLUSH 2
+#endif
+#ifndef PR_TIMER_CREATE_RESTORE_IDS
+#define PR_TIMER_CREATE_RESTORE_IDS 77
+#define PR_TIMER_CREATE_RESTORE_IDS_OFF 0
+#define PR_TIMER_CREATE_RESTORE_IDS_ON 1
+#define PR_TIMER_CREATE_RESTORE_IDS_GET 2
+#endif
+#ifndef PR_FUTEX_HASH
+#define PR_FUTEX_HASH 78
+#define PR_FUTEX_HASH_SET_SLOTS 1
+#define PR_FUTEX_HASH_GET_SLOTS 2
+#endif
+#ifndef PR_RSEQ_SLICE_EXTENSION
+#define PR_RSEQ_SLICE_EXTENSION 79
+#define PR_RSEQ_SLICE_EXTENSION_GET 1
+#define PR_RSEQ_SLICE_EXTENSION_SET 2
+#define PR_RSEQ_SLICE_EXT_ENABLE 0x01
+#endif
+#ifndef PR_GET_CFI
+#define PR_GET_CFI 80
+#define PR_SET_CFI 81
+#define PR_CFI_BRANCH_LANDING_PADS 0
+#endif
+#ifdef CONFIG_LATX
+#define IMAGE_NT_SIGNATURE 0x00004550
+#define IMAGE_FILE_RELOCS_STRIPPED 0x0001
+#define IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE 0x0040
+#define PE_OPTIONAL_HEADER_OFFSET 24
+#define PE_COFF_OPTIONAL_HEADER_SIZE_OFFSET 20
+#define PE_COFF_CHARACTERISTICS_OFFSET 22
+#define PE32_IMAGE_BASE_OFFSET 28
+#define PE64_IMAGE_BASE_OFFSET 24
+#define PE_SECTION_ALIGNMENT_OFFSET 32
+#define PE_SIZE_OF_IMAGE_OFFSET 56
+#define PE_DLL_CHARACTERISTICS_OFFSET 70
+#define PE32_NUMBER_OF_DATA_DIRECTORIES_OFFSET 92
+#define PE64_NUMBER_OF_DATA_DIRECTORIES_OFFSET 108
+#define PE32_DATA_DIRECTORIES_OFFSET 96
+#define PE64_DATA_DIRECTORIES_OFFSET 112
+#define PE_BASE_RELOCATION_DIRECTORY_INDEX 5
+#define PE_DATA_DIRECTORY_SIZE 8
+
+static bool latx_fd_basename_matches(int fd, const char *expected)
+{
+    char fd_link[64];
+    char path[PATH_MAX + 1];
+    const char *basename;
+    ssize_t len;
+
+    snprintf(fd_link, sizeof(fd_link), "/proc/self/fd/%d", fd);
+    len = readlink(fd_link, path, PATH_MAX);
+    if (len <= 0) {
+        return false;
+    }
+    path[len] = '\0';
+    basename = strrchr(path, '/');
+    basename = basename ? basename + 1 : path;
+    return !strcasecmp(basename, expected);
+}
+
+static bool latx_wine_pe_fixed_address_matches(int fd, uint64_t *address)
+{
+    const char *spec = option_wine_pe_fixed_address;
+    const char *separator;
+    char basename[NAME_MAX + 1];
+    char *end;
+    size_t basename_len;
+
+    if (!spec) {
+        return false;
+    }
+    separator = strrchr(spec, '@');
+    if (!separator || separator == spec) {
+        return false;
+    }
+    basename_len = separator - spec;
+    if (basename_len > NAME_MAX) {
+        return false;
+    }
+    memcpy(basename, spec, basename_len);
+    basename[basename_len] = '\0';
+    if (!latx_fd_basename_matches(fd, basename)) {
+        return false;
+    }
+    errno = 0;
+    *address = strtoull(separator + 1, &end, 0);
+    return !errno && *address && !*end;
+}
+
+static bool latx_wine_pe_has_safe_preferred_base(const uint8_t *header,
+                                                  abi_long len,
+                                                  uint16_t magic,
+                                                  uint64_t *image_base,
+                                                  uint32_t *image_size)
+{
+    uint32_t data_directories_offset;
+    uint32_t number_of_data_directories_offset;
+    uint32_t number_of_data_directories;
+    uint32_t relocation_rva;
+    uint32_t relocation_size;
+    uint32_t section_alignment;
+    uint16_t file_characteristics;
+    uint16_t optional_header_size;
+    uint64_t end;
+    size_t relocation_directory_offset;
+
+    optional_header_size = lduw_le_p(
+        header + PE_COFF_OPTIONAL_HEADER_SIZE_OFFSET);
+    file_characteristics = lduw_le_p(
+        header + PE_COFF_CHARACTERISTICS_OFFSET);
+    if (file_characteristics & IMAGE_FILE_RELOCS_STRIPPED) {
+        return false;
+    }
+
+    if (magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC) {
+        *image_base = ldl_le_p(header + PE_OPTIONAL_HEADER_OFFSET +
+                               PE32_IMAGE_BASE_OFFSET);
+        number_of_data_directories_offset =
+            PE32_NUMBER_OF_DATA_DIRECTORIES_OFFSET;
+        data_directories_offset = PE32_DATA_DIRECTORIES_OFFSET;
+    } else {
+        *image_base = ldq_le_p(header + PE_OPTIONAL_HEADER_OFFSET +
+                               PE64_IMAGE_BASE_OFFSET);
+        number_of_data_directories_offset =
+            PE64_NUMBER_OF_DATA_DIRECTORIES_OFFSET;
+        data_directories_offset = PE64_DATA_DIRECTORIES_OFFSET;
+    }
+
+    relocation_directory_offset = PE_OPTIONAL_HEADER_OFFSET +
+        data_directories_offset + PE_BASE_RELOCATION_DIRECTORY_INDEX *
+        PE_DATA_DIRECTORY_SIZE;
+    if (optional_header_size < data_directories_offset +
+            (PE_BASE_RELOCATION_DIRECTORY_INDEX + 1) *
+            PE_DATA_DIRECTORY_SIZE ||
+            len < relocation_directory_offset + PE_DATA_DIRECTORY_SIZE) {
+        return false;
+    }
+
+    number_of_data_directories = ldl_le_p(header +
+        PE_OPTIONAL_HEADER_OFFSET + number_of_data_directories_offset);
+    if (number_of_data_directories <= PE_BASE_RELOCATION_DIRECTORY_INDEX) {
+        return false;
+    }
+
+    section_alignment = ldl_le_p(header + PE_OPTIONAL_HEADER_OFFSET +
+                                 PE_SECTION_ALIGNMENT_OFFSET);
+    *image_size = ldl_le_p(header + PE_OPTIONAL_HEADER_OFFSET +
+                           PE_SIZE_OF_IMAGE_OFFSET);
+    relocation_rva = ldl_le_p(header + relocation_directory_offset);
+    relocation_size = ldl_le_p(header + relocation_directory_offset + 4);
+
+    if (!*image_base || !*image_size ||
+            !is_power_of_2(section_alignment) ||
+            (*image_base & (TARGET_PAGE_SIZE - 1)) ||
+            (*image_size & (TARGET_PAGE_SIZE - 1)) ||
+            (*image_size & (section_alignment - 1)) ||
+            *image_base > GUEST_ADDR_MAX ||
+            *image_size - 1 > GUEST_ADDR_MAX - *image_base) {
+        return false;
+    }
+    end = *image_base + *image_size;
+    if ((magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC && end > UINT64_C(1) << 32) ||
+            !relocation_rva || relocation_size < PE_DATA_DIRECTORY_SIZE ||
+            relocation_rva >= *image_size ||
+            relocation_size > *image_size - relocation_rva) {
+        return false;
+    }
+
+    return true;
+}
+
+static void latx_wine_pe_prefer_image_base(int fd, void *buffer, abi_long len)
+{
+    static bool logged_enabled;
+    static bool logged_rejected;
+    uint8_t *header = buffer;
+    uint16_t characteristics;
+    uint16_t magic;
+    uint64_t image_base;
+    uint64_t fixed_address = 0;
+    uint32_t image_size;
+    bool fixed_address_set;
+    const char *requested_image;
+
+    if (len < PE_OPTIONAL_HEADER_OFFSET +
+            PE_DLL_CHARACTERISTICS_OFFSET + sizeof(characteristics)) {
+        return;
+    }
+    if (ldl_le_p(header) != IMAGE_NT_SIGNATURE) {
+        return;
+    }
+    magic = lduw_le_p(header + PE_OPTIONAL_HEADER_OFFSET);
+    if (magic != IMAGE_NT_OPTIONAL_HDR32_MAGIC &&
+            magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC) {
+        return;
+    }
+    fixed_address_set = latx_wine_pe_fixed_address_matches(fd,
+                                                            &fixed_address);
+    if (!fixed_address_set && (!option_wine_pe_fixed_base ||
+            !latx_fd_basename_matches(fd, option_wine_pe_fixed_base))) {
+        return;
+    }
+    requested_image = fixed_address_set ? option_wine_pe_fixed_address :
+                                         option_wine_pe_fixed_base;
+
+    if (!latx_wine_pe_has_safe_preferred_base(header, len, magic,
+                                               &image_base, &image_size)) {
+        if (!logged_rejected) {
+            fprintf(stderr, "[LATX Wine PE] keeping ASLR for %s: "
+                    "preferred range or relocations are unsafe\n",
+                    option_wine_pe_fixed_base);
+            logged_rejected = true;
+        }
+        return;
+    }
+
+    if (fixed_address_set) {
+        if ((fixed_address & (TARGET_PAGE_SIZE - 1)) ||
+                fixed_address > GUEST_ADDR_MAX - image_size ||
+                (magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC &&
+                 fixed_address + image_size > UINT64_C(1) << 32)) {
+            return;
+        }
+        if (magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC) {
+            stl_le_p(header + PE_OPTIONAL_HEADER_OFFSET +
+                     PE32_IMAGE_BASE_OFFSET, fixed_address);
+        } else {
+            stq_le_p(header + PE_OPTIONAL_HEADER_OFFSET +
+                     PE64_IMAGE_BASE_OFFSET, fixed_address);
+        }
+        image_base = fixed_address;
+    }
+
+    /* Wine parses this header before atomically probing the guest range. */
+    header += PE_OPTIONAL_HEADER_OFFSET + PE_DLL_CHARACTERISTICS_OFFSET;
+    characteristics = lduw_le_p(header);
+    if (!(characteristics & IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE)) {
+        return;
+    }
+    stw_le_p(header, characteristics & ~IMAGE_DLLCHARACTERISTICS_DYNAMIC_BASE);
+    if (!logged_enabled) {
+        fprintf(stderr, "[LATX Wine PE] preferred base enabled for %s: "
+                "0x%" PRIx64 "-0x%" PRIx64
+                " (relocation fallback retained)\n",
+                requested_image, image_base,
+                image_base + image_size);
+        logged_enabled = true;
+    }
+}
+#endif
+/* We can't directly call the host clone syscall, because this will
+ * badly confuse libc (breaking mutexes, for example). So we must
+ * divide clone flags into:
+ *  * flag combinations that look like pthread_create()
+ *  * flag combinations that look like fork()
+ *  * flags we can implement within QEMU itself
+ *  * flags we can't support and will return an error for
+ */
+/* For thread creation, all these flags must be present; for
+ * fork, none must be present.
+ */
+#define CLONE_THREAD_FLAGS                              \
+    (CLONE_VM | CLONE_FS | CLONE_FILES |                \
+     CLONE_SIGHAND | CLONE_THREAD | CLONE_SYSVSEM)
+
+/* These flags are ignored:
+ * CLONE_DETACHED is now ignored by the kernel;
+ * CLONE_IO is just an optimisation hint to the I/O scheduler
+ */
+#define CLONE_IGNORED_FLAGS                     \
+    (CLONE_DETACHED | CLONE_IO)
+
+/* Flags for fork which we can implement within QEMU itself */
+#define CLONE_FORK_NAMESPACE_FLAGS \
+    (CLONE_NEWNS | CLONE_NEWUTS | CLONE_NEWIPC | CLONE_NEWUSER | \
+     CLONE_NEWPID | CLONE_NEWNET)
+
+#define CLONE_DIRECT_FORK_FLAGS \
+    (CLONE_NEWNS | CLONE_NEWUTS | CLONE_NEWIPC | CLONE_NEWUSER | \
+     CLONE_NEWPID | CLONE_NEWNET | CLONE_FS)
+
+#define CLONE_OPTIONAL_FORK_FLAGS               \
+    (CLONE_SETTLS | CLONE_PARENT_SETTID |       \
+     CLONE_CHILD_CLEARTID | CLONE_CHILD_SETTID | \
+     CLONE_FORK_NAMESPACE_FLAGS | CLONE_FS)
+
+/* Flags for thread creation which we can implement within QEMU itself */
+#define CLONE_OPTIONAL_THREAD_FLAGS                             \
+    (CLONE_SETTLS | CLONE_PARENT_SETTID |                       \
+     CLONE_CHILD_CLEARTID | CLONE_CHILD_SETTID | CLONE_PARENT)
+
+#define CLONE_INVALID_FORK_FLAGS                                        \
+    (~(CSIGNAL | CLONE_OPTIONAL_FORK_FLAGS | CLONE_IGNORED_FLAGS))
+
+#define CLONE_INVALID_THREAD_FLAGS                                      \
+    (~(CSIGNAL | CLONE_THREAD_FLAGS | CLONE_OPTIONAL_THREAD_FLAGS |     \
+       CLONE_IGNORED_FLAGS))
+
+/* CLONE_VFORK is special cased early in do_fork(). The other flag bits
+ * have almost all been allocated. We cannot support any of
+ * CLONE_NEWCGROUP, CLONE_PTRACE, CLONE_UNTRACED.
+ * The checks against the invalid thread masks above will catch these.
+ * (The one remaining unallocated bit is 0x1000 which used to be CLONE_PID.)
+ * Fork-like CLONE_NEWUSER is applied in the single-threaded child. Mount, UTS,
+ * IPC, PID, network, and shared-fs clone flags require a deferred
+ * single-thread child and use the libc clone wrapper so the kernel creates the
+ * requested state.
+ */
+
+/* Define DEBUG_ERESTARTSYS to force every syscall to be restarted
+ * once. This exercises the codepaths for restart.
+ */
+//#define DEBUG_ERESTARTSYS
+
+//#include <linux/msdos_fs.h>
+#define	VFAT_IOCTL_READDIR_BOTH		_IOR('r', 1, struct linux_dirent [2])
+#define	VFAT_IOCTL_READDIR_SHORT	_IOR('r', 2, struct linux_dirent [2])
+
+#undef _syscall0
+#undef _syscall1
+#undef _syscall2
+#undef _syscall3
+#undef _syscall4
+#undef _syscall5
+#undef _syscall6
+
+#define _syscall0(type,name)		\
+static type name (void)			\
+{					\
+	return syscall(__NR_##name);	\
+}
+
+#define _syscall1(type,name,type1,arg1)		\
+static type name (type1 arg1)			\
+{						\
+	return syscall(__NR_##name, arg1);	\
+}
+
+#define _syscall2(type,name,type1,arg1,type2,arg2)	\
+static type name (type1 arg1,type2 arg2)		\
+{							\
+	return syscall(__NR_##name, arg1, arg2);	\
+}
+
+#define _syscall3(type,name,type1,arg1,type2,arg2,type3,arg3)	\
+static type name (type1 arg1,type2 arg2,type3 arg3)		\
+{								\
+	return syscall(__NR_##name, arg1, arg2, arg3);		\
+}
+
+#define _syscall4(type,name,type1,arg1,type2,arg2,type3,arg3,type4,arg4)	\
+static type name (type1 arg1,type2 arg2,type3 arg3,type4 arg4)			\
+{										\
+	return syscall(__NR_##name, arg1, arg2, arg3, arg4);			\
+}
+
+#define _syscall5(type,name,type1,arg1,type2,arg2,type3,arg3,type4,arg4,	\
+		  type5,arg5)							\
+static type name (type1 arg1,type2 arg2,type3 arg3,type4 arg4,type5 arg5)	\
+{										\
+	return syscall(__NR_##name, arg1, arg2, arg3, arg4, arg5);		\
+}
+
+
+#define _syscall6(type,name,type1,arg1,type2,arg2,type3,arg3,type4,arg4,	\
+		  type5,arg5,type6,arg6)					\
+static type name (type1 arg1,type2 arg2,type3 arg3,type4 arg4,type5 arg5,	\
+                  type6 arg6)							\
+{										\
+	return syscall(__NR_##name, arg1, arg2, arg3, arg4, arg5, arg6);	\
+}
+
+
+#define __NR_sys_uname __NR_uname
+#define __NR_sys_getcwd1 __NR_getcwd
+#define __NR_sys_getdents __NR_getdents
+#define __NR_sys_getdents64 __NR_getdents64
+#define __NR_sys_getpriority __NR_getpriority
+#define __NR_sys_rt_sigqueueinfo __NR_rt_sigqueueinfo
+#define __NR_sys_rt_tgsigqueueinfo __NR_rt_tgsigqueueinfo
+#define __NR_sys_syslog __NR_syslog
+#if defined(__NR_futex)
+# define __NR_sys_futex __NR_futex
+#endif
+#if defined(__NR_futex_time64)
+# define __NR_sys_futex_time64 __NR_futex_time64
+#endif
+#define __NR_sys_inotify_init __NR_inotify_init
+#define __NR_sys_inotify_add_watch __NR_inotify_add_watch
+#define __NR_sys_inotify_rm_watch __NR_inotify_rm_watch
+#define __NR_sys_statx __NR_statx
+
+#if defined(__alpha__) || defined(__x86_64__) || defined(__s390x__)
+#define __NR__llseek __NR_lseek
+#endif
+
+/* Newer kernel ports have llseek() instead of _llseek() */
+#if defined(TARGET_NR_llseek) && !defined(TARGET_NR__llseek)
+#define TARGET_NR__llseek TARGET_NR_llseek
+#endif
+
+/* some platforms need to mask more bits than just TARGET_O_NONBLOCK */
+#ifndef TARGET_O_NONBLOCK_MASK
+#define TARGET_O_NONBLOCK_MASK TARGET_O_NONBLOCK
+#endif
+
+#define __NR_sys_gettid __NR_gettid
+_syscall0(int, sys_gettid)
+#define __NR_sys_setreuid __NR_setreuid
+_syscall2(int, sys_setreuid, uid_t, ruid, uid_t, euid)
+#define __NR_sys_setregid __NR_setregid
+_syscall2(int, sys_setregid, gid_t, rgid, gid_t, egid)
+#define __NR_sys_setgroups __NR_setgroups
+_syscall2(int, sys_setgroups, size_t, size, gid_t*, list)
+
+/* For the 64-bit guest on 32-bit host case we must emulate
+ * getdents using getdents64, because otherwise the host
+ * might hand us back more dirent records than we can fit
+ * into the guest buffer after structure format conversion.
+ * Otherwise we emulate getdents with getdents if the host has it.
+ */
+#if defined(__NR_getdents) && HOST_LONG_BITS >= TARGET_ABI_BITS
+#define EMULATE_GETDENTS_WITH_GETDENTS
+#endif
+
+#if (defined(TARGET_NR_getdents) && defined(EMULATE_GETDENTS_WITH_GETDENTS))
+_syscall3(int, sys_getdents, uint, fd, struct linux_dirent *, dirp, uint, count);
+#endif
+#if (defined(TARGET_NR_getdents) && \
+      !defined(EMULATE_GETDENTS_WITH_GETDENTS)) || \
+    (defined(TARGET_NR_getdents64) && defined(__NR_getdents64))
+_syscall3(int, sys_getdents64, uint, fd, struct linux_dirent64 *, dirp, uint, count);
+#endif
+#if defined(TARGET_NR__llseek) && defined(__NR_llseek)
+_syscall5(int, _llseek,  uint,  fd, ulong, hi, ulong, lo,
+          loff_t *, res, uint, wh);
+#endif
+_syscall3(int, sys_rt_sigqueueinfo, pid_t, pid, int, sig, siginfo_t *, uinfo)
+_syscall4(int, sys_rt_tgsigqueueinfo, pid_t, pid, pid_t, tid, int, sig,
+          siginfo_t *, uinfo)
+_syscall3(int,sys_syslog,int,type,char*,bufp,int,len)
+#ifdef __NR_exit_group
+_syscall1(int,exit_group,int,error_code)
+#endif
+#if defined(__NR_futex)
+_syscall6(int,sys_futex,int *,uaddr,int,op,int,val,
+          const struct timespec *,timeout,int *,uaddr2,int,val3)
+#endif
+#if defined(__NR_futex_time64)
+_syscall6(int,sys_futex_time64,int *,uaddr,int,op,int,val,
+          const struct timespec *,timeout,int *,uaddr2,int,val3)
+#endif
+#define __NR_sys_sched_getaffinity __NR_sched_getaffinity
+_syscall3(int, sys_sched_getaffinity, pid_t, pid, unsigned int, len,
+          unsigned long *, user_mask_ptr);
+#define __NR_sys_sched_setaffinity __NR_sched_setaffinity
+_syscall3(int, sys_sched_setaffinity, pid_t, pid, unsigned int, len,
+          unsigned long *, user_mask_ptr);
+#define __NR_sys_getcpu __NR_getcpu
+_syscall3(int, sys_getcpu, unsigned *, cpu, unsigned *, node, void *, tcache);
+_syscall4(int, reboot, int, magic1, int, magic2, unsigned int, cmd,
+          void *, arg);
+_syscall2(int, capget, struct __user_cap_header_struct *, header,
+          struct __user_cap_data_struct *, data);
+_syscall2(int, capset, struct __user_cap_header_struct *, header,
+          struct __user_cap_data_struct *, data);
+#if defined(TARGET_NR_ioprio_get) && defined(__NR_ioprio_get)
+_syscall2(int, ioprio_get, int, which, int, who)
+#endif
+#if defined(TARGET_NR_ioprio_set) && defined(__NR_ioprio_set)
+_syscall3(int, ioprio_set, int, which, int, who, int, ioprio)
+#endif
+#if defined(TARGET_NR_getrandom) && defined(__NR_getrandom)
+_syscall3(int, getrandom, void *, buf, size_t, buflen, unsigned int, flags)
+#endif
+
+#if defined(TARGET_NR_kcmp) && defined(__NR_kcmp)
+_syscall5(int, kcmp, pid_t, pid1, pid_t, pid2, int, type,
+          unsigned long, idx1, unsigned long, idx2)
+#endif
+
+/*
+ * It is assumed that struct statx is architecture independent.
+ */
+#if defined(TARGET_NR_statx) && defined(__NR_statx)
+_syscall5(int, sys_statx, int, dirfd, const char *, pathname, int, flags,
+          unsigned int, mask, struct target_statx *, statxbuf)
+#endif
+#if defined(TARGET_NR_membarrier) && defined(__NR_membarrier)
+_syscall2(int, membarrier, int, cmd, int, flags)
+#endif
+
+static bitmask_transtbl fcntl_flags_tbl[] = {
+  { TARGET_O_ACCMODE,   TARGET_O_WRONLY,    O_ACCMODE,   O_WRONLY,    },
+  { TARGET_O_ACCMODE,   TARGET_O_RDWR,      O_ACCMODE,   O_RDWR,      },
+  { TARGET_O_CREAT,     TARGET_O_CREAT,     O_CREAT,     O_CREAT,     },
+  { TARGET_O_EXCL,      TARGET_O_EXCL,      O_EXCL,      O_EXCL,      },
+  { TARGET_O_NOCTTY,    TARGET_O_NOCTTY,    O_NOCTTY,    O_NOCTTY,    },
+  { TARGET_O_TRUNC,     TARGET_O_TRUNC,     O_TRUNC,     O_TRUNC,     },
+  { TARGET_O_APPEND,    TARGET_O_APPEND,    O_APPEND,    O_APPEND,    },
+  { TARGET_O_NONBLOCK,  TARGET_O_NONBLOCK,  O_NONBLOCK,  O_NONBLOCK,  },
+  { TARGET_O_SYNC,      TARGET_O_DSYNC,     O_SYNC,      O_DSYNC,     },
+  { TARGET_O_SYNC,      TARGET_O_SYNC,      O_SYNC,      O_SYNC,      },
+  { TARGET_FASYNC,      TARGET_FASYNC,      FASYNC,      FASYNC,      },
+  { TARGET_O_DIRECTORY, TARGET_O_DIRECTORY, O_DIRECTORY, O_DIRECTORY, },
+  { TARGET_O_NOFOLLOW,  TARGET_O_NOFOLLOW,  O_NOFOLLOW,  O_NOFOLLOW,  },
+#if defined(O_DIRECT)
+  { TARGET_O_DIRECT,    TARGET_O_DIRECT,    O_DIRECT,    O_DIRECT,    },
+#endif
+#if defined(O_NOATIME)
+  { TARGET_O_NOATIME,   TARGET_O_NOATIME,   O_NOATIME,   O_NOATIME    },
+#endif
+#if defined(O_CLOEXEC)
+  { TARGET_O_CLOEXEC,   TARGET_O_CLOEXEC,   O_CLOEXEC,   O_CLOEXEC    },
+#endif
+#if defined(O_PATH)
+  { TARGET_O_PATH,      TARGET_O_PATH,      O_PATH,      O_PATH       },
+#endif
+#if defined(O_TMPFILE)
+  { TARGET_O_TMPFILE,   TARGET_O_TMPFILE,   O_TMPFILE,   O_TMPFILE    },
+#endif
+  /* Don't terminate the list prematurely on 64-bit host+guest.  */
+#if TARGET_O_LARGEFILE != 0 || O_LARGEFILE != 0
+  { TARGET_O_LARGEFILE, TARGET_O_LARGEFILE, O_LARGEFILE, O_LARGEFILE, },
+#endif
+  { 0, 0, 0, 0 }
+};
+
+_syscall2(int, sys_getcwd1, char *, buf, size_t, size)
+
+#if defined(TARGET_NR_utimensat) || defined(TARGET_NR_utimensat_time64)
+#if defined(__NR_utimensat)
+#define __NR_sys_utimensat __NR_utimensat
+_syscall4(int,sys_utimensat,int,dirfd,const char *,pathname,
+          const struct timespec *,tsp,int,flags)
+#else
+static int sys_utimensat(int dirfd, const char *pathname,
+                         const struct timespec times[2], int flags)
+{
+    errno = ENOSYS;
+    return -1;
+}
+#endif
+#endif /* TARGET_NR_utimensat */
+
+#ifdef TARGET_NR_renameat2
+#if defined(__NR_renameat2)
+#define __NR_sys_renameat2 __NR_renameat2
+_syscall5(int, sys_renameat2, int, oldfd, const char *, old, int, newfd,
+          const char *, new, unsigned int, flags)
+#else
+static int sys_renameat2(int oldfd, const char *old,
+                         int newfd, const char *new, int flags)
+{
+    if (flags == 0) {
+        return renameat(oldfd, old, newfd, new);
+    }
+    errno = ENOSYS;
+    return -1;
+}
+#endif
+#endif /* TARGET_NR_renameat2 */
+
+#ifdef CONFIG_INOTIFY
+#include <sys/inotify.h>
+
+#if defined(TARGET_NR_inotify_init) && defined(__NR_inotify_init) || \
+defined(__loongarch__)
+static int sys_inotify_init(void)
+{
+  return (inotify_init());
+}
+#endif
+#if defined(TARGET_NR_inotify_add_watch) && defined(__NR_inotify_add_watch)
+static int sys_inotify_add_watch(int fd,const char *pathname, int32_t mask)
+{
+  return (inotify_add_watch(fd, pathname, mask));
+}
+#endif
+#if defined(TARGET_NR_inotify_rm_watch) && defined(__NR_inotify_rm_watch)
+static int sys_inotify_rm_watch(int fd, int32_t wd)
+{
+  return (inotify_rm_watch(fd, wd));
+}
+#endif
+#ifdef CONFIG_INOTIFY1
+#if defined(TARGET_NR_inotify_init1) && defined(__NR_inotify_init1)
+static int sys_inotify_init1(int flags)
+{
+  return (inotify_init1(flags));
+}
+#endif
+#endif
+#else
+/* Userspace can usually survive runtime without inotify */
+#undef TARGET_NR_inotify_init
+#undef TARGET_NR_inotify_init1
+#undef TARGET_NR_inotify_add_watch
+#undef TARGET_NR_inotify_rm_watch
+#endif /* CONFIG_INOTIFY  */
+
+#if defined(CONFIG_INOTIFY)
+#include <sys/fanotify.h>
+#if defined(TARGET_NR_fanotify_init) && defined(__NR_fanotify_init)
+static int sys_fanotify_init(unsigned int flags, unsigned int event_f_flags)
+{
+  return (fanotify_init(flags, event_f_flags));
+}
+#endif
+#if defined(TARGET_NR_fanotify_mark) && defined(__NR_fanotify_mark)
+static int sys_fanotify_mark(int fanotify_fd, unsigned int flags,
+                         uint64_t mask, int dirfd, const char *pathname)
+{
+ return (fanotify_mark(fanotify_fd, flags, mask, dirfd, pathname));
+}
+#endif
+#else
+#undef TARGET_NR_fanotify_init
+#undef __NR_fanotify_init
+#undef TARGET_NR_fanotify_mark
+#undef __NR_fanotify_mark
+#endif
+
+#if defined(TARGET_NR_prlimit64)
+#ifndef __NR_prlimit64
+# define __NR_prlimit64 -1
+#endif
+#define __NR_sys_prlimit64 __NR_prlimit64
+/* The glibc rlimit structure may not be that used by the underlying syscall */
+struct host_rlimit64 {
+    uint64_t rlim_cur;
+    uint64_t rlim_max;
+};
+_syscall4(int, sys_prlimit64, pid_t, pid, int, resource,
+          const struct host_rlimit64 *, new_limit,
+          struct host_rlimit64 *, old_limit)
+#endif
+
+
+#if defined(TARGET_NR_timer_create)
+/* Maximum of 32 active POSIX timers allowed at any one time. */
+#define TIMER_MAGIC 0x0caf0000
+static timer_t g_posix_timers[32];
+static target_timer_t g_posix_timer_ids[32];
+typedef enum PosixTimerSlotState {
+    POSIX_TIMER_FREE,
+    POSIX_TIMER_RESERVED,
+    POSIX_TIMER_ACTIVE,
+} PosixTimerSlotState;
+static PosixTimerSlotState g_posix_timer_state[32];
+static pthread_mutex_t posix_timer_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static int reserve_host_timer(target_timer_t requested, bool exact,
+                              target_timer_t *allocated)
+{
+    int free_slot = -1;
+    int k;
+
+    pthread_mutex_lock(&posix_timer_lock);
+    for (k = 0; k < ARRAY_SIZE(g_posix_timers); k++) {
+        if (g_posix_timer_state[k] != POSIX_TIMER_FREE) {
+            if (exact && g_posix_timer_ids[k] == requested) {
+                pthread_mutex_unlock(&posix_timer_lock);
+                return -TARGET_EBUSY;
+            }
+        } else if (free_slot < 0) {
+            int j;
+
+            if (exact) {
+                free_slot = k;
+                continue;
+            }
+            requested = TIMER_MAGIC | k;
+            for (j = 0; j < ARRAY_SIZE(g_posix_timers); j++) {
+                if (g_posix_timer_state[j] != POSIX_TIMER_FREE &&
+                    g_posix_timer_ids[j] == requested) {
+                    break;
+                }
+            }
+            if (j == ARRAY_SIZE(g_posix_timers)) {
+                free_slot = k;
+            }
+        }
+    }
+    if (free_slot < 0) {
+        pthread_mutex_unlock(&posix_timer_lock);
+        return -TARGET_EAGAIN;
+    }
+
+    g_posix_timer_state[free_slot] = POSIX_TIMER_RESERVED;
+    g_posix_timer_ids[free_slot] = requested;
+    *allocated = requested;
+    pthread_mutex_unlock(&posix_timer_lock);
+    return free_slot;
+}
+
+static bool publish_host_timer(int slot, target_timer_t timerid, timer_t timer)
+{
+    bool reserved;
+
+    pthread_mutex_lock(&posix_timer_lock);
+    reserved = g_posix_timer_state[slot] == POSIX_TIMER_RESERVED &&
+               g_posix_timer_ids[slot] == timerid;
+    if (reserved) {
+        g_posix_timers[slot] = timer;
+        g_posix_timer_state[slot] = POSIX_TIMER_ACTIVE;
+    }
+    pthread_mutex_unlock(&posix_timer_lock);
+    return reserved;
+}
+
+static void release_host_timer(int slot, target_timer_t timerid)
+{
+    pthread_mutex_lock(&posix_timer_lock);
+    if (g_posix_timer_state[slot] == POSIX_TIMER_RESERVED &&
+        g_posix_timer_ids[slot] == timerid) {
+        g_posix_timer_state[slot] = POSIX_TIMER_FREE;
+        g_posix_timer_ids[slot] = 0;
+        g_posix_timers[slot] = (timer_t)0;
+    }
+    pthread_mutex_unlock(&posix_timer_lock);
+}
+
+static void posix_timer_fork_start(void)
+{
+    pthread_mutex_lock(&posix_timer_lock);
+}
+
+static void posix_timer_fork_end(bool child)
+{
+    if (!child) {
+        pthread_mutex_unlock(&posix_timer_lock);
+        return;
+    }
+
+    pthread_mutex_init(&posix_timer_lock, NULL);
+    memset(g_posix_timer_state, 0, sizeof(g_posix_timer_state));
+    memset(g_posix_timer_ids, 0, sizeof(g_posix_timer_ids));
+    memset(g_posix_timers, 0, sizeof(g_posix_timers));
+}
+#endif
+
+#define ERRNO_TABLE_SIZE 1200
+
+/* target_to_host_errno_table[] is initialized from
+ * host_to_target_errno_table[] in syscall_init(). */
+static uint16_t target_to_host_errno_table[ERRNO_TABLE_SIZE] = {
+};
+
+/*
+ * This list is the union of errno values overridden in asm-<arch>/errno.h
+ * minus the errnos that are not actually generic to all archs.
+ */
+static uint16_t host_to_target_errno_table[ERRNO_TABLE_SIZE] = {
+    [EAGAIN]		= TARGET_EAGAIN,
+    [EIDRM]		= TARGET_EIDRM,
+    [ECHRNG]		= TARGET_ECHRNG,
+    [EL2NSYNC]		= TARGET_EL2NSYNC,
+    [EL3HLT]		= TARGET_EL3HLT,
+    [EL3RST]		= TARGET_EL3RST,
+    [ELNRNG]		= TARGET_ELNRNG,
+    [EUNATCH]		= TARGET_EUNATCH,
+    [ENOCSI]		= TARGET_ENOCSI,
+    [EL2HLT]		= TARGET_EL2HLT,
+    [EDEADLK]		= TARGET_EDEADLK,
+    [ENOLCK]		= TARGET_ENOLCK,
+    [EBADE]		= TARGET_EBADE,
+    [EBADR]		= TARGET_EBADR,
+    [EXFULL]		= TARGET_EXFULL,
+    [ENOANO]		= TARGET_ENOANO,
+    [EBADRQC]		= TARGET_EBADRQC,
+    [EBADSLT]		= TARGET_EBADSLT,
+    [EBFONT]		= TARGET_EBFONT,
+    [ENOSTR]		= TARGET_ENOSTR,
+    [ENODATA]		= TARGET_ENODATA,
+    [ETIME]		= TARGET_ETIME,
+    [ENOSR]		= TARGET_ENOSR,
+    [ENONET]		= TARGET_ENONET,
+    [ENOPKG]		= TARGET_ENOPKG,
+    [EREMOTE]		= TARGET_EREMOTE,
+    [ENOLINK]		= TARGET_ENOLINK,
+    [EADV]		= TARGET_EADV,
+    [ESRMNT]		= TARGET_ESRMNT,
+    [ECOMM]		= TARGET_ECOMM,
+    [EPROTO]		= TARGET_EPROTO,
+    [EDOTDOT]		= TARGET_EDOTDOT,
+    [EMULTIHOP]		= TARGET_EMULTIHOP,
+    [EBADMSG]		= TARGET_EBADMSG,
+    [ENAMETOOLONG]	= TARGET_ENAMETOOLONG,
+    [EOVERFLOW]		= TARGET_EOVERFLOW,
+    [ENOTUNIQ]		= TARGET_ENOTUNIQ,
+    [EBADFD]		= TARGET_EBADFD,
+    [EREMCHG]		= TARGET_EREMCHG,
+    [ELIBACC]		= TARGET_ELIBACC,
+    [ELIBBAD]		= TARGET_ELIBBAD,
+    [ELIBSCN]		= TARGET_ELIBSCN,
+    [ELIBMAX]		= TARGET_ELIBMAX,
+    [ELIBEXEC]		= TARGET_ELIBEXEC,
+    [EILSEQ]		= TARGET_EILSEQ,
+    [ENOSYS]		= TARGET_ENOSYS,
+    [ELOOP]		= TARGET_ELOOP,
+    [ERESTART]		= TARGET_ERESTART,
+    [ESTRPIPE]		= TARGET_ESTRPIPE,
+    [ENOTEMPTY]		= TARGET_ENOTEMPTY,
+    [EUSERS]		= TARGET_EUSERS,
+    [ENOTSOCK]		= TARGET_ENOTSOCK,
+    [EDESTADDRREQ]	= TARGET_EDESTADDRREQ,
+    [EMSGSIZE]		= TARGET_EMSGSIZE,
+    [EPROTOTYPE]	= TARGET_EPROTOTYPE,
+    [ENOPROTOOPT]	= TARGET_ENOPROTOOPT,
+    [EPROTONOSUPPORT]	= TARGET_EPROTONOSUPPORT,
+    [ESOCKTNOSUPPORT]	= TARGET_ESOCKTNOSUPPORT,
+    [EOPNOTSUPP]	= TARGET_EOPNOTSUPP,
+    [EPFNOSUPPORT]	= TARGET_EPFNOSUPPORT,
+    [EAFNOSUPPORT]	= TARGET_EAFNOSUPPORT,
+    [EADDRINUSE]	= TARGET_EADDRINUSE,
+    [EADDRNOTAVAIL]	= TARGET_EADDRNOTAVAIL,
+    [ENETDOWN]		= TARGET_ENETDOWN,
+    [ENETUNREACH]	= TARGET_ENETUNREACH,
+    [ENETRESET]		= TARGET_ENETRESET,
+    [ECONNABORTED]	= TARGET_ECONNABORTED,
+    [ECONNRESET]	= TARGET_ECONNRESET,
+    [ENOBUFS]		= TARGET_ENOBUFS,
+    [EISCONN]		= TARGET_EISCONN,
+    [ENOTCONN]		= TARGET_ENOTCONN,
+    [EUCLEAN]		= TARGET_EUCLEAN,
+    [ENOTNAM]		= TARGET_ENOTNAM,
+    [ENAVAIL]		= TARGET_ENAVAIL,
+    [EISNAM]		= TARGET_EISNAM,
+    [EREMOTEIO]		= TARGET_EREMOTEIO,
+    [EDQUOT]            = TARGET_EDQUOT,
+    [ESHUTDOWN]		= TARGET_ESHUTDOWN,
+    [ETOOMANYREFS]	= TARGET_ETOOMANYREFS,
+    [ETIMEDOUT]		= TARGET_ETIMEDOUT,
+    [ECONNREFUSED]	= TARGET_ECONNREFUSED,
+    [EHOSTDOWN]		= TARGET_EHOSTDOWN,
+    [EHOSTUNREACH]	= TARGET_EHOSTUNREACH,
+    [EALREADY]		= TARGET_EALREADY,
+    [EINPROGRESS]	= TARGET_EINPROGRESS,
+    [ESTALE]		= TARGET_ESTALE,
+    [ECANCELED]		= TARGET_ECANCELED,
+    [ENOMEDIUM]		= TARGET_ENOMEDIUM,
+    [EMEDIUMTYPE]	= TARGET_EMEDIUMTYPE,
+#ifdef ENOKEY
+    [ENOKEY]		= TARGET_ENOKEY,
+#endif
+#ifdef EKEYEXPIRED
+    [EKEYEXPIRED]	= TARGET_EKEYEXPIRED,
+#endif
+#ifdef EKEYREVOKED
+    [EKEYREVOKED]	= TARGET_EKEYREVOKED,
+#endif
+#ifdef EKEYREJECTED
+    [EKEYREJECTED]	= TARGET_EKEYREJECTED,
+#endif
+#ifdef EOWNERDEAD
+    [EOWNERDEAD]	= TARGET_EOWNERDEAD,
+#endif
+#ifdef ENOTRECOVERABLE
+    [ENOTRECOVERABLE]	= TARGET_ENOTRECOVERABLE,
+#endif
+#ifdef ENOMSG
+    [ENOMSG]            = TARGET_ENOMSG,
+#endif
+#ifdef ERKFILL
+    [ERFKILL]           = TARGET_ERFKILL,
+#endif
+#ifdef EHWPOISON
+    [EHWPOISON]         = TARGET_EHWPOISON,
+#endif
+};
+
+static inline int host_to_target_errno(int err)
+{
+    if (err >= 0 && err < ERRNO_TABLE_SIZE &&
+        host_to_target_errno_table[err]) {
+        return host_to_target_errno_table[err];
+    }
+    return err;
+}
+
+static inline int target_to_host_errno(int err)
+{
+    if (err >= 0 && err < ERRNO_TABLE_SIZE &&
+        target_to_host_errno_table[err]) {
+        return target_to_host_errno_table[err];
+    }
+    return err;
+}
+
+static inline abi_long get_errno(abi_long ret)
+{
+    if (ret == -1) {
+#ifdef TARGET_X86_64
+        return (abi_long)latc_x86_syscall_result(
+            ret, host_to_target_errno(errno));
+#else
+        return -host_to_target_errno(errno);
+#endif
+    } else {
+        return ret;
+    }
+}
+
+const char *target_strerror(int err)
+{
+    if (err == TARGET_ERESTARTSYS) {
+        return "To be restarted";
+    }
+    if (err == TARGET_QEMU_ESIGRETURN) {
+        return "Successful exit from sigreturn";
+    }
+
+    if ((err >= ERRNO_TABLE_SIZE) || (err < 0)) {
+        return NULL;
+    }
+    return strerror(target_to_host_errno(err));
+}
+
+#define safe_syscall0(type, name) \
+static type safe_##name(void) \
+{ \
+    return safe_syscall(__NR_##name); \
+}
+
+#define safe_syscall1(type, name, type1, arg1) \
+static type safe_##name(type1 arg1) \
+{ \
+    return safe_syscall(__NR_##name, arg1); \
+}
+
+#define safe_syscall2(type, name, type1, arg1, type2, arg2) \
+static type safe_##name(type1 arg1, type2 arg2) \
+{ \
+    return safe_syscall(__NR_##name, arg1, arg2); \
+}
+
+#define safe_syscall3(type, name, type1, arg1, type2, arg2, type3, arg3) \
+static type safe_##name(type1 arg1, type2 arg2, type3 arg3) \
+{ \
+    return safe_syscall(__NR_##name, arg1, arg2, arg3); \
+}
+
+#define safe_syscall4(type, name, type1, arg1, type2, arg2, type3, arg3, \
+    type4, arg4) \
+static type safe_##name(type1 arg1, type2 arg2, type3 arg3, type4 arg4) \
+{ \
+    return safe_syscall(__NR_##name, arg1, arg2, arg3, arg4); \
+}
+
+#define safe_syscall5(type, name, type1, arg1, type2, arg2, type3, arg3, \
+    type4, arg4, type5, arg5) \
+static type safe_##name(type1 arg1, type2 arg2, type3 arg3, type4 arg4, \
+    type5 arg5) \
+{ \
+    return safe_syscall(__NR_##name, arg1, arg2, arg3, arg4, arg5); \
+}
+
+#define safe_syscall6(type, name, type1, arg1, type2, arg2, type3, arg3, \
+    type4, arg4, type5, arg5, type6, arg6) \
+static type safe_##name(type1 arg1, type2 arg2, type3 arg3, type4 arg4, \
+    type5 arg5, type6 arg6) \
+{ \
+    return safe_syscall(__NR_##name, arg1, arg2, arg3, arg4, arg5, arg6); \
+}
+
+safe_syscall3(ssize_t, read, int, fd, void *, buff, size_t, count)
+safe_syscall3(ssize_t, write, int, fd, const void *, buff, size_t, count)
+safe_syscall4(int, openat, int, dirfd, const char *, pathname, \
+              int, flags, mode_t, mode)
+#if defined(TARGET_NR_wait4) || defined(TARGET_NR_waitpid)
+safe_syscall4(pid_t, wait4, pid_t, pid, int *, status, int, options, \
+              struct rusage *, rusage)
+#endif
+safe_syscall5(int, waitid, idtype_t, idtype, id_t, id, siginfo_t *, infop, \
+              int, options, struct rusage *, rusage)
+safe_syscall3(int, execve, const char *, filename, char **, argv, char **, envp)
+#ifdef TARGET_NR_execveat
+safe_syscall5(int, execveat, int, fd, const char *, filename, char **, argv, \
+              char **, envp, int, flag)
+#endif
+#if defined(TARGET_NR_select) || defined(TARGET_NR__newselect) || \
+    defined(TARGET_NR_pselect6) || defined(TARGET_NR_pselect6_time64)
+safe_syscall6(int, pselect6, int, nfds, fd_set *, readfds, fd_set *, writefds, \
+              fd_set *, exceptfds, struct timespec *, timeout, void *, sig)
+#endif
+#if defined(TARGET_NR_ppoll) || defined(TARGET_NR_ppoll_time64)
+safe_syscall5(int, ppoll, struct pollfd *, ufds, unsigned int, nfds,
+              struct timespec *, tsp, const sigset_t *, sigmask,
+              size_t, sigsetsize)
+#endif
+safe_syscall6(int, epoll_pwait, int, epfd, struct epoll_event *, events,
+              int, maxevents, int, timeout, const sigset_t *, sigmask,
+              size_t, sigsetsize)
+#if defined(__NR_epoll_pwait2)
+safe_syscall6(int, epoll_pwait2, int, epfd, struct epoll_event *, events,
+              int, maxevents, struct timespec *, timeout, const sigset_t *, sigmask,
+              size_t, sigsetsize)
+#endif
+#if defined(__NR_futex)
+safe_syscall6(int,futex,int *,uaddr,int,op,int,val, \
+              const struct timespec *,timeout,int *,uaddr2,int,val3)
+#endif
+#if defined(__NR_futex_time64)
+safe_syscall6(int,futex_time64,int *,uaddr,int,op,int,val, \
+              const struct timespec *,timeout,int *,uaddr2,int,val3)
+#endif
+#if defined(__NR_pivot_root)
+safe_syscall2(int, pivot_root, const char *, new_root, const char *, put_old)
+#endif
+safe_syscall2(int, rt_sigsuspend, sigset_t *, newset, size_t, sigsetsize)
+safe_syscall2(int, kill, pid_t, pid, int, sig)
+safe_syscall2(int, tkill, int, tid, int, sig)
+safe_syscall3(int, tgkill, int, tgid, int, pid, int, sig)
+safe_syscall3(ssize_t, readv, int, fd, const struct iovec *, iov, int, iovcnt)
+safe_syscall3(ssize_t, writev, int, fd, const struct iovec *, iov, int, iovcnt)
+safe_syscall5(ssize_t, preadv, int, fd, const struct iovec *, iov, int, iovcnt,
+              unsigned long, pos_l, unsigned long, pos_h)
+safe_syscall5(ssize_t, pwritev, int, fd, const struct iovec *, iov, int, iovcnt,
+              unsigned long, pos_l, unsigned long, pos_h)
+safe_syscall6(ssize_t, preadv2, int, fd, const struct iovec *, iov, int, iovcnt,
+              unsigned long, pos_l, unsigned long, pos_h, int, flags)
+safe_syscall6(ssize_t, pwritev2, int, fd, const struct iovec *, iov, int, iovcnt,
+              unsigned long, pos_l, unsigned long, pos_h, int, flags)
+safe_syscall6(ssize_t, process_vm_readv, pid_t, pid, const struct iovec *, lvec,
+              unsigned long, liovcnt, const struct iovec *, rvec,
+              unsigned long, riovcnt, unsigned long, flags)
+safe_syscall6(ssize_t, process_vm_writev, pid_t, pid, const struct iovec *, lvec,
+              unsigned long, liovcnt, const struct iovec *, rvec,
+              unsigned long, riovcnt, unsigned long, flags)
+safe_syscall3(int, connect, int, fd, const struct sockaddr *, addr,
+              socklen_t, addrlen)
+safe_syscall6(ssize_t, sendto, int, fd, const void *, buf, size_t, len,
+              int, flags, const struct sockaddr *, addr, socklen_t, addrlen)
+safe_syscall6(ssize_t, recvfrom, int, fd, void *, buf, size_t, len,
+              int, flags, struct sockaddr *, addr, socklen_t *, addrlen)
+safe_syscall3(ssize_t, sendmsg, int, fd, const struct msghdr *, msg, int, flags)
+safe_syscall3(ssize_t, recvmsg, int, fd, struct msghdr *, msg, int, flags)
+#ifdef TARGET_X86_64
+safe_syscall4(ssize_t, sendmmsg, int, fd, struct msghdr *, msgvec, unsigned int, vlen,
+              int, flags)
+safe_syscall5(ssize_t, recvmmsg, int, fd, struct msghdr *, msgvec, unsigned int, vlen,
+              int, flags, struct timespec *, timeout)
+#endif
+safe_syscall2(int, flock, int, fd, int, operation)
+#if defined(TARGET_NR_rt_sigtimedwait) || defined(TARGET_NR_rt_sigtimedwait_time64)
+safe_syscall4(int, rt_sigtimedwait, const sigset_t *, these, siginfo_t *, uinfo,
+              const struct timespec *, uts, size_t, sigsetsize)
+#endif
+safe_syscall4(int, accept4, int, fd, struct sockaddr *, addr, socklen_t *, len,
+              int, flags)
+#if defined(TARGET_NR_nanosleep)
+safe_syscall2(int, nanosleep, const struct timespec *, req,
+              struct timespec *, rem)
+#endif
+#if defined(TARGET_NR_clock_nanosleep) || \
+    defined(TARGET_NR_clock_nanosleep_time64)
+safe_syscall4(int, clock_nanosleep, const clockid_t, clock, int, flags,
+              const struct timespec *, req, struct timespec *, rem)
+#endif
+#ifdef __NR_ipc
+#ifdef __s390x__
+safe_syscall5(int, ipc, int, call, long, first, long, second, long, third,
+              void *, ptr)
+#else
+safe_syscall6(int, ipc, int, call, long, first, long, second, long, third,
+              void *, ptr, long, fifth)
+#endif
+#endif
+#ifdef __NR_msgsnd
+safe_syscall4(int, msgsnd, int, msgid, const void *, msgp, size_t, sz,
+              int, flags)
+#endif
+#ifdef __NR_msgrcv
+safe_syscall5(int, msgrcv, int, msgid, void *, msgp, size_t, sz,
+              long, msgtype, int, flags)
+#endif
+#ifdef __NR_semtimedop
+safe_syscall4(int, semtimedop, int, semid, struct sembuf *, tsops,
+              unsigned, nsops, const struct timespec *, timeout)
+#endif
+#if defined(TARGET_NR_mq_timedsend) || \
+    defined(TARGET_NR_mq_timedsend_time64)
+safe_syscall5(int, mq_timedsend, int, mqdes, const char *, msg_ptr,
+              size_t, len, unsigned, prio, const struct timespec *, timeout)
+#endif
+#if defined(TARGET_NR_mq_timedreceive) || \
+    defined(TARGET_NR_mq_timedreceive_time64)
+safe_syscall5(int, mq_timedreceive, int, mqdes, char *, msg_ptr,
+              size_t, len, unsigned *, prio, const struct timespec *, timeout)
+#endif
+#if defined(TARGET_NR_copy_file_range) && defined(__NR_copy_file_range)
+safe_syscall6(ssize_t, copy_file_range, int, infd, loff_t *, pinoff,
+              int, outfd, loff_t *, poutoff, size_t, length,
+              unsigned int, flags)
+#endif
+#ifdef __NR_quotactl
+#ifdef TARGET_X86_64
+safe_syscall4(int, quotactl, int, cmd, const char *, special,
+              int, id, caddr_t, addr)
+#endif
+#endif
+
+/* We do ioctl like this rather than via safe_syscall3 to preserve the
+ * "third argument might be integer or pointer or not present" behaviour of
+ * the libc function.
+ */
+#define safe_ioctl(...) safe_syscall(__NR_ioctl, __VA_ARGS__)
+/* Similarly for fcntl. Note that callers must always:
+ *  pass the F_GETLK64 etc constants rather than the unsuffixed F_GETLK
+ *  use the flock64 struct rather than unsuffixed flock
+ * This will then work and use a 64-bit offset for both 32-bit and 64-bit hosts.
+ */
+#ifdef __NR_fcntl64
+#define safe_fcntl(...) safe_syscall(__NR_fcntl64, __VA_ARGS__)
+#else
+#define safe_fcntl(...) safe_syscall(__NR_fcntl, __VA_ARGS__)
+#endif
+
+static inline int host_to_target_sock_type(int host_type)
+{
+    int target_type;
+
+    switch (host_type & 0xf /* SOCK_TYPE_MASK */) {
+    case SOCK_DGRAM:
+        target_type = TARGET_SOCK_DGRAM;
+        break;
+    case SOCK_STREAM:
+        target_type = TARGET_SOCK_STREAM;
+        break;
+    default:
+        target_type = host_type & 0xf /* SOCK_TYPE_MASK */;
+        break;
+    }
+
+#if defined(SOCK_CLOEXEC)
+    if (host_type & SOCK_CLOEXEC) {
+        target_type |= TARGET_SOCK_CLOEXEC;
+    }
+#endif
+
+#if defined(SOCK_NONBLOCK)
+    if (host_type & SOCK_NONBLOCK) {
+        target_type |= TARGET_SOCK_NONBLOCK;
+    }
+#endif
+
+    return target_type;
+}
+
+#define N_SHM_REGIONS	32
+
+static struct shm_region {
+    abi_ulong start;
+    abi_ulong size;
+    bool in_use;
+} shm_regions[N_SHM_REGIONS];
+
+static abi_ulong target_brk;
+static abi_ulong target_original_brk;
+static abi_ulong brk_page;
+
+void target_set_brk(abi_ulong new_brk)
+{
+    target_original_brk = target_brk = HOST_PAGE_ALIGN(new_brk);
+    brk_page = HOST_PAGE_ALIGN(target_brk);
+}
+
+//#define DEBUGF_BRK(message, args...) do { fprintf(stderr, (message), ## args); } while (0)
+#define DEBUGF_BRK(message, args...)
+
+/* do_brk() must return target values and target errnos. */
+abi_long do_brk(abi_ulong new_brk)
+{
+    abi_long mapped_addr;
+    abi_ulong new_alloc_size;
+    int i;
+
+    /* brk pointers are always untagged */
+
+    DEBUGF_BRK("do_brk(" TARGET_ABI_FMT_lx ") -> ", new_brk);
+
+    if (!new_brk) {
+        DEBUGF_BRK(TARGET_ABI_FMT_lx " (!new_brk)\n", target_brk);
+        return target_brk;
+    }
+    if (new_brk < target_original_brk) {
+        DEBUGF_BRK(TARGET_ABI_FMT_lx " (new_brk < target_original_brk)\n",
+                   target_brk);
+        return target_brk;
+    }
+
+    for (i = 0; i < N_SHM_REGIONS; ++i) {
+        if (shm_regions[i].in_use &&
+            shm_regions[i].start <= new_brk &&
+            shm_regions[i].start + shm_regions[i].size >= new_brk) {
+	        return target_brk;
+        }
+    }
+
+
+    /* If the new brk is less than the highest page reserved to the
+     * target heap allocation, set it and we're almost done...  */
+    if (new_brk <= brk_page) {
+        /* Heap contents are initialized to zero, as for anonymous
+         * mapped pages.  */
+        if (new_brk > target_brk &&
+            page_check_range(target_brk, new_brk - target_brk, PAGE_WRITE)) {
+            memset(g2h_untagged(target_brk), 0, new_brk - target_brk);
+        }
+	    target_brk = new_brk;
+        DEBUGF_BRK(TARGET_ABI_FMT_lx " (new_brk <= brk_page)\n", target_brk);
+	    return target_brk;
+    }
+
+    /* We need to allocate more memory after the brk... Note that
+     * we don't use MAP_FIXED because that will map over the top of
+     * any existing mapping (like the one with the host libc or qemu
+     * itself); instead we treat "mapped but at wrong address" as
+     * a failure and unmap again.
+     */
+    new_alloc_size = HOST_PAGE_ALIGN(new_brk - brk_page);
+    mapped_addr = get_errno(target_mmap(brk_page, new_alloc_size,
+                                        PROT_READ|PROT_WRITE,
+                                        MAP_ANON|MAP_PRIVATE, 0, 0, 1));
+
+    if (mapped_addr == brk_page) {
+        /* Heap contents are initialized to zero, as for anonymous
+         * mapped pages.  Technically the new pages are already
+         * initialized to zero since they *are* anonymous mapped
+         * pages, however we have to take care with the contents that
+         * come from the remaining part of the previous page: it may
+         * contains garbage data due to a previous heap usage (grown
+         * then shrunken).  */
+        if (brk_page > target_brk &&
+            page_check_range(target_brk, brk_page - target_brk, PAGE_WRITE)) {
+            memset(g2h_untagged(target_brk), 0, brk_page - target_brk);
+        }
+
+        target_brk = new_brk;
+        brk_page = HOST_PAGE_ALIGN(target_brk);
+        DEBUGF_BRK(TARGET_ABI_FMT_lx " (mapped_addr == brk_page)\n",
+            target_brk);
+        return target_brk;
+    } else if (mapped_addr != -1) {
+        /* Mapped but at wrong address, meaning there wasn't actually
+         * enough space for this brk.
+         */
+        target_munmap(mapped_addr, new_alloc_size, 1);
+        mapped_addr = -1;
+        DEBUGF_BRK(TARGET_ABI_FMT_lx " (mapped_addr != -1)\n", target_brk);
+    }
+    else {
+        DEBUGF_BRK(TARGET_ABI_FMT_lx " (otherwise)\n", target_brk);
+    }
+
+#if defined(TARGET_ALPHA)
+    /* We (partially) emulate OSF/1 on Alpha, which requires we
+       return a proper errno, not an unchanged brk value.  */
+    return -TARGET_ENOMEM;
+#endif
+    /* For everything else, return the previous break. */
+    return target_brk;
+}
+
+#if defined(TARGET_NR_select) || defined(TARGET_NR__newselect) || \
+    defined(TARGET_NR_pselect6) || defined(TARGET_NR_pselect6_time64)
+static inline abi_long copy_from_user_fdset(fd_set *fds,
+                                            abi_ulong target_fds_addr,
+                                            int n)
+{
+    int i, nw, j, k;
+    abi_ulong b, *target_fds;
+
+    nw = DIV_ROUND_UP(n, TARGET_ABI_BITS);
+    if (!(target_fds = lock_user(VERIFY_READ,
+                                 target_fds_addr,
+                                 sizeof(abi_ulong) * nw,
+                                 1)))
+        return -TARGET_EFAULT;
+
+    FD_ZERO(fds);
+    k = 0;
+    for (i = 0; i < nw; i++) {
+        /* grab the abi_ulong */
+        __get_user(b, &target_fds[i]);
+        for (j = 0; j < TARGET_ABI_BITS; j++) {
+            /* check the bit inside the abi_ulong */
+            if ((b >> j) & 1)
+                FD_SET(k, fds);
+            k++;
+        }
+    }
+
+    unlock_user(target_fds, target_fds_addr, 0);
+
+    return 0;
+}
+
+static inline abi_ulong copy_from_user_fdset_ptr(fd_set *fds, fd_set **fds_ptr,
+                                                 abi_ulong target_fds_addr,
+                                                 int n)
+{
+    if (target_fds_addr) {
+        if (copy_from_user_fdset(fds, target_fds_addr, n))
+            return -TARGET_EFAULT;
+        *fds_ptr = fds;
+    } else {
+        *fds_ptr = NULL;
+    }
+    return 0;
+}
+
+static inline abi_long copy_to_user_fdset(abi_ulong target_fds_addr,
+                                          const fd_set *fds,
+                                          int n)
+{
+    int i, nw, j, k;
+    abi_long v;
+    abi_ulong *target_fds;
+
+    nw = DIV_ROUND_UP(n, TARGET_ABI_BITS);
+    if (!(target_fds = lock_user(VERIFY_WRITE,
+                                 target_fds_addr,
+                                 sizeof(abi_ulong) * nw,
+                                 0)))
+        return -TARGET_EFAULT;
+
+    k = 0;
+    for (i = 0; i < nw; i++) {
+        v = 0;
+        for (j = 0; j < TARGET_ABI_BITS; j++) {
+            v |= ((abi_ulong)(FD_ISSET(k, fds) != 0) << j);
+            k++;
+        }
+        __put_user(v, &target_fds[i]);
+    }
+
+    unlock_user(target_fds, target_fds_addr, sizeof(abi_ulong) * nw);
+
+    return 0;
+}
+#endif
+
+#if defined(__alpha__)
+#define HOST_HZ 1024
+#else
+#define HOST_HZ 100
+#endif
+
+static inline abi_long host_to_target_clock_t(long ticks)
+{
+#if HOST_HZ == TARGET_HZ
+    return ticks;
+#else
+    return ((int64_t)ticks * TARGET_HZ) / HOST_HZ;
+#endif
+}
+
+static inline abi_long host_to_target_rusage(abi_ulong target_addr,
+                                             const struct rusage *rusage)
+{
+    struct target_rusage *target_rusage;
+
+    if (!lock_user_struct(VERIFY_WRITE, target_rusage, target_addr, 0))
+        return -TARGET_EFAULT;
+    target_rusage->ru_utime.tv_sec = tswapal(rusage->ru_utime.tv_sec);
+    target_rusage->ru_utime.tv_usec = tswapal(rusage->ru_utime.tv_usec);
+    target_rusage->ru_stime.tv_sec = tswapal(rusage->ru_stime.tv_sec);
+    target_rusage->ru_stime.tv_usec = tswapal(rusage->ru_stime.tv_usec);
+    target_rusage->ru_maxrss = tswapal(rusage->ru_maxrss);
+    target_rusage->ru_ixrss = tswapal(rusage->ru_ixrss);
+    target_rusage->ru_idrss = tswapal(rusage->ru_idrss);
+    target_rusage->ru_isrss = tswapal(rusage->ru_isrss);
+    target_rusage->ru_minflt = tswapal(rusage->ru_minflt);
+    target_rusage->ru_majflt = tswapal(rusage->ru_majflt);
+    target_rusage->ru_nswap = tswapal(rusage->ru_nswap);
+    target_rusage->ru_inblock = tswapal(rusage->ru_inblock);
+    target_rusage->ru_oublock = tswapal(rusage->ru_oublock);
+    target_rusage->ru_msgsnd = tswapal(rusage->ru_msgsnd);
+    target_rusage->ru_msgrcv = tswapal(rusage->ru_msgrcv);
+    target_rusage->ru_nsignals = tswapal(rusage->ru_nsignals);
+    target_rusage->ru_nvcsw = tswapal(rusage->ru_nvcsw);
+    target_rusage->ru_nivcsw = tswapal(rusage->ru_nivcsw);
+    unlock_user_struct(target_rusage, target_addr, 1);
+
+    return 0;
+}
+
+#ifdef TARGET_NR_setrlimit
+static inline rlim_t target_to_host_rlim(abi_ulong target_rlim)
+{
+    abi_ulong target_rlim_swap;
+    rlim_t result;
+
+    target_rlim_swap = tswapal(target_rlim);
+    if (target_rlim_swap == TARGET_RLIM_INFINITY)
+        return RLIM_INFINITY;
+
+    result = target_rlim_swap;
+    if (target_rlim_swap != (rlim_t)result)
+        return RLIM_INFINITY;
+
+    return result;
+}
+#endif
+
+#if defined(TARGET_NR_getrlimit) || defined(TARGET_NR_ugetrlimit)
+static inline abi_ulong host_to_target_rlim(rlim_t rlim)
+{
+    abi_ulong target_rlim_swap;
+    abi_ulong result;
+
+    if (rlim == RLIM_INFINITY || rlim != (abi_long)rlim)
+        target_rlim_swap = TARGET_RLIM_INFINITY;
+    else
+        target_rlim_swap = rlim;
+    result = tswapal(target_rlim_swap);
+
+    return result;
+}
+#endif
+
+static inline int target_to_host_resource(int code)
+{
+#ifdef TARGET_X86_64
+    return latc_x86_target_to_host_resource(code);
+#else
+    switch (code) {
+    case TARGET_RLIMIT_AS:
+        return RLIMIT_AS;
+    case TARGET_RLIMIT_CORE:
+        return RLIMIT_CORE;
+    case TARGET_RLIMIT_CPU:
+        return RLIMIT_CPU;
+    case TARGET_RLIMIT_DATA:
+        return RLIMIT_DATA;
+    case TARGET_RLIMIT_FSIZE:
+        return RLIMIT_FSIZE;
+    case TARGET_RLIMIT_LOCKS:
+        return RLIMIT_LOCKS;
+    case TARGET_RLIMIT_MEMLOCK:
+        return RLIMIT_MEMLOCK;
+    case TARGET_RLIMIT_MSGQUEUE:
+        return RLIMIT_MSGQUEUE;
+    case TARGET_RLIMIT_NICE:
+        return RLIMIT_NICE;
+    case TARGET_RLIMIT_NOFILE:
+        return RLIMIT_NOFILE;
+    case TARGET_RLIMIT_NPROC:
+        return RLIMIT_NPROC;
+    case TARGET_RLIMIT_RSS:
+        return RLIMIT_RSS;
+    case TARGET_RLIMIT_RTPRIO:
+        return RLIMIT_RTPRIO;
+    case TARGET_RLIMIT_SIGPENDING:
+        return RLIMIT_SIGPENDING;
+    case TARGET_RLIMIT_STACK:
+        return RLIMIT_STACK;
+    default:
+        return code;
+    }
+#endif
+}
+
+static inline abi_long copy_from_user_timeval(struct timeval *tv,
+                                              abi_ulong target_tv_addr)
+{
+    struct target_timeval *target_tv;
+
+    if (!lock_user_struct(VERIFY_READ, target_tv, target_tv_addr, 1)) {
+        return -TARGET_EFAULT;
+    }
+
+    __get_user(tv->tv_sec, &target_tv->tv_sec);
+    __get_user(tv->tv_usec, &target_tv->tv_usec);
+
+    unlock_user_struct(target_tv, target_tv_addr, 0);
+
+    return 0;
+}
+
+static inline abi_long copy_to_user_timeval(abi_ulong target_tv_addr,
+                                            const struct timeval *tv)
+{
+    struct target_timeval *target_tv;
+
+    if (!lock_user_struct(VERIFY_WRITE, target_tv, target_tv_addr, 0)) {
+        return -TARGET_EFAULT;
+    }
+
+    __put_user(tv->tv_sec, &target_tv->tv_sec);
+    __put_user(tv->tv_usec, &target_tv->tv_usec);
+
+    unlock_user_struct(target_tv, target_tv_addr, 1);
+
+    return 0;
+}
+
+#if defined(TARGET_NR_clock_adjtime64) && defined(CONFIG_CLOCK_ADJTIME)
+static inline abi_long copy_from_user_timeval64(struct timeval *tv,
+                                                abi_ulong target_tv_addr)
+{
+    struct target__kernel_sock_timeval *target_tv;
+
+    if (!lock_user_struct(VERIFY_READ, target_tv, target_tv_addr, 1)) {
+        return -TARGET_EFAULT;
+    }
+
+    __get_user(tv->tv_sec, &target_tv->tv_sec);
+    __get_user(tv->tv_usec, &target_tv->tv_usec);
+
+    unlock_user_struct(target_tv, target_tv_addr, 0);
+
+    return 0;
+}
+#endif
+
+static inline abi_long copy_to_user_timeval64(abi_ulong target_tv_addr,
+                                              const struct timeval *tv)
+{
+    struct target__kernel_sock_timeval *target_tv;
+
+    if (!lock_user_struct(VERIFY_WRITE, target_tv, target_tv_addr, 0)) {
+        return -TARGET_EFAULT;
+    }
+
+    __put_user(tv->tv_sec, &target_tv->tv_sec);
+    __put_user(tv->tv_usec, &target_tv->tv_usec);
+
+    unlock_user_struct(target_tv, target_tv_addr, 1);
+
+    return 0;
+}
+
+#if defined(TARGET_NR_futex) || \
+    defined(TARGET_NR_rt_sigtimedwait) || \
+    defined(TARGET_NR_pselect6) || defined(TARGET_NR_pselect6) || \
+    defined(TARGET_NR_nanosleep) || defined(TARGET_NR_clock_settime) || \
+    defined(TARGET_NR_utimensat) || defined(TARGET_NR_mq_timedsend) || \
+    defined(TARGET_NR_mq_timedreceive) || defined(TARGET_NR_ipc) || \
+    defined(TARGET_NR_semop) || defined(TARGET_NR_semtimedop) || \
+    defined(TARGET_NR_timer_settime) || \
+    (defined(TARGET_NR_timerfd_settime) && defined(CONFIG_TIMERFD))
+static inline abi_long target_to_host_timespec(struct timespec *host_ts,
+                                               abi_ulong target_addr)
+{
+    struct target_timespec *target_ts;
+
+    if (!lock_user_struct(VERIFY_READ, target_ts, target_addr, 1)) {
+        return -TARGET_EFAULT;
+    }
+    __get_user(host_ts->tv_sec, &target_ts->tv_sec);
+    __get_user(host_ts->tv_nsec, &target_ts->tv_nsec);
+    unlock_user_struct(target_ts, target_addr, 0);
+    return 0;
+}
+#endif
+
+#if defined(TARGET_NR_clock_settime64) || defined(TARGET_NR_futex_time64) || \
+    defined(TARGET_NR_timer_settime64) || \
+    defined(TARGET_NR_mq_timedsend_time64) || \
+    defined(TARGET_NR_mq_timedreceive_time64) || \
+    (defined(TARGET_NR_timerfd_settime64) && defined(CONFIG_TIMERFD)) || \
+    defined(TARGET_NR_clock_nanosleep_time64) || \
+    defined(TARGET_NR_rt_sigtimedwait_time64) || \
+    defined(TARGET_NR_utimensat) || \
+    defined(TARGET_NR_utimensat_time64) || \
+    defined(TARGET_NR_semtimedop_time64) || \
+    defined(TARGET_NR_pselect6_time64) || defined(TARGET_NR_ppoll_time64)
+static inline abi_long target_to_host_timespec64(struct timespec *host_ts,
+                                                 abi_ulong target_addr)
+{
+    struct target__kernel_timespec *target_ts;
+
+    if (!lock_user_struct(VERIFY_READ, target_ts, target_addr, 1)) {
+        return -TARGET_EFAULT;
+    }
+    __get_user(host_ts->tv_sec, &target_ts->tv_sec);
+    __get_user(host_ts->tv_nsec, &target_ts->tv_nsec);
+    /* in 32bit mode, this drops the padding */
+    host_ts->tv_nsec = (long)(abi_long)host_ts->tv_nsec;
+    unlock_user_struct(target_ts, target_addr, 0);
+    return 0;
+}
+#endif
+
+static inline abi_long host_to_target_timespec(abi_ulong target_addr,
+                                               struct timespec *host_ts)
+{
+    struct target_timespec *target_ts;
+
+    if (!lock_user_struct(VERIFY_WRITE, target_ts, target_addr, 0)) {
+        return -TARGET_EFAULT;
+    }
+    __put_user(host_ts->tv_sec, &target_ts->tv_sec);
+    __put_user(host_ts->tv_nsec, &target_ts->tv_nsec);
+    unlock_user_struct(target_ts, target_addr, 1);
+    return 0;
+}
+
+static inline abi_long host_to_target_timespec64(abi_ulong target_addr,
+                                                 struct timespec *host_ts)
+{
+    struct target__kernel_timespec *target_ts;
+
+    if (!lock_user_struct(VERIFY_WRITE, target_ts, target_addr, 0)) {
+        return -TARGET_EFAULT;
+    }
+    __put_user(host_ts->tv_sec, &target_ts->tv_sec);
+    __put_user(host_ts->tv_nsec, &target_ts->tv_nsec);
+    unlock_user_struct(target_ts, target_addr, 1);
+    return 0;
+}
+
+#if defined(TARGET_NR_gettimeofday)
+static inline abi_long copy_to_user_timezone(abi_ulong target_tz_addr,
+                                             struct timezone *tz)
+{
+    struct target_timezone *target_tz;
+
+    if (!lock_user_struct(VERIFY_WRITE, target_tz, target_tz_addr, 1)) {
+        return -TARGET_EFAULT;
+    }
+
+    __put_user(tz->tz_minuteswest, &target_tz->tz_minuteswest);
+    __put_user(tz->tz_dsttime, &target_tz->tz_dsttime);
+
+    unlock_user_struct(target_tz, target_tz_addr, 1);
+
+    return 0;
+}
+#endif
+
+#if defined(TARGET_NR_settimeofday)
+static inline abi_long copy_from_user_timezone(struct timezone *tz,
+                                               abi_ulong target_tz_addr)
+{
+    struct target_timezone *target_tz;
+
+    if (!lock_user_struct(VERIFY_READ, target_tz, target_tz_addr, 1)) {
+        return -TARGET_EFAULT;
+    }
+
+    __get_user(tz->tz_minuteswest, &target_tz->tz_minuteswest);
+    __get_user(tz->tz_dsttime, &target_tz->tz_dsttime);
+
+    unlock_user_struct(target_tz, target_tz_addr, 0);
+
+    return 0;
+}
+#endif
+
+#if defined(TARGET_NR_mq_open) && defined(__NR_mq_open)
+#include <mqueue.h>
+
+static inline abi_long copy_from_user_mq_attr(struct mq_attr *attr,
+                                              abi_ulong target_mq_attr_addr)
+{
+    struct target_mq_attr *target_mq_attr;
+
+    if (!lock_user_struct(VERIFY_READ, target_mq_attr,
+                          target_mq_attr_addr, 1))
+        return -TARGET_EFAULT;
+
+    __get_user(attr->mq_flags, &target_mq_attr->mq_flags);
+    __get_user(attr->mq_maxmsg, &target_mq_attr->mq_maxmsg);
+    __get_user(attr->mq_msgsize, &target_mq_attr->mq_msgsize);
+    __get_user(attr->mq_curmsgs, &target_mq_attr->mq_curmsgs);
+
+    unlock_user_struct(target_mq_attr, target_mq_attr_addr, 0);
+
+    return 0;
+}
+
+static inline abi_long copy_to_user_mq_attr(abi_ulong target_mq_attr_addr,
+                                            const struct mq_attr *attr)
+{
+    struct target_mq_attr *target_mq_attr;
+
+    if (!lock_user_struct(VERIFY_WRITE, target_mq_attr,
+                          target_mq_attr_addr, 0))
+        return -TARGET_EFAULT;
+
+    __put_user(attr->mq_flags, &target_mq_attr->mq_flags);
+    __put_user(attr->mq_maxmsg, &target_mq_attr->mq_maxmsg);
+    __put_user(attr->mq_msgsize, &target_mq_attr->mq_msgsize);
+    __put_user(attr->mq_curmsgs, &target_mq_attr->mq_curmsgs);
+
+    unlock_user_struct(target_mq_attr, target_mq_attr_addr, 1);
+
+    return 0;
+}
+#endif
+
+#if defined(TARGET_NR_select) || defined(TARGET_NR__newselect)
+/* do_select() must return target values and target errnos. */
+static abi_long do_select(int n,
+                          abi_ulong rfd_addr, abi_ulong wfd_addr,
+                          abi_ulong efd_addr, abi_ulong target_tv_addr)
+{
+    fd_set rfds, wfds, efds;
+    fd_set *rfds_ptr, *wfds_ptr, *efds_ptr;
+    struct timeval tv;
+    struct timespec ts, *ts_ptr;
+    abi_long ret;
+
+    ret = copy_from_user_fdset_ptr(&rfds, &rfds_ptr, rfd_addr, n);
+    if (ret) {
+        return ret;
+    }
+    ret = copy_from_user_fdset_ptr(&wfds, &wfds_ptr, wfd_addr, n);
+    if (ret) {
+        return ret;
+    }
+    ret = copy_from_user_fdset_ptr(&efds, &efds_ptr, efd_addr, n);
+    if (ret) {
+        return ret;
+    }
+
+    if (target_tv_addr) {
+        if (copy_from_user_timeval(&tv, target_tv_addr))
+            return -TARGET_EFAULT;
+        ts.tv_sec = tv.tv_sec;
+        ts.tv_nsec = tv.tv_usec * 1000;
+        ts_ptr = &ts;
+    } else {
+        ts_ptr = NULL;
+    }
+
+    ret = get_errno(safe_pselect6(n, rfds_ptr, wfds_ptr, efds_ptr,
+                                  ts_ptr, NULL));
+
+    if (!is_error(ret)) {
+        if (rfd_addr && copy_to_user_fdset(rfd_addr, &rfds, n))
+            return -TARGET_EFAULT;
+        if (wfd_addr && copy_to_user_fdset(wfd_addr, &wfds, n))
+            return -TARGET_EFAULT;
+        if (efd_addr && copy_to_user_fdset(efd_addr, &efds, n))
+            return -TARGET_EFAULT;
+
+        if (target_tv_addr) {
+            tv.tv_sec = ts.tv_sec;
+            tv.tv_usec = ts.tv_nsec / 1000;
+            if (copy_to_user_timeval(target_tv_addr, &tv)) {
+                return -TARGET_EFAULT;
+            }
+        }
+    }
+
+    return ret;
+}
+
+#if defined(TARGET_WANT_OLD_SYS_SELECT)
+static abi_long do_old_select(abi_ulong arg1)
+{
+    struct target_sel_arg_struct *sel;
+    abi_ulong inp, outp, exp, tvp;
+    long nsel;
+
+    if (!lock_user_struct(VERIFY_READ, sel, arg1, 1)) {
+        return -TARGET_EFAULT;
+    }
+
+    nsel = tswapal(sel->n);
+    inp = tswapal(sel->inp);
+    outp = tswapal(sel->outp);
+    exp = tswapal(sel->exp);
+    tvp = tswapal(sel->tvp);
+
+    unlock_user_struct(sel, arg1, 0);
+
+    return do_select(nsel, inp, outp, exp, tvp);
+}
+#endif
+#endif
+
+#if defined(TARGET_NR_pselect6) || defined(TARGET_NR_pselect6_time64)
+static abi_long do_pselect6(abi_long arg1, abi_long arg2, abi_long arg3,
+                            abi_long arg4, abi_long arg5, abi_long arg6,
+                            bool time64)
+{
+    abi_long rfd_addr, wfd_addr, efd_addr, n, ts_addr;
+    fd_set rfds, wfds, efds;
+    fd_set *rfds_ptr, *wfds_ptr, *efds_ptr;
+    struct timespec ts, *ts_ptr;
+    abi_long ret;
+
+    /*
+     * The 6th arg is actually two args smashed together,
+     * so we cannot use the C library.
+     */
+    struct {
+        sigset_t *set;
+        size_t size;
+    } sig, *sig_ptr;
+
+    abi_ulong arg_sigset, arg_sigsize, *arg7;
+
+    n = arg1;
+    rfd_addr = arg2;
+    wfd_addr = arg3;
+    efd_addr = arg4;
+    ts_addr = arg5;
+
+    ret = copy_from_user_fdset_ptr(&rfds, &rfds_ptr, rfd_addr, n);
+    if (ret) {
+        return ret;
+    }
+    ret = copy_from_user_fdset_ptr(&wfds, &wfds_ptr, wfd_addr, n);
+    if (ret) {
+        return ret;
+    }
+    ret = copy_from_user_fdset_ptr(&efds, &efds_ptr, efd_addr, n);
+    if (ret) {
+        return ret;
+    }
+
+    /*
+     * This takes a timespec, and not a timeval, so we cannot
+     * use the do_select() helper ...
+     */
+    if (ts_addr) {
+        if (time64) {
+            if (target_to_host_timespec64(&ts, ts_addr)) {
+                return -TARGET_EFAULT;
+            }
+        } else {
+            if (target_to_host_timespec(&ts, ts_addr)) {
+                return -TARGET_EFAULT;
+            }
+        }
+            ts_ptr = &ts;
+    } else {
+        ts_ptr = NULL;
+    }
+
+    /* Extract the two packed args for the sigset */
+    sig_ptr = NULL;
+    if (arg6) {
+        arg7 = lock_user(VERIFY_READ, arg6, sizeof(*arg7) * 2, 1);
+        if (!arg7) {
+            return -TARGET_EFAULT;
+        }
+        arg_sigset = tswapal(arg7[0]);
+        arg_sigsize = tswapal(arg7[1]);
+        unlock_user(arg7, arg6, 0);
+
+        if (arg_sigset) {
+            ret = process_sigsuspend_mask(&sig.set, arg_sigset, arg_sigsize);
+            if (ret != 0) {
+                return ret;
+            }
+            sig_ptr = &sig;
+            sig.size = SIGSET_T_SIZE;
+        }
+    }
+
+    ret = get_errno(safe_pselect6(n, rfds_ptr, wfds_ptr, efds_ptr,
+                                  ts_ptr, sig_ptr));
+
+    if (sig_ptr) {
+        finish_sigsuspend_mask(ret);
+    }
+
+    if (!is_error(ret)) {
+        if (rfd_addr && copy_to_user_fdset(rfd_addr, &rfds, n)) {
+            return -TARGET_EFAULT;
+        }
+        if (wfd_addr && copy_to_user_fdset(wfd_addr, &wfds, n)) {
+            return -TARGET_EFAULT;
+        }
+        if (efd_addr && copy_to_user_fdset(efd_addr, &efds, n)) {
+            return -TARGET_EFAULT;
+        }
+        if (time64) {
+            if (ts_addr && host_to_target_timespec64(ts_addr, &ts)) {
+                return -TARGET_EFAULT;
+            }
+        } else {
+            if (ts_addr && host_to_target_timespec(ts_addr, &ts)) {
+                return -TARGET_EFAULT;
+            }
+        }
+    }
+    return ret;
+}
+#endif
+
+#if TARGET_ABI_BITS == 32 && HOST_LONG_BITS == 64
+safe_syscall2(int, io_setup, abi_ulong, arg1, uint64_t*, arg2)
+safe_syscall3(int, io_submit, uint64_t, arg1,
+    abi_ulong, arg2, abi_ulong * *, arg3)
+safe_syscall3(int, io_cancel, uint64_t, arg1,
+    abi_ulong, arg2, abi_ulong, arg3)
+safe_syscall5(int, io_getevents, uint64_t, arg1, abi_ulong,
+    arg2, abi_ulong, arg3, abi_ulong, arg4, abi_ulong, arg5)
+safe_syscall1(int, io_destroy, uint64_t, arg1)
+struct pmap {
+    uint64_t ctx;
+};
+typedef struct Link {
+    int elem;
+    struct pmap *body;/*data body*/
+    struct Link *next;/*next*/
+} aio_link;
+aio_link link_aio = {0};
+static abi_ulong insertElem(aio_link *p, struct pmap* newp)
+{
+    aio_link *t = p;
+    aio_link *tmp;
+#define AIO_ELEM_MAXLENGTH 1024
+    for (int i = 0; i < AIO_ELEM_MAXLENGTH; t = t->next, i++) {
+        if (!t->next) {
+            tmp = (aio_link *)calloc(1, sizeof(aio_link));
+            tmp->body = newp;
+            tmp->elem = t->elem + 1;
+            t->next = tmp;
+            return tmp->elem;
+        }
+    }
+    fprintf(stderr, "aio elem is too large!\n");
+    return -1;
+}
+static struct pmap *selectElem(aio_link * p, int elem)
+{
+    aio_link *t = p;
+    int i;
+    for (i = 0; i < AIO_ELEM_MAXLENGTH; i++, t = t->next) {
+        if (t->elem == elem) {
+            return t->body;
+         }
+        if (!t->next) {
+            return NULL;
+        }
+    }
+    if (i >= AIO_ELEM_MAXLENGTH) {
+        fprintf(stderr, "aio elem is too large!\n");
+    }
+    return NULL;
+}
+static int delElem(aio_link *p, int elem)
+{
+    aio_link *temp = p, *last = NULL;
+    int i;
+    for (i = 0; i < AIO_ELEM_MAXLENGTH; i++) {
+        if (temp->elem == elem) {
+            break;
+        }
+        if (temp->next == NULL) {
+            return -1;
+        }
+        last = temp;
+        temp = temp->next;
+    }
+    if (i >= AIO_ELEM_MAXLENGTH) {
+        fprintf(stderr, "aio elem is too large!\n");
+    }
+    aio_link *del = temp;
+    if (del == p) {
+        return -1;
+    } else if (del->next) {
+        last->next = del->next;
+    } else {
+        last->next = NULL;
+    }
+    free(del->body);
+    free(del);
+    return 0;
+}
+static abi_ulong do_io_setup(abi_ulong arg1, abi_ulong arg2)
+{
+    abi_ulong *target_ctx = (abi_ulong *)((void*)((uintptr_t)arg2));
+    uint64_t ctx = 0;
+    abi_ulong ret;
+    struct pmap *tmpmap = calloc(1, sizeof(struct pmap));
+
+    ret = get_errno(safe_io_setup(arg1, &ctx));
+    tmpmap->ctx = ctx;
+    *target_ctx = insertElem(&link_aio, tmpmap);
+    return ret;
+}
+static abi_ulong do_io_submit(abi_long arg1, abi_long arg2,
+    abi_long arg3)
+{
+    abi_ulong *tcb = (abi_ulong *)(
+        (intptr_t)(*((abi_ulong **)(intptr_t)(arg3 & 0xFFFFFFFF))) &
+            0xFFFFFFFF);/*On x86, both address of*/
+                        /* adress and address should be 32bit.*/
+    struct pmap *mm = NULL;
+    mm = selectElem(&link_aio, arg1);
+    return get_errno(safe_io_submit(mm->ctx, arg2, &tcb));
+}
+static abi_ulong do_io_cancel(abi_ulong arg1, abi_ulong arg2, abi_ulong arg3)
+{
+    struct pmap *mm = NULL;
+        mm = selectElem(&link_aio, arg1);
+    return get_errno(safe_io_cancel(mm->ctx, arg2, arg3));
+}
+static abi_long do_io_getevents(abi_long arg1, abi_long arg2,
+    abi_long arg3, abi_long arg4, abi_long arg5)
+{
+    struct pmap *mm = NULL;
+        mm = selectElem(&link_aio, arg1);
+    return get_errno(safe_io_getevents(mm->ctx, arg2, arg3, arg4, arg5));
+}
+static abi_long do_io_destroy(abi_long arg1)
+{
+    struct pmap *mm = NULL;
+    abi_long ret;
+    mm = selectElem(&link_aio, arg1);
+    ret = get_errno(safe_io_destroy(mm->ctx));
+    delElem(&link_aio, arg1);
+    return ret;
+}
+#endif
+#if defined(TARGET_NR_poll) || defined(TARGET_NR_ppoll) || \
+    defined(TARGET_NR_ppoll_time64)
+static abi_long do_ppoll(abi_long arg1, abi_long arg2, abi_long arg3,
+                         abi_long arg4, abi_long arg5, bool ppoll, bool time64)
+{
+    struct target_pollfd *target_pfd;
+    unsigned int nfds = arg2;
+    struct pollfd *pfd;
+    unsigned int i;
+    abi_long ret;
+
+    pfd = NULL;
+    target_pfd = NULL;
+    if (nfds) {
+        if (nfds > (INT_MAX / sizeof(struct target_pollfd))) {
+            return -TARGET_EINVAL;
+        }
+        target_pfd = lock_user(VERIFY_WRITE, arg1,
+                               sizeof(struct target_pollfd) * nfds, 1);
+        if (!target_pfd) {
+            return -TARGET_EFAULT;
+        }
+
+        pfd = alloca(sizeof(struct pollfd) * nfds);
+        for (i = 0; i < nfds; i++) {
+            pfd[i].fd = tswap32(target_pfd[i].fd);
+            pfd[i].events = tswap16(target_pfd[i].events);
+        }
+    }
+    if (ppoll) {
+        struct timespec _timeout_ts, *timeout_ts = &_timeout_ts;
+        sigset_t *set = NULL;
+
+        if (arg3) {
+            if (time64) {
+                if (target_to_host_timespec64(timeout_ts, arg3)) {
+                    unlock_user(target_pfd, arg1, 0);
+                    return -TARGET_EFAULT;
+                }
+            } else {
+                if (target_to_host_timespec(timeout_ts, arg3)) {
+                    unlock_user(target_pfd, arg1, 0);
+                    return -TARGET_EFAULT;
+                }
+            }
+        } else {
+            timeout_ts = NULL;
+        }
+
+        if (arg4) {
+            ret = process_sigsuspend_mask(&set, arg4, arg5);
+            if (ret != 0) {
+                unlock_user(target_pfd, arg1, 0);
+                return ret;
+            }
+        }
+
+        ret = get_errno(safe_ppoll(pfd, nfds, timeout_ts,
+                                   set, SIGSET_T_SIZE));
+
+        if (set) {
+            finish_sigsuspend_mask(ret);
+        }
+        if (!is_error(ret) && arg3) {
+            if (time64) {
+                if (host_to_target_timespec64(arg3, timeout_ts)) {
+                    return -TARGET_EFAULT;
+                }
+            } else {
+                if (host_to_target_timespec(arg3, timeout_ts)) {
+                    return -TARGET_EFAULT;
+                }
+            }
+        }
+    } else {
+          struct timespec ts, *pts;
+
+          if (arg3 >= 0) {
+              /* Convert ms to secs, ns */
+              ts.tv_sec = arg3 / 1000;
+              ts.tv_nsec = (arg3 % 1000) * 1000000LL;
+              pts = &ts;
+          } else {
+              /* -ve poll() timeout means "infinite" */
+              pts = NULL;
+          }
+          ret = get_errno(safe_ppoll(pfd, nfds, pts, NULL, 0));
+    }
+
+    if (!is_error(ret)) {
+        for (i = 0; i < nfds; i++) {
+            target_pfd[i].revents = tswap16(pfd[i].revents);
+        }
+    }
+    unlock_user(target_pfd, arg1, sizeof(struct target_pollfd) * nfds);
+    return ret;
+}
+#endif
+
+static abi_long do_pipe2(int host_pipe[], int flags)
+{
+#ifdef CONFIG_PIPE2
+    return pipe2(host_pipe, flags);
+#else
+    return -ENOSYS;
+#endif
+}
+
+static abi_long do_pipe(void *cpu_env, abi_ulong pipedes,
+                        int flags, int is_pipe2)
+{
+    int host_pipe[2];
+    abi_long ret;
+    ret = flags ? do_pipe2(host_pipe, flags) : pipe(host_pipe);
+
+    if (is_error(ret))
+        return get_errno(ret);
+
+    /* Several targets have special calling conventions for the original
+       pipe syscall, but didn't replicate this into the pipe2 syscall.  */
+    if (!is_pipe2) {
+#if defined(TARGET_ALPHA)
+        ((CPUAlphaState *)cpu_env)->ir[IR_A4] = host_pipe[1];
+        return host_pipe[0];
+#elif defined(TARGET_MIPS)
+        ((CPUMIPSState*)cpu_env)->active_tc.gpr[3] = host_pipe[1];
+        return host_pipe[0];
+#elif defined(TARGET_SH4)
+        ((CPUSH4State*)cpu_env)->gregs[1] = host_pipe[1];
+        return host_pipe[0];
+#elif defined(TARGET_SPARC)
+        ((CPUSPARCState*)cpu_env)->regwptr[1] = host_pipe[1];
+        return host_pipe[0];
+#endif
+    }
+
+    if (put_user_s32(host_pipe[0], pipedes)
+        || put_user_s32(host_pipe[1], pipedes + sizeof(host_pipe[0])))
+        return -TARGET_EFAULT;
+    return get_errno(ret);
+}
+
+static inline abi_long target_to_host_ip_mreq(struct ip_mreqn *mreqn,
+                                              abi_ulong target_addr,
+                                              socklen_t len)
+{
+    struct target_ip_mreqn *target_smreqn;
+
+    target_smreqn = lock_user(VERIFY_READ, target_addr, len, 1);
+    if (!target_smreqn)
+        return -TARGET_EFAULT;
+    mreqn->imr_multiaddr.s_addr = target_smreqn->imr_multiaddr.s_addr;
+    mreqn->imr_address.s_addr = target_smreqn->imr_address.s_addr;
+    if (len == sizeof(struct target_ip_mreqn))
+        mreqn->imr_ifindex = tswapal(target_smreqn->imr_ifindex);
+    unlock_user(target_smreqn, target_addr, 0);
+
+    return 0;
+}
+
+static inline abi_long target_to_host_sockaddr(int fd, struct sockaddr *addr,
+                                               abi_ulong target_addr,
+                                               socklen_t len)
+{
+    const socklen_t unix_maxlen = sizeof (struct sockaddr_un);
+    sa_family_t sa_family;
+    struct target_sockaddr *target_saddr;
+    TargetFdAddrFunc trans;
+
+    trans = fd_trans_target_to_host_addr(fd);
+    if (trans) {
+        return trans(addr, target_addr, len);
+    }
+
+    target_saddr = lock_user(VERIFY_READ, target_addr, len, 1);
+    if (!target_saddr)
+        return -TARGET_EFAULT;
+
+    sa_family = tswap16(target_saddr->sa_family);
+
+    /* Oops. The caller might send a incomplete sun_path; sun_path
+     * must be terminated by \0 (see the manual page), but
+     * unfortunately it is quite common to specify sockaddr_un
+     * length as "strlen(x->sun_path)" while it should be
+     * "strlen(...) + 1". We'll fix that here if needed.
+     * Linux kernel has a similar feature.
+     */
+
+    if (sa_family == AF_UNIX) {
+        if (len < unix_maxlen && len > 0) {
+            char *cp = (char*)target_saddr;
+
+            if ( cp[len-1] && !cp[len] )
+                len++;
+        }
+        if (len > unix_maxlen)
+            len = unix_maxlen;
+    }
+
+    memcpy(addr, target_saddr, len);
+    addr->sa_family = sa_family;
+    if (sa_family == AF_NETLINK) {
+        struct sockaddr_nl *nladdr;
+
+        nladdr = (struct sockaddr_nl *)addr;
+        nladdr->nl_pid = tswap32(nladdr->nl_pid);
+        nladdr->nl_groups = tswap32(nladdr->nl_groups);
+    } else if (sa_family == AF_PACKET) {
+	struct target_sockaddr_ll *lladdr;
+
+	lladdr = (struct target_sockaddr_ll *)addr;
+	lladdr->sll_ifindex = tswap32(lladdr->sll_ifindex);
+	lladdr->sll_hatype = tswap16(lladdr->sll_hatype);
+    }
+    unlock_user(target_saddr, target_addr, 0);
+
+    return 0;
+}
+
+static inline abi_long host_to_target_sockaddr(abi_ulong target_addr,
+                                               struct sockaddr *addr,
+                                               socklen_t len)
+{
+    struct target_sockaddr *target_saddr;
+
+    if (len == 0) {
+        return 0;
+    }
+    assert(addr);
+
+    target_saddr = lock_user(VERIFY_WRITE, target_addr, len, 0);
+    if (!target_saddr)
+        return -TARGET_EFAULT;
+    memcpy(target_saddr, addr, len);
+    if (len >= offsetof(struct target_sockaddr, sa_family) +
+        sizeof(target_saddr->sa_family)) {
+        target_saddr->sa_family = tswap16(addr->sa_family);
+    }
+    if (addr->sa_family == AF_NETLINK &&
+        len >= sizeof(struct target_sockaddr_nl)) {
+        struct target_sockaddr_nl *target_nl =
+               (struct target_sockaddr_nl *)target_saddr;
+        target_nl->nl_pid = tswap32(target_nl->nl_pid);
+        target_nl->nl_groups = tswap32(target_nl->nl_groups);
+    } else if (addr->sa_family == AF_PACKET) {
+        struct sockaddr_ll *target_ll = (struct sockaddr_ll *)target_saddr;
+        target_ll->sll_ifindex = tswap32(target_ll->sll_ifindex);
+        target_ll->sll_hatype = tswap16(target_ll->sll_hatype);
+    } else if (addr->sa_family == AF_INET6 &&
+               len >= sizeof(struct target_sockaddr_in6)) {
+        struct target_sockaddr_in6 *target_in6 =
+               (struct target_sockaddr_in6 *)target_saddr;
+        target_in6->sin6_scope_id = tswap16(target_in6->sin6_scope_id);
+    }
+    unlock_user(target_saddr, target_addr, len);
+
+    return 0;
+}
+
+static inline abi_long target_to_host_cmsg(struct msghdr *msgh,
+                                           struct target_msghdr *target_msgh)
+{
+    struct cmsghdr *cmsg = CMSG_FIRSTHDR(msgh);
+    abi_long msg_controllen;
+    abi_ulong target_cmsg_addr;
+    struct target_cmsghdr *target_cmsg, *target_cmsg_start;
+    socklen_t space = 0;
+
+    msg_controllen = tswapal(target_msgh->msg_controllen);
+    if (msg_controllen < sizeof (struct target_cmsghdr))
+        goto the_end;
+    target_cmsg_addr = tswapal(target_msgh->msg_control);
+    target_cmsg = lock_user(VERIFY_READ, target_cmsg_addr, msg_controllen, 1);
+    target_cmsg_start = target_cmsg;
+    if (!target_cmsg)
+        return -TARGET_EFAULT;
+
+    while (cmsg && target_cmsg) {
+        void *data = CMSG_DATA(cmsg);
+        void *target_data = TARGET_CMSG_DATA(target_cmsg);
+
+        int len = tswapal(target_cmsg->cmsg_len)
+            - sizeof(struct target_cmsghdr);
+
+        space += CMSG_SPACE(len);
+        if (space > msgh->msg_controllen) {
+            space -= CMSG_SPACE(len);
+            /* This is a QEMU bug, since we allocated the payload
+             * area ourselves (unlike overflow in host-to-target
+             * conversion, which is just the guest giving us a buffer
+             * that's too small). It can't happen for the payload types
+             * we currently support; if it becomes an issue in future
+             * we would need to improve our allocation strategy to
+             * something more intelligent than "twice the size of the
+             * target buffer we're reading from".
+             */
+            qemu_log_mask(LOG_UNIMP,
+                          ("Unsupported ancillary data %d/%d: "
+                           "unhandled msg size\n"),
+                          tswap32(target_cmsg->cmsg_level),
+                          tswap32(target_cmsg->cmsg_type));
+            break;
+        }
+
+        if (tswap32(target_cmsg->cmsg_level) == TARGET_SOL_SOCKET) {
+            cmsg->cmsg_level = SOL_SOCKET;
+        } else {
+            cmsg->cmsg_level = tswap32(target_cmsg->cmsg_level);
+        }
+        cmsg->cmsg_type = tswap32(target_cmsg->cmsg_type);
+        cmsg->cmsg_len = CMSG_LEN(len);
+
+        if (cmsg->cmsg_level == SOL_SOCKET && cmsg->cmsg_type == SCM_RIGHTS) {
+            int *fd = (int *)data;
+            int *target_fd = (int *)target_data;
+            int i, numfds = len / sizeof(int);
+
+            for (i = 0; i < numfds; i++) {
+                __get_user(fd[i], target_fd + i);
+            }
+        } else if (cmsg->cmsg_level == SOL_SOCKET
+               &&  cmsg->cmsg_type == SCM_CREDENTIALS) {
+            struct ucred *cred = (struct ucred *)data;
+            struct target_ucred *target_cred =
+                (struct target_ucred *)target_data;
+
+            __get_user(cred->pid, &target_cred->pid);
+            __get_user(cred->uid, &target_cred->uid);
+            __get_user(cred->gid, &target_cred->gid);
+        } else {
+            qemu_log_mask(LOG_UNIMP, "Unsupported ancillary data: %d/%d\n",
+                          cmsg->cmsg_level, cmsg->cmsg_type);
+            memcpy(data, target_data, len);
+        }
+
+        cmsg = CMSG_NXTHDR(msgh, cmsg);
+        target_cmsg = TARGET_CMSG_NXTHDR(target_msgh, target_cmsg,
+                                         target_cmsg_start);
+    }
+    unlock_user(target_cmsg, target_cmsg_addr, 0);
+ the_end:
+    msgh->msg_controllen = space;
+    return 0;
+}
+
+static inline abi_long host_to_target_cmsg(struct target_msghdr *target_msgh,
+                                           struct msghdr *msgh)
+{
+    struct cmsghdr *cmsg = CMSG_FIRSTHDR(msgh);
+    abi_long msg_controllen;
+    abi_ulong target_cmsg_addr;
+    struct target_cmsghdr *target_cmsg, *target_cmsg_start;
+    socklen_t space = 0;
+
+    msg_controllen = tswapal(target_msgh->msg_controllen);
+    if (msg_controllen < sizeof (struct target_cmsghdr)) {
+        if (cmsg && cmsg->cmsg_len) {
+            target_msgh->msg_flags |= tswap32(MSG_CTRUNC);
+        }
+        goto the_end;
+    }
+    target_cmsg_addr = tswapal(target_msgh->msg_control);
+    target_cmsg = lock_user(VERIFY_WRITE, target_cmsg_addr, msg_controllen, 0);
+    target_cmsg_start = target_cmsg;
+    if (!target_cmsg)
+        return -TARGET_EFAULT;
+
+    while (cmsg && target_cmsg) {
+        void *data = CMSG_DATA(cmsg);
+        void *target_data = TARGET_CMSG_DATA(target_cmsg);
+
+        int len = cmsg->cmsg_len - sizeof(struct cmsghdr);
+        int tgt_len, tgt_space;
+
+        /* We never copy a half-header but may copy half-data;
+         * this is Linux's behaviour in put_cmsg(). Note that
+         * truncation here is a guest problem (which we report
+         * to the guest via the CTRUNC bit), unlike truncation
+         * in target_to_host_cmsg, which is a QEMU bug.
+         */
+        if (msg_controllen < sizeof(struct target_cmsghdr)) {
+            target_msgh->msg_flags |= tswap32(MSG_CTRUNC);
+            break;
+        }
+
+        if (cmsg->cmsg_level == SOL_SOCKET) {
+            target_cmsg->cmsg_level = tswap32(TARGET_SOL_SOCKET);
+        } else {
+            target_cmsg->cmsg_level = tswap32(cmsg->cmsg_level);
+        }
+        target_cmsg->cmsg_type = tswap32(cmsg->cmsg_type);
+
+        /* Payload types which need a different size of payload on
+         * the target must adjust tgt_len here.
+         */
+        tgt_len = len;
+        switch (cmsg->cmsg_level) {
+        case SOL_SOCKET:
+            switch (cmsg->cmsg_type) {
+            case SO_TIMESTAMP:
+                tgt_len = sizeof(struct target_timeval);
+                break;
+            default:
+                break;
+            }
+            break;
+        default:
+            break;
+        }
+
+        if (msg_controllen < TARGET_CMSG_LEN(tgt_len)) {
+            target_msgh->msg_flags |= tswap32(MSG_CTRUNC);
+            tgt_len = msg_controllen - sizeof(struct target_cmsghdr);
+        }
+
+        /* We must now copy-and-convert len bytes of payload
+         * into tgt_len bytes of destination space. Bear in mind
+         * that in both source and destination we may be dealing
+         * with a truncated value!
+         */
+        switch (cmsg->cmsg_level) {
+        case SOL_SOCKET:
+            switch (cmsg->cmsg_type) {
+            case SCM_RIGHTS:
+            {
+                int *fd = (int *)data;
+                int *target_fd = (int *)target_data;
+                int i, numfds = tgt_len / sizeof(int);
+
+                for (i = 0; i < numfds; i++) {
+                    __put_user(fd[i], target_fd + i);
+                }
+                break;
+            }
+            case SO_TIMESTAMP:
+            {
+                struct timeval *tv = (struct timeval *)data;
+                struct target_timeval *target_tv =
+                    (struct target_timeval *)target_data;
+
+                if (len != sizeof(struct timeval) ||
+                    tgt_len != sizeof(struct target_timeval)) {
+                    goto unimplemented;
+                }
+
+                /* copy struct timeval to target */
+                __put_user(tv->tv_sec, &target_tv->tv_sec);
+                __put_user(tv->tv_usec, &target_tv->tv_usec);
+                break;
+            }
+            case SCM_CREDENTIALS:
+            {
+                struct ucred *cred = (struct ucred *)data;
+                struct target_ucred *target_cred =
+                    (struct target_ucred *)target_data;
+
+                __put_user(cred->pid, &target_cred->pid);
+                __put_user(cred->uid, &target_cred->uid);
+                __put_user(cred->gid, &target_cred->gid);
+                break;
+            }
+            default:
+                goto unimplemented;
+            }
+            break;
+
+        case SOL_IP:
+            switch (cmsg->cmsg_type) {
+            case IP_TTL:
+            {
+                uint32_t *v = (uint32_t *)data;
+                uint32_t *t_int = (uint32_t *)target_data;
+
+                if (len != sizeof(uint32_t) ||
+                    tgt_len != sizeof(uint32_t)) {
+                    goto unimplemented;
+                }
+                __put_user(*v, t_int);
+                break;
+            }
+            case IP_RECVERR:
+            {
+                struct errhdr_t {
+                   struct sock_extended_err ee;
+                   struct sockaddr_in offender;
+                };
+                struct errhdr_t *errh = (struct errhdr_t *)data;
+                struct errhdr_t *target_errh =
+                    (struct errhdr_t *)target_data;
+
+                if (len != sizeof(struct errhdr_t) ||
+                    tgt_len != sizeof(struct errhdr_t)) {
+                    goto unimplemented;
+                }
+                __put_user(errh->ee.ee_errno, &target_errh->ee.ee_errno);
+                __put_user(errh->ee.ee_origin, &target_errh->ee.ee_origin);
+                __put_user(errh->ee.ee_type,  &target_errh->ee.ee_type);
+                __put_user(errh->ee.ee_code, &target_errh->ee.ee_code);
+                __put_user(errh->ee.ee_pad, &target_errh->ee.ee_pad);
+                __put_user(errh->ee.ee_info, &target_errh->ee.ee_info);
+                __put_user(errh->ee.ee_data, &target_errh->ee.ee_data);
+                host_to_target_sockaddr((unsigned long) &target_errh->offender,
+                    (void *) &errh->offender, sizeof(errh->offender));
+                break;
+            }
+            default:
+                goto unimplemented;
+            }
+            break;
+
+        case SOL_IPV6:
+            switch (cmsg->cmsg_type) {
+            case IPV6_HOPLIMIT:
+            {
+                uint32_t *v = (uint32_t *)data;
+                uint32_t *t_int = (uint32_t *)target_data;
+
+                if (len != sizeof(uint32_t) ||
+                    tgt_len != sizeof(uint32_t)) {
+                    goto unimplemented;
+                }
+                __put_user(*v, t_int);
+                break;
+            }
+            case IPV6_RECVERR:
+            {
+                struct errhdr6_t {
+                   struct sock_extended_err ee;
+                   struct sockaddr_in6 offender;
+                };
+                struct errhdr6_t *errh = (struct errhdr6_t *)data;
+                struct errhdr6_t *target_errh =
+                    (struct errhdr6_t *)target_data;
+
+                if (len != sizeof(struct errhdr6_t) ||
+                    tgt_len != sizeof(struct errhdr6_t)) {
+                    goto unimplemented;
+                }
+                __put_user(errh->ee.ee_errno, &target_errh->ee.ee_errno);
+                __put_user(errh->ee.ee_origin, &target_errh->ee.ee_origin);
+                __put_user(errh->ee.ee_type,  &target_errh->ee.ee_type);
+                __put_user(errh->ee.ee_code, &target_errh->ee.ee_code);
+                __put_user(errh->ee.ee_pad, &target_errh->ee.ee_pad);
+                __put_user(errh->ee.ee_info, &target_errh->ee.ee_info);
+                __put_user(errh->ee.ee_data, &target_errh->ee.ee_data);
+                host_to_target_sockaddr((unsigned long) &target_errh->offender,
+                    (void *) &errh->offender, sizeof(errh->offender));
+                break;
+            }
+            default:
+                goto unimplemented;
+            }
+            break;
+
+        default:
+        unimplemented:
+            qemu_log_mask(LOG_UNIMP, "Unsupported ancillary data: %d/%d\n",
+                          cmsg->cmsg_level, cmsg->cmsg_type);
+            memcpy(target_data, data, MIN(len, tgt_len));
+            if (tgt_len > len) {
+                memset(target_data + len, 0, tgt_len - len);
+            }
+        }
+
+        target_cmsg->cmsg_len = tswapal(TARGET_CMSG_LEN(tgt_len));
+        tgt_space = TARGET_CMSG_SPACE(tgt_len);
+        if (msg_controllen < tgt_space) {
+            tgt_space = msg_controllen;
+        }
+        msg_controllen -= tgt_space;
+        space += tgt_space;
+        cmsg = CMSG_NXTHDR(msgh, cmsg);
+        target_cmsg = TARGET_CMSG_NXTHDR(target_msgh, target_cmsg,
+                                         target_cmsg_start);
+        if (cmsg && !target_cmsg)
+            target_msgh->msg_flags |= tswap32(MSG_CTRUNC);
+    }
+    unlock_user(target_cmsg_start, target_cmsg_addr, space);
+ the_end:
+    target_msgh->msg_controllen = tswapal(space);
+    if (target_msgh->msg_flags & tswap32(MSG_CTRUNC)) {
+        qemu_log_mask(LAT_LOG_SYSCALL,
+                "[LATX_SYSCALL] cmsg with MSG_CTRUNC but dropped by LATX\n");
+    }
+    return 0;
+}
+
+/* do_setsockopt() Must return target values and target errnos. */
+static abi_long do_setsockopt(int sockfd, int level, int optname,
+                              abi_ulong optval_addr, socklen_t optlen)
+{
+    struct {
+        uint8_t sctp_data_io_event;
+        uint8_t sctp_association_event;
+        uint8_t sctp_address_event;
+        uint8_t sctp_send_failure_event;
+        uint8_t sctp_peer_error_event;
+        uint8_t sctp_shutdown_event;
+        uint8_t sctp_partial_delivery_event;
+        uint8_t sctp_adaptation_layer_event;
+    } target_sctp_events;
+    abi_long ret;
+    int val;
+    struct ip_mreqn *ip_mreq;
+    struct ip_mreq_source *ip_mreq_source;
+    struct group_req *group_req;
+    struct tpacket_req *req;
+    struct sctp_event_subscribe sctp_events;
+    void *sctp_opt;
+
+    switch(level) {
+    case SOL_TCP:
+    case SOL_UDP:
+        /* TCP and UDP options all take an 'int' value.  */
+        if (optlen < sizeof(uint32_t))
+            return -TARGET_EINVAL;
+
+        if (get_user_u32(val, optval_addr))
+            return -TARGET_EFAULT;
+        ret = get_errno(setsockopt(sockfd, level, optname, &val, sizeof(val)));
+        break;
+    case SOL_IP:
+        switch(optname) {
+        case IP_TOS:
+        case IP_TTL:
+        case IP_HDRINCL:
+        case IP_ROUTER_ALERT:
+        case IP_RECVOPTS:
+        case IP_RETOPTS:
+        case IP_PKTINFO:
+        case IP_MTU_DISCOVER:
+        case IP_RECVERR:
+        case IP_RECVTTL:
+        case IP_RECVTOS:
+        case IP_OPTIONS:
+        case IP_UNICAST_IF:
+#ifdef IP_FREEBIND
+        case IP_FREEBIND:
+#endif
+#ifdef IP_MULTICAST_ALL
+        case IP_MULTICAST_ALL:
+#endif
+        case IP_MULTICAST_IF:
+        case IP_MULTICAST_TTL:
+        case IP_MULTICAST_LOOP:
+            val = 0;
+            if (optlen >= sizeof(uint32_t)) {
+                if (get_user_u32(val, optval_addr))
+                    return -TARGET_EFAULT;
+            } else if (optlen >= 1) {
+                if (get_user_u8(val, optval_addr))
+                    return -TARGET_EFAULT;
+            }
+            ret = get_errno(setsockopt(sockfd, level, optname, &val, sizeof(val)));
+            break;
+        case IP_ADD_MEMBERSHIP:
+        case IP_DROP_MEMBERSHIP:
+            if (optlen < sizeof (struct target_ip_mreq) ||
+                optlen > sizeof (struct target_ip_mreqn))
+                return -TARGET_EINVAL;
+
+            ip_mreq = (struct ip_mreqn *) alloca(optlen);
+            target_to_host_ip_mreq(ip_mreq, optval_addr, optlen);
+            ret = get_errno(setsockopt(sockfd, level, optname, ip_mreq, optlen));
+            break;
+
+        case IP_BLOCK_SOURCE:
+        case IP_UNBLOCK_SOURCE:
+        case IP_ADD_SOURCE_MEMBERSHIP:
+        case IP_DROP_SOURCE_MEMBERSHIP:
+            if (optlen != sizeof (struct target_ip_mreq_source))
+                return -TARGET_EINVAL;
+
+            ip_mreq_source = lock_user(VERIFY_READ, optval_addr, optlen, 1);
+            ret = get_errno(setsockopt(sockfd, level, optname, ip_mreq_source, optlen));
+            unlock_user (ip_mreq_source, optval_addr, 0);
+            break;
+        case MCAST_JOIN_GROUP:
+        case MCAST_LEAVE_GROUP:
+            if (optlen < sizeof (struct group_req))
+                return -TARGET_EINVAL;
+
+            group_req = lock_user(VERIFY_READ, optval_addr, optlen, 1);
+            ret = get_errno(setsockopt(sockfd, level, optname, group_req, optlen));
+            unlock_user (group_req, optval_addr, 0);
+            break;
+
+        default:
+            goto unimplemented;
+        }
+        break;
+    case IPPROTO_SCTP:
+        if (optname == SCTP_EVENTS) {
+            if (optlen != sizeof(target_sctp_events)) {
+                goto unimplemented;
+            }
+
+            /* The x86 JDK uses the legacy eight-byte subscription structure. */
+            memset(&sctp_events, 0, sizeof(sctp_events));
+            if (copy_from_user(&target_sctp_events, optval_addr,
+                               sizeof(target_sctp_events))) {
+                return -TARGET_EFAULT;
+            }
+            memcpy(&sctp_events, &target_sctp_events, sizeof(target_sctp_events));
+            ret = get_errno(setsockopt(sockfd, level, optname, &sctp_events,
+                                       sizeof(sctp_events)));
+            break;
+        }
+
+        if (optname == SCTP_INITMSG) {
+            if (optlen != sizeof(struct sctp_initmsg)) {
+                goto unimplemented;
+            }
+        } else if (optname != SCTP_SOCKOPT_BINDX_ADD &&
+                   optname != SCTP_SOCKOPT_BINDX_REM) {
+                goto unimplemented;
+        }
+
+        sctp_opt = lock_user(VERIFY_READ, optval_addr, optlen, 1);
+        if (!sctp_opt && optlen > 0) {
+            return -TARGET_EFAULT;
+        }
+        ret = get_errno(setsockopt(sockfd, level, optname, sctp_opt, optlen));
+        unlock_user(sctp_opt, optval_addr, 0);
+        break;
+    case SOL_IPV6:
+        switch (optname) {
+        case IPV6_MTU_DISCOVER:
+        case IPV6_MTU:
+        case IPV6_V6ONLY:
+        case IPV6_RECVPKTINFO:
+        case IPV6_UNICAST_HOPS:
+        case IPV6_MULTICAST_HOPS:
+        case IPV6_MULTICAST_LOOP:
+        case IPV6_RECVERR:
+        case IPV6_RECVHOPLIMIT:
+        case IPV6_2292HOPLIMIT:
+        case IPV6_CHECKSUM:
+        case IPV6_ADDRFORM:
+        case IPV6_2292PKTINFO:
+        case IPV6_RECVTCLASS:
+        case IPV6_RECVRTHDR:
+        case IPV6_2292RTHDR:
+        case IPV6_RECVHOPOPTS:
+        case IPV6_2292HOPOPTS:
+        case IPV6_RECVDSTOPTS:
+        case IPV6_2292DSTOPTS:
+        case IPV6_TCLASS:
+        case IPV6_ADDR_PREFERENCES:
+        case IPV6_DONTFRAG:
+        case IPV6_HOPLIMIT:
+#ifdef IPV6_RECVPATHMTU
+        case IPV6_RECVPATHMTU:
+#endif
+#ifdef IPV6_TRANSPARENT
+        case IPV6_TRANSPARENT:
+#endif
+#ifdef IPV6_FREEBIND
+        case IPV6_FREEBIND:
+#endif
+#ifdef IPV6_RECVORIGDSTADDR
+        case IPV6_RECVORIGDSTADDR:
+#endif
+        case IPV6_UNICAST_IF:
+        case IPV6_MULTICAST_IF:
+            val = 0;
+            if (optlen < sizeof(uint32_t)) {
+                return -TARGET_EINVAL;
+            }
+            if (get_user_u32(val, optval_addr)) {
+                return -TARGET_EFAULT;
+            }
+            ret = get_errno(setsockopt(sockfd, level, optname,
+                                       &val, sizeof(val)));
+            break;
+        case IPV6_PKTINFO:
+        {
+            struct in6_pktinfo pki;
+
+            if (optlen < sizeof(pki)) {
+                return -TARGET_EINVAL;
+            }
+
+            if (copy_from_user(&pki, optval_addr, sizeof(pki))) {
+                return -TARGET_EFAULT;
+            }
+
+            pki.ipi6_ifindex = tswap32(pki.ipi6_ifindex);
+
+            ret = get_errno(setsockopt(sockfd, level, optname,
+                                       &pki, sizeof(pki)));
+            break;
+        }
+        case IPV6_ADD_MEMBERSHIP:
+        case IPV6_DROP_MEMBERSHIP:
+        {
+            struct ipv6_mreq ipv6mreq;
+
+            if (optlen < sizeof(ipv6mreq)) {
+                return -TARGET_EINVAL;
+            }
+
+            if (copy_from_user(&ipv6mreq, optval_addr, sizeof(ipv6mreq))) {
+                return -TARGET_EFAULT;
+            }
+
+            ipv6mreq.ipv6mr_interface = tswap32(ipv6mreq.ipv6mr_interface);
+
+            ret = get_errno(setsockopt(sockfd, level, optname,
+                                       &ipv6mreq, sizeof(ipv6mreq)));
+            break;
+        }
+        case MCAST_JOIN_SOURCE_GROUP:
+        case MCAST_LEAVE_SOURCE_GROUP:
+        case MCAST_BLOCK_SOURCE:
+        case MCAST_UNBLOCK_SOURCE:
+        {
+            struct group_source_req req;
+            abi_long req_ret;
+            abi_ulong target_group_addr;
+            abi_ulong target_source_addr;
+
+            if (optlen != sizeof(struct target_group_source_req)) {
+                return -TARGET_EINVAL;
+            }
+            if (get_user_u32(req.gsr_interface, optval_addr)) {
+                return -TARGET_EFAULT;
+            }
+            req.gsr_interface = tswap32(req.gsr_interface);
+
+            target_group_addr = optval_addr +
+                offsetof(struct target_group_source_req, gsr_group);
+            req_ret = target_to_host_sockaddr(
+                sockfd, (struct sockaddr *)&req.gsr_group, target_group_addr,
+                sizeof(struct target_sockaddr_storage));
+            if (req_ret) {
+                return req_ret;
+            }
+
+            target_source_addr = optval_addr +
+                offsetof(struct target_group_source_req, gsr_source);
+            req_ret = target_to_host_sockaddr(
+                sockfd, (struct sockaddr *)&req.gsr_source, target_source_addr,
+                sizeof(struct target_sockaddr_storage));
+            if (req_ret) {
+                return req_ret;
+            }
+
+            ret = get_errno(setsockopt(sockfd, level, optname,
+                                       &req, sizeof(req)));
+            break;
+        }
+        default:
+            goto unimplemented;
+        }
+        break;
+    case SOL_ICMPV6:
+        switch (optname) {
+        case ICMPV6_FILTER:
+        {
+            struct icmp6_filter icmp6f;
+
+            if (optlen > sizeof(icmp6f)) {
+                optlen = sizeof(icmp6f);
+            }
+
+            if (copy_from_user(&icmp6f, optval_addr, optlen)) {
+                return -TARGET_EFAULT;
+            }
+
+            for (val = 0; val < 8; val++) {
+                icmp6f.data[val] = tswap32(icmp6f.data[val]);
+            }
+
+            ret = get_errno(setsockopt(sockfd, level, optname,
+                                       &icmp6f, optlen));
+            break;
+        }
+        default:
+            goto unimplemented;
+        }
+        break;
+    case SOL_RAW:
+        switch (optname) {
+        case ICMP_FILTER:
+        case IPV6_CHECKSUM:
+            /* those take an u32 value */
+            if (optlen < sizeof(uint32_t)) {
+                return -TARGET_EINVAL;
+            }
+
+            if (get_user_u32(val, optval_addr)) {
+                return -TARGET_EFAULT;
+            }
+            ret = get_errno(setsockopt(sockfd, level, optname,
+                                       &val, sizeof(val)));
+            break;
+
+        default:
+            goto unimplemented;
+        }
+        break;
+    case SOL_PACKET:
+        switch(optname) {
+        case PACKET_RX_RING:
+        case PACKET_TX_RING:
+            req = lock_user(VERIFY_READ, optval_addr, optlen, 1);
+            ret = get_errno(setsockopt(sockfd, level, optname, req, optlen));
+            unlock_user (req, optval_addr, 0);
+            break;
+        case PACKET_VERSION:
+            if (optlen != sizeof(val))
+                return -TARGET_EINVAL;
+            if (get_user_u32(val, optval_addr))
+                return -TARGET_EFAULT;
+            ret = get_errno(setsockopt(sockfd, level, optname, &val, optlen));
+            break;
+        default:
+            goto unimplemented;
+        }
+        break;
+#if defined(SOL_ALG) && defined(ALG_SET_KEY) && defined(ALG_SET_AEAD_AUTHSIZE)
+    case SOL_ALG:
+        switch (optname) {
+        case ALG_SET_KEY:
+        {
+            char *alg_key = g_malloc(optlen);
+
+            if (!alg_key) {
+                return -TARGET_ENOMEM;
+            }
+            if (copy_from_user(alg_key, optval_addr, optlen)) {
+                g_free(alg_key);
+                return -TARGET_EFAULT;
+            }
+            ret = get_errno(setsockopt(sockfd, level, optname,
+                                       alg_key, optlen));
+            g_free(alg_key);
+            break;
+        }
+        case ALG_SET_AEAD_AUTHSIZE:
+        {
+            ret = get_errno(setsockopt(sockfd, level, optname,
+                                       NULL, optlen));
+            break;
+        }
+        default:
+            goto unimplemented;
+        }
+        break;
+#endif
+    case TARGET_SOL_SOCKET:
+        switch (optname) {
+        case TARGET_SO_RCVTIMEO:
+        {
+                struct timeval tv;
+
+                optname = SO_RCVTIMEO;
+
+set_timeout:
+                if (optlen != sizeof(struct target_timeval)) {
+                    return -TARGET_EINVAL;
+                }
+
+                if (copy_from_user_timeval(&tv, optval_addr)) {
+                    return -TARGET_EFAULT;
+                }
+
+                ret = get_errno(setsockopt(sockfd, SOL_SOCKET, optname,
+                                &tv, sizeof(tv)));
+                return ret;
+        }
+        case TARGET_SO_SNDTIMEO:
+                optname = SO_SNDTIMEO;
+                goto set_timeout;
+        case TARGET_SO_ATTACH_FILTER:
+        {
+                struct target_sock_fprog *tfprog;
+                struct target_sock_filter *tfilter;
+                struct sock_fprog fprog;
+                struct sock_filter *filter;
+                int i;
+
+                if (optlen != sizeof(*tfprog)) {
+                    return -TARGET_EINVAL;
+                }
+                if (!lock_user_struct(VERIFY_READ, tfprog, optval_addr, 0)) {
+                    return -TARGET_EFAULT;
+                }
+                if (!lock_user_struct(VERIFY_READ, tfilter,
+                                      tswapal(tfprog->filter), 0)) {
+                    unlock_user_struct(tfprog, optval_addr, 1);
+                    return -TARGET_EFAULT;
+                }
+
+                fprog.len = tswap16(tfprog->len);
+                filter = g_try_new(struct sock_filter, fprog.len);
+                if (filter == NULL) {
+                    unlock_user_struct(tfilter, tfprog->filter, 1);
+                    unlock_user_struct(tfprog, optval_addr, 1);
+                    return -TARGET_ENOMEM;
+                }
+                for (i = 0; i < fprog.len; i++) {
+                    filter[i].code = tswap16(tfilter[i].code);
+                    filter[i].jt = tfilter[i].jt;
+                    filter[i].jf = tfilter[i].jf;
+                    filter[i].k = tswap32(tfilter[i].k);
+                }
+                fprog.filter = filter;
+
+                ret = get_errno(setsockopt(sockfd, SOL_SOCKET,
+                                SO_ATTACH_FILTER, &fprog, sizeof(fprog)));
+                g_free(filter);
+
+                unlock_user_struct(tfilter, tfprog->filter, 1);
+                unlock_user_struct(tfprog, optval_addr, 1);
+                return ret;
+        }
+	case TARGET_SO_BINDTODEVICE:
+	{
+		char *dev_ifname, *addr_ifname;
+
+		if (optlen > IFNAMSIZ - 1) {
+		    optlen = IFNAMSIZ - 1;
+		}
+		dev_ifname = lock_user(VERIFY_READ, optval_addr, optlen, 1);
+		if (!dev_ifname) {
+		    return -TARGET_EFAULT;
+		}
+		optname = SO_BINDTODEVICE;
+		addr_ifname = alloca(IFNAMSIZ);
+		memcpy(addr_ifname, dev_ifname, optlen);
+		addr_ifname[optlen] = 0;
+		ret = get_errno(setsockopt(sockfd, SOL_SOCKET, optname,
+                                           addr_ifname, optlen));
+		unlock_user (dev_ifname, optval_addr, 0);
+		return ret;
+	}
+        case TARGET_SO_LINGER:
+        {
+                struct linger lg;
+                struct target_linger *tlg;
+
+                if (optlen != sizeof(struct target_linger)) {
+                    return -TARGET_EINVAL;
+                }
+                if (!lock_user_struct(VERIFY_READ, tlg, optval_addr, 1)) {
+                    return -TARGET_EFAULT;
+                }
+                __get_user(lg.l_onoff, &tlg->l_onoff);
+                __get_user(lg.l_linger, &tlg->l_linger);
+                ret = get_errno(setsockopt(sockfd, SOL_SOCKET, SO_LINGER,
+                                &lg, sizeof(lg)));
+                unlock_user_struct(tlg, optval_addr, 0);
+                return ret;
+        }
+            /* Options with 'int' argument.  */
+        case TARGET_SO_DEBUG:
+		optname = SO_DEBUG;
+		break;
+        case TARGET_SO_REUSEADDR:
+		optname = SO_REUSEADDR;
+		break;
+#ifdef SO_REUSEPORT
+        case TARGET_SO_REUSEPORT:
+                optname = SO_REUSEPORT;
+                break;
+#endif
+        case TARGET_SO_TYPE:
+		optname = SO_TYPE;
+		break;
+        case TARGET_SO_ERROR:
+		optname = SO_ERROR;
+		break;
+        case TARGET_SO_DONTROUTE:
+		optname = SO_DONTROUTE;
+		break;
+        case TARGET_SO_BROADCAST:
+		optname = SO_BROADCAST;
+		break;
+        case TARGET_SO_SNDBUF:
+		optname = SO_SNDBUF;
+		break;
+        case TARGET_SO_SNDBUFFORCE:
+                optname = SO_SNDBUFFORCE;
+                break;
+        case TARGET_SO_RCVBUF:
+		optname = SO_RCVBUF;
+		break;
+        case TARGET_SO_RCVBUFFORCE:
+                optname = SO_RCVBUFFORCE;
+                break;
+        case TARGET_SO_KEEPALIVE:
+		optname = SO_KEEPALIVE;
+		break;
+        case TARGET_SO_OOBINLINE:
+		optname = SO_OOBINLINE;
+		break;
+        case TARGET_SO_NO_CHECK:
+		optname = SO_NO_CHECK;
+		break;
+        case TARGET_SO_PRIORITY:
+		optname = SO_PRIORITY;
+		break;
+#ifdef SO_BSDCOMPAT
+        case TARGET_SO_BSDCOMPAT:
+		optname = SO_BSDCOMPAT;
+		break;
+#endif
+        case TARGET_SO_PASSCRED:
+		optname = SO_PASSCRED;
+		break;
+        case TARGET_SO_PASSSEC:
+                optname = SO_PASSSEC;
+                break;
+        case TARGET_SO_TIMESTAMP:
+		optname = SO_TIMESTAMP;
+		break;
+        case TARGET_SO_RCVLOWAT:
+		optname = SO_RCVLOWAT;
+		break;
+        case TARGET_SO_MARK:
+		optname = SO_MARK;
+		break;
+        default:
+            goto unimplemented;
+        }
+	if (optlen < sizeof(uint32_t))
+            return -TARGET_EINVAL;
+
+	if (get_user_u32(val, optval_addr))
+            return -TARGET_EFAULT;
+	ret = get_errno(setsockopt(sockfd, SOL_SOCKET, optname, &val, sizeof(val)));
+        break;
+#ifdef SOL_NETLINK
+    case SOL_NETLINK:
+        switch (optname) {
+        case NETLINK_PKTINFO:
+        case NETLINK_ADD_MEMBERSHIP:
+        case NETLINK_DROP_MEMBERSHIP:
+        case NETLINK_BROADCAST_ERROR:
+        case NETLINK_NO_ENOBUFS:
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 2, 0)
+        case NETLINK_LISTEN_ALL_NSID:
+        case NETLINK_CAP_ACK:
+#endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(4, 2, 0) */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 12, 0)
+        case NETLINK_EXT_ACK:
+#endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(4, 12, 0) */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 20, 0)
+        case NETLINK_GET_STRICT_CHK:
+#endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(4, 12, 0) */
+            break;
+        default:
+            goto unimplemented;
+        }
+        val = 0;
+        if (optlen < sizeof(uint32_t)) {
+            return -TARGET_EINVAL;
+        }
+        if (get_user_u32(val, optval_addr)) {
+            return -TARGET_EFAULT;
+        }
+        ret = get_errno(setsockopt(sockfd, SOL_NETLINK, optname, &val,
+                                   sizeof(val)));
+        break;
+#endif /* SOL_NETLINK */
+    case SOL_CAN_RAW:
+    {
+        char * can_raw_val;
+        can_raw_val = lock_user(VERIFY_READ, optval_addr, optlen, 1);
+		if (!can_raw_val) {
+		    return -TARGET_EFAULT;
+		}
+        ret = get_errno(setsockopt(sockfd, SOL_CAN_RAW, optname, can_raw_val, optlen));
+        unlock_user(can_raw_val, optval_addr, 0);
+        break;
+    }
+    default:
+    unimplemented:
+        qemu_log_mask(LOG_UNIMP, "Unsupported setsockopt level=%d optname=%d\n",
+                      level, optname);
+        ret = -TARGET_ENOPROTOOPT;
+    }
+    return ret;
+}
+
+/* do_getsockopt() Must return target values and target errnos. */
+static abi_long do_getsockopt(int sockfd, int level, int optname,
+                              abi_ulong optval_addr, abi_ulong optlen)
+{
+    struct target_sctp_peeloff_arg {
+        uint32_t associd;
+        int32_t sd;
+    } *target_peeloff;
+    sctp_peeloff_arg_t peeloff;
+    abi_long ret;
+    int len, val;
+    socklen_t lv;
+    void *sctp_opt;
+
+    switch(level) {
+    case TARGET_SOL_SOCKET:
+        level = SOL_SOCKET;
+        switch (optname) {
+        /* These don't just return a single integer */
+        case TARGET_SO_PEERNAME:
+            goto unimplemented;
+        case TARGET_SO_RCVTIMEO: {
+            struct timeval tv;
+            socklen_t tvlen;
+
+            optname = SO_RCVTIMEO;
+
+get_timeout:
+            if (get_user_u32(len, optlen)) {
+                return -TARGET_EFAULT;
+            }
+            if (len < 0) {
+                return -TARGET_EINVAL;
+            }
+
+            tvlen = sizeof(tv);
+            ret = get_errno(getsockopt(sockfd, level, optname,
+                                       &tv, &tvlen));
+            if (ret < 0) {
+                return ret;
+            }
+            if (len > sizeof(struct target_timeval)) {
+                len = sizeof(struct target_timeval);
+            }
+            if (copy_to_user_timeval(optval_addr, &tv)) {
+                return -TARGET_EFAULT;
+            }
+            if (put_user_u32(len, optlen)) {
+                return -TARGET_EFAULT;
+            }
+            break;
+        }
+        case TARGET_SO_SNDTIMEO:
+            optname = SO_SNDTIMEO;
+            goto get_timeout;
+        case TARGET_SO_PEERCRED: {
+            struct ucred cr;
+            socklen_t crlen;
+            struct target_ucred *tcr;
+
+            if (get_user_u32(len, optlen)) {
+                return -TARGET_EFAULT;
+            }
+            if (len < 0) {
+                return -TARGET_EINVAL;
+            }
+
+            crlen = sizeof(cr);
+            ret = get_errno(getsockopt(sockfd, level, SO_PEERCRED,
+                                       &cr, &crlen));
+            if (ret < 0) {
+                return ret;
+            }
+            if (len > crlen) {
+                len = crlen;
+            }
+            if (!lock_user_struct(VERIFY_WRITE, tcr, optval_addr, 0)) {
+                return -TARGET_EFAULT;
+            }
+            __put_user(cr.pid, &tcr->pid);
+            __put_user(cr.uid, &tcr->uid);
+            __put_user(cr.gid, &tcr->gid);
+            unlock_user_struct(tcr, optval_addr, 1);
+            if (put_user_u32(len, optlen)) {
+                return -TARGET_EFAULT;
+            }
+            break;
+        }
+        case TARGET_SO_PEERSEC: {
+            char *name;
+
+            if (get_user_u32(len, optlen)) {
+                return -TARGET_EFAULT;
+            }
+            if (len < 0) {
+                return -TARGET_EINVAL;
+            }
+            name = lock_user(VERIFY_WRITE, optval_addr, len, 0);
+            if (!name) {
+                return -TARGET_EFAULT;
+            }
+            lv = len;
+            ret = get_errno(getsockopt(sockfd, level, SO_PEERSEC,
+                                       name, &lv));
+            if (put_user_u32(lv, optlen)) {
+                ret = -TARGET_EFAULT;
+            }
+            unlock_user(name, optval_addr, lv);
+            break;
+        }
+        case TARGET_SO_LINGER:
+        {
+            struct linger lg;
+            socklen_t lglen;
+            struct target_linger *tlg;
+
+            if (get_user_u32(len, optlen)) {
+                return -TARGET_EFAULT;
+            }
+            if (len < 0) {
+                return -TARGET_EINVAL;
+            }
+
+            lglen = sizeof(lg);
+            ret = get_errno(getsockopt(sockfd, level, SO_LINGER,
+                                       &lg, &lglen));
+            if (ret < 0) {
+                return ret;
+            }
+            if (len > lglen) {
+                len = lglen;
+            }
+            if (!lock_user_struct(VERIFY_WRITE, tlg, optval_addr, 0)) {
+                return -TARGET_EFAULT;
+            }
+            __put_user(lg.l_onoff, &tlg->l_onoff);
+            __put_user(lg.l_linger, &tlg->l_linger);
+            unlock_user_struct(tlg, optval_addr, 1);
+            if (put_user_u32(len, optlen)) {
+                return -TARGET_EFAULT;
+            }
+            break;
+        }
+        /* Options with 'int' argument.  */
+        case TARGET_SO_DEBUG:
+            optname = SO_DEBUG;
+            goto int_case;
+        case TARGET_SO_REUSEADDR:
+            optname = SO_REUSEADDR;
+            goto int_case;
+#ifdef SO_REUSEPORT
+        case TARGET_SO_REUSEPORT:
+            optname = SO_REUSEPORT;
+            goto int_case;
+#endif
+        case TARGET_SO_TYPE:
+            optname = SO_TYPE;
+            goto int_case;
+        case TARGET_SO_ERROR:
+            optname = SO_ERROR;
+            goto int_case;
+        case TARGET_SO_DONTROUTE:
+            optname = SO_DONTROUTE;
+            goto int_case;
+        case TARGET_SO_BROADCAST:
+            optname = SO_BROADCAST;
+            goto int_case;
+        case TARGET_SO_SNDBUF:
+            optname = SO_SNDBUF;
+            goto int_case;
+        case TARGET_SO_RCVBUF:
+            optname = SO_RCVBUF;
+            goto int_case;
+        case TARGET_SO_KEEPALIVE:
+            optname = SO_KEEPALIVE;
+            goto int_case;
+        case TARGET_SO_OOBINLINE:
+            optname = SO_OOBINLINE;
+            goto int_case;
+        case TARGET_SO_NO_CHECK:
+            optname = SO_NO_CHECK;
+            goto int_case;
+        case TARGET_SO_PRIORITY:
+            optname = SO_PRIORITY;
+            goto int_case;
+#ifdef SO_BSDCOMPAT
+        case TARGET_SO_BSDCOMPAT:
+            optname = SO_BSDCOMPAT;
+            goto int_case;
+#endif
+        case TARGET_SO_PASSCRED:
+            optname = SO_PASSCRED;
+            goto int_case;
+        case TARGET_SO_TIMESTAMP:
+            optname = SO_TIMESTAMP;
+            goto int_case;
+        case TARGET_SO_RCVLOWAT:
+            optname = SO_RCVLOWAT;
+            goto int_case;
+        case TARGET_SO_ACCEPTCONN:
+            optname = SO_ACCEPTCONN;
+            goto int_case;
+        case TARGET_SO_PROTOCOL:
+            optname = SO_PROTOCOL;
+            goto int_case;
+        case TARGET_SO_DOMAIN:
+            optname = SO_DOMAIN;
+            goto int_case;
+        default:
+            goto int_case;
+        }
+        break;
+    case SOL_TCP:
+    case SOL_UDP:
+        /* TCP and UDP options all take an 'int' value.  */
+    int_case:
+        if (get_user_u32(len, optlen))
+            return -TARGET_EFAULT;
+        if (len < 0)
+            return -TARGET_EINVAL;
+        lv = sizeof(lv);
+        ret = get_errno(getsockopt(sockfd, level, optname, &val, &lv));
+        if (ret < 0)
+            return ret;
+        if (optname == SO_TYPE) {
+            val = host_to_target_sock_type(val);
+        }
+        if (len > lv)
+            len = lv;
+        if (len == 4) {
+            if (put_user_u32(val, optval_addr))
+                return -TARGET_EFAULT;
+        } else if (len == 2) {
+            if (put_user_u16(val, optval_addr))
+                return -TARGET_EFAULT;
+        } else {
+            if (put_user_u8(val, optval_addr))
+                return -TARGET_EFAULT;
+        }
+        if (put_user_u32(len, optlen))
+            return -TARGET_EFAULT;
+        break;
+    case SOL_IP:
+        switch(optname) {
+        case IP_TOS:
+        case IP_TTL:
+        case IP_HDRINCL:
+        case IP_ROUTER_ALERT:
+        case IP_RECVOPTS:
+        case IP_RETOPTS:
+        case IP_PKTINFO:
+        case IP_MTU_DISCOVER:
+        case IP_RECVERR:
+        case IP_RECVTTL:
+        case IP_RECVTOS:
+        case IP_OPTIONS:
+        case IP_UNICAST_IF:
+#ifdef IP_FREEBIND
+        case IP_FREEBIND:
+#endif
+        case IP_MULTICAST_IF:
+        case IP_MULTICAST_TTL:
+        case IP_MULTICAST_LOOP:
+            if (get_user_u32(len, optlen))
+                return -TARGET_EFAULT;
+            if (len < 0)
+                return -TARGET_EINVAL;
+            lv = sizeof(lv);
+            ret = get_errno(getsockopt(sockfd, level, optname, &val, &lv));
+            if (ret < 0)
+                return ret;
+            if (len < sizeof(int) && len > 0 && val >= 0 && val < 255) {
+                len = 1;
+                if (put_user_u32(len, optlen)
+                    || put_user_u8(val, optval_addr))
+                    return -TARGET_EFAULT;
+            } else {
+                if (len > sizeof(int))
+                    len = sizeof(int);
+                if (put_user_u32(len, optlen)
+                    || put_user_u32(val, optval_addr))
+                    return -TARGET_EFAULT;
+            }
+            break;
+        case SO_ORIGINAL_DST: {
+            if (get_user_u32(lv, optlen)) {
+                return -TARGET_EFAULT;
+            }
+
+            if ((int)lv < 0) {
+                return -TARGET_EINVAL;
+            }
+
+            struct sockaddr_in original_dst;
+            void *addr = (void *)&original_dst;
+
+            ret = get_errno(getsockopt(sockfd, level, optname, &original_dst, &lv));
+
+            if (ret < 0) {
+                return ret;
+            }
+
+            if (!is_error(ret)) {
+                if (host_to_target_sockaddr(optval_addr, addr, lv)
+                   || put_user_u32(lv, optlen)) {
+                    return -TARGET_EFAULT;
+                }
+            }
+            break;
+        }
+        default:
+            ret = -TARGET_ENOPROTOOPT;
+            break;
+        }
+        break;
+    case SOL_IPV6:
+        switch (optname) {
+        case IPV6_MTU_DISCOVER:
+        case IPV6_MTU:
+        case IPV6_V6ONLY:
+        case IPV6_RECVPKTINFO:
+        case IPV6_UNICAST_HOPS:
+        case IPV6_MULTICAST_HOPS:
+        case IPV6_MULTICAST_LOOP:
+        case IPV6_RECVERR:
+        case IPV6_RECVHOPLIMIT:
+        case IPV6_2292HOPLIMIT:
+        case IPV6_CHECKSUM:
+        case IPV6_ADDRFORM:
+        case IPV6_2292PKTINFO:
+        case IPV6_RECVTCLASS:
+        case IPV6_RECVRTHDR:
+        case IPV6_2292RTHDR:
+        case IPV6_RECVHOPOPTS:
+        case IPV6_2292HOPOPTS:
+        case IPV6_RECVDSTOPTS:
+        case IPV6_2292DSTOPTS:
+        case IPV6_TCLASS:
+        case IPV6_ADDR_PREFERENCES:
+        case IPV6_DONTFRAG:
+        case IPV6_HOPLIMIT:
+        case IPV6_PKTINFO:
+#ifdef IPV6_RECVPATHMTU
+        case IPV6_RECVPATHMTU:
+#endif
+#ifdef IPV6_TRANSPARENT
+        case IPV6_TRANSPARENT:
+#endif
+#ifdef IPV6_FREEBIND
+        case IPV6_FREEBIND:
+#endif
+#ifdef IPV6_RECVORIGDSTADDR
+        case IPV6_RECVORIGDSTADDR:
+#endif
+        case IPV6_UNICAST_IF:
+        case IPV6_MULTICAST_IF:
+            if (get_user_u32(len, optlen))
+                return -TARGET_EFAULT;
+            if (len < 0)
+                return -TARGET_EINVAL;
+            lv = sizeof(lv);
+            ret = get_errno(getsockopt(sockfd, level, optname, &val, &lv));
+            if (ret < 0)
+                return ret;
+            if (len < sizeof(int) && len > 0 && val >= 0 && val < 255) {
+                len = 1;
+                if (put_user_u32(len, optlen)
+                    || put_user_u8(val, optval_addr))
+                    return -TARGET_EFAULT;
+            } else {
+                if (len > sizeof(int))
+                    len = sizeof(int);
+                if (put_user_u32(len, optlen)
+                    || put_user_u32(val, optval_addr))
+                    return -TARGET_EFAULT;
+            }
+            break;
+        default:
+            ret = -TARGET_ENOPROTOOPT;
+            break;
+        }
+        break;
+#ifdef SOL_NETLINK
+    case SOL_NETLINK:
+        switch (optname) {
+        case NETLINK_PKTINFO:
+        case NETLINK_BROADCAST_ERROR:
+        case NETLINK_NO_ENOBUFS:
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 2, 0)
+        case NETLINK_LISTEN_ALL_NSID:
+        case NETLINK_CAP_ACK:
+#endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(4, 2, 0) */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 12, 0)
+        case NETLINK_EXT_ACK:
+#endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(4, 12, 0) */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 20, 0)
+        case NETLINK_GET_STRICT_CHK:
+#endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(4, 12, 0) */
+            if (get_user_u32(len, optlen)) {
+                return -TARGET_EFAULT;
+            }
+            if (len != sizeof(val)) {
+                return -TARGET_EINVAL;
+            }
+            lv = len;
+            ret = get_errno(getsockopt(sockfd, level, optname, &val, &lv));
+            if (ret < 0) {
+                return ret;
+            }
+            if (put_user_u32(lv, optlen)
+                || put_user_u32(val, optval_addr)) {
+                return -TARGET_EFAULT;
+            }
+            break;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 2, 0)
+        case NETLINK_LIST_MEMBERSHIPS:
+        {
+            uint32_t *results;
+            int i;
+            if (get_user_u32(len, optlen)) {
+                return -TARGET_EFAULT;
+            }
+            if (len < 0) {
+                return -TARGET_EINVAL;
+            }
+            results = lock_user(VERIFY_WRITE, optval_addr, len, 1);
+            if (!results && len > 0) {
+                return -TARGET_EFAULT;
+            }
+            lv = len;
+            ret = get_errno(getsockopt(sockfd, level, optname, results, &lv));
+            if (ret < 0) {
+                unlock_user(results, optval_addr, 0);
+                return ret;
+            }
+            /* swap host endianess to target endianess. */
+            for (i = 0; i < (len / sizeof(uint32_t)); i++) {
+                results[i] = tswap32(results[i]);
+            }
+            if (put_user_u32(lv, optlen)) {
+                return -TARGET_EFAULT;
+            }
+            unlock_user(results, optval_addr, 0);
+            break;
+        }
+#endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(4, 2, 0) */
+        default:
+            goto unimplemented;
+        }
+        break;
+#endif /* SOL_NETLINK */
+    case IPPROTO_SCTP:
+        if (get_user_u32(len, optlen)) {
+            return -TARGET_EFAULT;
+        }
+
+        if (optname == SCTP_SOCKOPT_PEELOFF) {
+            if (len < sizeof(*target_peeloff)) {
+                return -TARGET_EINVAL;
+            }
+            target_peeloff = lock_user(VERIFY_WRITE, optval_addr,
+                                       sizeof(*target_peeloff), 1);
+            if (!target_peeloff) {
+                return -TARGET_EFAULT;
+            }
+            peeloff.associd = tswap32(target_peeloff->associd);
+            peeloff.sd = tswap32(target_peeloff->sd);
+            lv = sizeof(peeloff);
+            ret = get_errno(getsockopt(sockfd, level, optname, &peeloff, &lv));
+            if (ret < 0) {
+                unlock_user(target_peeloff, optval_addr, 0);
+                return ret;
+            }
+            target_peeloff->associd = tswap32(peeloff.associd);
+            target_peeloff->sd = tswap32(peeloff.sd);
+            unlock_user(target_peeloff, optval_addr,
+                        sizeof(*target_peeloff));
+            if (put_user_u32(lv, optlen)) {
+                close(peeloff.sd);
+                return -TARGET_EFAULT;
+            }
+            break;
+        }
+
+        if (optname != SCTP_GET_LOCAL_ADDRS &&
+            optname != SCTP_GET_PEER_ADDRS) {
+            goto unimplemented;
+        }
+        if (len < sizeof(struct sctp_getaddrs)) {
+            return -TARGET_EINVAL;
+        }
+        sctp_opt = lock_user(VERIFY_WRITE, optval_addr, len, 1);
+        if (!sctp_opt) {
+            return -TARGET_EFAULT;
+        }
+        lv = len;
+        ret = get_errno(getsockopt(sockfd, level, optname, sctp_opt, &lv));
+        if (ret < 0) {
+            unlock_user(sctp_opt, optval_addr, 0);
+            return ret;
+        }
+        unlock_user(sctp_opt, optval_addr, lv);
+        if (put_user_u32(lv, optlen)) {
+            return -TARGET_EFAULT;
+        }
+        break;
+    case SOL_CAN_RAW:
+    {
+        char * can_raw_val;
+        if (get_user_u32(len, optlen)) {
+            return -TARGET_EFAULT;
+        }
+        if (len < 0) {
+            return -TARGET_EINVAL;
+        }
+        can_raw_val = lock_user(VERIFY_WRITE, optval_addr, len, 1);
+        if (!can_raw_val && len > 0) {
+            return -TARGET_EFAULT;
+        }
+        lv = len;
+        ret = get_errno(getsockopt(sockfd, SOL_CAN_RAW, optname, can_raw_val, &lv));
+        if (ret < 0) {
+            unlock_user(can_raw_val, optval_addr, 0);
+            return ret;
+        }
+        unlock_user(can_raw_val, optval_addr, 0);
+        if (put_user_u32(lv, optlen)) {
+            return -TARGET_EFAULT;
+        }
+        break;
+    }
+    default:
+    unimplemented:
+        qemu_log_mask(LOG_UNIMP,
+                      "getsockopt level=%d optname=%d not yet supported\n",
+                      level, optname);
+        ret = -TARGET_EOPNOTSUPP;
+        break;
+    }
+    return ret;
+}
+
+/* Convert target low/high pair representing file offset into the host
+ * low/high pair. This function doesn't handle offsets bigger than 64 bits
+ * as the kernel doesn't handle them either.
+ */
+static void target_to_host_low_high(abi_ulong tlow,
+                                    abi_ulong thigh,
+                                    unsigned long *hlow,
+                                    unsigned long *hhigh)
+{
+    uint64_t off = tlow |
+        ((unsigned long long)thigh << TARGET_LONG_BITS / 2) <<
+        TARGET_LONG_BITS / 2;
+
+    *hlow = off;
+    *hhigh = (off >> HOST_LONG_BITS / 2) >> HOST_LONG_BITS / 2;
+}
+
+static struct iovec *lock_iovec(int type, abi_ulong target_addr,
+                                abi_ulong count, int copy)
+{
+    struct target_iovec *target_vec;
+    struct iovec *vec;
+    abi_ulong total_len, max_len;
+    int i;
+    int err = 0;
+    bool bad_address = false;
+
+    if (count == 0) {
+        errno = 0;
+        return NULL;
+    }
+    if (count > IOV_MAX) {
+        errno = EINVAL;
+        return NULL;
+    }
+
+    vec = g_try_new0(struct iovec, count);
+    if (vec == NULL) {
+        errno = ENOMEM;
+        return NULL;
+    }
+
+    target_vec = lock_user(VERIFY_READ, target_addr,
+                           count * sizeof(struct target_iovec), 1);
+    if (target_vec == NULL) {
+        err = EFAULT;
+        goto fail2;
+    }
+
+    /* ??? If host page size > target page size, this will result in a
+       value larger than what we can actually support.  */
+    max_len = 0x7fffffff & TARGET_PAGE_MASK;
+    total_len = 0;
+
+    for (i = 0; i < count; i++) {
+        abi_ulong base = tswapal(target_vec[i].iov_base);
+        abi_long len = tswapal(target_vec[i].iov_len);
+
+        if (len < 0) {
+            err = EINVAL;
+            goto fail;
+        } else if (len == 0) {
+            /* Zero length pointer is ignored.  */
+            vec[i].iov_base = 0;
+        } else {
+            vec[i].iov_base = lock_user(type, base, len, copy);
+            /* If the first buffer pointer is bad, this is a fault.  But
+             * subsequent bad buffers will result in a partial write; this
+             * is realized by filling the vector with null pointers and
+             * zero lengths. */
+            if (!vec[i].iov_base) {
+                if (i == 0) {
+                    err = EFAULT;
+                    goto fail;
+                } else {
+                    bad_address = true;
+                }
+            }
+            if (bad_address) {
+                len = 0;
+            }
+            if (len > max_len - total_len) {
+                len = max_len - total_len;
+            }
+        }
+        if ((len == 4096) && (qemu_real_host_page_size > len)) {
+            qemu_log_mask(LAT_LOG_SYSCALL,
+                    "[LATX_SYSCALL] struct iovec[%d]->iov_len = " TARGET_FMT_ld
+                    ";//host page size > target page size.\n", i, len);
+        }
+        vec[i].iov_len = len;
+        total_len += len;
+    }
+
+    unlock_user(target_vec, target_addr, 0);
+    return vec;
+
+ fail:
+    while (--i >= 0) {
+        if (tswapal(target_vec[i].iov_len) > 0) {
+            unlock_user(vec[i].iov_base, tswapal(target_vec[i].iov_base), 0);
+        }
+    }
+    unlock_user(target_vec, target_addr, 0);
+ fail2:
+    g_free(vec);
+    errno = err;
+    return NULL;
+}
+
+static void unlock_iovec(struct iovec *vec, abi_ulong target_addr,
+                         abi_ulong count, int copy)
+{
+    struct target_iovec *target_vec;
+    int i;
+
+    target_vec = lock_user(VERIFY_READ, target_addr,
+                           count * sizeof(struct target_iovec), 1);
+    if (target_vec) {
+        for (i = 0; i < count; i++) {
+            abi_ulong base = tswapal(target_vec[i].iov_base);
+            abi_long len = tswapal(target_vec[i].iov_len);
+            if (len < 0) {
+                break;
+            }
+            unlock_user(vec[i].iov_base, base, copy ? vec[i].iov_len : 0);
+        }
+        unlock_user(target_vec, target_addr, 0);
+    }
+
+    g_free(vec);
+}
+
+/*
+ * Convert an iovec whose buffers belong to another translated process.
+ * Only the iovec array itself is in the caller's address space; the kernel
+ * must validate and access the remote buffers in the process identified by
+ * process_vm_readv/process_vm_writev.
+ */
+static struct iovec *lock_remote_iovec(pid_t pid, abi_ulong target_addr,
+                                       abi_ulong count, int type)
+{
+    struct target_iovec *target_vec;
+    struct iovec *vec;
+    abi_ulong total_len, max_len;
+    unsigned int i;
+    bool bad_address = false;
+
+    if (count == 0) {
+        errno = 0;
+        return NULL;
+    }
+    if (count > IOV_MAX) {
+        errno = EINVAL;
+        return NULL;
+    }
+
+    vec = g_try_new0(struct iovec, count);
+    if (vec == NULL) {
+        errno = ENOMEM;
+        return NULL;
+    }
+
+    target_vec = lock_user(VERIFY_READ, target_addr,
+                           count * sizeof(struct target_iovec), 1);
+    if (target_vec == NULL) {
+        g_free(vec);
+        errno = EFAULT;
+        return NULL;
+    }
+
+    max_len = 0x7fffffff & TARGET_PAGE_MASK;
+    total_len = 0;
+    for (i = 0; i < count; i++) {
+        abi_ulong base = tswapal(target_vec[i].iov_base);
+        abi_long len = tswapal(target_vec[i].iov_len);
+
+        if (len < 0) {
+            unlock_user(target_vec, target_addr, 0);
+            g_free(vec);
+            errno = EINVAL;
+            return NULL;
+        }
+        if (len > max_len - total_len) {
+            len = max_len - total_len;
+        }
+
+        if (bad_address) {
+            len = 0;
+            vec[i].iov_base = NULL;
+        } else if (len == 0) {
+            vec[i].iov_base = NULL;
+        } else if (guest_range_valid_untagged(base, len)) {
+            abi_ulong checked = 0;
+
+            vec[i].iov_base = g2h_untagged(base);
+            while (checked < len) {
+                abi_ulong addr = base + checked;
+                abi_ulong chunk = MIN((abi_ulong)TARGET_PAGE_SIZE -
+                                      (addr & ~TARGET_PAGE_MASK),
+                                      (abi_ulong)len - checked);
+                int flags;
+
+                if (page_get_flags_remote(pid, addr, &flags) &&
+                    (flags & type) != type) {
+                    break;
+                }
+                checked += chunk;
+            }
+            if (checked < len) {
+                bad_address = true;
+                if (checked == 0) {
+                    vec[i].iov_base = (void *)(uintptr_t)-1;
+                } else {
+                    len = checked;
+                }
+            }
+        } else {
+            /* Let the kernel preserve partial-transfer and EFAULT semantics. */
+            vec[i].iov_base = (void *)(uintptr_t)-1;
+            bad_address = true;
+        }
+        vec[i].iov_len = len;
+        total_len += len;
+    }
+
+    unlock_user(target_vec, target_addr, 0);
+    return vec;
+}
+
+static struct iovec *lock_iovec_remap(int type, abi_ulong target_addr,
+                                abi_ulong count, int copy)
+{
+    struct target_iovec *target_vec;
+    struct iovec *vec;
+    abi_ulong total_len, max_len;
+    int i;
+    int err = 0;
+    bool bad_address = false;
+
+    if (count == 0) {
+        errno = 0;
+        return NULL;
+    }
+    if (count > IOV_MAX) {
+        errno = EINVAL;
+        return NULL;
+    }
+
+    vec = g_try_new0(struct iovec, count);
+    if (vec == NULL) {
+        errno = ENOMEM;
+        return NULL;
+    }
+
+    target_vec = lock_user(VERIFY_READ, target_addr,
+                           count * sizeof(struct target_iovec), 1);
+    if (target_vec == NULL) {
+        err = EFAULT;
+        goto fail2;
+    }
+
+    /* ??? If host page size > target page size, this will result in a
+       value larger than what we can actually support.  */
+    max_len = 0x7fffffff & TARGET_PAGE_MASK;
+    total_len = 0;
+
+    for (i = 0; i < count; i++) {
+        abi_ulong base = tswapal(target_vec[i].iov_base);
+        abi_long len = tswapal(target_vec[i].iov_len);
+
+        if (len < 0) {
+            err = EINVAL;
+            goto fail;
+        } else if (len == 0) {
+            /* Zero length pointer is ignored.  */
+            vec[i].iov_base = 0;
+        } else {
+            vec[i].iov_base = lock_user_remap(type, base, len, copy);
+            /* If the first buffer pointer is bad, this is a fault.  But
+             * subsequent bad buffers will result in a partial write; this
+             * is realized by filling the vector with null pointers and
+             * zero lengths. */
+            if (!vec[i].iov_base) {
+                if (i == 0) {
+                    err = EFAULT;
+                    goto fail;
+                } else {
+                    bad_address = true;
+                }
+            }
+            if (bad_address) {
+                len = 0;
+            }
+            if (len > max_len - total_len) {
+                len = max_len - total_len;
+            }
+        }
+        if ((len == 4096) && (qemu_real_host_page_size > len)) {
+            qemu_log_mask(LAT_LOG_SYSCALL,
+                    "[LATX_SYSCALL] struct iovec[%d]->iov_len = " TARGET_FMT_ld
+                    ";//host page size > target page size.\n", i, len);
+        }
+        vec[i].iov_len = len;
+        total_len += len;
+    }
+
+    unlock_user(target_vec, target_addr, 0);
+    return vec;
+
+ fail:
+    while (--i >= 0) {
+        if (tswapal(target_vec[i].iov_len) > 0) {
+            unlock_user_remap(vec[i].iov_base, tswapal(target_vec[i].iov_base), 0);
+        }
+    }
+    unlock_user(target_vec, target_addr, 0);
+ fail2:
+    g_free(vec);
+    errno = err;
+    return NULL;
+}
+
+static void unlock_iovec_remap(struct iovec *vec, abi_ulong target_addr,
+                         abi_ulong count, int copy)
+{
+    struct target_iovec *target_vec;
+    int i;
+
+    target_vec = lock_user(VERIFY_READ, target_addr,
+                           count * sizeof(struct target_iovec), 1);
+    if (target_vec) {
+        for (i = 0; i < count; i++) {
+            abi_ulong base = tswapal(target_vec[i].iov_base);
+            abi_long len = tswapal(target_vec[i].iov_len);
+            if (len < 0) {
+                break;
+            }
+            unlock_user_remap(vec[i].iov_base, base, copy ? vec[i].iov_len : 0);
+        }
+        unlock_user(target_vec, target_addr, 0);
+    }
+
+    g_free(vec);
+}
+
+static inline int target_to_host_sock_type(int *type)
+{
+    int host_type = 0;
+    int target_type = *type;
+
+    switch (target_type & TARGET_SOCK_TYPE_MASK) {
+    case TARGET_SOCK_DGRAM:
+        host_type = SOCK_DGRAM;
+        break;
+    case TARGET_SOCK_STREAM:
+        host_type = SOCK_STREAM;
+        break;
+    default:
+        host_type = target_type & TARGET_SOCK_TYPE_MASK;
+        break;
+    }
+    if (target_type & TARGET_SOCK_CLOEXEC) {
+#if defined(SOCK_CLOEXEC)
+        host_type |= SOCK_CLOEXEC;
+#else
+        return -TARGET_EINVAL;
+#endif
+    }
+    if (target_type & TARGET_SOCK_NONBLOCK) {
+#if defined(SOCK_NONBLOCK)
+        host_type |= SOCK_NONBLOCK;
+#elif !defined(O_NONBLOCK)
+        return -TARGET_EINVAL;
+#endif
+    }
+    *type = host_type;
+    return 0;
+}
+
+/* Try to emulate socket type flags after socket creation.  */
+static int sock_flags_fixup(int fd, int target_type)
+{
+#if !defined(SOCK_NONBLOCK) && defined(O_NONBLOCK)
+    if (target_type & TARGET_SOCK_NONBLOCK) {
+        int flags = fcntl(fd, F_GETFL);
+        if (fcntl(fd, F_SETFL, O_NONBLOCK | flags) == -1) {
+            close(fd);
+            return -TARGET_EINVAL;
+        }
+    }
+#endif
+    return fd;
+}
+
+/* do_socket() Must return target values and target errnos. */
+static abi_long do_socket(int domain, int type, int protocol)
+{
+    int target_type = type;
+    int ret;
+
+    ret = target_to_host_sock_type(&type);
+    if (ret) {
+        return ret;
+    }
+
+    if (domain == PF_NETLINK && !(
+#ifdef CONFIG_RTNETLINK
+         protocol == NETLINK_ROUTE ||
+#endif
+         protocol == NETLINK_KOBJECT_UEVENT ||
+         protocol == NETLINK_AUDIT ||
+         protocol == NETLINK_NETFILTER ||
+         protocol == NETLINK_CRYPTO)) {
+        qemu_log_mask(LOG_UNIMP, "Unsupported socket, protocol = %d\n", protocol);
+        return -TARGET_EPROTONOSUPPORT;
+    }
+
+    if (domain == AF_PACKET ||
+        (domain == AF_INET && type == SOCK_PACKET)) {
+        protocol = tswap16(protocol);
+    }
+
+    ret = get_errno(socket(domain, type, protocol));
+    if (ret >= 0) {
+        ret = sock_flags_fixup(ret, target_type);
+        if (type == SOCK_PACKET) {
+            /* Manage an obsolete case :
+             * if socket type is SOCK_PACKET, bind by name
+             */
+            fd_trans_register(ret, &target_packet_trans);
+        } else if (domain == PF_NETLINK) {
+            switch (protocol) {
+#ifdef CONFIG_RTNETLINK
+            case NETLINK_ROUTE:
+                fd_trans_register(ret, &target_netlink_route_trans);
+                break;
+#endif
+            case NETLINK_KOBJECT_UEVENT:
+                /* nothing to do: messages are strings */
+                break;
+            case NETLINK_AUDIT:
+                fd_trans_register(ret, &target_netlink_audit_trans);
+                break;
+            case NETLINK_CRYPTO:
+                fd_trans_register(ret, &target_netlink_crypto_trans);
+                break;
+            case NETLINK_NETFILTER:
+                break;
+            default:
+                g_assert_not_reached();
+            }
+        }
+    }
+    return ret;
+}
+
+/* do_bind() Must return target values and target errnos. */
+static abi_long do_bind(int sockfd, abi_ulong target_addr,
+                        socklen_t addrlen)
+{
+    void *addr;
+    abi_long ret;
+
+    if ((int)addrlen < 0) {
+        return -TARGET_EINVAL;
+    }
+
+    addr = alloca(addrlen+1);
+
+    ret = target_to_host_sockaddr(sockfd, addr, target_addr, addrlen);
+    if (ret)
+        return ret;
+
+    return get_errno(bind(sockfd, addr, addrlen));
+}
+
+/* do_connect() Must return target values and target errnos. */
+static abi_long do_connect(int sockfd, abi_ulong target_addr,
+                           socklen_t addrlen)
+{
+    void *addr;
+    abi_long ret;
+
+    if ((int)addrlen < 0) {
+        return -TARGET_EINVAL;
+    }
+
+    addr = alloca(addrlen+1);
+
+    ret = target_to_host_sockaddr(sockfd, addr, target_addr, addrlen);
+    if (ret)
+        return ret;
+
+    return get_errno(safe_connect(sockfd, addr, addrlen));
+}
+
+#define BUFF_4K 4096
+#define BUFF_16K 16384
+static __thread struct nlmsghdr *pre_nlmh;
+static __thread void* buf;
+static __thread abi_long all_len;
+
+static void reset_16k_buf(void)
+{
+    free(buf);
+    buf = NULL;
+    pre_nlmh = NULL;
+    all_len = 0;
+}
+
+static void set_16k_buf(struct msghdr *msg)
+{
+    buf = malloc(BUFF_16K);
+    assert(buf);
+    msg->msg_iov->iov_len = BUFF_16K;
+    msg->msg_iov->iov_base = buf;
+    pre_nlmh = buf;
+}
+
+static abi_long get_from_16k_buf(struct msghdr *msg)
+{
+#ifdef LATX_DEBUG
+    struct sockaddr *saddr = msg->msg_name;
+    /* Fix me! */
+    /* Need make msg_name={sa_family=AF_NETLINK, nl_pid=0, nl_groups=00000000}. */
+    assert(sockaddr && sockaddr->sa_family == AF_NETLINK);
+#endif
+    struct nlmsghdr *nlmh = pre_nlmh;
+    abi_long curr_nlmh_len = 0;
+    for (;NLMSG_OK (nlmh, all_len);
+            nlmh = (struct nlmsghdr *) NLMSG_NEXT (nlmh, all_len)) {
+        if (curr_nlmh_len + nlmh->nlmsg_len > BUFF_4K) {
+            break;
+        }
+        curr_nlmh_len += nlmh->nlmsg_len;
+    }
+    memcpy(msg->msg_iov->iov_base, pre_nlmh, BUFF_4K);
+    if (NLMSG_OK(nlmh, all_len)) {
+        pre_nlmh = nlmh;
+    } else {
+        reset_16k_buf();
+    }
+    return curr_nlmh_len;
+}
+
+static int get_socket_domain(int sockfd) {
+    int socket_domain;
+    socklen_t optlen = sizeof(socket_domain);
+    if (getsockopt(sockfd, SOL_SOCKET, SO_DOMAIN, &socket_domain, &optlen) == -1) {
+        return -1;
+    }
+    return socket_domain;
+}
+
+static bool buf_need_fix(struct msghdr *msg, int fd)
+{
+    int socket_domain = get_socket_domain(fd);
+    if (socket_domain == AF_NETLINK && msg->msg_iov->iov_len == BUFF_4K
+            && sysconf(_SC_PAGESIZE) == BUFF_16K) {
+        return true;
+    }
+    return false;
+}
+
+/* do_sendrecvmsg_locked() Must return target values and target errnos. */
+static abi_long do_sendrecvmsg_locked(int fd, struct target_msghdr *msgp,
+                                      int flags, int send)
+{
+    abi_long ret, len;
+    struct msghdr msg;
+    abi_ulong count;
+    struct iovec *vec;
+    abi_ulong target_vec;
+    TargetFdDataFunc trans;
+
+    if (msgp->msg_name) {
+        msg.msg_namelen = tswap32(msgp->msg_namelen);
+        msg.msg_name = alloca(msg.msg_namelen+1);
+        ret = target_to_host_sockaddr(fd, msg.msg_name,
+                                      tswapal(msgp->msg_name),
+                                      msg.msg_namelen);
+        if (ret == -TARGET_EFAULT) {
+            /* For connected sockets msg_name and msg_namelen must
+             * be ignored, so returning EFAULT immediately is wrong.
+             * Instead, pass a bad msg_name to the host kernel, and
+             * let it decide whether to return EFAULT or not.
+             */
+            msg.msg_name = (void *)-1;
+        } else if (ret) {
+            goto out2;
+        }
+    } else {
+        msg.msg_name = NULL;
+        msg.msg_namelen = 0;
+    }
+    msg.msg_controllen = 2 * tswapal(msgp->msg_controllen);
+    msg.msg_control = alloca(msg.msg_controllen);
+    memset(msg.msg_control, 0, msg.msg_controllen);
+
+    msg.msg_flags = tswap32(msgp->msg_flags);
+
+    count = tswapal(msgp->msg_iovlen);
+    target_vec = tswapal(msgp->msg_iov);
+
+    if (count > IOV_MAX) {
+        /* sendrcvmsg returns a different errno for this condition than
+         * readv/writev, so we must catch it here before lock_iovec() does.
+         */
+        ret = -TARGET_EMSGSIZE;
+        goto out2;
+    }
+
+    vec = lock_iovec(send ? VERIFY_READ : VERIFY_WRITE,
+                     target_vec, count, send);
+    msg.msg_iovlen = count;
+    msg.msg_iov = vec;
+
+    if (send) {
+        trans = fd_trans_target_to_host_data(fd);
+        if (trans) {
+            void *host_msg;
+
+            host_msg = g_malloc(msg.msg_iov->iov_len);
+            memcpy(host_msg, msg.msg_iov->iov_base, msg.msg_iov->iov_len);
+            ret = trans(host_msg, msg.msg_iov->iov_len);
+            if (ret >= 0) {
+                msg.msg_iov->iov_base = host_msg;
+                ret = get_errno(safe_sendmsg(fd, &msg, flags));
+            }
+            g_free(host_msg);
+        } else {
+            ret = target_to_host_cmsg(&msg, msgp);
+            if (ret == 0) {
+                ret = get_errno(safe_sendmsg(fd, &msg, flags));
+            }
+        }
+    } else {
+        bool need_fix = buf_need_fix(&msg, fd);
+        if (need_fix) {
+            if (!buf) {
+                void *iov_base = msg.msg_iov->iov_base;
+                size_t iov_len = msg.msg_iov->iov_len;
+                set_16k_buf(&msg);
+                ret = get_errno(safe_recvmsg(fd, &msg, flags));
+                msg.msg_iov->iov_base = iov_base;
+                msg.msg_iov->iov_len = iov_len;
+                if (is_error(ret)) {
+                    reset_16k_buf();
+                    goto out;
+                }
+                all_len = ret;
+            }
+            ret =  get_from_16k_buf(&msg);
+        } else {
+            ret = get_errno(safe_recvmsg(fd, &msg, flags));
+        }
+
+        if (!is_error(ret)) {
+            len = ret;
+            trans = fd_trans_host_to_target_data(fd);
+            if (trans) {
+                ret = trans(msg.msg_iov->iov_base,
+                            MIN(msg.msg_iov->iov_len, len));
+            }
+            if (!is_error(ret)) {
+                ret = host_to_target_cmsg(msgp, &msg);
+            }
+            if (!is_error(ret)) {
+                msgp->msg_namelen = tswap32(msg.msg_namelen);
+                msgp->msg_flags |= tswap32(msg.msg_flags);
+                if (msg.msg_name != NULL && msg.msg_name != (void *)-1) {
+                    ret = host_to_target_sockaddr(tswapal(msgp->msg_name),
+                                    msg.msg_name, msg.msg_namelen);
+                    if (ret) {
+                        goto out;
+                    }
+                }
+                ret = len;
+            }
+        }
+    }
+
+out:
+    unlock_iovec(vec, target_vec, count, !send);
+out2:
+    return ret;
+}
+
+static abi_long do_sendrecvmsg(int fd, abi_ulong target_msg,
+                               int flags, int send)
+{
+    abi_long ret;
+    struct target_msghdr *msgp;
+
+    if (!lock_user_struct(send ? VERIFY_READ : VERIFY_WRITE,
+                          msgp,
+                          target_msg,
+                          send ? 1 : 0)) {
+        return -TARGET_EFAULT;
+    }
+    ret = do_sendrecvmsg_locked(fd, msgp, flags, send);
+    unlock_user_struct(msgp, target_msg, send ? 0 : 1);
+    return ret;
+}
+
+/* We don't rely on the C library to have sendmmsg/recvmmsg support,
+ * so it might not have this *mmsg-specific flag either.
+ */
+#ifndef MSG_WAITFORONE
+#define MSG_WAITFORONE 0x10000
+#endif
+
+static abi_long do_sendrecvmmsg(int fd, abi_ulong target_msgvec,
+                                unsigned int vlen, unsigned int flags,
+                                int send, struct timespec *timeout)
+{
+    struct target_mmsghdr *mmsgp;
+    abi_long ret = 0;
+
+    if (vlen > UIO_MAXIOV) {
+        vlen = UIO_MAXIOV;
+    }
+
+    mmsgp = lock_user(VERIFY_WRITE, target_msgvec, sizeof(*mmsgp) * vlen, 1);
+    if (!mmsgp) {
+        return -TARGET_EFAULT;
+    }
+
+#ifdef TARGET_X86_64
+    /* direct syscall (only for 64bit guest and host) */
+    if(send==0) {
+        ret = get_errno(safe_recvmmsg(fd, (struct msghdr *)mmsgp, vlen, flags, timeout));
+    } else {
+        ret = get_errno(safe_sendmmsg(fd, (struct msghdr *)mmsgp, vlen, flags));
+    }
+    unlock_user(mmsgp, target_msgvec, sizeof(*mmsgp) * vlen);
+	return ret;
+#else
+    /* use sendmsg/recvmsg to emulate sendmmsg/recvmmsg */
+    int i;
+    for (i = 0; i < vlen; i++) {
+        ret = do_sendrecvmsg_locked(fd, &mmsgp[i].msg_hdr, flags, send);
+        if (is_error(ret)) {
+            break;
+        }
+        mmsgp[i].msg_len = tswap32(ret);
+        /* MSG_WAITFORONE turns on MSG_DONTWAIT after one packet */
+        if (flags & MSG_WAITFORONE) {
+            flags |= MSG_DONTWAIT;
+        }
+    }
+
+    /* timeout used only in recvmmsg but not supported */
+	if (timeout) {
+#ifdef CONFIG_LATX_DEBUG
+        qemu_log_mask(LAT_LOG_SYSCALL,
+                "[LATX_SYSCALL] do_sendrecvmmsg error fd " TARGET_FMT_ld
+                " with timeout not supported\n", fd);
+#endif
+	}
+
+    unlock_user(mmsgp, target_msgvec, sizeof(*mmsgp) * i);
+
+    /* Return number of datagrams sent if we sent any at all;
+     * otherwise return the error.
+     */
+    if (i) {
+        return i;
+    }
+    return ret;
+#endif
+}
+
+/* do_accept4() Must return target values and target errnos. */
+static abi_long do_accept4(int fd, abi_ulong target_addr,
+                           abi_ulong target_addrlen_addr, int flags)
+{
+    socklen_t addrlen, ret_addrlen;
+    void *addr;
+    abi_long ret;
+    int host_flags;
+
+    host_flags = target_to_host_bitmask(flags, fcntl_flags_tbl);
+
+    if (target_addr == 0) {
+        return get_errno(safe_accept4(fd, NULL, NULL, host_flags));
+    }
+
+    /* linux returns EFAULT if addrlen pointer is invalid */
+    if (get_user_u32(addrlen, target_addrlen_addr))
+        return -TARGET_EFAULT;
+
+    if ((int)addrlen < 0) {
+        return -TARGET_EINVAL;
+    }
+
+    if (!page_check_range((target_ulong)target_addr, addrlen, 0)) {
+        return -TARGET_EINVAL;
+    }
+
+    if (!access_ok(thread_cpu, VERIFY_WRITE, target_addr, addrlen)) {
+        return -TARGET_EFAULT;
+    }
+
+    addr = alloca(addrlen);
+
+    ret_addrlen = addrlen;
+    ret = get_errno(safe_accept4(fd, addr, &ret_addrlen, host_flags));
+    if (!is_error(ret)) {
+        host_to_target_sockaddr(target_addr, addr, MIN(addrlen, ret_addrlen));
+        if (put_user_u32(ret_addrlen, target_addrlen_addr)) {
+            ret = -TARGET_EFAULT;
+        }
+    }
+    return ret;
+}
+
+/* do_getpeername() Must return target values and target errnos. */
+static abi_long do_getpeername(int fd, abi_ulong target_addr,
+                               abi_ulong target_addrlen_addr)
+{
+    socklen_t addrlen, ret_addrlen;
+    void *addr;
+    abi_long ret;
+
+    if (get_user_u32(addrlen, target_addrlen_addr))
+        return -TARGET_EFAULT;
+
+    if ((int)addrlen < 0) {
+        return -TARGET_EINVAL;
+    }
+
+    if (!access_ok(thread_cpu, VERIFY_WRITE, target_addr, addrlen)) {
+        return -TARGET_EFAULT;
+    }
+
+    addr = alloca(addrlen);
+
+    ret_addrlen = addrlen;
+    ret = get_errno(getpeername(fd, addr, &ret_addrlen));
+    if (!is_error(ret)) {
+        host_to_target_sockaddr(target_addr, addr, MIN(addrlen, ret_addrlen));
+        if (put_user_u32(ret_addrlen, target_addrlen_addr)) {
+            ret = -TARGET_EFAULT;
+        }
+    }
+    return ret;
+}
+
+/* do_getsockname() Must return target values and target errnos. */
+static abi_long do_getsockname(int fd, abi_ulong target_addr,
+                               abi_ulong target_addrlen_addr)
+{
+    socklen_t addrlen, ret_addrlen;
+    void *addr;
+    abi_long ret;
+
+    if (get_user_u32(addrlen, target_addrlen_addr))
+        return -TARGET_EFAULT;
+
+    if ((int)addrlen < 0) {
+        return -TARGET_EINVAL;
+    }
+
+    if (!access_ok(thread_cpu, VERIFY_WRITE, target_addr, addrlen)) {
+        return -TARGET_EFAULT;
+    }
+
+    addr = alloca(addrlen);
+
+    ret_addrlen = addrlen;
+    ret = get_errno(getsockname(fd, addr, &ret_addrlen));
+    if (!is_error(ret)) {
+        host_to_target_sockaddr(target_addr, addr, MIN(addrlen, ret_addrlen));
+        if (put_user_u32(ret_addrlen, target_addrlen_addr)) {
+            ret = -TARGET_EFAULT;
+        }
+    }
+    return ret;
+}
+
+/* do_socketpair() Must return target values and target errnos. */
+static abi_long do_socketpair(int domain, int type, int protocol,
+                              abi_ulong target_tab_addr)
+{
+    int tab[2];
+    abi_long ret;
+
+    target_to_host_sock_type(&type);
+
+    ret = get_errno(socketpair(domain, type, protocol, tab));
+    if (!is_error(ret)) {
+        if (put_user_s32(tab[0], target_tab_addr)
+            || put_user_s32(tab[1], target_tab_addr + sizeof(tab[0])))
+            ret = -TARGET_EFAULT;
+    }
+    return ret;
+}
+
+/* do_sendto() Must return target values and target errnos. */
+static abi_long do_sendto(int fd, abi_ulong msg, size_t len, int flags,
+                          abi_ulong target_addr, socklen_t addrlen)
+{
+    void *addr;
+    void *host_msg;
+    void *copy_msg = NULL;
+    abi_long ret;
+    TargetFdDataFunc trans;
+
+    if ((int)addrlen < 0) {
+        return -TARGET_EINVAL;
+    }
+
+    host_msg = lock_user(VERIFY_READ, msg, len, 1);
+    if (!host_msg)
+        return -TARGET_EFAULT;
+    trans = fd_trans_target_to_host_data(fd);
+    if (trans) {
+        copy_msg = host_msg;
+        host_msg = g_malloc(len);
+        memcpy(host_msg, copy_msg, len);
+        ret = trans(host_msg, len);
+        if (ret < 0) {
+            goto fail;
+        }
+    }
+    if (target_addr) {
+        addr = alloca(addrlen+1);
+        ret = target_to_host_sockaddr(fd, addr, target_addr, addrlen);
+        if (ret) {
+            goto fail;
+        }
+        ret = get_errno(safe_sendto(fd, host_msg, len, flags, addr, addrlen));
+    } else {
+        ret = get_errno(safe_sendto(fd, host_msg, len, flags, NULL, 0));
+    }
+fail:
+    if (copy_msg) {
+        g_free(host_msg);
+        host_msg = copy_msg;
+    }
+    unlock_user(host_msg, msg, 0);
+    return ret;
+}
+
+/* do_recvfrom() Must return target values and target errnos. */
+static abi_long do_recvfrom(int fd, abi_ulong msg, size_t len, int flags,
+                            abi_ulong target_addr,
+                            abi_ulong target_addrlen)
+{
+    socklen_t addrlen, ret_addrlen;
+    void *addr;
+    void *host_msg;
+    abi_long ret;
+    TargetFdDataFunc trans;
+
+    if (!msg) {
+        host_msg = NULL;
+    } else {
+        host_msg = lock_user(VERIFY_WRITE, msg, len, 0);
+        if (!host_msg) {
+            return -TARGET_EFAULT;
+        }
+    }
+    if (target_addr) {
+        if (get_user_u32(addrlen, target_addrlen)) {
+            ret = -TARGET_EFAULT;
+            goto fail;
+        }
+        if ((int)addrlen < 0) {
+            ret = -TARGET_EINVAL;
+            goto fail;
+        }
+        addr = alloca(addrlen);
+        ret_addrlen = addrlen;
+        ret = get_errno(safe_recvfrom(fd, host_msg, len, flags,
+                                      addr, &ret_addrlen));
+    } else {
+        addr = NULL; /* To keep compiler quiet.  */
+        addrlen = 0; /* To keep compiler quiet.  */
+        ret = get_errno(safe_recvfrom(fd, host_msg, len, flags, NULL, 0));
+    }
+    if (!is_error(ret)) {
+        trans = fd_trans_host_to_target_data(fd);
+        if (trans) {
+            abi_long trans_ret = trans(host_msg, MIN(ret, len));
+            if (is_error(trans_ret)) {
+                ret = trans_ret;
+                goto fail;
+            }
+        }
+        if (target_addr) {
+            host_to_target_sockaddr(target_addr, addr,
+                                    MIN(addrlen, ret_addrlen));
+            if (put_user_u32(ret_addrlen, target_addrlen)) {
+                ret = -TARGET_EFAULT;
+                goto fail;
+            }
+        }
+        unlock_user(host_msg, msg, len);
+    } else {
+fail:
+        unlock_user(host_msg, msg, 0);
+    }
+    return ret;
+}
+
+#ifdef TARGET_NR_socketcall
+/* do_socketcall() must return target values and target errnos. */
+static abi_long do_socketcall(int num, abi_ulong vptr)
+{
+    static const unsigned nargs[] = { /* number of arguments per operation */
+        [TARGET_SYS_SOCKET] = 3,      /* domain, type, protocol */
+        [TARGET_SYS_BIND] = 3,        /* fd, addr, addrlen */
+        [TARGET_SYS_CONNECT] = 3,     /* fd, addr, addrlen */
+        [TARGET_SYS_LISTEN] = 2,      /* fd, backlog */
+        [TARGET_SYS_ACCEPT] = 3,      /* fd, addr, addrlen */
+        [TARGET_SYS_GETSOCKNAME] = 3, /* fd, addr, addrlen */
+        [TARGET_SYS_GETPEERNAME] = 3, /* fd, addr, addrlen */
+        [TARGET_SYS_SOCKETPAIR] = 4,  /* domain, type, protocol, tab */
+        [TARGET_SYS_SEND] = 4,        /* fd, msg, len, flags */
+        [TARGET_SYS_RECV] = 4,        /* fd, msg, len, flags */
+        [TARGET_SYS_SENDTO] = 6,      /* fd, msg, len, flags, addr, addrlen */
+        [TARGET_SYS_RECVFROM] = 6,    /* fd, msg, len, flags, addr, addrlen */
+        [TARGET_SYS_SHUTDOWN] = 2,    /* fd, how */
+        [TARGET_SYS_SETSOCKOPT] = 5,  /* fd, level, optname, optval, optlen */
+        [TARGET_SYS_GETSOCKOPT] = 5,  /* fd, level, optname, optval, optlen */
+        [TARGET_SYS_SENDMSG] = 3,     /* fd, msg, flags */
+        [TARGET_SYS_RECVMSG] = 3,     /* fd, msg, flags */
+        [TARGET_SYS_ACCEPT4] = 4,     /* fd, addr, addrlen, flags */
+        [TARGET_SYS_RECVMMSG] = 4,    /* fd, msgvec, vlen, flags */
+        [TARGET_SYS_SENDMMSG] = 4,    /* fd, msgvec, vlen, flags */
+    };
+    abi_long a[6]; /* max 6 args */
+    unsigned i;
+
+    /* check the range of the first argument num */
+    /* (TARGET_SYS_SENDMMSG is the highest among TARGET_SYS_xxx) */
+    if (num < 1 || num > TARGET_SYS_SENDMMSG) {
+        return -TARGET_EINVAL;
+    }
+    /* ensure we have space for args */
+    if (nargs[num] > ARRAY_SIZE(a)) {
+        return -TARGET_EINVAL;
+    }
+    /* collect the arguments in a[] according to nargs[] */
+    for (i = 0; i < nargs[num]; ++i) {
+        if (get_user_ual(a[i], vptr + i * sizeof(abi_long)) != 0) {
+            return -TARGET_EFAULT;
+        }
+    }
+    /* now when we have the args, invoke the appropriate underlying function */
+    switch (num) {
+    case TARGET_SYS_SOCKET: /* domain, type, protocol */
+        return do_socket(a[0], a[1], a[2]);
+    case TARGET_SYS_BIND: /* sockfd, addr, addrlen */
+        return do_bind(a[0], a[1], a[2]);
+    case TARGET_SYS_CONNECT: /* sockfd, addr, addrlen */
+        return do_connect(a[0], a[1], a[2]);
+    case TARGET_SYS_LISTEN: /* sockfd, backlog */
+        return get_errno(listen(a[0], a[1]));
+    case TARGET_SYS_ACCEPT: /* sockfd, addr, addrlen */
+        return do_accept4(a[0], a[1], a[2], 0);
+    case TARGET_SYS_GETSOCKNAME: /* sockfd, addr, addrlen */
+        return do_getsockname(a[0], a[1], a[2]);
+    case TARGET_SYS_GETPEERNAME: /* sockfd, addr, addrlen */
+        return do_getpeername(a[0], a[1], a[2]);
+    case TARGET_SYS_SOCKETPAIR: /* domain, type, protocol, tab */
+        return do_socketpair(a[0], a[1], a[2], a[3]);
+    case TARGET_SYS_SEND: /* sockfd, msg, len, flags */
+        return do_sendto(a[0], a[1], a[2], a[3], 0, 0);
+    case TARGET_SYS_RECV: /* sockfd, msg, len, flags */
+        return do_recvfrom(a[0], a[1], a[2], a[3], 0, 0);
+    case TARGET_SYS_SENDTO: /* sockfd, msg, len, flags, addr, addrlen */
+        return do_sendto(a[0], a[1], a[2], a[3], a[4], a[5]);
+    case TARGET_SYS_RECVFROM: /* sockfd, msg, len, flags, addr, addrlen */
+        return do_recvfrom(a[0], a[1], a[2], a[3], a[4], a[5]);
+    case TARGET_SYS_SHUTDOWN: /* sockfd, how */
+        return get_errno(shutdown(a[0], a[1]));
+    case TARGET_SYS_SETSOCKOPT: /* sockfd, level, optname, optval, optlen */
+        return do_setsockopt(a[0], a[1], a[2], a[3], a[4]);
+    case TARGET_SYS_GETSOCKOPT: /* sockfd, level, optname, optval, optlen */
+        return do_getsockopt(a[0], a[1], a[2], a[3], a[4]);
+    case TARGET_SYS_SENDMSG: /* sockfd, msg, flags */
+        return do_sendrecvmsg(a[0], a[1], a[2], 1);
+    case TARGET_SYS_RECVMSG: /* sockfd, msg, flags */
+        return do_sendrecvmsg(a[0], a[1], a[2], 0);
+    case TARGET_SYS_ACCEPT4: /* sockfd, addr, addrlen, flags */
+        return do_accept4(a[0], a[1], a[2], a[3]);
+    case TARGET_SYS_RECVMMSG: /* sockfd, msgvec, vlen, flags */
+        return do_sendrecvmmsg(a[0], a[1], a[2], a[3], 0, (struct timespec *)(uintptr_t)a[4]);
+    case TARGET_SYS_SENDMMSG: /* sockfd, msgvec, vlen, flags */
+        return do_sendrecvmmsg(a[0], a[1], a[2], a[3], 1, NULL);
+    default:
+        qemu_log_mask(LOG_UNIMP, "Unsupported socketcall: %d\n", num);
+        return -TARGET_EINVAL;
+    }
+}
+#endif
+
+#ifndef TARGET_SEMID64_DS
+/* asm-generic version of this struct */
+struct target_semid64_ds
+{
+  struct target_ipc_perm sem_perm;
+  abi_ulong sem_otime;
+#if TARGET_ABI_BITS == 32
+  abi_ulong __unused1;
+#endif
+  abi_ulong sem_ctime;
+#if TARGET_ABI_BITS == 32
+  abi_ulong __unused2;
+#endif
+  abi_ulong sem_nsems;
+  abi_ulong __unused3;
+  abi_ulong __unused4;
+};
+#endif
+
+static inline abi_long target_to_host_ipc_perm(struct ipc_perm *host_ip,
+                                               abi_ulong target_addr)
+{
+    struct target_ipc_perm *target_ip;
+    struct target_semid64_ds *target_sd;
+
+    if (!lock_user_struct(VERIFY_READ, target_sd, target_addr, 1))
+        return -TARGET_EFAULT;
+    target_ip = &(target_sd->sem_perm);
+    host_ip->__key = tswap32(target_ip->__key);
+    host_ip->uid = tswap32(target_ip->uid);
+    host_ip->gid = tswap32(target_ip->gid);
+    host_ip->cuid = tswap32(target_ip->cuid);
+    host_ip->cgid = tswap32(target_ip->cgid);
+#if defined(TARGET_ALPHA) || defined(TARGET_MIPS) || defined(TARGET_PPC)
+    host_ip->mode = tswap32(target_ip->mode);
+#else
+    host_ip->mode = tswap16(target_ip->mode);
+#endif
+#if defined(TARGET_PPC)
+    host_ip->__seq = tswap32(target_ip->__seq);
+#else
+    host_ip->__seq = tswap16(target_ip->__seq);
+#endif
+    unlock_user_struct(target_sd, target_addr, 0);
+    return 0;
+}
+
+static inline abi_long host_to_target_ipc_perm(abi_ulong target_addr,
+                                               struct ipc_perm *host_ip)
+{
+    struct target_ipc_perm *target_ip;
+    struct target_semid64_ds *target_sd;
+
+    if (!lock_user_struct(VERIFY_WRITE, target_sd, target_addr, 0))
+        return -TARGET_EFAULT;
+    target_ip = &(target_sd->sem_perm);
+    target_ip->__key = tswap32(host_ip->__key);
+    target_ip->uid = tswap32(host_ip->uid);
+    target_ip->gid = tswap32(host_ip->gid);
+    target_ip->cuid = tswap32(host_ip->cuid);
+    target_ip->cgid = tswap32(host_ip->cgid);
+#if defined(TARGET_ALPHA) || defined(TARGET_MIPS) || defined(TARGET_PPC)
+    target_ip->mode = tswap32(host_ip->mode);
+#else
+    target_ip->mode = tswap16(host_ip->mode);
+#endif
+#if defined(TARGET_PPC)
+    target_ip->__seq = tswap32(host_ip->__seq);
+#else
+    target_ip->__seq = tswap16(host_ip->__seq);
+#endif
+    unlock_user_struct(target_sd, target_addr, 1);
+    return 0;
+}
+
+static inline abi_long target_to_host_semid_ds(struct semid_ds *host_sd,
+                                               abi_ulong target_addr)
+{
+    struct target_semid64_ds *target_sd;
+
+    if (!lock_user_struct(VERIFY_READ, target_sd, target_addr, 1))
+        return -TARGET_EFAULT;
+    if (target_to_host_ipc_perm(&(host_sd->sem_perm),target_addr))
+        return -TARGET_EFAULT;
+    host_sd->sem_nsems = tswapal(target_sd->sem_nsems);
+    host_sd->sem_otime = tswapal(target_sd->sem_otime);
+    host_sd->sem_ctime = tswapal(target_sd->sem_ctime);
+    unlock_user_struct(target_sd, target_addr, 0);
+    return 0;
+}
+
+static inline abi_long host_to_target_semid_ds(abi_ulong target_addr,
+                                               struct semid_ds *host_sd)
+{
+    struct target_semid64_ds *target_sd;
+
+    if (!lock_user_struct(VERIFY_WRITE, target_sd, target_addr, 0))
+        return -TARGET_EFAULT;
+    if (host_to_target_ipc_perm(target_addr,&(host_sd->sem_perm)))
+        return -TARGET_EFAULT;
+    target_sd->sem_nsems = tswapal(host_sd->sem_nsems);
+    target_sd->sem_otime = tswapal(host_sd->sem_otime);
+    target_sd->sem_ctime = tswapal(host_sd->sem_ctime);
+    unlock_user_struct(target_sd, target_addr, 1);
+    return 0;
+}
+
+struct target_seminfo {
+    int semmap;
+    int semmni;
+    int semmns;
+    int semmnu;
+    int semmsl;
+    int semopm;
+    int semume;
+    int semusz;
+    int semvmx;
+    int semaem;
+};
+
+static inline abi_long host_to_target_seminfo(abi_ulong target_addr,
+                                              struct seminfo *host_seminfo)
+{
+    struct target_seminfo *target_seminfo;
+    if (!lock_user_struct(VERIFY_WRITE, target_seminfo, target_addr, 0))
+        return -TARGET_EFAULT;
+    __put_user(host_seminfo->semmap, &target_seminfo->semmap);
+    __put_user(host_seminfo->semmni, &target_seminfo->semmni);
+    __put_user(host_seminfo->semmns, &target_seminfo->semmns);
+    __put_user(host_seminfo->semmnu, &target_seminfo->semmnu);
+    __put_user(host_seminfo->semmsl, &target_seminfo->semmsl);
+    __put_user(host_seminfo->semopm, &target_seminfo->semopm);
+    __put_user(host_seminfo->semume, &target_seminfo->semume);
+    __put_user(host_seminfo->semusz, &target_seminfo->semusz);
+    __put_user(host_seminfo->semvmx, &target_seminfo->semvmx);
+    __put_user(host_seminfo->semaem, &target_seminfo->semaem);
+    unlock_user_struct(target_seminfo, target_addr, 1);
+    return 0;
+}
+
+union semun {
+	int val;
+	struct semid_ds *buf;
+	unsigned short *array;
+	struct seminfo *__buf;
+};
+
+union target_semun {
+	int val;
+	abi_ulong buf;
+	abi_ulong array;
+	abi_ulong __buf;
+};
+
+static inline abi_long target_to_host_semarray(int semid, unsigned short **host_array,
+                                               abi_ulong target_addr)
+{
+    int nsems;
+    unsigned short *array;
+    union semun semun;
+    struct semid_ds semid_ds;
+    int i, ret;
+
+    semun.buf = &semid_ds;
+
+    ret = semctl(semid, 0, IPC_STAT, semun);
+    if (ret == -1)
+        return get_errno(ret);
+
+    nsems = semid_ds.sem_nsems;
+
+    *host_array = g_try_new(unsigned short, nsems);
+    if (!*host_array) {
+        return -TARGET_ENOMEM;
+    }
+    array = lock_user(VERIFY_READ, target_addr,
+                      nsems*sizeof(unsigned short), 1);
+    if (!array) {
+        g_free(*host_array);
+        return -TARGET_EFAULT;
+    }
+
+    for(i=0; i<nsems; i++) {
+        __get_user((*host_array)[i], &array[i]);
+    }
+    unlock_user(array, target_addr, 0);
+
+    return 0;
+}
+
+static inline abi_long host_to_target_semarray(int semid, abi_ulong target_addr,
+                                               unsigned short **host_array)
+{
+    int nsems;
+    unsigned short *array;
+    union semun semun;
+    struct semid_ds semid_ds;
+    int i, ret;
+
+    semun.buf = &semid_ds;
+
+    ret = semctl(semid, 0, IPC_STAT, semun);
+    if (ret == -1)
+        return get_errno(ret);
+
+    nsems = semid_ds.sem_nsems;
+
+    array = lock_user(VERIFY_WRITE, target_addr,
+                      nsems*sizeof(unsigned short), 0);
+    if (!array)
+        return -TARGET_EFAULT;
+
+    for(i=0; i<nsems; i++) {
+        __put_user((*host_array)[i], &array[i]);
+    }
+    g_free(*host_array);
+    unlock_user(array, target_addr, 1);
+
+    return 0;
+}
+
+static inline abi_long do_semctl(int semid, int semnum, int cmd,
+                                 abi_ulong target_arg)
+{
+    union target_semun target_su = { .buf = target_arg };
+    union semun arg;
+    struct semid_ds dsarg;
+    unsigned short *array = NULL;
+    struct seminfo seminfo;
+    abi_long ret = -TARGET_EINVAL;
+    abi_long err;
+    cmd &= 0xff;
+
+    switch( cmd ) {
+	case GETVAL:
+	case SETVAL:
+            /* In 64 bit cross-endian situations, we will erroneously pick up
+             * the wrong half of the union for the "val" element.  To rectify
+             * this, the entire 8-byte structure is byteswapped, followed by
+	     * a swap of the 4 byte val field. In other cases, the data is
+	     * already in proper host byte order. */
+	    if (sizeof(target_su.val) != (sizeof(target_su.buf))) {
+		target_su.buf = tswapal(target_su.buf);
+		arg.val = tswap32(target_su.val);
+	    } else {
+		arg.val = target_su.val;
+	    }
+            ret = get_errno(semctl(semid, semnum, cmd, arg));
+            break;
+	case GETALL:
+	case SETALL:
+            err = target_to_host_semarray(semid, &array, target_su.array);
+            if (err)
+                return err;
+            arg.array = array;
+            ret = get_errno(semctl(semid, semnum, cmd, arg));
+            err = host_to_target_semarray(semid, target_su.array, &array);
+            if (err)
+                return err;
+            break;
+	case IPC_STAT:
+	case IPC_SET:
+	case SEM_STAT:
+            err = target_to_host_semid_ds(&dsarg, target_su.buf);
+            if (err)
+                return err;
+            arg.buf = &dsarg;
+            ret = get_errno(semctl(semid, semnum, cmd, arg));
+            err = host_to_target_semid_ds(target_su.buf, &dsarg);
+            if (err)
+                return err;
+            break;
+	case IPC_INFO:
+	case SEM_INFO:
+            arg.__buf = &seminfo;
+            ret = get_errno(semctl(semid, semnum, cmd, arg));
+            err = host_to_target_seminfo(target_su.__buf, &seminfo);
+            if (err)
+                return err;
+            break;
+	case IPC_RMID:
+	case GETPID:
+	case GETNCNT:
+	case GETZCNT:
+            ret = get_errno(semctl(semid, semnum, cmd, NULL));
+            break;
+    }
+
+    return ret;
+}
+
+struct target_sembuf {
+    unsigned short sem_num;
+    short sem_op;
+    short sem_flg;
+};
+
+static inline abi_long target_to_host_sembuf(struct sembuf *host_sembuf,
+                                             abi_ulong target_addr,
+                                             unsigned nsops)
+{
+    struct target_sembuf *target_sembuf;
+    int i;
+
+    target_sembuf = lock_user(VERIFY_READ, target_addr,
+                              nsops*sizeof(struct target_sembuf), 1);
+    if (!target_sembuf)
+        return -TARGET_EFAULT;
+
+    for(i=0; i<nsops; i++) {
+        __get_user(host_sembuf[i].sem_num, &target_sembuf[i].sem_num);
+        __get_user(host_sembuf[i].sem_op, &target_sembuf[i].sem_op);
+        __get_user(host_sembuf[i].sem_flg, &target_sembuf[i].sem_flg);
+    }
+
+    unlock_user(target_sembuf, target_addr, 0);
+
+    return 0;
+}
+
+#if defined(TARGET_NR_ipc) || defined(TARGET_NR_semop) || \
+    defined(TARGET_NR_semtimedop) || defined(TARGET_NR_semtimedop_time64)
+
+/*
+ * This macro is required to handle the s390 variants, which passes the
+ * arguments in a different order than default.
+ */
+#ifdef __s390x__
+#define SEMTIMEDOP_IPC_ARGS(__nsops, __sops, __timeout) \
+  (__nsops), (__timeout), (__sops)
+#else
+#define SEMTIMEDOP_IPC_ARGS(__nsops, __sops, __timeout) \
+  (__nsops), 0, (__sops), (__timeout)
+#endif
+
+static inline abi_long do_semtimedop(int semid,
+                                     abi_long ptr,
+                                     unsigned nsops,
+                                     abi_long timeout, bool time64)
+{
+    struct sembuf *sops;
+    struct timespec ts, *pts = NULL;
+    abi_long ret;
+
+    if (timeout) {
+        pts = &ts;
+        if (time64) {
+            if (target_to_host_timespec64(pts, timeout)) {
+                return -TARGET_EFAULT;
+            }
+        } else {
+            if (target_to_host_timespec(pts, timeout)) {
+                return -TARGET_EFAULT;
+            }
+        }
+    }
+
+    if (nsops > TARGET_SEMOPM) {
+        return -TARGET_E2BIG;
+    }
+
+    sops = g_new(struct sembuf, nsops);
+
+    if (target_to_host_sembuf(sops, ptr, nsops)) {
+        g_free(sops);
+        return -TARGET_EFAULT;
+    }
+
+    ret = -TARGET_ENOSYS;
+#ifdef __NR_semtimedop
+    ret = get_errno(safe_semtimedop(semid, sops, nsops, pts));
+#endif
+#ifdef __NR_ipc
+    if (ret == -TARGET_ENOSYS) {
+        ret = get_errno(safe_ipc(IPCOP_semtimedop, semid,
+                                 SEMTIMEDOP_IPC_ARGS(nsops, sops, (long)pts)));
+    }
+#endif
+    g_free(sops);
+    return ret;
+}
+#endif
+
+struct target_msqid_ds
+{
+    struct target_ipc_perm msg_perm;
+    abi_ulong msg_stime;
+#if TARGET_ABI_BITS == 32
+    abi_ulong __unused1;
+#endif
+    abi_ulong msg_rtime;
+#if TARGET_ABI_BITS == 32
+    abi_ulong __unused2;
+#endif
+    abi_ulong msg_ctime;
+#if TARGET_ABI_BITS == 32
+    abi_ulong __unused3;
+#endif
+    abi_ulong __msg_cbytes;
+    abi_ulong msg_qnum;
+    abi_ulong msg_qbytes;
+    uint32_t msg_lspid;
+    uint32_t msg_lrpid;
+    abi_ulong __unused4;
+    abi_ulong __unused5;
+};
+
+static inline abi_long target_to_host_msqid_ds(struct msqid_ds *host_md,
+                                               abi_ulong target_addr)
+{
+    struct target_msqid_ds *target_md;
+
+    if (!lock_user_struct(VERIFY_READ, target_md, target_addr, 1))
+        return -TARGET_EFAULT;
+    if (target_to_host_ipc_perm(&(host_md->msg_perm),target_addr))
+        return -TARGET_EFAULT;
+    host_md->msg_stime = tswapal(target_md->msg_stime);
+    host_md->msg_rtime = tswapal(target_md->msg_rtime);
+    host_md->msg_ctime = tswapal(target_md->msg_ctime);
+    host_md->__msg_cbytes = tswapal(target_md->__msg_cbytes);
+    host_md->msg_qnum = tswapal(target_md->msg_qnum);
+    host_md->msg_qbytes = tswapal(target_md->msg_qbytes);
+    host_md->msg_lspid = tswapal(target_md->msg_lspid);
+    host_md->msg_lrpid = tswapal(target_md->msg_lrpid);
+    unlock_user_struct(target_md, target_addr, 0);
+    return 0;
+}
+
+static inline abi_long host_to_target_msqid_ds(abi_ulong target_addr,
+                                               struct msqid_ds *host_md)
+{
+    struct target_msqid_ds *target_md;
+
+    if (!lock_user_struct(VERIFY_WRITE, target_md, target_addr, 0))
+        return -TARGET_EFAULT;
+    if (host_to_target_ipc_perm(target_addr,&(host_md->msg_perm)))
+        return -TARGET_EFAULT;
+    target_md->msg_stime = tswapal(host_md->msg_stime);
+    target_md->msg_rtime = tswapal(host_md->msg_rtime);
+    target_md->msg_ctime = tswapal(host_md->msg_ctime);
+    target_md->__msg_cbytes = tswapal(host_md->__msg_cbytes);
+    target_md->msg_qnum = tswapal(host_md->msg_qnum);
+    target_md->msg_qbytes = tswapal(host_md->msg_qbytes);
+    target_md->msg_lspid = tswapal(host_md->msg_lspid);
+    target_md->msg_lrpid = tswapal(host_md->msg_lrpid);
+    unlock_user_struct(target_md, target_addr, 1);
+    return 0;
+}
+
+struct target_msginfo {
+    int msgpool;
+    int msgmap;
+    int msgmax;
+    int msgmnb;
+    int msgmni;
+    int msgssz;
+    int msgtql;
+    unsigned short int msgseg;
+};
+
+static inline abi_long host_to_target_msginfo(abi_ulong target_addr,
+                                              struct msginfo *host_msginfo)
+{
+    struct target_msginfo *target_msginfo;
+    if (!lock_user_struct(VERIFY_WRITE, target_msginfo, target_addr, 0))
+        return -TARGET_EFAULT;
+    __put_user(host_msginfo->msgpool, &target_msginfo->msgpool);
+    __put_user(host_msginfo->msgmap, &target_msginfo->msgmap);
+    __put_user(host_msginfo->msgmax, &target_msginfo->msgmax);
+    __put_user(host_msginfo->msgmnb, &target_msginfo->msgmnb);
+    __put_user(host_msginfo->msgmni, &target_msginfo->msgmni);
+    __put_user(host_msginfo->msgssz, &target_msginfo->msgssz);
+    __put_user(host_msginfo->msgtql, &target_msginfo->msgtql);
+    __put_user(host_msginfo->msgseg, &target_msginfo->msgseg);
+    unlock_user_struct(target_msginfo, target_addr, 1);
+    return 0;
+}
+
+static inline abi_long do_msgctl(int msgid, int cmd, abi_long ptr)
+{
+    struct msqid_ds dsarg;
+    struct msginfo msginfo;
+    abi_long ret = -TARGET_EINVAL;
+
+    cmd &= 0xff;
+
+    switch (cmd) {
+    case IPC_STAT:
+    case IPC_SET:
+    case MSG_STAT:
+        if (target_to_host_msqid_ds(&dsarg,ptr))
+            return -TARGET_EFAULT;
+        ret = get_errno(msgctl(msgid, cmd, &dsarg));
+        if (host_to_target_msqid_ds(ptr,&dsarg))
+            return -TARGET_EFAULT;
+        break;
+    case IPC_RMID:
+        ret = get_errno(msgctl(msgid, cmd, NULL));
+        break;
+    case IPC_INFO:
+    case MSG_INFO:
+        ret = get_errno(msgctl(msgid, cmd, (struct msqid_ds *)&msginfo));
+        if (host_to_target_msginfo(ptr, &msginfo))
+            return -TARGET_EFAULT;
+        break;
+    }
+
+    return ret;
+}
+
+struct target_msgbuf {
+    abi_long mtype;
+    char	mtext[1];
+};
+
+static inline abi_long do_msgsnd(int msqid, abi_long msgp,
+                                 ssize_t msgsz, int msgflg)
+{
+    struct target_msgbuf *target_mb;
+    struct msgbuf *host_mb;
+    abi_long ret = 0;
+
+    if (msgsz < 0) {
+        return -TARGET_EINVAL;
+    }
+
+    if (!lock_user_struct(VERIFY_READ, target_mb, msgp, 0))
+        return -TARGET_EFAULT;
+    host_mb = g_try_malloc(msgsz + sizeof(long));
+    if (!host_mb) {
+        unlock_user_struct(target_mb, msgp, 0);
+        return -TARGET_ENOMEM;
+    }
+    host_mb->mtype = (abi_long) tswapal(target_mb->mtype);
+    memcpy(host_mb->mtext, target_mb->mtext, msgsz);
+    ret = -TARGET_ENOSYS;
+#ifdef __NR_msgsnd
+    ret = get_errno(safe_msgsnd(msqid, host_mb, msgsz, msgflg));
+#endif
+#ifdef __NR_ipc
+    if (ret == -TARGET_ENOSYS) {
+#ifdef __s390x__
+        ret = get_errno(safe_ipc(IPCOP_msgsnd, msqid, msgsz, msgflg,
+                                 host_mb));
+#else
+        ret = get_errno(safe_ipc(IPCOP_msgsnd, msqid, msgsz, msgflg,
+                                 host_mb, 0));
+#endif
+    }
+#endif
+    g_free(host_mb);
+    unlock_user_struct(target_mb, msgp, 0);
+
+    return ret;
+}
+
+#ifdef __NR_ipc
+#if defined(__sparc__)
+/* SPARC for msgrcv it does not use the kludge on final 2 arguments.  */
+#define MSGRCV_ARGS(__msgp, __msgtyp) __msgp, __msgtyp
+#elif defined(__s390x__)
+/* The s390 sys_ipc variant has only five parameters.  */
+#define MSGRCV_ARGS(__msgp, __msgtyp) \
+    ((long int[]){(long int)__msgp, __msgtyp})
+#else
+#define MSGRCV_ARGS(__msgp, __msgtyp) \
+    ((long int[]){(long int)__msgp, __msgtyp}), 0
+#endif
+#endif
+
+static inline abi_long do_msgrcv(int msqid, abi_long msgp,
+                                 ssize_t msgsz, abi_long msgtyp,
+                                 int msgflg)
+{
+    struct target_msgbuf *target_mb;
+    char *target_mtext;
+    struct msgbuf *host_mb;
+    abi_long ret = 0;
+
+    if (msgsz < 0) {
+        return -TARGET_EINVAL;
+    }
+
+    if (!lock_user_struct(VERIFY_WRITE, target_mb, msgp, 0))
+        return -TARGET_EFAULT;
+
+    host_mb = g_try_malloc(msgsz + sizeof(long));
+    if (!host_mb) {
+        ret = -TARGET_ENOMEM;
+        goto end;
+    }
+    ret = -TARGET_ENOSYS;
+#ifdef __NR_msgrcv
+    ret = get_errno(safe_msgrcv(msqid, host_mb, msgsz, msgtyp, msgflg));
+#endif
+#ifdef __NR_ipc
+    if (ret == -TARGET_ENOSYS) {
+        ret = get_errno(safe_ipc(IPCOP_CALL(1, IPCOP_msgrcv), msqid, msgsz,
+                        msgflg, MSGRCV_ARGS(host_mb, msgtyp)));
+    }
+#endif
+
+    if (ret > 0) {
+        abi_ulong target_mtext_addr = msgp + sizeof(abi_ulong);
+        target_mtext = lock_user(VERIFY_WRITE, target_mtext_addr, ret, 0);
+        if (!target_mtext) {
+            ret = -TARGET_EFAULT;
+            goto end;
+        }
+        memcpy(target_mb->mtext, host_mb->mtext, ret);
+        unlock_user(target_mtext, target_mtext_addr, ret);
+    }
+
+    target_mb->mtype = tswapal(host_mb->mtype);
+
+end:
+    if (target_mb)
+        unlock_user_struct(target_mb, msgp, 1);
+    g_free(host_mb);
+    return ret;
+}
+
+static inline abi_long target_to_host_shmid_ds(struct shmid_ds *host_sd,
+                                               abi_ulong target_addr)
+{
+    struct target_shmid_ds *target_sd;
+
+    if (!lock_user_struct(VERIFY_READ, target_sd, target_addr, 1))
+        return -TARGET_EFAULT;
+    if (target_to_host_ipc_perm(&(host_sd->shm_perm), target_addr))
+        return -TARGET_EFAULT;
+    __get_user(host_sd->shm_segsz, &target_sd->shm_segsz);
+    __get_user(host_sd->shm_atime, &target_sd->shm_atime);
+    __get_user(host_sd->shm_dtime, &target_sd->shm_dtime);
+    __get_user(host_sd->shm_ctime, &target_sd->shm_ctime);
+    __get_user(host_sd->shm_cpid, &target_sd->shm_cpid);
+    __get_user(host_sd->shm_lpid, &target_sd->shm_lpid);
+    __get_user(host_sd->shm_nattch, &target_sd->shm_nattch);
+    unlock_user_struct(target_sd, target_addr, 0);
+    return 0;
+}
+
+static inline abi_long host_to_target_shmid_ds(abi_ulong target_addr,
+                                               struct shmid_ds *host_sd)
+{
+    struct target_shmid_ds *target_sd;
+
+    if (!lock_user_struct(VERIFY_WRITE, target_sd, target_addr, 0))
+        return -TARGET_EFAULT;
+    if (host_to_target_ipc_perm(target_addr, &(host_sd->shm_perm)))
+        return -TARGET_EFAULT;
+    __put_user(host_sd->shm_segsz, &target_sd->shm_segsz);
+    __put_user(host_sd->shm_atime, &target_sd->shm_atime);
+    __put_user(host_sd->shm_dtime, &target_sd->shm_dtime);
+    __put_user(host_sd->shm_ctime, &target_sd->shm_ctime);
+    __put_user(host_sd->shm_cpid, &target_sd->shm_cpid);
+    __put_user(host_sd->shm_lpid, &target_sd->shm_lpid);
+    __put_user(host_sd->shm_nattch, &target_sd->shm_nattch);
+    unlock_user_struct(target_sd, target_addr, 1);
+    return 0;
+}
+
+struct  target_shminfo {
+    abi_ulong shmmax;
+    abi_ulong shmmin;
+    abi_ulong shmmni;
+    abi_ulong shmseg;
+    abi_ulong shmall;
+};
+
+static inline abi_long host_to_target_shminfo(abi_ulong target_addr,
+                                              struct shminfo *host_shminfo)
+{
+    struct target_shminfo *target_shminfo;
+    if (!lock_user_struct(VERIFY_WRITE, target_shminfo, target_addr, 0))
+        return -TARGET_EFAULT;
+    __put_user(host_shminfo->shmmax, &target_shminfo->shmmax);
+    __put_user(host_shminfo->shmmin, &target_shminfo->shmmin);
+    __put_user(host_shminfo->shmmni, &target_shminfo->shmmni);
+    __put_user(host_shminfo->shmseg, &target_shminfo->shmseg);
+    __put_user(host_shminfo->shmall, &target_shminfo->shmall);
+    unlock_user_struct(target_shminfo, target_addr, 1);
+    return 0;
+}
+
+struct target_shm_info {
+    int used_ids;
+    abi_ulong shm_tot;
+    abi_ulong shm_rss;
+    abi_ulong shm_swp;
+    abi_ulong swap_attempts;
+    abi_ulong swap_successes;
+};
+
+static inline abi_long host_to_target_shm_info(abi_ulong target_addr,
+                                               struct shm_info *host_shm_info)
+{
+    struct target_shm_info *target_shm_info;
+    if (!lock_user_struct(VERIFY_WRITE, target_shm_info, target_addr, 0))
+        return -TARGET_EFAULT;
+    __put_user(host_shm_info->used_ids, &target_shm_info->used_ids);
+    __put_user(host_shm_info->shm_tot, &target_shm_info->shm_tot);
+    __put_user(host_shm_info->shm_rss, &target_shm_info->shm_rss);
+    __put_user(host_shm_info->shm_swp, &target_shm_info->shm_swp);
+    __put_user(host_shm_info->swap_attempts, &target_shm_info->swap_attempts);
+    __put_user(host_shm_info->swap_successes, &target_shm_info->swap_successes);
+    unlock_user_struct(target_shm_info, target_addr, 1);
+    return 0;
+}
+
+static inline abi_long do_shmctl(int shmid, int cmd, abi_long buf)
+{
+    struct shmid_ds dsarg;
+    struct shminfo shminfo;
+    struct shm_info shm_info;
+    abi_long ret = -TARGET_EINVAL;
+
+    cmd &= 0xff;
+
+    switch(cmd) {
+    case IPC_STAT:
+    case IPC_SET:
+    case SHM_STAT:
+        if (target_to_host_shmid_ds(&dsarg, buf))
+            return -TARGET_EFAULT;
+        ret = get_errno(shmctl(shmid, cmd, &dsarg));
+        if (host_to_target_shmid_ds(buf, &dsarg))
+            return -TARGET_EFAULT;
+        break;
+    case IPC_INFO:
+        ret = get_errno(shmctl(shmid, cmd, (struct shmid_ds *)&shminfo));
+        if (host_to_target_shminfo(buf, &shminfo))
+            return -TARGET_EFAULT;
+        break;
+    case SHM_INFO:
+        ret = get_errno(shmctl(shmid, cmd, (struct shmid_ds *)&shm_info));
+        if (host_to_target_shm_info(buf, &shm_info))
+            return -TARGET_EFAULT;
+        break;
+    case IPC_RMID:
+    case SHM_LOCK:
+    case SHM_UNLOCK:
+        ret = get_errno(shmctl(shmid, cmd, NULL));
+        break;
+    }
+
+    return ret;
+}
+
+#ifndef TARGET_FORCE_SHMLBA
+/* For most architectures, SHMLBA is the same as the page size;
+ * some architectures have larger values, in which case they should
+ * define TARGET_FORCE_SHMLBA and provide a target_shmlba() function.
+ * This corresponds to the kernel arch code defining __ARCH_FORCE_SHMLBA
+ * and defining its own value for SHMLBA.
+ *
+ * The kernel also permits SHMLBA to be set by the architecture to a
+ * value larger than the page size without setting __ARCH_FORCE_SHMLBA;
+ * this means that addresses are rounded to the large size if
+ * SHM_RND is set but addresses not aligned to that size are not rejected
+ * as long as they are at least page-aligned. Since the only architecture
+ * which uses this is ia64 this code doesn't provide for that oddity.
+ */
+static inline abi_ulong target_shmlba(CPUArchState *cpu_env)
+{
+    return TARGET_PAGE_SIZE;
+}
+#endif
+abi_ulong latx_is_shm(abi_ulong maddr);
+abi_ulong latx_is_shm(abi_ulong maddr)
+{
+    for (int i = 0; i < N_SHM_REGIONS; ++i) {
+        if (shm_regions[i].in_use &&
+            shm_regions[i].start <= maddr &&
+            shm_regions[i].start + shm_regions[i].size >= maddr) {
+	        return shm_regions[i].start;
+        }
+    }
+    return 0;
+}
+#ifdef TARGET_I386
+static abi_long guest_mdwe_mmap(CPUState *cpu, abi_ulong len, int prot);
+#endif
+static inline abi_ulong do_shmat(CPUArchState *cpu_env,
+                                 int shmid, abi_ulong shmaddr, int shmflg)
+{
+    CPUState *cpu = env_cpu(cpu_env);
+    abi_long raddr;
+    void *host_raddr;
+    struct shmid_ds shm_info;
+    int i,ret;
+    abi_ulong shmlba;
+
+    /* shmat pointers are always untagged */
+
+    /* find out the length of the shared memory segment */
+    ret = get_errno(shmctl(shmid, IPC_STAT, &shm_info));
+    if (is_error(ret)) {
+        /* can't get length, bail out */
+        return ret;
+    }
+
+    shmlba = target_shmlba(cpu_env);
+
+    if (shmaddr & (shmlba - 1)) {
+        if (shmflg & SHM_RND) {
+            shmaddr &= ~(shmlba - 1);
+        } else {
+            return -TARGET_EINVAL;
+        }
+    }
+    if (!guest_range_valid_untagged(shmaddr, shm_info.shm_segsz)) {
+        return -TARGET_EINVAL;
+    }
+
+    mmap_lock();
+
+#ifdef TARGET_I386
+    ret = guest_mdwe_mmap(cpu, shm_info.shm_segsz,
+                          PROT_READ |
+                          (shmflg & SHM_RDONLY ? 0 : PROT_WRITE) |
+                          (shmflg & SHM_EXEC ? PROT_EXEC : 0));
+    if (ret) {
+        mmap_unlock();
+        return ret;
+    }
+#endif
+
+    /*
+     * We're mapping shared memory, so ensure we generate code for parallel
+     * execution and flush old translations.  This will work up to the level
+     * supported by the host -- anything that requires EXCP_ATOMIC will not
+     * be atomic with respect to an external process.
+     */
+    if (!(cpu->tcg_cflags & CF_PARALLEL)) {
+        cpu->tcg_cflags |= CF_PARALLEL;
+        tb_flush(cpu);
+    }
+
+    if (shmaddr) {
+#ifdef LATX_DEBUG
+        fprintf(stderr, "[LATX-WARNING] %s:%d\n", __func__, __LINE__);
+#endif
+	    shmflg |= SHM_REMAP;
+        host_raddr = shmat(shmid, (void *)g2h_untagged(shmaddr), shmflg);
+    } else {
+        abi_ulong mmap_start;
+
+        /* In order to use the host shmat, we need to honor host SHMLBA.  */
+        mmap_start = mmap_find_vma(0, shm_info.shm_segsz, MAX(SHMLBA, shmlba));
+
+        if (mmap_start == -1) {
+            errno = ENOMEM;
+            host_raddr = (void *)-1;
+        } else
+            host_raddr = shmat(shmid, g2h_untagged(mmap_start),
+                               shmflg | SHM_REMAP);
+    }
+
+    if (host_raddr == (void *)-1) {
+        mmap_unlock();
+        return get_errno((long)host_raddr);
+    }
+    raddr=h2g((unsigned long)host_raddr);
+
+#ifdef TARGET_I386
+    guest_vma_name_reset(raddr, shm_info.shm_segsz);
+#endif
+    page_set_flags(raddr, raddr + shm_info.shm_segsz,
+                   PAGE_VALID | PAGE_RESET | PAGE_ANON | PAGE_MEMSHARE |
+                   PAGE_READ |
+                   (shmflg & SHM_RDONLY ? 0 : PAGE_WRITE) |
+                   (shmflg & SHM_EXEC ? PAGE_EXEC : 0));
+
+    for (i = 0; i < N_SHM_REGIONS; i++) {
+        if (!shm_regions[i].in_use) {
+            shm_regions[i].in_use = true;
+            shm_regions[i].start = raddr;
+            shm_regions[i].size = shm_info.shm_segsz;
+            break;
+        }
+    }
+
+    mmap_unlock();
+    return raddr;
+
+}
+
+static inline abi_long do_shmdt(abi_ulong shmaddr)
+{
+    int i;
+    abi_long rv;
+
+    /* shmdt pointers are always untagged */
+
+    mmap_lock();
+
+    rv = get_errno(shmdt(g2h_untagged(shmaddr)));
+    if (!is_error(rv)) {
+        for (i = 0; i < N_SHM_REGIONS; ++i) {
+            if (shm_regions[i].in_use && shm_regions[i].start == shmaddr) {
+#ifdef TARGET_I386
+                guest_vma_name_reset(shmaddr, shm_regions[i].size);
+#endif
+#ifdef CONFIG_LATX_AOT
+                if (option_aot) {
+                    /* Include padding in the last cleared guest page. */
+                    segment_tree_remove_range(shmaddr,
+                        TARGET_PAGE_ALIGN(shmaddr + shm_regions[i].size));
+                }
+#endif
+                page_set_flags(shmaddr, shmaddr + shm_regions[i].size, 0);
+                shm_regions[i].in_use = false;
+                break;
+            }
+        }
+    }
+
+    mmap_unlock();
+
+    return rv;
+}
+
+#ifdef TARGET_NR_ipc
+/* ??? This only works with linear mappings.  */
+/* do_ipc() must return target values and target errnos. */
+static abi_long do_ipc(CPUArchState *cpu_env,
+                       unsigned int call, abi_long first,
+                       abi_long second, abi_long third,
+                       abi_long ptr, abi_long fifth)
+{
+    int version;
+    abi_long ret = 0;
+
+    version = call >> 16;
+    call &= 0xffff;
+
+    switch (call) {
+    case IPCOP_semop:
+        ret = do_semtimedop(first, ptr, second, 0, false);
+        break;
+    case IPCOP_semtimedop:
+    /*
+     * The s390 sys_ipc variant has only five parameters instead of six
+     * (as for default variant) and the only difference is the handling of
+     * SEMTIMEDOP where on s390 the third parameter is used as a pointer
+     * to a struct timespec where the generic variant uses fifth parameter.
+     */
+#if defined(TARGET_S390X)
+        ret = do_semtimedop(first, ptr, second, third, TARGET_ABI_BITS == 64);
+#else
+        ret = do_semtimedop(first, ptr, second, fifth, TARGET_ABI_BITS == 64);
+#endif
+        break;
+
+    case IPCOP_semget:
+        ret = get_errno(semget(first, second, third));
+        break;
+
+    case IPCOP_semctl: {
+        /* The semun argument to semctl is passed by value, so dereference the
+         * ptr argument. */
+        abi_ulong atptr;
+        get_user_ual(atptr, ptr);
+        ret = do_semctl(first, second, third, atptr);
+        break;
+    }
+
+    case IPCOP_msgget:
+        ret = get_errno(msgget(first, second));
+        break;
+
+    case IPCOP_msgsnd:
+        ret = do_msgsnd(first, ptr, second, third);
+        break;
+
+    case IPCOP_msgctl:
+        ret = do_msgctl(first, second, ptr);
+        break;
+
+    case IPCOP_msgrcv:
+        switch (version) {
+        case 0:
+            {
+                struct target_ipc_kludge {
+                    abi_long msgp;
+                    abi_long msgtyp;
+                } *tmp;
+
+                if (!lock_user_struct(VERIFY_READ, tmp, ptr, 1)) {
+                    ret = -TARGET_EFAULT;
+                    break;
+                }
+
+                ret = do_msgrcv(first, tswapal(tmp->msgp), second, tswapal(tmp->msgtyp), third);
+
+                unlock_user_struct(tmp, ptr, 0);
+                break;
+            }
+        default:
+            ret = do_msgrcv(first, ptr, second, fifth, third);
+        }
+        break;
+
+    case IPCOP_shmat:
+        switch (version) {
+        default:
+        {
+            abi_ulong raddr;
+            raddr = do_shmat(cpu_env, first, ptr, second);
+            if (is_error(raddr))
+                return get_errno(raddr);
+            if (put_user_ual(raddr, third))
+                return -TARGET_EFAULT;
+            break;
+        }
+        case 1:
+            ret = -TARGET_EINVAL;
+            break;
+        }
+	break;
+    case IPCOP_shmdt:
+        ret = do_shmdt(ptr);
+	break;
+
+    case IPCOP_shmget:
+	/* IPC_* flag values are the same on all linux platforms */
+	ret = get_errno(shmget(first, second, third));
+	break;
+
+	/* IPC_* and SHM_* command values are the same on all linux platforms */
+    case IPCOP_shmctl:
+        ret = do_shmctl(first, second, ptr);
+        break;
+    default:
+        qemu_log_mask(LOG_UNIMP, "Unsupported ipc call: %d (version %d)\n",
+                      call, version);
+	ret = -TARGET_ENOSYS;
+	break;
+    }
+    return ret;
+}
+#endif
+
+/* kernel structure types definitions */
+
+#define STRUCT(name, ...) STRUCT_ ## name,
+#define STRUCT_SPECIAL(name) STRUCT_ ## name,
+enum {
+#include "syscall_types.h"
+STRUCT_MAX
+};
+#undef STRUCT
+#undef STRUCT_SPECIAL
+
+#define STRUCT(name, ...) static const argtype struct_ ## name ## _def[] = {  __VA_ARGS__, TYPE_NULL };
+#define STRUCT_SPECIAL(name)
+#include "syscall_types.h"
+#undef STRUCT
+#undef STRUCT_SPECIAL
+
+#define MAX_STRUCT_SIZE 16384
+
+#ifdef CONFIG_FIEMAP
+/* So fiemap access checks don't overflow on 32 bit systems.
+ * This is very slightly smaller than the limit imposed by
+ * the underlying kernel.
+ */
+#define FIEMAP_MAX_EXTENTS ((UINT_MAX - sizeof(struct fiemap))  \
+                            / sizeof(struct fiemap_extent))
+
+static abi_long do_ioctl_fs_ioc_fiemap(const IOCTLEntry *ie, uint8_t *buf_temp,
+                                       int fd, int cmd, abi_long arg)
+{
+    /* The parameter for this ioctl is a struct fiemap followed
+     * by an array of struct fiemap_extent whose size is set
+     * in fiemap->fm_extent_count. The array is filled in by the
+     * ioctl.
+     */
+    int target_size_in, target_size_out;
+    struct fiemap *fm;
+    const argtype *arg_type = ie->arg_type;
+    const argtype extent_arg_type[] = { MK_STRUCT(STRUCT_fiemap_extent) };
+    void *argptr, *p;
+    abi_long ret;
+    int i, extent_size = thunk_type_size(extent_arg_type, 0);
+    uint32_t outbufsz;
+    int free_fm = 0;
+
+    assert(arg_type[0] == TYPE_PTR);
+    assert(ie->access == IOC_RW);
+    arg_type++;
+    target_size_in = thunk_type_size(arg_type, 0);
+    argptr = lock_user(VERIFY_READ, arg, target_size_in, 1);
+    if (!argptr) {
+        return -TARGET_EFAULT;
+    }
+    thunk_convert(buf_temp, argptr, arg_type, THUNK_HOST);
+    unlock_user(argptr, arg, 0);
+    fm = (struct fiemap *)buf_temp;
+    if (fm->fm_extent_count > FIEMAP_MAX_EXTENTS) {
+        return -TARGET_EINVAL;
+    }
+
+    outbufsz = sizeof (*fm) +
+        (sizeof(struct fiemap_extent) * fm->fm_extent_count);
+
+    if (outbufsz > MAX_STRUCT_SIZE) {
+        /* We can't fit all the extents into the fixed size buffer.
+         * Allocate one that is large enough and use it instead.
+         */
+        fm = g_try_malloc(outbufsz);
+        if (!fm) {
+            return -TARGET_ENOMEM;
+        }
+        memcpy(fm, buf_temp, sizeof(struct fiemap));
+        free_fm = 1;
+    }
+    ret = get_errno(safe_ioctl(fd, ie->host_cmd, fm));
+    if (!is_error(ret)) {
+        target_size_out = target_size_in;
+        /* An extent_count of 0 means we were only counting the extents
+         * so there are no structs to copy
+         */
+        if (fm->fm_extent_count != 0) {
+            target_size_out += fm->fm_mapped_extents * extent_size;
+        }
+        argptr = lock_user(VERIFY_WRITE, arg, target_size_out, 0);
+        if (!argptr) {
+            ret = -TARGET_EFAULT;
+        } else {
+            /* Convert the struct fiemap */
+            thunk_convert(argptr, fm, arg_type, THUNK_TARGET);
+            if (fm->fm_extent_count != 0) {
+                p = argptr + target_size_in;
+                /* ...and then all the struct fiemap_extents */
+                for (i = 0; i < fm->fm_mapped_extents; i++) {
+                    thunk_convert(p, &fm->fm_extents[i], extent_arg_type,
+                                  THUNK_TARGET);
+                    p += extent_size;
+                }
+            }
+            unlock_user(argptr, arg, target_size_out);
+        }
+    }
+    if (free_fm) {
+        g_free(fm);
+    }
+    return ret;
+}
+#endif
+
+static abi_long do_ioctl_fideduperange(const IOCTLEntry *ie, uint8_t *buf_temp,
+                                       int fd, int cmd, abi_long arg)
+{
+    int target_size_in, target_size_out;
+    struct file_dedupe_range  *same;
+    const argtype *arg_type = ie->arg_type;
+    const argtype extent_arg_type[] = { MK_STRUCT(STRUCT_file_dedupe_range_info) };
+    void *argptr, *p;
+    abi_long ret;
+    int i, extent_size = thunk_type_size(extent_arg_type, 0);
+    uint32_t inbufsz;
+
+    assert(arg_type[0] == TYPE_PTR);
+    assert(ie->access == IOC_RW);
+    arg_type++;
+    target_size_in = thunk_type_size(arg_type, 0);
+    argptr = lock_user(VERIFY_READ, arg, target_size_in, 1);
+    if (!argptr) {
+        return -TARGET_EFAULT;
+    }
+    thunk_convert(buf_temp, argptr, arg_type, THUNK_HOST);
+    unlock_user(argptr, arg, 0);
+    same = (struct file_dedupe_range *)buf_temp;
+    if (same->dest_count !=0 ){
+        inbufsz = target_size_in + same->dest_count * extent_size;
+        assert(inbufsz < MAX_STRUCT_SIZE);
+        argptr = lock_user(VERIFY_READ, arg, inbufsz, 1);
+        if (!argptr) {
+            return -TARGET_EFAULT;
+        }
+        thunk_convert(buf_temp, argptr, arg_type, THUNK_HOST);
+        unlock_user(argptr, arg, 0);
+        memcpy(same->info, argptr + target_size_in, extent_size);
+    }
+    ret = get_errno(safe_ioctl(fd, ie->host_cmd, same));
+    if (!is_error(ret)) {
+        target_size_out = target_size_in;
+        if (same->dest_count != 0) {
+            target_size_out += same->dest_count * extent_size;
+        }
+        argptr = lock_user(VERIFY_WRITE, arg, target_size_out, 0);
+        if (!argptr) {
+            ret = -TARGET_EFAULT;
+        } else {
+            /* Convert the struct fiemap */
+            thunk_convert(argptr, same, arg_type, THUNK_TARGET);
+
+            if (same->dest_count != 0) {
+                p = argptr + target_size_in;
+                /* ...and then all the struct fiemap_extents */
+                for (i = 0; i < same->dest_count; i++) {
+                    thunk_convert(p, &same->info[i], extent_arg_type,
+                                  THUNK_TARGET);
+                    p += extent_size;
+                }
+            }
+            unlock_user(argptr, arg, target_size_out);
+        }
+    }
+    return ret;
+}
+
+static abi_long do_ioctl_ifconf(const IOCTLEntry *ie, uint8_t *buf_temp,
+                                int fd, int cmd, abi_long arg)
+{
+    const argtype *arg_type = ie->arg_type;
+    int target_size;
+    void *argptr;
+    int ret;
+    struct ifconf *host_ifconf;
+    uint32_t outbufsz;
+    const argtype ifreq_arg_type[] = { MK_STRUCT(STRUCT_sockaddr_ifreq) };
+    const argtype ifreq_max_type[] = { MK_STRUCT(STRUCT_ifmap_ifreq) };
+    int target_ifreq_size;
+    int nb_ifreq;
+    int free_buf = 0;
+    int i;
+    int target_ifc_len;
+    abi_long target_ifc_buf;
+    int host_ifc_len;
+    char *host_ifc_buf;
+
+    assert(arg_type[0] == TYPE_PTR);
+    assert(ie->access == IOC_RW);
+
+    arg_type++;
+    target_size = thunk_type_size(arg_type, 0);
+
+    argptr = lock_user(VERIFY_READ, arg, target_size, 1);
+    if (!argptr)
+        return -TARGET_EFAULT;
+    thunk_convert(buf_temp, argptr, arg_type, THUNK_HOST);
+    unlock_user(argptr, arg, 0);
+
+    host_ifconf = (struct ifconf *)(unsigned long)buf_temp;
+    target_ifc_buf = (abi_long)(unsigned long)host_ifconf->ifc_buf;
+    target_ifreq_size = thunk_type_size(ifreq_max_type, 0);
+
+    if (target_ifc_buf != 0) {
+        target_ifc_len = host_ifconf->ifc_len;
+        nb_ifreq = target_ifc_len / target_ifreq_size;
+        host_ifc_len = nb_ifreq * sizeof(struct ifreq);
+
+        outbufsz = sizeof(*host_ifconf) + host_ifc_len;
+        if (outbufsz > MAX_STRUCT_SIZE) {
+            /*
+             * We can't fit all the extents into the fixed size buffer.
+             * Allocate one that is large enough and use it instead.
+             */
+            host_ifconf = malloc(outbufsz);
+            if (!host_ifconf) {
+                return -TARGET_ENOMEM;
+            }
+            memcpy(host_ifconf, buf_temp, sizeof(*host_ifconf));
+            free_buf = 1;
+        }
+        host_ifc_buf = (char *)host_ifconf + sizeof(*host_ifconf);
+
+        host_ifconf->ifc_len = host_ifc_len;
+    } else {
+      host_ifc_buf = NULL;
+    }
+    host_ifconf->ifc_buf = host_ifc_buf;
+
+    ret = get_errno(safe_ioctl(fd, ie->host_cmd, host_ifconf));
+    if (!is_error(ret)) {
+	/* convert host ifc_len to target ifc_len */
+
+        nb_ifreq = host_ifconf->ifc_len / sizeof(struct ifreq);
+        target_ifc_len = nb_ifreq * target_ifreq_size;
+        host_ifconf->ifc_len = target_ifc_len;
+
+	/* restore target ifc_buf */
+
+        host_ifconf->ifc_buf = (char *)(unsigned long)target_ifc_buf;
+
+	/* copy struct ifconf to target user */
+
+        argptr = lock_user(VERIFY_WRITE, arg, target_size, 0);
+        if (!argptr)
+            return -TARGET_EFAULT;
+        thunk_convert(argptr, host_ifconf, arg_type, THUNK_TARGET);
+        unlock_user(argptr, arg, target_size);
+
+        if (target_ifc_buf != 0) {
+            /* copy ifreq[] to target user */
+            argptr = lock_user(VERIFY_WRITE, target_ifc_buf, target_ifc_len, 0);
+            for (i = 0; i < nb_ifreq ; i++) {
+                thunk_convert(argptr + i * target_ifreq_size,
+                              host_ifc_buf + i * sizeof(struct ifreq),
+                              ifreq_arg_type, THUNK_TARGET);
+            }
+            unlock_user(argptr, target_ifc_buf, target_ifc_len);
+        }
+    }
+
+    if (free_buf) {
+        free(host_ifconf);
+    }
+
+    return ret;
+}
+
+#if defined(CONFIG_USBFS)
+#if HOST_LONG_BITS > 64
+#error USBDEVFS thunks do not support >64 bit hosts yet.
+#endif
+struct live_urb {
+    uint64_t target_urb_adr;
+    uint64_t target_buf_adr;
+    char *target_buf_ptr;
+    struct usbdevfs_urb host_urb;
+};
+
+static GHashTable *usbdevfs_urb_hashtable(void)
+{
+    static GHashTable *urb_hashtable;
+
+    if (!urb_hashtable) {
+        urb_hashtable = g_hash_table_new(g_int64_hash, g_int64_equal);
+    }
+    return urb_hashtable;
+}
+
+static void urb_hashtable_insert(struct live_urb *urb)
+{
+    GHashTable *urb_hashtable = usbdevfs_urb_hashtable();
+    g_hash_table_insert(urb_hashtable, urb, urb);
+}
+
+static struct live_urb *urb_hashtable_lookup(uint64_t target_urb_adr)
+{
+    GHashTable *urb_hashtable = usbdevfs_urb_hashtable();
+    return g_hash_table_lookup(urb_hashtable, &target_urb_adr);
+}
+
+static void urb_hashtable_remove(struct live_urb *urb)
+{
+    GHashTable *urb_hashtable = usbdevfs_urb_hashtable();
+    g_hash_table_remove(urb_hashtable, urb);
+}
+
+static abi_long
+do_ioctl_usbdevfs_reapurb(const IOCTLEntry *ie, uint8_t *buf_temp,
+                          int fd, int cmd, abi_long arg)
+{
+    const argtype usbfsurb_arg_type[] = { MK_STRUCT(STRUCT_usbdevfs_urb) };
+    const argtype ptrvoid_arg_type[] = { TYPE_PTRVOID, 0, 0 };
+    struct live_urb *lurb;
+    void *argptr;
+    uint64_t hurb;
+    int target_size;
+    uintptr_t target_urb_adr;
+    abi_long ret;
+
+    target_size = thunk_type_size(usbfsurb_arg_type, THUNK_TARGET);
+
+    memset(buf_temp, 0, sizeof(uint64_t));
+    ret = get_errno(safe_ioctl(fd, ie->host_cmd, buf_temp));
+    if (is_error(ret)) {
+        return ret;
+    }
+
+    memcpy(&hurb, buf_temp, sizeof(uint64_t));
+    lurb = (void *)((uintptr_t)hurb - offsetof(struct live_urb, host_urb));
+    if (!lurb->target_urb_adr) {
+        return -TARGET_EFAULT;
+    }
+    urb_hashtable_remove(lurb);
+    unlock_user(lurb->target_buf_ptr, lurb->target_buf_adr,
+        lurb->host_urb.buffer_length);
+    lurb->target_buf_ptr = NULL;
+
+    /* restore the guest buffer pointer */
+    lurb->host_urb.buffer = (void *)(uintptr_t)lurb->target_buf_adr;
+
+    /* update the guest urb struct */
+    argptr = lock_user(VERIFY_WRITE, lurb->target_urb_adr, target_size, 0);
+    if (!argptr) {
+        g_free(lurb);
+        return -TARGET_EFAULT;
+    }
+    thunk_convert(argptr, &lurb->host_urb, usbfsurb_arg_type, THUNK_TARGET);
+    unlock_user(argptr, lurb->target_urb_adr, target_size);
+
+    target_size = thunk_type_size(ptrvoid_arg_type, THUNK_TARGET);
+    /* write back the urb handle */
+    argptr = lock_user(VERIFY_WRITE, arg, target_size, 0);
+    if (!argptr) {
+        g_free(lurb);
+        return -TARGET_EFAULT;
+    }
+
+    /* GHashTable uses 64-bit keys but thunk_convert expects uintptr_t */
+    target_urb_adr = lurb->target_urb_adr;
+    thunk_convert(argptr, &target_urb_adr, ptrvoid_arg_type, THUNK_TARGET);
+    unlock_user(argptr, arg, target_size);
+
+    g_free(lurb);
+    return ret;
+}
+
+static abi_long
+do_ioctl_usbdevfs_discardurb(const IOCTLEntry *ie,
+                             uint8_t *buf_temp __attribute__((unused)),
+                             int fd, int cmd, abi_long arg)
+{
+    struct live_urb *lurb;
+
+    /* map target address back to host URB with metadata. */
+    lurb = urb_hashtable_lookup(arg);
+    if (!lurb) {
+        return -TARGET_EFAULT;
+    }
+    return get_errno(safe_ioctl(fd, ie->host_cmd, &lurb->host_urb));
+}
+
+static abi_long
+do_ioctl_usbdevfs_submiturb(const IOCTLEntry *ie, uint8_t *buf_temp,
+                            int fd, int cmd, abi_long arg)
+{
+    const argtype *arg_type = ie->arg_type;
+    int target_size;
+    abi_long ret;
+    void *argptr;
+    int rw_dir;
+    struct live_urb *lurb;
+
+    /*
+     * each submitted URB needs to map to a unique ID for the
+     * kernel, and that unique ID needs to be a pointer to
+     * host memory.  hence, we need to malloc for each URB.
+     * isochronous transfers have a variable length struct.
+     */
+    arg_type++;
+    target_size = thunk_type_size(arg_type, THUNK_TARGET);
+
+    /* construct host copy of urb and metadata */
+    lurb = g_try_malloc0(sizeof(struct live_urb));
+    if (!lurb) {
+        return -TARGET_ENOMEM;
+    }
+
+    argptr = lock_user(VERIFY_READ, arg, target_size, 1);
+    if (!argptr) {
+        g_free(lurb);
+        return -TARGET_EFAULT;
+    }
+    thunk_convert(&lurb->host_urb, argptr, arg_type, THUNK_HOST);
+    unlock_user(argptr, arg, 0);
+
+    lurb->target_urb_adr = arg;
+    lurb->target_buf_adr = (uintptr_t)lurb->host_urb.buffer;
+
+    /* buffer space used depends on endpoint type so lock the entire buffer */
+    /* control type urbs should check the buffer contents for true direction */
+    rw_dir = lurb->host_urb.endpoint & USB_DIR_IN ? VERIFY_WRITE : VERIFY_READ;
+    lurb->target_buf_ptr = lock_user(rw_dir, lurb->target_buf_adr,
+        lurb->host_urb.buffer_length, 1);
+    if (lurb->target_buf_ptr == NULL) {
+        g_free(lurb);
+        return -TARGET_EFAULT;
+    }
+
+    /* update buffer pointer in host copy */
+    lurb->host_urb.buffer = lurb->target_buf_ptr;
+
+    ret = get_errno(safe_ioctl(fd, ie->host_cmd, &lurb->host_urb));
+    if (is_error(ret)) {
+        unlock_user(lurb->target_buf_ptr, lurb->target_buf_adr, 0);
+        g_free(lurb);
+    } else {
+        urb_hashtable_insert(lurb);
+    }
+
+    return ret;
+}
+#endif /* CONFIG_USBFS */
+
+static abi_long do_ioctl_dm(const IOCTLEntry *ie, uint8_t *buf_temp, int fd,
+                            int cmd, abi_long arg)
+{
+    void *argptr;
+    struct dm_ioctl *host_dm;
+    abi_long guest_data;
+    uint32_t guest_data_size;
+    int target_size;
+    const argtype *arg_type = ie->arg_type;
+    abi_long ret;
+    void *big_buf = NULL;
+    char *host_data;
+
+    arg_type++;
+    target_size = thunk_type_size(arg_type, 0);
+    argptr = lock_user(VERIFY_READ, arg, target_size, 1);
+    if (!argptr) {
+        ret = -TARGET_EFAULT;
+        goto out;
+    }
+    thunk_convert(buf_temp, argptr, arg_type, THUNK_HOST);
+    unlock_user(argptr, arg, 0);
+
+    /* buf_temp is too small, so fetch things into a bigger buffer */
+    big_buf = g_malloc0(((struct dm_ioctl*)buf_temp)->data_size * 2);
+    memcpy(big_buf, buf_temp, target_size);
+    buf_temp = big_buf;
+    host_dm = big_buf;
+
+    guest_data = arg + host_dm->data_start;
+    if ((guest_data - arg) < 0) {
+        ret = -TARGET_EINVAL;
+        goto out;
+    }
+    guest_data_size = host_dm->data_size - host_dm->data_start;
+    host_data = (char*)host_dm + host_dm->data_start;
+
+    argptr = lock_user(VERIFY_READ, guest_data, guest_data_size, 1);
+    if (!argptr) {
+        ret = -TARGET_EFAULT;
+        goto out;
+    }
+
+    switch (ie->host_cmd) {
+    case DM_REMOVE_ALL:
+    case DM_LIST_DEVICES:
+    case DM_DEV_CREATE:
+    case DM_DEV_REMOVE:
+    case DM_DEV_SUSPEND:
+    case DM_DEV_STATUS:
+    case DM_DEV_WAIT:
+    case DM_TABLE_STATUS:
+    case DM_TABLE_CLEAR:
+    case DM_TABLE_DEPS:
+    case DM_LIST_VERSIONS:
+        /* no input data */
+        break;
+    case DM_DEV_RENAME:
+    case DM_DEV_SET_GEOMETRY:
+        /* data contains only strings */
+        memcpy(host_data, argptr, guest_data_size);
+        break;
+    case DM_TARGET_MSG:
+        memcpy(host_data, argptr, guest_data_size);
+        *(uint64_t*)host_data = tswap64(*(uint64_t*)argptr);
+        break;
+    case DM_TABLE_LOAD:
+    {
+        void *gspec = argptr;
+        void *cur_data = host_data;
+        const argtype arg_type[] = { MK_STRUCT(STRUCT_dm_target_spec) };
+        int spec_size = thunk_type_size(arg_type, 0);
+        int i;
+
+        for (i = 0; i < host_dm->target_count; i++) {
+            struct dm_target_spec *spec = cur_data;
+            uint32_t next;
+            int slen;
+
+            thunk_convert(spec, gspec, arg_type, THUNK_HOST);
+            slen = strlen((char*)gspec + spec_size) + 1;
+            next = spec->next;
+            spec->next = sizeof(*spec) + slen;
+            strcpy((char*)&spec[1], gspec + spec_size);
+            gspec += next;
+            cur_data += spec->next;
+        }
+        break;
+    }
+    default:
+        ret = -TARGET_EINVAL;
+        unlock_user(argptr, guest_data, 0);
+        goto out;
+    }
+    unlock_user(argptr, guest_data, 0);
+
+    ret = get_errno(safe_ioctl(fd, ie->host_cmd, buf_temp));
+    if (!is_error(ret)) {
+        guest_data = arg + host_dm->data_start;
+        guest_data_size = host_dm->data_size - host_dm->data_start;
+        argptr = lock_user(VERIFY_WRITE, guest_data, guest_data_size, 0);
+        switch (ie->host_cmd) {
+        case DM_REMOVE_ALL:
+        case DM_DEV_CREATE:
+        case DM_DEV_REMOVE:
+        case DM_DEV_RENAME:
+        case DM_DEV_SUSPEND:
+        case DM_DEV_STATUS:
+        case DM_TABLE_LOAD:
+        case DM_TABLE_CLEAR:
+        case DM_TARGET_MSG:
+        case DM_DEV_SET_GEOMETRY:
+            /* no return data */
+            break;
+        case DM_LIST_DEVICES:
+        {
+            struct dm_name_list *nl = (void*)host_dm + host_dm->data_start;
+            uint32_t remaining_data = guest_data_size;
+            void *cur_data = argptr;
+            const argtype arg_type[] = { MK_STRUCT(STRUCT_dm_name_list) };
+            int nl_size = 12; /* can't use thunk_size due to alignment */
+
+            while (1) {
+                uint32_t next = nl->next;
+                if (next) {
+                    nl->next = nl_size + (strlen(nl->name) + 1);
+                }
+                if (remaining_data < nl->next) {
+                    host_dm->flags |= DM_BUFFER_FULL_FLAG;
+                    break;
+                }
+                thunk_convert(cur_data, nl, arg_type, THUNK_TARGET);
+                strcpy(cur_data + nl_size, nl->name);
+                cur_data += nl->next;
+                remaining_data -= nl->next;
+                if (!next) {
+                    break;
+                }
+                nl = (void*)nl + next;
+            }
+            break;
+        }
+        case DM_DEV_WAIT:
+        case DM_TABLE_STATUS:
+        {
+            struct dm_target_spec *spec = (void*)host_dm + host_dm->data_start;
+            void *cur_data = argptr;
+            const argtype arg_type[] = { MK_STRUCT(STRUCT_dm_target_spec) };
+            int spec_size = thunk_type_size(arg_type, 0);
+            int i;
+
+            for (i = 0; i < host_dm->target_count; i++) {
+                uint32_t next = spec->next;
+                int slen = strlen((char*)&spec[1]) + 1;
+                spec->next = (cur_data - argptr) + spec_size + slen;
+                if (guest_data_size < spec->next) {
+                    host_dm->flags |= DM_BUFFER_FULL_FLAG;
+                    break;
+                }
+                thunk_convert(cur_data, spec, arg_type, THUNK_TARGET);
+                strcpy(cur_data + spec_size, (char*)&spec[1]);
+                cur_data = argptr + spec->next;
+                spec = (void*)host_dm + host_dm->data_start + next;
+            }
+            break;
+        }
+        case DM_TABLE_DEPS:
+        {
+            void *hdata = (void*)host_dm + host_dm->data_start;
+            int count = *(uint32_t*)hdata;
+            uint64_t *hdev = hdata + 8;
+            uint64_t *gdev = argptr + 8;
+            int i;
+
+            *(uint32_t*)argptr = tswap32(count);
+            for (i = 0; i < count; i++) {
+                *gdev = tswap64(*hdev);
+                gdev++;
+                hdev++;
+            }
+            break;
+        }
+        case DM_LIST_VERSIONS:
+        {
+            struct dm_target_versions *vers = (void*)host_dm + host_dm->data_start;
+            uint32_t remaining_data = guest_data_size;
+            void *cur_data = argptr;
+            const argtype arg_type[] = { MK_STRUCT(STRUCT_dm_target_versions) };
+            int vers_size = thunk_type_size(arg_type, 0);
+
+            while (1) {
+                uint32_t next = vers->next;
+                if (next) {
+                    vers->next = vers_size + (strlen(vers->name) + 1);
+                }
+                if (remaining_data < vers->next) {
+                    host_dm->flags |= DM_BUFFER_FULL_FLAG;
+                    break;
+                }
+                thunk_convert(cur_data, vers, arg_type, THUNK_TARGET);
+                strcpy(cur_data + vers_size, vers->name);
+                cur_data += vers->next;
+                remaining_data -= vers->next;
+                if (!next) {
+                    break;
+                }
+                vers = (void*)vers + next;
+            }
+            break;
+        }
+        default:
+            unlock_user(argptr, guest_data, 0);
+            ret = -TARGET_EINVAL;
+            goto out;
+        }
+        unlock_user(argptr, guest_data, guest_data_size);
+
+        argptr = lock_user(VERIFY_WRITE, arg, target_size, 0);
+        if (!argptr) {
+            ret = -TARGET_EFAULT;
+            goto out;
+        }
+        thunk_convert(argptr, buf_temp, arg_type, THUNK_TARGET);
+        unlock_user(argptr, arg, target_size);
+    }
+out:
+    g_free(big_buf);
+    return ret;
+}
+
+static abi_long do_ioctl_blkpg(const IOCTLEntry *ie, uint8_t *buf_temp, int fd,
+                               int cmd, abi_long arg)
+{
+    void *argptr;
+    int target_size;
+    const argtype *arg_type = ie->arg_type;
+    const argtype part_arg_type[] = { MK_STRUCT(STRUCT_blkpg_partition) };
+    abi_long ret;
+
+    struct blkpg_ioctl_arg *host_blkpg = (void*)buf_temp;
+    struct blkpg_partition host_part;
+
+    /* Read and convert blkpg */
+    arg_type++;
+    target_size = thunk_type_size(arg_type, 0);
+    argptr = lock_user(VERIFY_READ, arg, target_size, 1);
+    if (!argptr) {
+        ret = -TARGET_EFAULT;
+        goto out;
+    }
+    thunk_convert(buf_temp, argptr, arg_type, THUNK_HOST);
+    unlock_user(argptr, arg, 0);
+
+    switch (host_blkpg->op) {
+    case BLKPG_ADD_PARTITION:
+    case BLKPG_DEL_PARTITION:
+        /* payload is struct blkpg_partition */
+        break;
+    default:
+        /* Unknown opcode */
+        ret = -TARGET_EINVAL;
+        goto out;
+    }
+
+    /* Read and convert blkpg->data */
+    arg = (abi_long)(uintptr_t)host_blkpg->data;
+    target_size = thunk_type_size(part_arg_type, 0);
+    argptr = lock_user(VERIFY_READ, arg, target_size, 1);
+    if (!argptr) {
+        ret = -TARGET_EFAULT;
+        goto out;
+    }
+    thunk_convert(&host_part, argptr, part_arg_type, THUNK_HOST);
+    unlock_user(argptr, arg, 0);
+
+    /* Swizzle the data pointer to our local copy and call! */
+    host_blkpg->data = &host_part;
+    ret = get_errno(safe_ioctl(fd, ie->host_cmd, host_blkpg));
+
+out:
+    return ret;
+}
+
+static abi_long do_ioctl_rt(const IOCTLEntry *ie, uint8_t *buf_temp,
+                                int fd, int cmd, abi_long arg)
+{
+    const argtype *arg_type = ie->arg_type;
+    const StructEntry *se;
+    const argtype *field_types;
+    const int *dst_offsets, *src_offsets;
+    int target_size;
+    void *argptr;
+    abi_ulong *target_rt_dev_ptr = NULL;
+    unsigned long *host_rt_dev_ptr = NULL;
+    abi_long ret;
+    int i;
+
+    assert(ie->access == IOC_W);
+    assert(*arg_type == TYPE_PTR);
+    arg_type++;
+    assert(*arg_type == TYPE_STRUCT);
+    target_size = thunk_type_size(arg_type, 0);
+    argptr = lock_user(VERIFY_READ, arg, target_size, 1);
+    if (!argptr) {
+        return -TARGET_EFAULT;
+    }
+    arg_type++;
+    assert(*arg_type == (int)STRUCT_rtentry);
+    se = struct_entries + *arg_type++;
+    assert(se->convert[0] == NULL);
+    /* convert struct here to be able to catch rt_dev string */
+    field_types = se->field_types;
+    dst_offsets = se->field_offsets[THUNK_HOST];
+    src_offsets = se->field_offsets[THUNK_TARGET];
+    for (i = 0; i < se->nb_fields; i++) {
+        if (dst_offsets[i] == offsetof(struct rtentry, rt_dev)) {
+            assert(*field_types == TYPE_PTRVOID);
+            target_rt_dev_ptr = (abi_ulong *)(argptr + src_offsets[i]);
+            host_rt_dev_ptr = (unsigned long *)(buf_temp + dst_offsets[i]);
+            if (*target_rt_dev_ptr != 0) {
+                *host_rt_dev_ptr = (unsigned long)lock_user_string(
+                                                  tswapal(*target_rt_dev_ptr));
+                if (!*host_rt_dev_ptr) {
+                    unlock_user(argptr, arg, 0);
+                    return -TARGET_EFAULT;
+                }
+            } else {
+                *host_rt_dev_ptr = 0;
+            }
+            field_types++;
+            continue;
+        }
+        field_types = thunk_convert(buf_temp + dst_offsets[i],
+                                    argptr + src_offsets[i],
+                                    field_types, THUNK_HOST);
+    }
+    unlock_user(argptr, arg, 0);
+
+    ret = get_errno(safe_ioctl(fd, ie->host_cmd, buf_temp));
+
+    assert(host_rt_dev_ptr != NULL);
+    assert(target_rt_dev_ptr != NULL);
+    if (*host_rt_dev_ptr != 0) {
+        unlock_user((void *)*host_rt_dev_ptr,
+                    *target_rt_dev_ptr, 0);
+    }
+    return ret;
+}
+
+static abi_long do_ioctl_kdsigaccept(const IOCTLEntry *ie, uint8_t *buf_temp,
+                                     int fd, int cmd, abi_long arg)
+{
+    int sig = target_to_host_signal(arg);
+    return get_errno(safe_ioctl(fd, ie->host_cmd, sig));
+}
+
+static abi_long do_ioctl_SIOCGSTAMP(const IOCTLEntry *ie, uint8_t *buf_temp,
+                                    int fd, int cmd, abi_long arg)
+{
+    struct timeval tv;
+    abi_long ret;
+
+    ret = get_errno(safe_ioctl(fd, SIOCGSTAMP, &tv));
+    if (is_error(ret)) {
+        return ret;
+    }
+
+    if (cmd == (int)TARGET_SIOCGSTAMP_OLD) {
+        if (copy_to_user_timeval(arg, &tv)) {
+            return -TARGET_EFAULT;
+        }
+    } else {
+        if (copy_to_user_timeval64(arg, &tv)) {
+            return -TARGET_EFAULT;
+        }
+    }
+
+    return ret;
+}
+
+static abi_long do_ioctl_SIOCGSTAMPNS(const IOCTLEntry *ie, uint8_t *buf_temp,
+                                      int fd, int cmd, abi_long arg)
+{
+    struct timespec ts;
+    abi_long ret;
+
+    ret = get_errno(safe_ioctl(fd, SIOCGSTAMPNS, &ts));
+    if (is_error(ret)) {
+        return ret;
+    }
+
+    if (cmd == (int)TARGET_SIOCGSTAMPNS_OLD) {
+        if (host_to_target_timespec(arg, &ts)) {
+            return -TARGET_EFAULT;
+        }
+    } else{
+        if (host_to_target_timespec64(arg, &ts)) {
+            return -TARGET_EFAULT;
+        }
+    }
+
+    return ret;
+}
+
+#ifdef TIOCGPTPEER
+static abi_long do_ioctl_tiocgptpeer(const IOCTLEntry *ie, uint8_t *buf_temp,
+                                     int fd, int cmd, abi_long arg)
+{
+    int flags = target_to_host_bitmask(arg, fcntl_flags_tbl);
+    return get_errno(safe_ioctl(fd, ie->host_cmd, flags));
+}
+#endif
+
+#if defined(HAVE_LIBDRM_H) || defined(HAVE_DRM_H)
+
+static void unlock_drm_version(struct drm_version *host_ver,
+                               struct target_drm_version *target_ver,
+                               bool copy)
+{
+    unlock_user(host_ver->name, target_ver->name,
+                                copy ? host_ver->name_len : 0);
+    unlock_user(host_ver->date, target_ver->date,
+                                copy ? host_ver->date_len : 0);
+    unlock_user(host_ver->desc, target_ver->desc,
+                                copy ? host_ver->desc_len : 0);
+}
+
+static inline abi_long target_to_host_drmversion(struct drm_version *host_ver,
+                                          struct target_drm_version *target_ver)
+{
+    memset(host_ver, 0, sizeof(*host_ver));
+
+    __get_user(host_ver->name_len, &target_ver->name_len);
+    if (host_ver->name_len) {
+        host_ver->name = lock_user(VERIFY_WRITE, target_ver->name,
+                                   target_ver->name_len, 0);
+        if (!host_ver->name) {
+            return -EFAULT;
+        }
+    }
+
+    __get_user(host_ver->date_len, &target_ver->date_len);
+    if (host_ver->date_len) {
+        host_ver->date = lock_user(VERIFY_WRITE, target_ver->date,
+                                   target_ver->date_len, 0);
+        if (!host_ver->date) {
+            goto err;
+        }
+    }
+
+    __get_user(host_ver->desc_len, &target_ver->desc_len);
+    if (host_ver->desc_len) {
+        host_ver->desc = lock_user(VERIFY_WRITE, target_ver->desc,
+                                   target_ver->desc_len, 0);
+        if (!host_ver->desc) {
+            goto err;
+        }
+    }
+
+    return 0;
+err:
+    unlock_drm_version(host_ver, target_ver, false);
+    return -EFAULT;
+}
+
+static inline void host_to_target_drmversion(
+                                          struct target_drm_version *target_ver,
+                                          struct drm_version *host_ver)
+{
+    __put_user(host_ver->version_major, &target_ver->version_major);
+    __put_user(host_ver->version_minor, &target_ver->version_minor);
+    __put_user(host_ver->version_patchlevel, &target_ver->version_patchlevel);
+    __put_user(host_ver->name_len, &target_ver->name_len);
+    __put_user(host_ver->date_len, &target_ver->date_len);
+    __put_user(host_ver->desc_len, &target_ver->desc_len);
+    unlock_drm_version(host_ver, target_ver, true);
+}
+
+static inline abi_long target_to_host_gem_create(struct drm_radeon_gem_create *host_ver,
+                                          struct target_drm_radeon_gem_create *target_ver)
+{
+    memset(host_ver, 0, sizeof(*host_ver));
+    __get_user(host_ver->size, &target_ver->size);
+    __get_user(host_ver->alignment, &target_ver->alignment);
+    __get_user(host_ver->handle, &target_ver->handle);
+    __get_user(host_ver->initial_domain, &target_ver->initial_domain);
+    __get_user(host_ver->flags, &target_ver->flags);
+    return 0;
+}
+
+static inline void host_to_target_gem_create(
+                                          struct target_drm_radeon_gem_create *target_ver,
+                                          struct drm_radeon_gem_create *host_ver)
+{
+    __put_user(host_ver->size, &target_ver->size);
+    __put_user(host_ver->alignment, &target_ver->alignment);
+    __put_user(host_ver->handle, &target_ver->handle);
+    __put_user(host_ver->initial_domain, &target_ver->initial_domain);
+    __put_user(host_ver->flags, &target_ver->flags);
+}
+
+static abi_long do_ioctl_drm(const IOCTLEntry *ie, uint8_t *buf_temp,
+                             int fd, int cmd, abi_long arg)
+{
+    abi_long ret;
+    struct drm_version *ver;
+    struct target_drm_version *target_ver;
+    struct drm_radeon_gem_create *gem_create;
+    struct target_drm_radeon_gem_create *target_gem_create;
+
+    switch (ie->host_cmd) {
+       case DRM_IOCTL_VERSION:
+            if (!lock_user_struct(VERIFY_WRITE, target_ver, arg, 0)) {
+                return -TARGET_EFAULT;
+               }
+            ver = (struct drm_version *)buf_temp;
+            ret = target_to_host_drmversion(ver, target_ver);
+            if (!is_error(ret)) {
+                ret = get_errno(safe_ioctl(fd, ie->host_cmd, ver));
+                if (is_error(ret)) {
+                    unlock_drm_version(ver, target_ver, false);
+                } else {
+                    host_to_target_drmversion(target_ver, ver);
+                    }
+               }
+            unlock_user_struct(target_ver, arg, 0);
+            return ret;
+       case DRM_IOCTL_RADEON_GEM_CREATE:
+            if (!lock_user_struct(VERIFY_WRITE, target_gem_create, arg, 0)) {
+                return -TARGET_EFAULT;
+               }
+            gem_create = (struct drm_radeon_gem_create *)buf_temp;
+            ret = target_to_host_gem_create(gem_create, target_gem_create);
+            if (!is_error(ret)) {
+                ret = get_errno(safe_ioctl(fd, ie->host_cmd, gem_create));
+                if (is_error(ret)) {
+                    assert(0);
+                } else {
+                    host_to_target_gem_create(target_gem_create, gem_create);
+                    }
+                }
+            unlock_user_struct(target_gem_create, arg, 0);
+            return ret;
+    }
+   return -TARGET_ENOSYS;
+}
+
+static abi_long do_ioctl_drm_i915_getparam(const IOCTLEntry *ie,
+                                           struct drm_i915_getparam *gparam,
+                                           int fd, abi_long arg)
+{
+    abi_long ret;
+    int value;
+    struct target_drm_i915_getparam *target_gparam;
+
+    if (!lock_user_struct(VERIFY_READ, target_gparam, arg, 0)) {
+        return -TARGET_EFAULT;
+    }
+
+    __get_user(gparam->param, &target_gparam->param);
+    gparam->value = &value;
+    ret = get_errno(safe_ioctl(fd, ie->host_cmd, gparam));
+    put_user_s32(value, target_gparam->value);
+
+    unlock_user_struct(target_gparam, arg, 0);
+    return ret;
+}
+
+static abi_long do_ioctl_drm_i915(const IOCTLEntry *ie, uint8_t *buf_temp,
+                                  int fd, int cmd, abi_long arg)
+{
+    switch (ie->host_cmd) {
+    case DRM_IOCTL_I915_GETPARAM:
+        return do_ioctl_drm_i915_getparam(ie,
+                                          (struct drm_i915_getparam *)buf_temp,
+                                          fd, arg);
+    default:
+        return -TARGET_ENOSYS;
+    }
+}
+
+#endif
+
+static abi_long do_ioctl_TUNSETTXFILTER(const IOCTLEntry *ie, uint8_t *buf_temp,
+                                        int fd, int cmd, abi_long arg)
+{
+    struct tun_filter *filter = (struct tun_filter *)buf_temp;
+    struct tun_filter *target_filter;
+    char *target_addr;
+
+    assert(ie->access == IOC_W);
+
+    target_filter = lock_user(VERIFY_READ, arg, sizeof(*target_filter), 1);
+    if (!target_filter) {
+        return -TARGET_EFAULT;
+    }
+    filter->flags = tswap16(target_filter->flags);
+    filter->count = tswap16(target_filter->count);
+    unlock_user(target_filter, arg, 0);
+
+    if (filter->count) {
+        if (offsetof(struct tun_filter, addr) + filter->count * ETH_ALEN >
+            MAX_STRUCT_SIZE) {
+            return -TARGET_EFAULT;
+        }
+
+        target_addr = lock_user(VERIFY_READ,
+                                arg + offsetof(struct tun_filter, addr),
+                                filter->count * ETH_ALEN, 1);
+        if (!target_addr) {
+            return -TARGET_EFAULT;
+        }
+        memcpy(filter->addr, target_addr, filter->count * ETH_ALEN);
+        unlock_user(target_addr, arg + offsetof(struct tun_filter, addr), 0);
+    }
+
+    return get_errno(safe_ioctl(fd, ie->host_cmd, filter));
+}
+
+static inline abi_long target_to_host_ext_ctrls(struct v4l2_ext_controls *host_ver,
+                                          struct target_v4l2_ext_controls *target_ver)
+{
+    memset(host_ver, 0, sizeof(*host_ver));
+    uint64_t controls;
+    size_t error_idx_offset = offsetof(struct v4l2_ext_controls, error_idx);
+    size_t request_fd_offset = error_idx_offset + sizeof(uint32_t);
+    size_t reserved_offset = request_fd_offset + sizeof(uint32_t);
+    __get_user(host_ver->ctrl_class, &target_ver->ctrl_class);
+    __get_user(host_ver->count, &target_ver->count);
+    __get_user(host_ver->error_idx, &target_ver->error_idx);
+    __get_user(*(int32_t *)((uint64_t)host_ver + request_fd_offset),
+                &target_ver->reserved[0]);
+    __get_user(*(uint32_t *)((uint64_t)host_ver + reserved_offset),
+                                    &target_ver->reserved[1]);
+    __get_user(controls, &target_ver->controls);
+    host_ver->controls = (struct v4l2_ext_control *)controls;
+    return 0;
+}
+
+static inline void host_to_target_ext_ctrls(
+                  struct target_v4l2_ext_controls *target_ver,
+                  struct v4l2_ext_controls *host_ver)
+{
+    uint64_t controls = (uint64_t)host_ver->controls;
+    size_t error_idx_offset = offsetof(struct v4l2_ext_controls, error_idx);
+    size_t request_fd_offset = error_idx_offset + sizeof(uint32_t);
+    size_t reserved_offset = request_fd_offset + sizeof(uint32_t);
+    __put_user(host_ver->ctrl_class, &target_ver->ctrl_class);
+    __put_user(host_ver->count, &target_ver->count);
+    __put_user(host_ver->error_idx, &target_ver->error_idx);
+    __put_user(*(int32_t *)((uint64_t)host_ver + request_fd_offset),
+                                    &target_ver->reserved[0]);
+    __put_user(*(uint32_t *)((uint64_t)host_ver + reserved_offset),
+                                    &target_ver->reserved[1]);
+    __put_user(controls, &target_ver->controls);
+}
+
+static inline abi_long target_to_host_v4l2_fmt(
+                  struct v4l2_format *host_ver,
+                  struct target_v4l2_format *target_ver)
+{
+    memset(host_ver, 0, sizeof(*host_ver));
+    __get_user(host_ver->type, &target_ver->type);
+    /*
+    * NOTE: it seems like all union structures are
+    * same as bit64, so memcpy directly.
+    */
+    memcpy(host_ver->fmt.raw_data, target_ver->fmt.raw_data,
+                            sizeof(target_ver->fmt.raw_data));
+    return 0;
+}
+
+static inline void host_to_target_v4l2_fmt(
+                  struct target_v4l2_format *target_ver,
+                  struct v4l2_format *host_ver)
+{
+    __put_user(host_ver->type, &target_ver->type);
+    memcpy(target_ver->fmt.raw_data , host_ver->fmt.raw_data,
+                              sizeof(host_ver->fmt.raw_data));
+}
+
+static inline abi_long target_to_host_v4l2_fb(
+                  struct v4l2_framebuffer *host_ver,
+                  struct target_v4l2_framebuffer *target_ver)
+{
+    uint64_t base;
+    memset(host_ver, 0, sizeof(*host_ver));
+    __get_user(host_ver->capability, &target_ver->capability);
+    __get_user(host_ver->flags, &target_ver->flags);
+    __get_user(base, &target_ver->base);
+    host_ver->base = (void *)base;
+    memcpy(&host_ver->fmt, &target_ver->fmt,
+                                     sizeof(target_ver->fmt));
+    return 0;
+}
+
+static inline void host_to_target_v4l2_fb(
+                   struct target_v4l2_framebuffer *target_ver,
+                   struct v4l2_framebuffer *host_ver)
+{
+    uint64_t base = (uint64_t)host_ver->base;
+    __put_user(host_ver->capability, &target_ver->capability);
+    __put_user(host_ver->flags, &target_ver->flags);
+    __put_user(base, &target_ver->base);
+    memcpy(&target_ver->fmt,
+                       &host_ver->fmt, sizeof(host_ver->fmt));
+}
+
+static inline abi_long target_to_host_v4l2_eminput(
+                   struct v4l2_input *host_ver,
+                   struct target_v4l2_input *target_ver)
+{
+    memset(host_ver, 0, sizeof(*host_ver));
+    __get_user(host_ver->index, &target_ver->index);
+    memcpy(host_ver->name, target_ver->name,
+                                    sizeof(target_ver->name));
+    __get_user(host_ver->type, &target_ver->type);
+    __get_user(host_ver->audioset, &target_ver->audioset);
+    __get_user(host_ver->tuner, &target_ver->tuner);
+    __get_user(host_ver->std, &target_ver->std);
+    __get_user(host_ver->status, &target_ver->status);
+    __get_user(host_ver->capabilities,
+                                   &target_ver->capabilities);
+    memcpy(host_ver->reserved, target_ver->reserved,
+                                sizeof(target_ver->reserved));
+    return 0;
+}
+
+static inline void host_to_target_v4l2_eminput(
+                         struct target_v4l2_input *target_ver,
+                         struct v4l2_input *host_ver)
+{
+    __put_user(host_ver->index, &target_ver->index);
+    memcpy(target_ver->name, host_ver->name,
+                                    sizeof(target_ver->name));
+    __put_user(host_ver->type, &target_ver->type);
+    __put_user(host_ver->audioset, &target_ver->audioset);
+    __put_user(host_ver->tuner, &target_ver->tuner);
+    __put_user(host_ver->std, &target_ver->std);
+    __put_user(host_ver->status, &target_ver->status);
+    __put_user(host_ver->capabilities,
+                                   &target_ver->capabilities);
+    memcpy(target_ver->reserved, host_ver->reserved,
+                                sizeof(target_ver->reserved));
+}
+
+static inline abi_long target_to_host_v4l2_std(
+                      struct v4l2_standard *host_ver,
+                      struct target_v4l2_standard *target_ver)
+{
+    memset(host_ver, 0, sizeof(*host_ver));
+    __get_user(host_ver->index, &target_ver->index);
+    __get_user(host_ver->id, &target_ver->id);
+    memcpy(host_ver->name, target_ver->name,
+                                    sizeof(target_ver->name));
+    __get_user(host_ver->frameperiod.numerator,
+                          &target_ver->frameperiod.numerator);
+    __get_user(host_ver->frameperiod.denominator,
+                        &target_ver->frameperiod.denominator);
+    __get_user(host_ver->framelines, &target_ver->framelines);
+    memcpy(host_ver->reserved, target_ver->reserved,
+                                sizeof(target_ver->reserved));
+    return 0;
+}
+
+static inline void host_to_target_v4l2_std(
+                      struct target_v4l2_standard *target_ver,
+                      struct v4l2_standard *host_ver)
+{
+    __put_user(host_ver->index, &target_ver->index);
+    __put_user(host_ver->id, &target_ver->id);
+    memcpy(target_ver->name, host_ver->name,
+                                    sizeof(target_ver->name));
+    __put_user(host_ver->frameperiod.numerator,
+                          &target_ver->frameperiod.numerator);
+    __put_user(host_ver->frameperiod.denominator,
+                        &target_ver->frameperiod.denominator);
+    __put_user(host_ver->framelines, &target_ver->framelines);
+    memcpy(target_ver->reserved, host_ver->reserved,
+                                sizeof(target_ver->reserved));
+}
+
+static inline abi_long target_to_host_v4l2_buf(
+                        struct v4l2_buffer *host_ver,
+                        struct target_v4l2_buffer *target_ver)
+{
+    memset(host_ver, 0, sizeof(*host_ver));
+    __get_user(host_ver->index, &target_ver->index);
+    __get_user(host_ver->type, &target_ver->type);
+    __get_user(host_ver->bytesused, &target_ver->bytesused);
+    __get_user(host_ver->flags, &target_ver->flags);
+    __get_user(host_ver->field, &target_ver->field);
+    __get_user(host_ver->timestamp.tv_sec,
+                               &target_ver->timestamp.tv_sec);
+    __get_user(host_ver->timestamp.tv_usec,
+                              &target_ver->timestamp.tv_usec);
+    __get_user(host_ver->timecode.type,
+                                  &target_ver->timecode.type);
+    __get_user(host_ver->timecode.flags,
+                                 &target_ver->timecode.flags);
+    __get_user(host_ver->timecode.frames,
+                                &target_ver->timecode.frames);
+    __get_user(host_ver->timecode.seconds,
+                               &target_ver->timecode.seconds);
+    __get_user(host_ver->timecode.minutes,
+                               &target_ver->timecode.minutes);
+    __get_user(host_ver->timecode.hours,
+                                 &target_ver->timecode.hours);
+    memcpy(host_ver->timecode.userbits,
+                       target_ver->timecode.userbits,
+                       sizeof(target_ver->timecode.userbits));
+    __get_user(host_ver->sequence, &target_ver->sequence);
+    __get_user(host_ver->memory, &target_ver->memory);
+    __get_user(host_ver->m.userptr, &target_ver->m.userptr);
+    __get_user(host_ver->length, &target_ver->length);
+    __get_user(host_ver->reserved2, &target_ver->reserved2);
+    __get_user(host_ver->reserved, &target_ver->reserved);
+    return 0;
+}
+
+static inline void host_to_target_v4l2_buf(
+                        struct target_v4l2_buffer *target_ver,
+                        struct v4l2_buffer *host_ver)
+{
+    __put_user(host_ver->index, &target_ver->index);
+    __put_user(host_ver->type, &target_ver->type);
+    __put_user(host_ver->bytesused, &target_ver->bytesused);
+    __put_user(host_ver->flags, &target_ver->flags);
+    __put_user(host_ver->field, &target_ver->field);
+    __put_user(host_ver->timestamp.tv_sec,
+                               &target_ver->timestamp.tv_sec);
+    __put_user(host_ver->timestamp.tv_usec,
+                              &target_ver->timestamp.tv_usec);
+    __put_user(host_ver->timecode.type,
+                                  &target_ver->timecode.type);
+    __put_user(host_ver->timecode.flags,
+                                 &target_ver->timecode.flags);
+    __put_user(host_ver->timecode.frames,
+                                &target_ver->timecode.frames);
+    __put_user(host_ver->timecode.seconds,
+                               &target_ver->timecode.seconds);
+    __put_user(host_ver->timecode.minutes,
+                               &target_ver->timecode.minutes);
+    __put_user(host_ver->timecode.hours,
+                                 &target_ver->timecode.hours);
+    memcpy(target_ver->timecode.userbits,
+                       host_ver->timecode.userbits,
+                       sizeof(target_ver->timecode.userbits));
+    __put_user(host_ver->sequence, &target_ver->sequence);
+    __put_user(host_ver->memory, &target_ver->memory);
+    __put_user(host_ver->m.userptr, &target_ver->m.userptr);
+    __put_user(host_ver->length, &target_ver->length);
+    __put_user(host_ver->reserved2, &target_ver->reserved2);
+    __put_user(host_ver->reserved, &target_ver->reserved);
+}
+
+static inline abi_long target_to_host_v4l2_exp_buf(
+                  struct v4l2_exportbuffer *host_ver,
+                  struct target_v4l2_exportbuffer *target_ver)
+{
+    memset(host_ver, 0, sizeof(*host_ver));
+    __get_user(host_ver->type, &target_ver->type);
+    __get_user(host_ver->index, &target_ver->index);
+    __get_user(host_ver->plane, &target_ver->plane);
+    __get_user(host_ver->flags, &target_ver->flags);
+    __get_user(host_ver->fd, &target_ver->fd);
+    memcpy(host_ver->reserved, target_ver->reserved,
+                                sizeof(target_ver->reserved));
+    return 0;
+}
+
+static inline void host_to_target_v4l2_exp_buf(
+                  struct target_v4l2_exportbuffer *target_ver,
+                  struct v4l2_exportbuffer *host_ver)
+{
+    __put_user(host_ver->type, &target_ver->type);
+    __put_user(host_ver->index, &target_ver->index);
+    __put_user(host_ver->plane, &target_ver->plane);
+    __put_user(host_ver->flags, &target_ver->flags);
+    __put_user(host_ver->fd, &target_ver->fd);
+    memcpy(target_ver->reserved, host_ver->reserved,
+                                sizeof(target_ver->reserved));
+}
+
+static inline abi_long target_to_host_v4l2_edid(
+                          struct v4l2_edid *host_ver,
+                          struct target_v4l2_edid *target_ver)
+{
+    uint64_t edid;
+    memset(host_ver, 0, sizeof(*host_ver));
+
+    __get_user(host_ver->pad, &target_ver->pad);
+    __get_user(host_ver->start_block,
+                                    &target_ver->start_block);
+    __get_user(host_ver->blocks, &target_ver->blocks);
+
+    memcpy(host_ver->reserved, target_ver->reserved,
+                                sizeof(target_ver->reserved));
+    __get_user(edid, &target_ver->edid);
+    host_ver->edid = (uint8_t *)edid;
+    return 0;
+}
+
+static inline void host_to_target_v4l2_edid(
+                          struct target_v4l2_edid *target_ver,
+                          struct v4l2_edid *host_ver)
+{
+    uint64_t edid = (uint64_t)host_ver->edid;
+    __put_user(host_ver->pad, &target_ver->pad);
+    __put_user(host_ver->start_block,
+                                    &target_ver->start_block);
+    __put_user(host_ver->blocks, &target_ver->blocks);
+
+    memcpy(target_ver->reserved, host_ver->reserved,
+                                sizeof(target_ver->reserved));
+    __put_user(edid, &target_ver->edid);
+}
+
+static inline abi_long target_to_host_v4l2_create_buffers(
+                struct v4l2_create_buffers *host_ver,
+                struct target_v4l2_create_buffers *target_ver)
+{
+    memset(host_ver, 0, sizeof(*host_ver));
+    __get_user(host_ver->index, &target_ver->index);
+    __get_user(host_ver->count, &target_ver->count);
+    __get_user(host_ver->memory, &target_ver->memory);
+    __get_user(host_ver->format.type,
+                                    &target_ver->format.type);
+    /*
+    * NOTE: it seems like all union structures
+    * are same as bit64, so memcpy directly.
+    */
+    memcpy(host_ver->format.fmt.raw_data,
+                     target_ver->format.fmt.raw_data,
+                     sizeof(target_ver->format.fmt.raw_data));
+    memcpy(host_ver->reserved,
+          target_ver->reserved, sizeof(target_ver->reserved));
+    return 0;
+}
+
+static inline void host_to_target_v4l2_create_buffers(
+                struct target_v4l2_create_buffers *target_ver,
+                struct v4l2_create_buffers *host_ver)
+{
+
+    __put_user(host_ver->index, &target_ver->index);
+    __put_user(host_ver->count, &target_ver->count);
+    __put_user(host_ver->memory, &target_ver->memory);
+    __put_user(host_ver->format.type,
+                                    &target_ver->format.type);
+    memcpy(target_ver->format.fmt.raw_data,
+                       host_ver->format.fmt.raw_data,
+                       sizeof(host_ver->format.fmt.raw_data));
+    memcpy(target_ver->reserved,
+                       host_ver->reserved,
+                       sizeof(target_ver->reserved));
+}
+
+static inline abi_long target_to_host_v4l2_event(
+                         struct v4l2_event *host_ver,
+                         struct target_v4l2_event *target_ver)
+{
+    memset(host_ver, 0, sizeof(*host_ver));
+    __get_user(host_ver->type, &target_ver->type);
+    memcpy(host_ver->u.data, target_ver->u.data,
+                                  sizeof(target_ver->u.data));
+    __get_user(host_ver->pending, &target_ver->pending);
+    __get_user(host_ver->sequence, &target_ver->sequence);
+    __get_user(host_ver->timestamp.tv_sec,
+                               &target_ver->timestamp.tv_sec);
+    __get_user(host_ver->timestamp.tv_nsec,
+                              &target_ver->timestamp.tv_nsec);
+    __get_user(host_ver->id, &target_ver->id);
+    memcpy(host_ver->reserved, target_ver->reserved,
+                                sizeof(target_ver->reserved));
+    return 0;
+}
+
+static inline void host_to_target_v4l2_event(
+                         struct target_v4l2_event *target_ver,
+                         struct v4l2_event *host_ver)
+{
+    __put_user(host_ver->type, &target_ver->type);
+    memcpy(target_ver->u.data, host_ver->u.data,
+                                  sizeof(target_ver->u.data));
+    __put_user(host_ver->pending, &target_ver->pending);
+    __put_user(host_ver->sequence, &target_ver->sequence);
+    __put_user(host_ver->timestamp.tv_sec,
+                               &target_ver->timestamp.tv_sec);
+    __put_user(host_ver->timestamp.tv_nsec,
+                              &target_ver->timestamp.tv_nsec);
+    __put_user(host_ver->id, &target_ver->id);
+    memcpy(target_ver->reserved, host_ver->reserved,
+                                sizeof(target_ver->reserved));
+}
+
+static abi_long do_ioctl_v4l2(const IOCTLEntry *ie,
+                             uint8_t *buf_temp,
+                             int fd, int cmd, abi_long arg)
+{
+    abi_long ret;
+    struct v4l2_ext_controls *ext_ctrls;
+    struct target_v4l2_ext_controls *target_ext_ctrls;
+    struct target_v4l2_format *target_v4l2_fmt;
+    struct v4l2_format *v4l2_fmt;
+    struct target_v4l2_framebuffer *target_v4l2_fb;
+    struct v4l2_framebuffer *v4l2_fb;
+    struct target_v4l2_input *target_v4l2_input;
+    struct v4l2_input *v4l2_input;
+    struct target_v4l2_standard *target_v4l2_std;
+    struct v4l2_standard *v4l2_std;
+    struct target_v4l2_buffer *target_v4l2_buffer;
+    struct v4l2_buffer *v4l2_buffer;
+    struct target_v4l2_exportbuffer *target_exp_buf;
+    struct v4l2_exportbuffer *exp_buf;
+    struct target_v4l2_edid *target_v4l2_edid;
+    struct v4l2_edid *v4l2_edid;
+    struct target_v4l2_create_buffers
+                                  *target_v4l2_create_buffers;
+    struct v4l2_create_buffers *v4l2_create_buffers;
+    struct target_v4l2_event *target_v4l2_event;
+    struct v4l2_event *v4l2_event;
+
+    switch (ie->host_cmd) {
+    case VIDIOC_TRY_EXT_CTRLS:
+    case VIDIOC_G_EXT_CTRLS:
+    case VIDIOC_S_EXT_CTRLS:
+        if (!lock_user_struct(VERIFY_READ, target_ext_ctrls, arg, 0)) {
+            return -TARGET_EFAULT;
+        }
+        ext_ctrls = (struct v4l2_ext_controls *)buf_temp;
+        ret = target_to_host_ext_ctrls(ext_ctrls, target_ext_ctrls);
+        if (!is_error(ret)) {
+            ret = get_errno(safe_ioctl(fd, ie->host_cmd, ext_ctrls));
+            if (is_error(ret)) {
+                    /* do nothing */
+            } else {
+                host_to_target_ext_ctrls(target_ext_ctrls, ext_ctrls);
+            }
+        }
+        unlock_user_struct(target_ext_ctrls, arg, 0);
+        return ret;
+    case VIDIOC_G_FMT:
+    case VIDIOC_S_FMT:
+    case VIDIOC_TRY_FMT:
+        if (!lock_user_struct(VERIFY_READ, target_v4l2_fmt, arg, 0)) {
+            return -TARGET_EFAULT;
+        }
+        v4l2_fmt = (struct v4l2_format *)buf_temp;
+        ret = target_to_host_v4l2_fmt(v4l2_fmt, target_v4l2_fmt);
+        if (!is_error(ret)) {
+            ret = get_errno(safe_ioctl(fd, ie->host_cmd, v4l2_fmt));
+            if (is_error(ret)) {
+                    /* do nothing */
+            } else {
+                host_to_target_v4l2_fmt(target_v4l2_fmt, v4l2_fmt);
+            }
+        }
+        unlock_user_struct(target_v4l2_fmt, arg, 0);
+        return ret;
+    case VIDIOC_G_FBUF:
+        if (!lock_user_struct(VERIFY_WRITE, target_v4l2_fb, arg, 0)) {
+            return -TARGET_EFAULT;
+        }
+        v4l2_fb = (struct v4l2_framebuffer *)buf_temp;
+        ret = target_to_host_v4l2_fb(v4l2_fb, target_v4l2_fb);
+        if (!is_error(ret)) {
+            ret = get_errno(safe_ioctl(fd, ie->host_cmd, v4l2_fb));
+            if (is_error(ret)) {
+                    /* do nothing */
+            } else {
+                host_to_target_v4l2_fb(target_v4l2_fb, v4l2_fb);
+            }
+        }
+        unlock_user_struct(target_v4l2_fb, arg, 0);
+        return ret;
+    case VIDIOC_ENUMINPUT:
+        if (!lock_user_struct(VERIFY_READ, target_v4l2_input, arg, 0)) {
+            return -TARGET_EFAULT;
+        }
+        v4l2_input = (struct v4l2_input *)buf_temp;
+        ret = target_to_host_v4l2_eminput(v4l2_input, target_v4l2_input);
+        if (!is_error(ret)) {
+            ret = get_errno(safe_ioctl(fd, ie->host_cmd, v4l2_input));
+            if (is_error(ret)) {
+                    /* do nothing */
+            } else {
+                host_to_target_v4l2_eminput(target_v4l2_input, v4l2_input);
+            }
+        }
+        unlock_user_struct(target_v4l2_input, arg, 0);
+        return ret;
+    case VIDIOC_ENUMSTD:
+        if (!lock_user_struct(VERIFY_READ, target_v4l2_std, arg, 0)) {
+            return -TARGET_EFAULT;
+        }
+        v4l2_std = (struct v4l2_standard *)buf_temp;
+        ret = target_to_host_v4l2_std(v4l2_std, target_v4l2_std);
+        if (!is_error(ret)) {
+            ret = get_errno(safe_ioctl(fd, ie->host_cmd, v4l2_std));
+            if (is_error(ret)) {
+                    /* do nothing */
+            } else {
+                host_to_target_v4l2_std(target_v4l2_std, v4l2_std);
+            }
+        }
+        unlock_user_struct(target_v4l2_std, arg, 0);
+        return ret;
+    case VIDIOC_QUERYBUF:
+    case VIDIOC_QBUF:
+    case VIDIOC_DQBUF:
+        if (!lock_user_struct(VERIFY_READ, target_v4l2_buffer, arg, 0)) {
+            return -TARGET_EFAULT;
+        }
+        v4l2_buffer = (struct v4l2_buffer *)buf_temp;
+        ret = target_to_host_v4l2_buf(v4l2_buffer, target_v4l2_buffer);
+        if (!is_error(ret)) {
+            ret = get_errno(safe_ioctl(fd, ie->host_cmd, v4l2_buffer));
+            if (is_error(ret)) {
+                    /* do nothing */
+            } else {
+               host_to_target_v4l2_buf(target_v4l2_buffer, v4l2_buffer);
+            }
+        }
+        unlock_user_struct(target_v4l2_buffer, arg, 0);
+        return ret;
+    case VIDIOC_EXPBUF:
+        if (!lock_user_struct(VERIFY_READ, target_exp_buf, arg, 0)) {
+            return -TARGET_EFAULT;
+        }
+        exp_buf = (struct v4l2_exportbuffer *)buf_temp;
+        ret = target_to_host_v4l2_exp_buf(exp_buf, target_exp_buf);
+        if (!is_error(ret)) {
+            ret = get_errno(safe_ioctl(fd, ie->host_cmd, exp_buf));
+            if (is_error(ret)) {
+                    /* do nothing */
+            } else {
+                host_to_target_v4l2_exp_buf(target_exp_buf, exp_buf);
+            }
+        }
+        unlock_user_struct(target_exp_buf, arg, 0);
+        return ret;
+    case VIDIOC_G_EDID:
+    case VIDIOC_S_EDID:
+        if (!lock_user_struct(VERIFY_READ, target_v4l2_edid, arg, 0)) {
+            return -TARGET_EFAULT;
+        }
+        v4l2_edid = (struct v4l2_edid *)buf_temp;
+        ret = target_to_host_v4l2_edid(v4l2_edid, target_v4l2_edid);
+        if (!is_error(ret)) {
+            ret = get_errno(safe_ioctl(fd, ie->host_cmd, v4l2_edid));
+            if (is_error(ret)) {
+                    /* do nothing */
+            } else {
+                host_to_target_v4l2_edid(target_v4l2_edid, v4l2_edid);
+            }
+        }
+        unlock_user_struct(target_v4l2_edid, arg, 0);
+        return ret;
+    case VIDIOC_CREATE_BUFS:
+        if (!lock_user_struct(VERIFY_READ, target_v4l2_create_buffers, arg, 0)) {
+            return -TARGET_EFAULT;
+        }
+        v4l2_create_buffers = (struct v4l2_create_buffers *)buf_temp;
+        ret = target_to_host_v4l2_create_buffers(v4l2_create_buffers,
+                                  target_v4l2_create_buffers);
+        if (!is_error(ret)) {
+            ret = get_errno(safe_ioctl(fd, ie->host_cmd, v4l2_create_buffers));
+            if (is_error(ret)) {
+                    /* do nothing */
+            } else {
+               host_to_target_v4l2_create_buffers(target_v4l2_create_buffers,
+                                         v4l2_create_buffers);
+            }
+        }
+        unlock_user_struct(target_v4l2_create_buffers, arg, 0);
+        return ret;
+    case VIDIOC_DQEVENT:
+        if (!lock_user_struct(VERIFY_WRITE, target_v4l2_event, arg, 0)) {
+            return -TARGET_EFAULT;
+        }
+        v4l2_event = (struct v4l2_event *)buf_temp;
+        ret = target_to_host_v4l2_event(v4l2_event, target_v4l2_event);
+        if (!is_error(ret)) {
+            ret = get_errno(safe_ioctl(fd, ie->host_cmd, v4l2_event));
+            if (is_error(ret)) {
+                    /* do nothing */
+            } else {
+                host_to_target_v4l2_event(target_v4l2_event, v4l2_event);
+            }
+        }
+        unlock_user_struct(target_v4l2_event, arg, 0);
+        return ret;
+    }
+   return -TARGET_ENOSYS;
+}
+
+static inline abi_long target_to_host_seq_port_info(
+                         struct snd_seq_port_info *host_ver,
+                         struct target_snd_seq_port_info *target_ver)
+{
+    uint64_t kernel;
+    memset(host_ver, 0, sizeof(*host_ver));
+    __get_user(host_ver->addr.client, &target_ver->addr.client);
+    __get_user(host_ver->addr.port, &target_ver->addr.port);
+    memcpy(host_ver->name, target_ver->name,
+                                  sizeof(target_ver->name));
+    __get_user(host_ver->capability, &target_ver->capability);
+    __get_user(host_ver->type, &target_ver->type);
+    __get_user(host_ver->midi_channels, &target_ver->midi_channels);
+    __get_user(host_ver->midi_voices, &target_ver->midi_voices);
+    __get_user(host_ver->synth_voices, &target_ver->synth_voices);
+    __get_user(host_ver->read_use, &target_ver->read_use);
+    __get_user(host_ver->write_use, &target_ver->write_use);
+    __get_user(kernel, &target_ver->kernel);
+
+    __get_user(host_ver->flags, &target_ver->flags);
+    __get_user(host_ver->time_queue, &target_ver->time_queue);
+
+    memcpy(host_ver->reserved, target_ver->reserved,
+                                  sizeof(target_ver->reserved));
+    host_ver->kernel = (uint8_t *)kernel;
+    return 0;
+}
+
+static inline void host_to_target_seq_port_info(
+                         struct target_snd_seq_port_info *target_ver,
+                         struct snd_seq_port_info *host_ver)
+{
+    uint64_t kernel = (uint64_t)host_ver->kernel;
+
+    __put_user(host_ver->addr.client, &target_ver->addr.client);
+    __put_user(host_ver->addr.port, &target_ver->addr.port);
+    memcpy(target_ver->name, host_ver->name,
+                                  sizeof(target_ver->name));
+    __put_user(host_ver->capability, &target_ver->capability);
+    __put_user(host_ver->type, &target_ver->type);
+    __put_user(host_ver->midi_channels, &target_ver->midi_channels);
+    __put_user(host_ver->midi_voices, &target_ver->midi_voices);
+    __put_user(host_ver->synth_voices, &target_ver->synth_voices);
+    __put_user(host_ver->read_use, &target_ver->read_use);
+    __put_user(host_ver->write_use, &target_ver->write_use);
+    __put_user(kernel, &target_ver->kernel);
+
+    __put_user(host_ver->flags, &target_ver->flags);
+    __put_user(host_ver->time_queue, &target_ver->time_queue);
+
+    memcpy(target_ver->reserved, host_ver->reserved,
+                                  sizeof(target_ver->reserved));
+}
+
+static inline abi_long target_to_host_snd_pcm_sync_ptr(
+                         struct snd_pcm_sync_ptr *host_ver,
+                         struct target_snd_pcm_sync_ptr *target_ver)
+{
+    memset(host_ver, 0, sizeof(*host_ver));
+    __get_user(host_ver->flags, &target_ver->flags);
+    __get_user(host_ver->s.status.state, &target_ver->s.status.state);
+    __get_user(host_ver->s.status.pad1, &target_ver->s.status.pad1);
+    __get_user(host_ver->s.status.hw_ptr, &target_ver->s.status.hw_ptr);
+    __get_user(host_ver->s.status.tstamp.tv_nsec,
+                                      &target_ver->s.status.tstamp.tv_nsec);
+    __get_user(host_ver->s.status.tstamp.tv_sec,
+                                      &target_ver->s.status.tstamp.tv_sec);
+    __get_user(host_ver->s.status.suspended_state,
+                                      &target_ver->s.status.suspended_state);
+    __get_user(host_ver->s.status.audio_tstamp.tv_nsec,
+                                      &target_ver->s.status.audio_tstamp.tv_nsec);
+    __get_user(host_ver->s.status.audio_tstamp.tv_sec,
+                                      &target_ver->s.status.audio_tstamp.tv_sec);
+    __get_user(host_ver->c.control.appl_ptr, &target_ver->c.control.appl_ptr);
+    __get_user(host_ver->c.control.avail_min, &target_ver->c.control.avail_min);
+
+    return 0;
+}
+
+static inline void host_to_target_snd_pcm_sync_ptr(
+                         struct target_snd_pcm_sync_ptr *target_ver,
+                         struct snd_pcm_sync_ptr *host_ver)
+{
+    __put_user(host_ver->flags, &target_ver->flags);
+    __put_user(host_ver->s.status.state, &target_ver->s.status.state);
+    __put_user(host_ver->s.status.pad1, &target_ver->s.status.pad1);
+    __put_user(host_ver->s.status.hw_ptr, &target_ver->s.status.hw_ptr);
+    __put_user(host_ver->s.status.tstamp.tv_nsec,
+                                      &target_ver->s.status.tstamp.tv_nsec);
+    __put_user(host_ver->s.status.tstamp.tv_sec,
+                                      &target_ver->s.status.tstamp.tv_sec);
+    __put_user(host_ver->s.status.suspended_state,
+                                      &target_ver->s.status.suspended_state);
+    __put_user(host_ver->s.status.audio_tstamp.tv_nsec,
+                                      &target_ver->s.status.audio_tstamp.tv_nsec);
+    __put_user(host_ver->s.status.audio_tstamp.tv_sec,
+                                      &target_ver->s.status.audio_tstamp.tv_sec);
+    __put_user(host_ver->c.control.appl_ptr, &target_ver->c.control.appl_ptr);
+    __put_user(host_ver->c.control.avail_min, &target_ver->c.control.avail_min);
+}
+
+static inline abi_long target_to_host_snd_hw_params(
+                         struct snd_pcm_hw_params *host_ver,
+                         struct target_snd_pcm_hw_params *target_ver)
+{
+    memset(host_ver, 0, sizeof(*host_ver));
+    __get_user(host_ver->flags, &target_ver->flags);
+    assert(ARRAY_SIZE(host_ver->masks) == ARRAY_SIZE(target_ver->masks));
+    memcpy(host_ver->masks, target_ver->masks,
+                                  sizeof(target_ver->masks));
+    memcpy(host_ver->mres, target_ver->mres,
+                                  sizeof(target_ver->mres));
+    memcpy(host_ver->intervals, target_ver->intervals,
+                                  sizeof(target_ver->intervals));
+    memcpy(host_ver->ires, target_ver->ires,
+                                  sizeof(target_ver->ires));
+    __get_user(host_ver->rmask, &target_ver->rmask);
+    __get_user(host_ver->cmask, &target_ver->cmask);
+    __get_user(host_ver->info, &target_ver->info);
+    __get_user(host_ver->msbits, &target_ver->msbits);
+    __get_user(host_ver->rate_num, &target_ver->rate_num);
+    __get_user(host_ver->rate_den, &target_ver->rate_den);
+    __get_user(host_ver->fifo_size, &target_ver->fifo_size);
+    memcpy(host_ver->reserved, target_ver->reserved,
+                                  sizeof(target_ver->reserved));
+    return 0;
+}
+
+static inline void host_to_target_snd_hw_params(
+                         struct target_snd_pcm_hw_params *target_ver,
+                         struct snd_pcm_hw_params *host_ver)
+{
+    __put_user(host_ver->flags, &target_ver->flags);
+    assert(ARRAY_SIZE(host_ver->masks) == ARRAY_SIZE(target_ver->masks));
+    memcpy(target_ver->masks, host_ver->masks,
+                                  sizeof(target_ver->masks));
+    memcpy(target_ver->mres, host_ver->mres,
+                                  sizeof(target_ver->mres));
+    memcpy(target_ver->intervals, host_ver->intervals,
+                                  sizeof(target_ver->intervals));
+    memcpy(target_ver->ires, host_ver->ires,
+                                  sizeof(target_ver->ires));
+    __put_user(host_ver->rmask, &target_ver->rmask);
+    __put_user(host_ver->cmask, &target_ver->cmask);
+    __put_user(host_ver->info, &target_ver->info);
+    __put_user(host_ver->msbits, &target_ver->msbits);
+    __put_user(host_ver->rate_num, &target_ver->rate_num);
+    __put_user(host_ver->rate_den, &target_ver->rate_den);
+    __put_user(host_ver->fifo_size, &target_ver->fifo_size);
+    memcpy(target_ver->reserved, host_ver->reserved,
+                                  sizeof(target_ver->reserved));
+}
+
+static inline abi_long target_to_host_snd_sw_params(
+                         struct snd_pcm_sw_params *host_ver,
+                         struct target_snd_pcm_sw_params *target_ver)
+{
+    __get_user(host_ver->tstamp_mode, &target_ver->tstamp_mode);
+    __get_user(host_ver->period_step, &target_ver->period_step);
+    __get_user(host_ver->sleep_min, &target_ver->sleep_min);
+    __get_user(host_ver->avail_min, &target_ver->avail_min);
+    __get_user(host_ver->xfer_align, &target_ver->xfer_align);
+    __get_user(host_ver->start_threshold, &target_ver->start_threshold);
+    __get_user(host_ver->stop_threshold, &target_ver->stop_threshold);
+    __get_user(host_ver->silence_threshold, &target_ver->silence_threshold);
+    __get_user(host_ver->silence_size, &target_ver->silence_size);
+    __get_user(host_ver->boundary, &target_ver->boundary);
+    __get_user(host_ver->proto, &target_ver->proto);
+    __get_user(host_ver->tstamp_type, &target_ver->tstamp_type);
+    memcpy(host_ver->reserved, target_ver->reserved,
+                                  sizeof(target_ver->reserved));
+    return 0;
+}
+
+static inline void host_to_target_snd_sw_params(
+                         struct target_snd_pcm_sw_params *target_ver,
+                         struct snd_pcm_sw_params *host_ver)
+{
+    __put_user(host_ver->tstamp_mode, &target_ver->tstamp_mode);
+    __put_user(host_ver->period_step, &target_ver->period_step);
+    __put_user(host_ver->sleep_min, &target_ver->sleep_min);
+    __put_user(host_ver->avail_min, &target_ver->avail_min);
+    __put_user(host_ver->xfer_align, &target_ver->xfer_align);
+    __put_user(host_ver->start_threshold, &target_ver->start_threshold);
+    __put_user(host_ver->stop_threshold, &target_ver->stop_threshold);
+    __put_user(host_ver->silence_threshold, &target_ver->silence_threshold);
+    __put_user(host_ver->silence_size, &target_ver->silence_size);
+    __put_user(host_ver->boundary, &target_ver->boundary);
+    __put_user(host_ver->proto, &target_ver->proto);
+    __put_user(host_ver->tstamp_type, &target_ver->tstamp_type);
+    memcpy(target_ver->reserved, host_ver->reserved,
+                                  sizeof(target_ver->reserved));
+}
+
+static inline abi_long target_to_host_snd_pcm_channel_info(
+                         struct snd_pcm_channel_info *host_ver,
+          struct target_snd_pcm_channel_info *target_ver)
+{
+    __get_user(host_ver->channel, &target_ver->channel);
+    __get_user(host_ver->offset, &target_ver->offset);
+    __get_user(host_ver->first, &target_ver->first);
+    __get_user(host_ver->step, &target_ver->step);
+    return 0;
+}
+
+static inline void host_to_target_snd_pcm_channel_info(
+                         struct target_snd_pcm_channel_info *target_ver,
+         struct snd_pcm_channel_info *host_ver)
+{
+    __put_user(host_ver->channel, &target_ver->channel);
+    __put_user(host_ver->offset, &target_ver->offset);
+    __put_user(host_ver->first, &target_ver->first);
+    __put_user(host_ver->step, &target_ver->step);
+}
+
+static inline abi_long target_to_host_snd_xferi(
+                         struct snd_xferi *host_ver,
+         struct target_snd_xferi *target_ver)
+{
+    uint64_t buf;
+    __get_user(host_ver->result, &target_ver->result);
+    __get_user(buf, &target_ver->buf);
+    host_ver->buf = (void *)buf;
+    __get_user(host_ver->frames, &target_ver->frames);
+    return 0;
+}
+
+static inline void host_to_target_snd_xferi(
+                         struct target_snd_xferi *target_ver,
+         struct snd_xferi *host_ver)
+{
+    uint64_t buf = (uint64_t)host_ver->buf;
+    __put_user(host_ver->result, &target_ver->result);
+    __put_user(buf, &target_ver->buf);
+    __put_user(host_ver->frames, &target_ver->frames);
+}
+
+static abi_long do_ioctl_seq(const IOCTLEntry *ie,
+                             uint8_t *buf_temp,
+                             int fd, int cmd, abi_long arg)
+{
+    abi_long ret;
+    struct target_snd_seq_port_info *target_seq_port_info;
+    struct snd_seq_port_info *seq_port_info;
+    struct target_snd_pcm_sync_ptr *target_pcm_sync_ptr;
+    struct snd_pcm_sync_ptr *pcm_sync_ptr;
+    struct target_snd_pcm_hw_params *target_snd_pcm_hw_params;
+    struct snd_pcm_hw_params *snd_pcm_hw_params;
+    struct target_snd_pcm_sw_params *target_snd_pcm_sw_params;
+    struct snd_pcm_sw_params *snd_pcm_sw_params;
+    struct target_snd_pcm_channel_info *target_snd_pcm_channel_info;
+    struct snd_pcm_channel_info *snd_pcm_channel_info;
+    struct target_snd_xferi *target_snd_xferi;
+    struct snd_xferi *snd_xferi;
+
+    switch (ie->host_cmd) {
+    case SNDRV_SEQ_IOCTL_QUERY_NEXT_PORT:
+    case SNDRV_SEQ_IOCTL_DELETE_PORT:
+    case SNDRV_SEQ_IOCTL_CREATE_PORT:
+        if (!lock_user_struct(VERIFY_READ, target_seq_port_info, arg, 0)) {
+            return -TARGET_EFAULT;
+        }
+        seq_port_info = (struct snd_seq_port_info *)buf_temp;
+        ret = target_to_host_seq_port_info(seq_port_info, target_seq_port_info);
+        if (!is_error(ret)) {
+            ret = get_errno(safe_ioctl(fd, ie->host_cmd, seq_port_info));
+            if (is_error(ret)) {
+                    /* do nothing */
+            } else {
+                host_to_target_seq_port_info(target_seq_port_info, seq_port_info);
+            }
+        }
+        unlock_user_struct(target_seq_port_info, arg, 0);
+        return ret;
+    case SNDRV_PCM_IOCTL_SYNC_PTR:
+        if (!lock_user_struct(VERIFY_READ, target_pcm_sync_ptr, arg, 0)) {
+            return -TARGET_EFAULT;
+        }
+        pcm_sync_ptr = (struct snd_pcm_sync_ptr *)buf_temp;
+        ret = target_to_host_snd_pcm_sync_ptr(pcm_sync_ptr, target_pcm_sync_ptr);
+        if (!is_error(ret)) {
+            ret = get_errno(safe_ioctl(fd, ie->host_cmd, pcm_sync_ptr));
+            if (is_error(ret)) {
+                    /* do nothing */
+            } else {
+                host_to_target_snd_pcm_sync_ptr(target_pcm_sync_ptr, pcm_sync_ptr);
+            }
+        }
+        unlock_user_struct(target_pcm_sync_ptr, arg, 0);
+        return ret;
+    case SNDRV_PCM_IOCTL_HW_REFINE:
+    case SNDRV_PCM_IOCTL_HW_PARAMS:
+        if (!lock_user_struct(VERIFY_READ, target_snd_pcm_hw_params, arg, 0)) {
+            return -TARGET_EFAULT;
+        }
+        snd_pcm_hw_params = (struct snd_pcm_hw_params *)buf_temp;
+        ret = target_to_host_snd_hw_params(snd_pcm_hw_params, target_snd_pcm_hw_params);
+        if (!is_error(ret)) {
+            ret = get_errno(safe_ioctl(fd, ie->host_cmd, snd_pcm_hw_params));
+            if (is_error(ret)) {
+                    /* do nothing */
+            } else {
+                host_to_target_snd_hw_params(target_snd_pcm_hw_params, snd_pcm_hw_params);
+            }
+        }
+        unlock_user_struct(target_snd_pcm_hw_params, arg, 0);
+        return ret;
+    case SNDRV_PCM_IOCTL_SW_PARAMS:
+        if (!lock_user_struct(VERIFY_READ, target_snd_pcm_sw_params, arg, 0)) {
+            return -TARGET_EFAULT;
+        }
+        snd_pcm_sw_params = (struct snd_pcm_sw_params *)buf_temp;
+        ret = target_to_host_snd_sw_params(snd_pcm_sw_params,
+                 target_snd_pcm_sw_params);
+        if (!is_error(ret)) {
+            ret = get_errno(safe_ioctl(fd, ie->host_cmd, snd_pcm_sw_params));
+            if (is_error(ret)) {
+                    /* do nothing */
+            } else {
+                host_to_target_snd_sw_params(target_snd_pcm_sw_params,
+                      snd_pcm_sw_params);
+            }
+        }
+        unlock_user_struct(target_snd_pcm_sw_params, arg, 0);
+        return ret;
+    case SNDRV_PCM_IOCTL_CHANNEL_INFO:
+        if (!lock_user_struct(VERIFY_READ,
+                 target_snd_pcm_channel_info, arg, 0)) {
+            return -TARGET_EFAULT;
+        }
+        snd_pcm_channel_info = (struct snd_pcm_channel_info *)buf_temp;
+        ret = target_to_host_snd_pcm_channel_info(snd_pcm_channel_info,
+                 target_snd_pcm_channel_info);
+        if (!is_error(ret)) {
+            ret = get_errno(safe_ioctl(fd, ie->host_cmd, snd_pcm_channel_info));
+            if (is_error(ret)) {
+                    /* do nothing */
+            } else {
+                host_to_target_snd_pcm_channel_info(
+                      target_snd_pcm_channel_info, snd_pcm_channel_info);
+            }
+        }
+        unlock_user_struct(target_snd_pcm_channel_info, arg, 0);
+        return ret;
+    case SNDRV_PCM_IOCTL_WRITEI_FRAMES:
+    case SNDRV_PCM_IOCTL_READI_FRAMES:
+        if (!lock_user_struct(VERIFY_READ, target_snd_xferi, arg, 0)) {
+            return -TARGET_EFAULT;
+        }
+        snd_xferi = (struct snd_xferi *)buf_temp;
+        ret = target_to_host_snd_xferi(snd_xferi, target_snd_xferi);
+        if (!is_error(ret)) {
+            ret = get_errno(safe_ioctl(fd, ie->host_cmd, snd_xferi));
+            if (is_error(ret)) {
+                    /* do nothing */
+            } else {
+                host_to_target_snd_xferi(target_snd_xferi, snd_xferi);
+            }
+        }
+        unlock_user_struct(target_snd_xferi, arg, 0);
+        return ret;
+
+    }
+    return -TARGET_ENOSYS;
+}
+static inline abi_long target_to_host_mpt3_ioctl_iocinfo(
+                         struct mpt3_ioctl_iocinfo *host_ver,
+         struct target_mpt3_ioctl_iocinfo *target_ver)
+{
+    memset(host_ver, 0, sizeof(*host_ver));
+    __get_user(host_ver->hdr.ioc_number, &target_ver->hdr.ioc_number);
+    __get_user(host_ver->hdr.port_number, &target_ver->hdr.port_number);
+    __get_user(host_ver->hdr.max_data_size, &target_ver->hdr.max_data_size);
+    __get_user(host_ver->adapter_type, &target_ver->adapter_type);
+    __get_user(host_ver->port_number, &target_ver->port_number);
+    __get_user(host_ver->pci_id, &target_ver->pci_id);
+    __get_user(host_ver->hw_rev, &target_ver->hw_rev);
+    __get_user(host_ver->subsystem_device, &target_ver->subsystem_device);
+    __get_user(host_ver->subsystem_vendor, &target_ver->subsystem_vendor);
+    __get_user(host_ver->rsvd0, &target_ver->rsvd0);
+    __get_user(host_ver->firmware_version, &target_ver->firmware_version);
+    __get_user(host_ver->bios_version, &target_ver->bios_version);
+    memcpy(host_ver->driver_version, target_ver->driver_version,
+                                  sizeof(target_ver->driver_version));
+    __get_user(host_ver->rsvd1,   &target_ver->rsvd1);
+    __get_user(host_ver->scsi_id, &target_ver->scsi_id);
+    __get_user(host_ver->rsvd2, &target_ver->rsvd2);
+    __get_user(host_ver->pci_information.u.word, &target_ver->pci_information.u.word);
+    __get_user(host_ver->pci_information.segment_id,
+               &target_ver->pci_information.segment_id);
+
+    return 0;
+}
+
+static inline void host_to_target_mpt3_ioctl_iocinfo(
+                         struct target_mpt3_ioctl_iocinfo *target_ver,
+         struct mpt3_ioctl_iocinfo *host_ver)
+{
+    __put_user(host_ver->hdr.ioc_number, &target_ver->hdr.ioc_number);
+    __put_user(host_ver->hdr.port_number, &target_ver->hdr.port_number);
+    __put_user(host_ver->hdr.max_data_size, &target_ver->hdr.max_data_size);
+    __put_user(host_ver->adapter_type, &target_ver->adapter_type);
+    __put_user(host_ver->port_number, &target_ver->port_number);
+    __put_user(host_ver->pci_id, &target_ver->pci_id);
+    __put_user(host_ver->hw_rev, &target_ver->hw_rev);
+    __put_user(host_ver->subsystem_device, &target_ver->subsystem_device);
+    __put_user(host_ver->subsystem_vendor, &target_ver->subsystem_vendor);
+    __put_user(host_ver->rsvd0, &target_ver->rsvd0);
+    __put_user(host_ver->firmware_version, &target_ver->firmware_version);
+    __put_user(host_ver->bios_version, &target_ver->bios_version);
+    memcpy(target_ver->driver_version, host_ver->driver_version,
+                                  sizeof(target_ver->driver_version));
+    __put_user(host_ver->rsvd1,   &target_ver->rsvd1);
+    __put_user(host_ver->scsi_id, &target_ver->scsi_id);
+    __put_user(host_ver->rsvd2, &target_ver->rsvd2);
+    __put_user(host_ver->pci_information.u.word, &target_ver->pci_information.u.word);
+    __put_user(host_ver->pci_information.segment_id,
+               &target_ver->pci_information.segment_id);
+
+}
+
+static inline abi_long target_to_host_mpt3_ioctl_command(
+                         struct mpt3_ioctl_command *host_ver,
+         struct target_mpt3_ioctl_command *target_ver)
+{
+    memset(host_ver, 0, sizeof(*host_ver));
+    __get_user(host_ver->hdr.ioc_number, &target_ver->hdr.ioc_number);
+    __get_user(host_ver->hdr.port_number, &target_ver->hdr.port_number);
+    __get_user(host_ver->hdr.max_data_size, &target_ver->hdr.max_data_size);
+    __get_user(host_ver->timeout, &target_ver->timeout);
+    __get_user(host_ver->max_reply_bytes, &target_ver->max_reply_bytes);
+    if (host_ver->max_reply_bytes) {
+        host_ver->reply_frame_buf_ptr = lock_user(VERIFY_READ, target_ver->reply_frame_buf_ptr,
+                                   target_ver->max_reply_bytes, 0);
+        if (!host_ver->reply_frame_buf_ptr) {
+            return -EFAULT;
+        }
+    }
+    __get_user(host_ver->data_in_size, &target_ver->data_in_size);
+    if (host_ver->data_in_size) {
+        host_ver->data_in_buf_ptr = lock_user(VERIFY_READ, target_ver->data_in_buf_ptr,
+                                   target_ver->data_in_size, 0);
+        if (!host_ver->data_in_buf_ptr) {
+            return -EFAULT;
+        }
+    }
+    __get_user(host_ver->data_out_size, &target_ver->data_out_size);
+    if (host_ver->data_out_size) {
+        host_ver->data_out_buf_ptr = lock_user(VERIFY_READ, target_ver->data_out_buf_ptr,
+                                   target_ver->data_out_size, 0);
+        if (!host_ver->data_out_buf_ptr) {
+            return -EFAULT;
+        }
+    }
+    __get_user(host_ver->max_sense_bytes, &target_ver->max_sense_bytes);
+    if (host_ver->max_sense_bytes) {
+        host_ver->sense_data_ptr = lock_user(VERIFY_READ, target_ver->sense_data_ptr,
+                                   target_ver->max_sense_bytes, 0);
+        if (!host_ver->sense_data_ptr) {
+            return -EFAULT;
+        }
+    }
+    __get_user(host_ver->data_sge_offset, &target_ver->data_sge_offset);
+    memcpy(host_ver->mf, target_ver->mf,
+           sizeof(uint32_t) * host_ver->data_sge_offset);
+    return 0;
+}
+
+static inline void host_to_target_mpt3_ioctl_command(
+                         struct target_mpt3_ioctl_command *target_ver,
+         struct mpt3_ioctl_command *host_ver)
+{
+    uint64_t reply_frame_buf_ptr = (uint64_t)host_ver->reply_frame_buf_ptr;
+    uint64_t data_in_buf_ptr = (uint64_t)host_ver->data_in_buf_ptr;
+    uint64_t data_out_buf_ptr = (uint64_t)host_ver->data_out_buf_ptr;
+    uint64_t sense_data_ptr = (uint64_t)host_ver->sense_data_ptr;
+    __put_user(host_ver->hdr.ioc_number, &target_ver->hdr.ioc_number);
+    __put_user(host_ver->hdr.port_number, &target_ver->hdr.port_number);
+    __put_user(host_ver->hdr.max_data_size, &target_ver->hdr.max_data_size);
+    __put_user(host_ver->timeout, &target_ver->timeout);
+    __put_user(reply_frame_buf_ptr, &target_ver->reply_frame_buf_ptr);
+    __put_user(data_in_buf_ptr, &target_ver->data_in_buf_ptr);
+    __put_user(data_out_buf_ptr, &target_ver->data_out_buf_ptr);
+    __put_user(sense_data_ptr, &target_ver->sense_data_ptr);
+    __put_user(host_ver->max_reply_bytes, &target_ver->max_reply_bytes);
+    __put_user(host_ver->data_in_size, &target_ver->data_in_size);
+    __put_user(host_ver->data_out_size, &target_ver->data_out_size);
+    __put_user(host_ver->max_sense_bytes, &target_ver->max_sense_bytes);
+    __put_user(host_ver->data_sge_offset, &target_ver->data_sge_offset);
+    memcpy(target_ver->mf, host_ver->mf,
+           sizeof(uint32_t) * host_ver->data_sge_offset);
+}
+
+static inline abi_long target_to_host_mpt3_ioctl_eventquery(
+                         struct mpt3_ioctl_eventquery *host_ver,
+         struct target_mpt3_ioctl_eventquery *target_ver)
+{
+    __get_user(host_ver->hdr.ioc_number, &target_ver->hdr.ioc_number);
+    __get_user(host_ver->hdr.port_number, &target_ver->hdr.port_number);
+    __get_user(host_ver->hdr.max_data_size, &target_ver->hdr.max_data_size);
+    __get_user(host_ver->event_entries, &target_ver->event_entries);
+    __get_user(host_ver->rsvd, &target_ver->rsvd);
+    memcpy(host_ver->event_types,
+           target_ver->event_types, sizeof(target_ver->event_types));
+    return 0;
+}
+
+static inline void host_to_target_mpt3_ioctl_eventquery(
+                         struct target_mpt3_ioctl_eventquery *target_ver,
+         struct mpt3_ioctl_eventquery *host_ver)
+{
+    __put_user(host_ver->hdr.ioc_number, &target_ver->hdr.ioc_number);
+    __put_user(host_ver->hdr.port_number, &target_ver->hdr.port_number);
+    __put_user(host_ver->hdr.max_data_size, &target_ver->hdr.max_data_size);
+    __put_user(host_ver->event_entries, &target_ver->event_entries);
+    __put_user(host_ver->rsvd, &target_ver->rsvd);
+    memcpy(target_ver->event_types,
+           host_ver->event_types, sizeof(target_ver->event_types));
+}
+
+static inline abi_long target_to_host_mpt3_ioctl_eventenable(
+                         struct mpt3_ioctl_eventenable *host_ver,
+         struct target_mpt3_ioctl_eventenable *target_ver)
+{
+    __get_user(host_ver->hdr.ioc_number, &target_ver->hdr.ioc_number);
+    __get_user(host_ver->hdr.port_number, &target_ver->hdr.port_number);
+    __get_user(host_ver->hdr.max_data_size, &target_ver->hdr.max_data_size);
+    memcpy(host_ver->event_types,
+           target_ver->event_types, sizeof(target_ver->event_types));
+    return 0;
+}
+
+static inline void host_to_target_mpt3_ioctl_eventenable(
+                         struct target_mpt3_ioctl_eventenable *target_ver,
+         struct mpt3_ioctl_eventenable *host_ver)
+{
+    __put_user(host_ver->hdr.ioc_number, &target_ver->hdr.ioc_number);
+    __put_user(host_ver->hdr.port_number, &target_ver->hdr.port_number);
+    __put_user(host_ver->hdr.max_data_size, &target_ver->hdr.max_data_size);
+    memcpy(target_ver->event_types,
+           host_ver->event_types, sizeof(target_ver->event_types));
+}
+
+static inline abi_long target_to_host_mpt3_ioctl_eventreport(
+                         struct mpt3_ioctl_eventreport *host_ver,
+         struct target_mpt3_ioctl_eventreport *target_ver)
+{
+    __get_user(host_ver->hdr.ioc_number, &target_ver->hdr.ioc_number);
+    __get_user(host_ver->hdr.port_number, &target_ver->hdr.port_number);
+    __get_user(host_ver->hdr.max_data_size, &target_ver->hdr.max_data_size);
+    abi_ulong number_bytes = host_ver->hdr.max_data_size -
+                            sizeof(struct mpt3_ioctl_header);
+    abi_ulong max_events = number_bytes/sizeof(struct MPT3_IOCTL_EVENTS);
+    abi_ulong max = MPT3SAS_CTL_EVENT_LOG_SIZE < max_events ?
+                    MPT3SAS_CTL_EVENT_LOG_SIZE : max_events;
+    memcpy(host_ver->event_data, target_ver->event_data,
+            sizeof(struct MPT3_IOCTL_EVENTS) * max);
+    return 0;
+}
+
+static inline void host_to_target_mpt3_ioctl_eventreport(
+                         struct target_mpt3_ioctl_eventreport *target_ver,
+         struct mpt3_ioctl_eventreport *host_ver)
+{
+    __put_user(host_ver->hdr.ioc_number, &target_ver->hdr.ioc_number);
+    __put_user(host_ver->hdr.port_number, &target_ver->hdr.port_number);
+    __put_user(host_ver->hdr.max_data_size, &target_ver->hdr.max_data_size);
+    abi_ulong number_bytes = host_ver->hdr.max_data_size -
+                            sizeof(struct mpt3_ioctl_header);
+    abi_ulong max_events = number_bytes/sizeof(struct MPT3_IOCTL_EVENTS);
+    abi_ulong max = MPT3SAS_CTL_EVENT_LOG_SIZE < max_events ?
+                    MPT3SAS_CTL_EVENT_LOG_SIZE : max_events;
+    memcpy(target_ver->event_data, host_ver->event_data,
+            sizeof(target_ver->event_data) * max);
+}
+
+static inline abi_long target_to_host_mpt3_ioctl_diag_reset(
+                         struct mpt3_ioctl_diag_reset *host_ver,
+         struct target_mpt3_ioctl_diag_reset *target_ver)
+{
+    __get_user(host_ver->hdr.ioc_number, &target_ver->hdr.ioc_number);
+    __get_user(host_ver->hdr.port_number, &target_ver->hdr.port_number);
+    __get_user(host_ver->hdr.max_data_size, &target_ver->hdr.max_data_size);
+    return 0;
+}
+
+static inline void host_to_target_mpt3_ioctl_diag_reset(
+                         struct target_mpt3_ioctl_diag_reset *target_ver,
+         struct mpt3_ioctl_diag_reset *host_ver)
+{
+    __put_user(host_ver->hdr.ioc_number, &target_ver->hdr.ioc_number);
+    __put_user(host_ver->hdr.port_number, &target_ver->hdr.port_number);
+    __put_user(host_ver->hdr.max_data_size, &target_ver->hdr.max_data_size);
+}
+
+static inline abi_long target_to_host_mpt3_ioctl_btdh_mapping(
+                         struct mpt3_ioctl_btdh_mapping *host_ver,
+         struct target_mpt3_ioctl_btdh_mapping *target_ver)
+{
+    __get_user(host_ver->hdr.ioc_number, &target_ver->hdr.ioc_number);
+    __get_user(host_ver->hdr.port_number, &target_ver->hdr.port_number);
+    __get_user(host_ver->hdr.max_data_size, &target_ver->hdr.max_data_size);
+    __get_user(host_ver->id, &target_ver->id);
+    __get_user(host_ver->bus, &target_ver->bus);
+    __get_user(host_ver->handle, &target_ver->handle);
+    __get_user(host_ver->rsvd, &target_ver->rsvd);
+    return 0;
+}
+
+static inline void host_to_target_mpt3_ioctl_btdh_mapping(
+                         struct target_mpt3_ioctl_btdh_mapping *target_ver,
+         struct mpt3_ioctl_btdh_mapping *host_ver)
+{
+    __put_user(host_ver->hdr.ioc_number, &target_ver->hdr.ioc_number);
+    __put_user(host_ver->hdr.port_number, &target_ver->hdr.port_number);
+    __put_user(host_ver->hdr.max_data_size, &target_ver->hdr.max_data_size);
+    __put_user(host_ver->id, &target_ver->id);
+    __put_user(host_ver->bus, &target_ver->bus);
+    __put_user(host_ver->handle, &target_ver->handle);
+    __put_user(host_ver->rsvd, &target_ver->rsvd);
+}
+
+static inline abi_long target_to_host_mpt3_diag_register(
+                         struct mpt3_diag_register *host_ver,
+         struct target_mpt3_diag_register *target_ver)
+{
+    __get_user(host_ver->hdr.ioc_number, &target_ver->hdr.ioc_number);
+    __get_user(host_ver->hdr.port_number, &target_ver->hdr.port_number);
+    __get_user(host_ver->hdr.max_data_size, &target_ver->hdr.max_data_size);
+    __get_user(host_ver->reserved, &target_ver->reserved);
+    __get_user(host_ver->buffer_type, &target_ver->buffer_type);
+    __get_user(host_ver->application_flags, &target_ver->application_flags);
+    __get_user(host_ver->diagnostic_flags, &target_ver->diagnostic_flags);
+    memcpy(host_ver->product_specific,
+           target_ver->product_specific, sizeof(target_ver->product_specific));
+    __get_user(host_ver->requested_buffer_size, &target_ver->requested_buffer_size);
+    __get_user(host_ver->unique_id, &target_ver->unique_id);
+    return 0;
+}
+
+static inline void host_to_target_mpt3_diag_register(
+                         struct target_mpt3_diag_register *target_ver,
+         struct mpt3_diag_register *host_ver)
+{
+    __put_user(host_ver->hdr.ioc_number, &target_ver->hdr.ioc_number);
+    __put_user(host_ver->hdr.port_number, &target_ver->hdr.port_number);
+    __put_user(host_ver->hdr.max_data_size, &target_ver->hdr.max_data_size);
+    __put_user(host_ver->reserved, &target_ver->reserved);
+    __put_user(host_ver->buffer_type, &target_ver->buffer_type);
+    __put_user(host_ver->application_flags, &target_ver->application_flags);
+    __put_user(host_ver->diagnostic_flags, &target_ver->diagnostic_flags);
+    memcpy(target_ver->product_specific,
+           host_ver->product_specific, sizeof(target_ver->product_specific));
+    __put_user(host_ver->requested_buffer_size, &target_ver->requested_buffer_size);
+    __put_user(host_ver->unique_id, &target_ver->unique_id);
+}
+
+static inline abi_long target_to_host_mpt3_diag_release(
+                         struct mpt3_diag_release *host_ver,
+         struct target_mpt3_diag_release *target_ver)
+{
+    __get_user(host_ver->hdr.ioc_number, &target_ver->hdr.ioc_number);
+    __get_user(host_ver->hdr.port_number, &target_ver->hdr.port_number);
+    __get_user(host_ver->hdr.max_data_size, &target_ver->hdr.max_data_size);
+    __get_user(host_ver->unique_id, &target_ver->unique_id);
+    return 0;
+}
+
+static inline void host_to_target_mpt3_diag_release(
+                         struct target_mpt3_diag_release *target_ver,
+         struct mpt3_diag_release *host_ver)
+{
+    __put_user(host_ver->hdr.ioc_number, &target_ver->hdr.ioc_number);
+    __put_user(host_ver->hdr.port_number, &target_ver->hdr.port_number);
+    __put_user(host_ver->hdr.max_data_size, &target_ver->hdr.max_data_size);
+    __put_user(host_ver->unique_id, &target_ver->unique_id);
+}
+
+static inline abi_long target_to_host_mpt3_diag_unregister(
+                         struct mpt3_diag_unregister *host_ver,
+         struct target_mpt3_diag_unregister *target_ver)
+{
+    __get_user(host_ver->hdr.ioc_number, &target_ver->hdr.ioc_number);
+    __get_user(host_ver->hdr.port_number, &target_ver->hdr.port_number);
+    __get_user(host_ver->hdr.max_data_size, &target_ver->hdr.max_data_size);
+    __get_user(host_ver->unique_id, &target_ver->unique_id);
+    return 0;
+}
+
+static inline void host_to_target_mpt3_diag_unregister(
+                         struct target_mpt3_diag_unregister *target_ver,
+         struct mpt3_diag_unregister *host_ver)
+{
+    __put_user(host_ver->hdr.ioc_number, &target_ver->hdr.ioc_number);
+    __put_user(host_ver->hdr.port_number, &target_ver->hdr.port_number);
+    __put_user(host_ver->hdr.max_data_size, &target_ver->hdr.max_data_size);
+    __put_user(host_ver->unique_id, &target_ver->unique_id);
+}
+
+static inline abi_long target_to_host_mpt3_diag_query(
+                         struct mpt3_diag_query *host_ver,
+         struct target_mpt3_diag_query *target_ver)
+{
+    __get_user(host_ver->hdr.ioc_number, &target_ver->hdr.ioc_number);
+    __get_user(host_ver->hdr.port_number, &target_ver->hdr.port_number);
+    __get_user(host_ver->hdr.max_data_size, &target_ver->hdr.max_data_size);
+    __get_user(host_ver->reserved, &target_ver->reserved);
+    __get_user(host_ver->buffer_type, &target_ver->buffer_type);
+    __get_user(host_ver->application_flags, &target_ver->application_flags);
+    __get_user(host_ver->diagnostic_flags, &target_ver->diagnostic_flags);
+    memcpy(host_ver->product_specific,
+           target_ver->product_specific, sizeof(target_ver->product_specific));
+
+    __get_user(host_ver->total_buffer_size, &target_ver->total_buffer_size);
+    __get_user(host_ver->driver_added_buffer_size, &target_ver->driver_added_buffer_size);
+    __get_user(host_ver->unique_id, &target_ver->unique_id);
+    return 0;
+}
+
+static inline void host_to_target_mpt3_diag_query(
+                         struct target_mpt3_diag_query *target_ver,
+         struct mpt3_diag_query *host_ver)
+{
+    __put_user(host_ver->hdr.ioc_number, &target_ver->hdr.ioc_number);
+    __put_user(host_ver->hdr.port_number, &target_ver->hdr.port_number);
+    __put_user(host_ver->hdr.max_data_size, &target_ver->hdr.max_data_size);
+    __put_user(host_ver->reserved, &target_ver->reserved);
+    __put_user(host_ver->buffer_type, &target_ver->buffer_type);
+    __put_user(host_ver->application_flags, &target_ver->application_flags);
+    __put_user(host_ver->diagnostic_flags, &target_ver->diagnostic_flags);
+    memcpy(target_ver->product_specific,
+           host_ver->product_specific, sizeof(target_ver->product_specific));
+    __put_user(host_ver->total_buffer_size, &target_ver->total_buffer_size);
+    __put_user(host_ver->driver_added_buffer_size, &target_ver->driver_added_buffer_size);
+    __put_user(host_ver->unique_id, &target_ver->unique_id);
+}
+
+static inline abi_long target_to_host_mpt3_diag_read_buffer(
+                         struct mpt3_diag_read_buffer *host_ver,
+         struct target_mpt3_diag_read_buffer *target_ver)
+{
+    __get_user(host_ver->hdr.ioc_number, &target_ver->hdr.ioc_number);
+    __get_user(host_ver->hdr.port_number, &target_ver->hdr.port_number);
+    __get_user(host_ver->hdr.max_data_size, &target_ver->hdr.max_data_size);
+    __get_user(host_ver->status, &target_ver->status);
+    __get_user(host_ver->reserved, &target_ver->reserved);
+    __get_user(host_ver->flags, &target_ver->flags);
+    __get_user(host_ver->starting_offset, &target_ver->starting_offset);
+    __get_user(host_ver->bytes_to_read, &target_ver->bytes_to_read);
+    __get_user(host_ver->unique_id, &target_ver->unique_id);
+    memcpy(host_ver->diagnostic_data,
+           target_ver->diagnostic_data, sizeof(target_ver->diagnostic_data));
+    return 0;
+}
+
+static inline void host_to_target_mpt3_diag_read_buffer(
+                         struct target_mpt3_diag_read_buffer *target_ver,
+         struct mpt3_diag_read_buffer *host_ver)
+{
+    size_t bytes_to_read;
+    __put_user(host_ver->hdr.ioc_number, &target_ver->hdr.ioc_number);
+    __put_user(host_ver->hdr.port_number, &target_ver->hdr.port_number);
+    __put_user(host_ver->hdr.max_data_size, &target_ver->hdr.max_data_size);
+    __put_user(host_ver->status, &target_ver->status);
+    __put_user(host_ver->reserved, &target_ver->reserved);
+    __put_user(host_ver->flags, &target_ver->flags);
+    __put_user(host_ver->starting_offset, &target_ver->starting_offset);
+    __put_user(host_ver->bytes_to_read, &target_ver->bytes_to_read);
+    __put_user(host_ver->unique_id, &target_ver->unique_id);
+    bytes_to_read = host_ver->bytes_to_read / sizeof(uint32_t) * sizeof(uint32_t);
+    if (host_ver->bytes_to_read % sizeof(uint32_t) != 0) {
+        bytes_to_read += sizeof(uint32_t);
+    }
+    memcpy(target_ver->diagnostic_data, host_ver->diagnostic_data, bytes_to_read);
+}
+
+static abi_long do_ioctl_mpt3(const IOCTLEntry *ie,
+                             uint8_t *buf_temp,
+                             int fd, int cmd, abi_long arg)
+{
+    abi_long ret;
+    struct target_mpt3_ioctl_iocinfo *target_mpt3_ioctl_iocinfo;
+    struct target_mpt3_ioctl_command *target_mpt3_ioctl_command;
+    struct target_mpt3_ioctl_eventquery *target_mpt3_ioctl_eventquery;
+    struct target_mpt3_ioctl_eventenable *target_mpt3_ioctl_eventenable;
+    struct target_mpt3_ioctl_eventreport *target_mpt3_ioctl_eventreport;
+    struct target_mpt3_ioctl_diag_reset *target_mpt3_ioctl_diag_reset;
+    struct target_mpt3_ioctl_btdh_mapping *target_mpt3_ioctl_btdh_mapping;
+    struct target_mpt3_diag_register *target_mpt3_diag_register;
+    struct target_mpt3_diag_release *target_mpt3_diag_release;
+    struct target_mpt3_diag_unregister *target_mpt3_diag_unregister;
+    struct target_mpt3_diag_query *target_mpt3_diag_query;
+    struct target_mpt3_diag_read_buffer *target_mpt3_diag_read_buffer;
+
+    struct mpt3_ioctl_iocinfo *mpt3_ioctl_iocinfo;
+    struct mpt3_ioctl_command *mpt3_ioctl_command;
+    struct mpt3_ioctl_eventquery *mpt3_ioctl_eventquery;
+    struct mpt3_ioctl_eventenable *mpt3_ioctl_eventenable;
+    struct mpt3_ioctl_eventreport *mpt3_ioctl_eventreport;
+    struct mpt3_ioctl_diag_reset *mpt3_ioctl_diag_reset;
+    struct mpt3_ioctl_btdh_mapping *mpt3_ioctl_btdh_mapping;
+    struct mpt3_diag_register *mpt3_diag_register;
+    struct mpt3_diag_release *mpt3_diag_release;
+    struct mpt3_diag_unregister *mpt3_diag_unregister;
+    struct mpt3_diag_query *mpt3_diag_query;
+    struct mpt3_diag_read_buffer *mpt3_diag_read_buffer;
+
+    switch (ie->host_cmd) {
+    case MPT3IOCINFO:
+        if (!lock_user_struct(VERIFY_READ, target_mpt3_ioctl_iocinfo, arg, 0)) {
+            return -TARGET_EFAULT;
+        }
+        mpt3_ioctl_iocinfo = (struct mpt3_ioctl_iocinfo *)buf_temp;
+        ret = target_to_host_mpt3_ioctl_iocinfo(mpt3_ioctl_iocinfo,
+                                                target_mpt3_ioctl_iocinfo);
+        if (!is_error(ret)) {
+            ret = get_errno(safe_ioctl(fd, ie->host_cmd, mpt3_ioctl_iocinfo));
+            if (is_error(ret)) {
+                    /* do nothing */
+            } else {
+                host_to_target_mpt3_ioctl_iocinfo(target_mpt3_ioctl_iocinfo,
+                                                  mpt3_ioctl_iocinfo);
+            }
+        }
+        unlock_user_struct(target_mpt3_ioctl_iocinfo, arg, 0);
+        return ret;
+    case MPT3COMMAND:
+        if (!lock_user_struct(VERIFY_READ, target_mpt3_ioctl_command, arg, 0)) {
+            return -TARGET_EFAULT;
+        }
+        mpt3_ioctl_command = (struct mpt3_ioctl_command *)buf_temp;
+        ret = target_to_host_mpt3_ioctl_command(mpt3_ioctl_command,
+                                                target_mpt3_ioctl_command);
+        if (!is_error(ret)) {
+            ret = get_errno(safe_ioctl(fd, ie->host_cmd, mpt3_ioctl_command));
+            if (is_error(ret)) {
+                    /* do nothing */
+            } else {
+                host_to_target_mpt3_ioctl_command(target_mpt3_ioctl_command,
+                                                  mpt3_ioctl_command);
+            }
+        }
+        unlock_user(mpt3_ioctl_command->reply_frame_buf_ptr, target_mpt3_ioctl_command->reply_frame_buf_ptr, 0);
+        unlock_user(mpt3_ioctl_command->data_in_buf_ptr, target_mpt3_ioctl_command->data_in_buf_ptr, 0);
+        unlock_user(mpt3_ioctl_command->data_out_buf_ptr, target_mpt3_ioctl_command->data_out_buf_ptr, 0);
+        unlock_user(mpt3_ioctl_command->sense_data_ptr, target_mpt3_ioctl_command->sense_data_ptr, 0);
+        unlock_user_struct(target_mpt3_ioctl_command, arg, 0);
+        return ret;
+    case MPT3EVENTQUERY:
+        if (!lock_user_struct(VERIFY_READ, target_mpt3_ioctl_eventquery, arg, 0)) {
+            return -TARGET_EFAULT;
+        }
+        mpt3_ioctl_eventquery = (struct mpt3_ioctl_eventquery *)buf_temp;
+        ret = target_to_host_mpt3_ioctl_eventquery(mpt3_ioctl_eventquery,
+                                                   target_mpt3_ioctl_eventquery);
+        if (!is_error(ret)) {
+            ret = get_errno(safe_ioctl(fd, ie->host_cmd, mpt3_ioctl_eventquery));
+            if (is_error(ret)) {
+                    /* do nothing */
+            } else {
+                host_to_target_mpt3_ioctl_eventquery(target_mpt3_ioctl_eventquery,
+                                                     mpt3_ioctl_eventquery);
+            }
+        }
+        unlock_user_struct(target_mpt3_ioctl_eventquery, arg, 0);
+        return ret;
+    case MPT3EVENTENABLE:
+        if (!lock_user_struct(VERIFY_READ, target_mpt3_ioctl_eventenable, arg, 0)) {
+            return -TARGET_EFAULT;
+        }
+        mpt3_ioctl_eventenable = (struct mpt3_ioctl_eventenable *)buf_temp;
+        ret = target_to_host_mpt3_ioctl_eventenable(mpt3_ioctl_eventenable,
+                                                    target_mpt3_ioctl_eventenable);
+        if (!is_error(ret)) {
+            ret = get_errno(safe_ioctl(fd, ie->host_cmd, mpt3_ioctl_eventenable));
+            if (is_error(ret)) {
+                    /* do nothing */
+            } else {
+                host_to_target_mpt3_ioctl_eventenable(target_mpt3_ioctl_eventenable,
+                                                      mpt3_ioctl_eventenable);
+            }
+        }
+        unlock_user_struct(target_mpt3_ioctl_eventenable, arg, 0);
+        return ret;
+    case MPT3EVENTREPORT:
+        if (!lock_user_struct(VERIFY_READ, target_mpt3_ioctl_eventreport, arg, 0)) {
+            return -TARGET_EFAULT;
+        }
+        mpt3_ioctl_eventreport = g_malloc(MPT3SAS_CTL_EVENT_LOG_SIZE *
+                                        sizeof(struct MPT3_IOCTL_EVENTS) +
+                                        sizeof(struct mpt3_ioctl_header));
+        ret = target_to_host_mpt3_ioctl_eventreport(mpt3_ioctl_eventreport,
+                                                    target_mpt3_ioctl_eventreport);
+        if (!is_error(ret)) {
+            ret = get_errno(safe_ioctl(fd, ie->host_cmd, mpt3_ioctl_eventreport));
+            if (is_error(ret)) {
+                    /* do nothing */
+            } else {
+                host_to_target_mpt3_ioctl_eventreport(target_mpt3_ioctl_eventreport,
+                                                      mpt3_ioctl_eventreport);
+            }
+        }
+        unlock_user_struct(target_mpt3_ioctl_eventreport, arg, 0);
+        g_free(mpt3_ioctl_eventreport);
+        return ret;
+    case MPT3HARDRESET:
+        if (!lock_user_struct(VERIFY_READ, target_mpt3_ioctl_diag_reset, arg, 0)) {
+            return -TARGET_EFAULT;
+        }
+        mpt3_ioctl_diag_reset = (struct mpt3_ioctl_diag_reset *)buf_temp;
+        ret = target_to_host_mpt3_ioctl_diag_reset(mpt3_ioctl_diag_reset,
+                                                   target_mpt3_ioctl_diag_reset);
+        if (!is_error(ret)) {
+            ret = get_errno(safe_ioctl(fd, ie->host_cmd, mpt3_ioctl_diag_reset));
+            if (is_error(ret)) {
+                    /* do nothing */
+            } else {
+                host_to_target_mpt3_ioctl_diag_reset(target_mpt3_ioctl_diag_reset,
+                                                     mpt3_ioctl_diag_reset);
+            }
+        }
+        unlock_user_struct(target_mpt3_ioctl_diag_reset, arg, 0);
+        return ret;
+    case MPT3BTDHMAPPING:
+        if (!lock_user_struct(VERIFY_READ, target_mpt3_ioctl_btdh_mapping, arg, 0)) {
+            return -TARGET_EFAULT;
+        }
+        mpt3_ioctl_btdh_mapping = (struct mpt3_ioctl_btdh_mapping *)buf_temp;
+        ret = target_to_host_mpt3_ioctl_btdh_mapping(mpt3_ioctl_btdh_mapping,
+                                                     target_mpt3_ioctl_btdh_mapping);
+        if (!is_error(ret)) {
+            ret = get_errno(safe_ioctl(fd, ie->host_cmd, mpt3_ioctl_btdh_mapping));
+            if (is_error(ret)) {
+                    /* do nothing */
+            } else {
+                host_to_target_mpt3_ioctl_btdh_mapping(target_mpt3_ioctl_btdh_mapping,
+                                                       mpt3_ioctl_btdh_mapping);
+            }
+        }
+        unlock_user_struct(target_mpt3_ioctl_btdh_mapping, arg, 0);
+        return ret;
+    case MPT3DIAGREGISTER:
+        if (!lock_user_struct(VERIFY_READ, target_mpt3_diag_register, arg, 0)) {
+            return -TARGET_EFAULT;
+        }
+        mpt3_diag_register = (struct mpt3_diag_register *)buf_temp;
+        ret = target_to_host_mpt3_diag_register(mpt3_diag_register,
+                                                target_mpt3_diag_register);
+        if (!is_error(ret)) {
+            ret = get_errno(safe_ioctl(fd, ie->host_cmd, mpt3_diag_register));
+            if (is_error(ret)) {
+                    /* do nothing */
+            } else {
+                host_to_target_mpt3_diag_register(target_mpt3_diag_register,
+                                                  mpt3_diag_register);
+            }
+        }
+        unlock_user_struct(target_mpt3_diag_register, arg, 0);
+        return ret;
+    case MPT3DIAGRELEASE:
+        if (!lock_user_struct(VERIFY_READ, target_mpt3_diag_release, arg, 0)) {
+            return -TARGET_EFAULT;
+        }
+        mpt3_diag_release = (struct mpt3_diag_release *)buf_temp;
+        ret = target_to_host_mpt3_diag_release(mpt3_diag_release,
+                                               target_mpt3_diag_release);
+        if (!is_error(ret)) {
+            ret = get_errno(safe_ioctl(fd, ie->host_cmd, mpt3_diag_release));
+            if (is_error(ret)) {
+                    /* do nothing */
+            } else {
+                host_to_target_mpt3_diag_release(target_mpt3_diag_release,
+                                                 mpt3_diag_release);
+            }
+        }
+        unlock_user_struct(target_mpt3_diag_release, arg, 0);
+        return ret;
+    case MPT3DIAGUNREGISTER:
+        if (!lock_user_struct(VERIFY_READ, target_mpt3_diag_unregister, arg, 0)) {
+            return -TARGET_EFAULT;
+        }
+        mpt3_diag_unregister = (struct mpt3_diag_unregister *)buf_temp;
+        ret = target_to_host_mpt3_diag_unregister(mpt3_diag_unregister,
+                                                  target_mpt3_diag_unregister);
+        if (!is_error(ret)) {
+            ret = get_errno(safe_ioctl(fd, ie->host_cmd, mpt3_diag_unregister));
+            if (is_error(ret)) {
+                    /* do nothing */
+            } else {
+                host_to_target_mpt3_diag_unregister(target_mpt3_diag_unregister,
+                                                    mpt3_diag_unregister);
+            }
+        }
+        unlock_user_struct(target_mpt3_diag_unregister, arg, 0);
+        return ret;
+    case MPT3DIAGQUERY:
+        if (!lock_user_struct(VERIFY_READ, target_mpt3_diag_query, arg, 0)) {
+            return -TARGET_EFAULT;
+        }
+        mpt3_diag_query = (struct mpt3_diag_query *)buf_temp;
+        ret = target_to_host_mpt3_diag_query(mpt3_diag_query,
+                                             target_mpt3_diag_query);
+        if (!is_error(ret)) {
+            ret = get_errno(safe_ioctl(fd, ie->host_cmd, mpt3_diag_query));
+            if (is_error(ret)) {
+                    /* do nothing */
+            } else {
+                host_to_target_mpt3_diag_query(target_mpt3_diag_query,
+                                               mpt3_diag_query);
+            }
+        }
+        unlock_user_struct(target_mpt3_diag_query, arg, 0);
+        return ret;
+    case MPT3DIAGREADBUFFER:
+        if (!lock_user_struct(VERIFY_READ, target_mpt3_diag_read_buffer, arg, 0)) {
+            return -TARGET_EFAULT;
+        }
+        mpt3_diag_read_buffer = (struct mpt3_diag_read_buffer *)buf_temp;
+        ret = target_to_host_mpt3_diag_read_buffer(mpt3_diag_read_buffer,
+                                                   target_mpt3_diag_read_buffer);
+        if (!is_error(ret)) {
+            ret = get_errno(safe_ioctl(fd, ie->host_cmd, mpt3_diag_read_buffer));
+            if (is_error(ret)) {
+                    /* do nothing */
+            } else {
+                host_to_target_mpt3_diag_read_buffer(target_mpt3_diag_read_buffer,
+                                                     mpt3_diag_read_buffer);
+            }
+        }
+        unlock_user_struct(target_mpt3_diag_read_buffer, arg, 0);
+        return ret;
+    }
+    return -TARGET_ENOSYS;
+}
+static abi_long handle_hidfeature(int fd, abi_ulong cmd, abi_ulong arg,
+                                  int len, bool is_read)
+{
+    void *host_buf;
+
+    host_buf = lock_user(is_read ? VERIFY_WRITE : VERIFY_READ, arg, len, 1);
+    if (!host_buf) {
+        return -TARGET_EFAULT;
+    }
+
+    int ret = get_errno(safe_ioctl(fd, cmd, host_buf));
+
+    unlock_user(host_buf, arg, len);
+
+    return ret;
+}
+
+#include "ioctl/ioctl_syscall/syscall_amdgpu_drm.c"
+#include <linux/hidraw.h>
+
+typedef __u32 u32;
+typedef __u64 u64;
+
+IOCTLEntry ioctl_entries[] = {
+#define IOCTL(cmd, access, ...) \
+    { TARGET_ ## cmd, cmd, #cmd, access, 0, {  __VA_ARGS__ } },
+#define IOCTL_SPECIAL(cmd, access, dofn, ...)                      \
+    { TARGET_ ## cmd, cmd, #cmd, access, dofn, {  __VA_ARGS__ } },
+#define IOCTL_IGNORE(cmd) \
+    { TARGET_ ## cmd, 0, #cmd },
+#include "ioctls.h"
+    { 0, 0, },
+};
+int ioctl_cache[256];
+#ifdef TARGET_X86_64
+int ioctl_cache_unsupported_cmd [256];
+#endif
+
+/* ??? Implement proper locking for ioctls.  */
+/* do_ioctl() Must return target values and target errnos. */
+static abi_long do_ioctl(int fd, int cmd, abi_ulong arg)
+{
+    const IOCTLEntry *ie;
+    const argtype *arg_type;
+    abi_long ret;
+    uint8_t buf_temp[MAX_STRUCT_SIZE];
+    int target_size;
+    void *argptr;
+    int i;
+    int hash = (cmd & 0xff) ^ ((cmd & 0xff00) >> 8);
+
+    ie = ioctl_entries;
+    int ioctl_cache_val = ioctl_cache[hash];
+    ie += ioctl_cache_val;
+
+#ifdef TARGET_X86_64
+    if (ioctl_cache_unsupported_cmd[hash] == cmd) {
+        ret = get_errno(safe_ioctl(fd, cmd, arg));
+        return ret;
+    }
+#endif
+    /* slow path to iterate the ioctl_entries */
+    if (ie->target_cmd != cmd) {
+        if (TARGET_IOC_TYPE(cmd) == 'H' || TARGET_IOC_TYPE(cmd) == 'U') {
+            switch(TARGET_IOC_NR(cmd)) {
+                case TARGET_IOC_NR(TARGET_HIDIOCSFEATURE(0)):
+                case TARGET_IOC_NR(TARGET_HIDIOCGFEATURE(0)):
+                case TARGET_IOC_NR(TARGET_HIDIOCGRAWNAME(0)):
+                case TARGET_IOC_NR(TARGET_HIDIOCGRAWPHYS(0)):
+                case TARGET_IOC_NR(TARGET_HIDIOCGRAWUNIQ(0)):
+                case TARGET_IOC_NR(TARGET_HIDIOCSINPUT(0)):
+                case TARGET_IOC_NR(TARGET_HIDIOCGINPUT(0)):
+                case TARGET_IOC_NR(TARGET_HIDIOCSOUTPUT(0)):
+                case TARGET_IOC_NR(TARGET_HIDIOCGOUTPUT(0)):
+                case TARGET_IOC_NR(TARGET_HIDIOCREVOKE):
+                    return handle_hidfeature(fd, cmd, arg, TARGET_IOC_SIZE(cmd), 1);
+            }
+        }
+        ie = ioctl_entries;
+        for (i = 0; ; i++) {
+            if (ie->target_cmd == 0) {
+#ifdef TARGET_X86_64
+                ioctl_cache_unsupported_cmd[hash] = cmd;
+                ret = get_errno(safe_ioctl(fd, cmd, arg));
+                return ret;
+#else
+                return -TARGET_ENOSYS;
+#endif
+            }
+            if (ie->target_cmd == cmd) {
+                ioctl_cache[hash] = i;
+#ifdef TARGET_X86_64
+                ioctl_cache_unsupported_cmd[hash] = 0;
+#endif
+                break;
+            }
+            ie++;
+        }
+    }
+
+    arg_type = ie->arg_type;
+    if (ie->do_ioctl) {
+        return ie->do_ioctl(ie, buf_temp, fd, cmd, arg);
+    } else if (!ie->host_cmd) {
+        /* Some architectures define BSD ioctls in their headers
+           that are not implemented in Linux.  */
+        return -TARGET_ENOSYS;
+    }
+
+    switch(arg_type[0]) {
+    case TYPE_NULL:
+        /* no argument */
+        ret = get_errno(safe_ioctl(fd, ie->host_cmd));
+        break;
+    case TYPE_PTRVOID:
+    case TYPE_INT:
+    case TYPE_LONG:
+    case TYPE_ULONG:
+        ret = get_errno(safe_ioctl(fd, ie->host_cmd, arg));
+        break;
+    case TYPE_PTR:
+        arg_type++;
+        target_size = thunk_type_size(arg_type, 0);
+        switch(ie->access) {
+        case IOC_R:
+            if (ie->host_cmd == HIDIOCGRDESC) {
+                /* kernel use the size, should pass it */
+                argptr = lock_user(VERIFY_WRITE, arg, 4, 0);
+                *(uint32_t*)buf_temp = *(uint32_t *)argptr;
+            }
+            ret = get_errno(safe_ioctl(fd, ie->host_cmd, buf_temp));
+            if (!is_error(ret)) {
+                argptr = lock_user(VERIFY_WRITE, arg, target_size, 0);
+                if (!argptr)
+                    return -TARGET_EFAULT;
+                thunk_convert(argptr, buf_temp, arg_type, THUNK_TARGET);
+                unlock_user(argptr, arg, target_size);
+            }
+            break;
+        case IOC_W:
+            argptr = lock_user(VERIFY_READ, arg, target_size, 1);
+            if (!argptr)
+                return -TARGET_EFAULT;
+            thunk_convert(buf_temp, argptr, arg_type, THUNK_HOST);
+            unlock_user(argptr, arg, 0);
+            ret = get_errno(safe_ioctl(fd, ie->host_cmd, buf_temp));
+            break;
+        default:
+        case IOC_RW:
+            argptr = lock_user(VERIFY_READ, arg, target_size, 1);
+            if (!argptr)
+                return -TARGET_EFAULT;
+            thunk_convert(buf_temp, argptr, arg_type, THUNK_HOST);
+            unlock_user(argptr, arg, 0);
+            ret = get_errno(safe_ioctl(fd, ie->host_cmd, buf_temp));
+            if (!is_error(ret)) {
+                argptr = lock_user(VERIFY_WRITE, arg, target_size, 0);
+                if (!argptr)
+                    return -TARGET_EFAULT;
+                thunk_convert(argptr, buf_temp, arg_type, THUNK_TARGET);
+                unlock_user(argptr, arg, target_size);
+            }
+            break;
+        }
+        break;
+    default:
+        qemu_log_mask(LOG_UNIMP,
+                      "Unsupported ioctl type: cmd=0x%04lx type=%d\n",
+                      (long)cmd, arg_type[0]);
+        ret = -TARGET_ENOSYS;
+        break;
+    }
+    return ret;
+}
+
+static const bitmask_transtbl iflag_tbl[] = {
+        { TARGET_IGNBRK, TARGET_IGNBRK, IGNBRK, IGNBRK },
+        { TARGET_BRKINT, TARGET_BRKINT, BRKINT, BRKINT },
+        { TARGET_IGNPAR, TARGET_IGNPAR, IGNPAR, IGNPAR },
+        { TARGET_PARMRK, TARGET_PARMRK, PARMRK, PARMRK },
+        { TARGET_INPCK, TARGET_INPCK, INPCK, INPCK },
+        { TARGET_ISTRIP, TARGET_ISTRIP, ISTRIP, ISTRIP },
+        { TARGET_INLCR, TARGET_INLCR, INLCR, INLCR },
+        { TARGET_IGNCR, TARGET_IGNCR, IGNCR, IGNCR },
+        { TARGET_ICRNL, TARGET_ICRNL, ICRNL, ICRNL },
+        { TARGET_IUCLC, TARGET_IUCLC, IUCLC, IUCLC },
+        { TARGET_IXON, TARGET_IXON, IXON, IXON },
+        { TARGET_IXANY, TARGET_IXANY, IXANY, IXANY },
+        { TARGET_IXOFF, TARGET_IXOFF, IXOFF, IXOFF },
+        { TARGET_IMAXBEL, TARGET_IMAXBEL, IMAXBEL, IMAXBEL },
+        { TARGET_IUTF8, TARGET_IUTF8, IUTF8, IUTF8},
+        { 0, 0, 0, 0 }
+};
+
+static const bitmask_transtbl oflag_tbl[] = {
+	{ TARGET_OPOST, TARGET_OPOST, OPOST, OPOST },
+	{ TARGET_OLCUC, TARGET_OLCUC, OLCUC, OLCUC },
+	{ TARGET_ONLCR, TARGET_ONLCR, ONLCR, ONLCR },
+	{ TARGET_OCRNL, TARGET_OCRNL, OCRNL, OCRNL },
+	{ TARGET_ONOCR, TARGET_ONOCR, ONOCR, ONOCR },
+	{ TARGET_ONLRET, TARGET_ONLRET, ONLRET, ONLRET },
+	{ TARGET_OFILL, TARGET_OFILL, OFILL, OFILL },
+	{ TARGET_OFDEL, TARGET_OFDEL, OFDEL, OFDEL },
+	{ TARGET_NLDLY, TARGET_NL0, NLDLY, NL0 },
+	{ TARGET_NLDLY, TARGET_NL1, NLDLY, NL1 },
+	{ TARGET_CRDLY, TARGET_CR0, CRDLY, CR0 },
+	{ TARGET_CRDLY, TARGET_CR1, CRDLY, CR1 },
+	{ TARGET_CRDLY, TARGET_CR2, CRDLY, CR2 },
+	{ TARGET_CRDLY, TARGET_CR3, CRDLY, CR3 },
+	{ TARGET_TABDLY, TARGET_TAB0, TABDLY, TAB0 },
+	{ TARGET_TABDLY, TARGET_TAB1, TABDLY, TAB1 },
+	{ TARGET_TABDLY, TARGET_TAB2, TABDLY, TAB2 },
+	{ TARGET_TABDLY, TARGET_TAB3, TABDLY, TAB3 },
+	{ TARGET_BSDLY, TARGET_BS0, BSDLY, BS0 },
+	{ TARGET_BSDLY, TARGET_BS1, BSDLY, BS1 },
+	{ TARGET_VTDLY, TARGET_VT0, VTDLY, VT0 },
+	{ TARGET_VTDLY, TARGET_VT1, VTDLY, VT1 },
+	{ TARGET_FFDLY, TARGET_FF0, FFDLY, FF0 },
+	{ TARGET_FFDLY, TARGET_FF1, FFDLY, FF1 },
+	{ 0, 0, 0, 0 }
+};
+
+static const bitmask_transtbl cflag_tbl[] = {
+	{ TARGET_CBAUD, TARGET_B0, CBAUD, B0 },
+	{ TARGET_CBAUD, TARGET_B50, CBAUD, B50 },
+	{ TARGET_CBAUD, TARGET_B75, CBAUD, B75 },
+	{ TARGET_CBAUD, TARGET_B110, CBAUD, B110 },
+	{ TARGET_CBAUD, TARGET_B134, CBAUD, B134 },
+	{ TARGET_CBAUD, TARGET_B150, CBAUD, B150 },
+	{ TARGET_CBAUD, TARGET_B200, CBAUD, B200 },
+	{ TARGET_CBAUD, TARGET_B300, CBAUD, B300 },
+	{ TARGET_CBAUD, TARGET_B600, CBAUD, B600 },
+	{ TARGET_CBAUD, TARGET_B1200, CBAUD, B1200 },
+	{ TARGET_CBAUD, TARGET_B1800, CBAUD, B1800 },
+	{ TARGET_CBAUD, TARGET_B2400, CBAUD, B2400 },
+	{ TARGET_CBAUD, TARGET_B4800, CBAUD, B4800 },
+	{ TARGET_CBAUD, TARGET_B9600, CBAUD, B9600 },
+	{ TARGET_CBAUD, TARGET_B19200, CBAUD, B19200 },
+	{ TARGET_CBAUD, TARGET_B38400, CBAUD, B38400 },
+	{ TARGET_CBAUD, TARGET_B57600, CBAUD, B57600 },
+	{ TARGET_CBAUD, TARGET_B115200, CBAUD, B115200 },
+	{ TARGET_CBAUD, TARGET_B230400, CBAUD, B230400 },
+	{ TARGET_CBAUD, TARGET_B460800, CBAUD, B460800 },
+	{ TARGET_CSIZE, TARGET_CS5, CSIZE, CS5 },
+	{ TARGET_CSIZE, TARGET_CS6, CSIZE, CS6 },
+	{ TARGET_CSIZE, TARGET_CS7, CSIZE, CS7 },
+	{ TARGET_CSIZE, TARGET_CS8, CSIZE, CS8 },
+	{ TARGET_CSTOPB, TARGET_CSTOPB, CSTOPB, CSTOPB },
+	{ TARGET_CREAD, TARGET_CREAD, CREAD, CREAD },
+	{ TARGET_PARENB, TARGET_PARENB, PARENB, PARENB },
+	{ TARGET_PARODD, TARGET_PARODD, PARODD, PARODD },
+	{ TARGET_HUPCL, TARGET_HUPCL, HUPCL, HUPCL },
+	{ TARGET_CLOCAL, TARGET_CLOCAL, CLOCAL, CLOCAL },
+	{ TARGET_CRTSCTS, TARGET_CRTSCTS, CRTSCTS, CRTSCTS },
+	{ 0, 0, 0, 0 }
+};
+
+static const bitmask_transtbl lflag_tbl[] = {
+  { TARGET_ISIG, TARGET_ISIG, ISIG, ISIG },
+  { TARGET_ICANON, TARGET_ICANON, ICANON, ICANON },
+  { TARGET_XCASE, TARGET_XCASE, XCASE, XCASE },
+  { TARGET_ECHO, TARGET_ECHO, ECHO, ECHO },
+  { TARGET_ECHOE, TARGET_ECHOE, ECHOE, ECHOE },
+  { TARGET_ECHOK, TARGET_ECHOK, ECHOK, ECHOK },
+  { TARGET_ECHONL, TARGET_ECHONL, ECHONL, ECHONL },
+  { TARGET_NOFLSH, TARGET_NOFLSH, NOFLSH, NOFLSH },
+  { TARGET_TOSTOP, TARGET_TOSTOP, TOSTOP, TOSTOP },
+  { TARGET_ECHOCTL, TARGET_ECHOCTL, ECHOCTL, ECHOCTL },
+  { TARGET_ECHOPRT, TARGET_ECHOPRT, ECHOPRT, ECHOPRT },
+  { TARGET_ECHOKE, TARGET_ECHOKE, ECHOKE, ECHOKE },
+  { TARGET_FLUSHO, TARGET_FLUSHO, FLUSHO, FLUSHO },
+  { TARGET_PENDIN, TARGET_PENDIN, PENDIN, PENDIN },
+  { TARGET_IEXTEN, TARGET_IEXTEN, IEXTEN, IEXTEN },
+  { TARGET_EXTPROC, TARGET_EXTPROC, EXTPROC, EXTPROC},
+  { 0, 0, 0, 0 }
+};
+
+static void target_to_host_termios (void *dst, const void *src)
+{
+    struct host_termios *host = dst;
+    const struct target_termios *target = src;
+
+    host->c_iflag =
+        target_to_host_bitmask(tswap32(target->c_iflag), iflag_tbl);
+    host->c_oflag =
+        target_to_host_bitmask(tswap32(target->c_oflag), oflag_tbl);
+    host->c_cflag =
+        target_to_host_bitmask(tswap32(target->c_cflag), cflag_tbl);
+    host->c_lflag =
+        target_to_host_bitmask(tswap32(target->c_lflag), lflag_tbl);
+    host->c_line = target->c_line;
+
+    memset(host->c_cc, 0, sizeof(host->c_cc));
+    host->c_cc[VINTR] = target->c_cc[TARGET_VINTR];
+    host->c_cc[VQUIT] = target->c_cc[TARGET_VQUIT];
+    host->c_cc[VERASE] = target->c_cc[TARGET_VERASE];
+    host->c_cc[VKILL] = target->c_cc[TARGET_VKILL];
+    host->c_cc[VEOF] = target->c_cc[TARGET_VEOF];
+    host->c_cc[VTIME] = target->c_cc[TARGET_VTIME];
+    host->c_cc[VMIN] = target->c_cc[TARGET_VMIN];
+    host->c_cc[VSWTC] = target->c_cc[TARGET_VSWTC];
+    host->c_cc[VSTART] = target->c_cc[TARGET_VSTART];
+    host->c_cc[VSTOP] = target->c_cc[TARGET_VSTOP];
+    host->c_cc[VSUSP] = target->c_cc[TARGET_VSUSP];
+    host->c_cc[VEOL] = target->c_cc[TARGET_VEOL];
+    host->c_cc[VREPRINT] = target->c_cc[TARGET_VREPRINT];
+    host->c_cc[VDISCARD] = target->c_cc[TARGET_VDISCARD];
+    host->c_cc[VWERASE] = target->c_cc[TARGET_VWERASE];
+    host->c_cc[VLNEXT] = target->c_cc[TARGET_VLNEXT];
+    host->c_cc[VEOL2] = target->c_cc[TARGET_VEOL2];
+}
+
+static void host_to_target_termios (void *dst, const void *src)
+{
+    struct target_termios *target = dst;
+    const struct host_termios *host = src;
+
+    target->c_iflag =
+        tswap32(host_to_target_bitmask(host->c_iflag, iflag_tbl));
+    target->c_oflag =
+        tswap32(host_to_target_bitmask(host->c_oflag, oflag_tbl));
+    target->c_cflag =
+        tswap32(host_to_target_bitmask(host->c_cflag, cflag_tbl));
+    target->c_lflag =
+        tswap32(host_to_target_bitmask(host->c_lflag, lflag_tbl));
+    target->c_line = host->c_line;
+
+    memset(target->c_cc, 0, sizeof(target->c_cc));
+    target->c_cc[TARGET_VINTR] = host->c_cc[VINTR];
+    target->c_cc[TARGET_VQUIT] = host->c_cc[VQUIT];
+    target->c_cc[TARGET_VERASE] = host->c_cc[VERASE];
+    target->c_cc[TARGET_VKILL] = host->c_cc[VKILL];
+    target->c_cc[TARGET_VEOF] = host->c_cc[VEOF];
+    target->c_cc[TARGET_VTIME] = host->c_cc[VTIME];
+    target->c_cc[TARGET_VMIN] = host->c_cc[VMIN];
+    target->c_cc[TARGET_VSWTC] = host->c_cc[VSWTC];
+    target->c_cc[TARGET_VSTART] = host->c_cc[VSTART];
+    target->c_cc[TARGET_VSTOP] = host->c_cc[VSTOP];
+    target->c_cc[TARGET_VSUSP] = host->c_cc[VSUSP];
+    target->c_cc[TARGET_VEOL] = host->c_cc[VEOL];
+    target->c_cc[TARGET_VREPRINT] = host->c_cc[VREPRINT];
+    target->c_cc[TARGET_VDISCARD] = host->c_cc[VDISCARD];
+    target->c_cc[TARGET_VWERASE] = host->c_cc[VWERASE];
+    target->c_cc[TARGET_VLNEXT] = host->c_cc[VLNEXT];
+    target->c_cc[TARGET_VEOL2] = host->c_cc[VEOL2];
+}
+
+static const StructEntry struct_termios_def = {
+    .convert = { host_to_target_termios, target_to_host_termios },
+    .size = { sizeof(struct target_termios), sizeof(struct host_termios) },
+    .align = { __alignof__(struct target_termios), __alignof__(struct host_termios) },
+    .print = print_termios,
+};
+
+static bitmask_transtbl mmap_flags_tbl[] = {
+    { TARGET_MAP_SHARED, TARGET_MAP_SHARED, MAP_SHARED, MAP_SHARED },
+    { TARGET_MAP_PRIVATE, TARGET_MAP_PRIVATE, MAP_PRIVATE, MAP_PRIVATE },
+    { TARGET_MAP_FIXED, TARGET_MAP_FIXED, MAP_FIXED, MAP_FIXED },
+#if defined(TARGET_MAP_FIXED_NOREPLACE) && defined(MAP_FIXED_NOREPLACE)
+    { TARGET_MAP_FIXED_NOREPLACE, TARGET_MAP_FIXED_NOREPLACE,
+      MAP_FIXED_NOREPLACE, MAP_FIXED_NOREPLACE },
+#endif
+    { TARGET_MAP_ANONYMOUS, TARGET_MAP_ANONYMOUS,
+      MAP_ANONYMOUS, MAP_ANONYMOUS },
+    { TARGET_MAP_GROWSDOWN, TARGET_MAP_GROWSDOWN,
+      MAP_GROWSDOWN, MAP_GROWSDOWN },
+    { TARGET_MAP_DENYWRITE, TARGET_MAP_DENYWRITE,
+      MAP_DENYWRITE, MAP_DENYWRITE },
+    { TARGET_MAP_EXECUTABLE, TARGET_MAP_EXECUTABLE,
+      MAP_EXECUTABLE, MAP_EXECUTABLE },
+    { TARGET_MAP_LOCKED, TARGET_MAP_LOCKED, MAP_LOCKED, MAP_LOCKED },
+    { TARGET_MAP_NORESERVE, TARGET_MAP_NORESERVE,
+      MAP_NORESERVE, MAP_NORESERVE },
+    { TARGET_MAP_HUGETLB, TARGET_MAP_HUGETLB, MAP_HUGETLB, MAP_HUGETLB },
+#ifdef TARGET_X86_64
+    { X86_64_MAP_32BIT, X86_64_MAP_32BIT, X86_64_MAP_32BIT, X86_64_MAP_32BIT },
+#endif
+    /* MAP_STACK had been ignored by the kernel for quite some time.
+       Recognize it for the target insofar as we do not want to pass
+       it through to the host.  */
+    { TARGET_MAP_STACK, TARGET_MAP_STACK, 0, 0 },
+    { TARGET_MAP_SHARED_VALIDATE, TARGET_MAP_SHARED_VALIDATE, MAP_SHARED_VALIDATE, MAP_SHARED_VALIDATE },
+    { TARGET_MAP_HUGE_2MB, TARGET_MAP_HUGE_2MB, MAP_HUGE_2MB, MAP_HUGE_2MB },
+    { TARGET_MAP_HUGE_1GB, TARGET_MAP_HUGE_1GB, MAP_HUGE_1GB, MAP_HUGE_1GB },
+    { 0, 0, 0, 0 }
+};
+
+/*
+ * NOTE: TARGET_ABI32 is defined for TARGET_I386 (but not for TARGET_X86_64)
+ *       TARGET_I386 is defined if TARGET_X86_64 is defined
+ */
+#if defined(TARGET_I386)
+
+/* NOTE: there is really one LDT for all the threads */
+static uint8_t *ldt_table;
+
+static abi_long read_ldt(abi_ulong ptr, unsigned long bytecount)
+{
+    int size;
+    void *p;
+
+    if (!ldt_table)
+        return 0;
+    size = TARGET_LDT_ENTRIES * TARGET_LDT_ENTRY_SIZE;
+    if (size > bytecount)
+        size = bytecount;
+    p = lock_user(VERIFY_WRITE, ptr, size, 0);
+    if (!p)
+        return -TARGET_EFAULT;
+    /* ??? Should this by byteswapped?  */
+    memcpy(p, ldt_table, size);
+    unlock_user(p, ptr, size);
+    return size;
+}
+
+/* XXX: add locking support */
+static abi_long write_ldt(CPUX86State *env,
+                          abi_ulong ptr, unsigned long bytecount, int oldmode)
+{
+    struct target_modify_ldt_ldt_s ldt_info;
+    struct target_modify_ldt_ldt_s *target_ldt_info;
+    int seg_32bit, contents, read_exec_only, limit_in_pages;
+    int seg_not_present, useable, lm;
+    uint32_t *lp, entry_1, entry_2;
+
+    if (bytecount != sizeof(ldt_info))
+        return -TARGET_EINVAL;
+    if (!lock_user_struct(VERIFY_READ, target_ldt_info, ptr, 1))
+        return -TARGET_EFAULT;
+    ldt_info.entry_number = tswap32(target_ldt_info->entry_number);
+    ldt_info.base_addr = tswapal(target_ldt_info->base_addr);
+    ldt_info.limit = tswap32(target_ldt_info->limit);
+    ldt_info.flags = tswap32(target_ldt_info->flags);
+    unlock_user_struct(target_ldt_info, ptr, 0);
+
+    if (ldt_info.entry_number >= TARGET_LDT_ENTRIES)
+        return -TARGET_EINVAL;
+    seg_32bit = ldt_info.flags & 1;
+    contents = (ldt_info.flags >> 1) & 3;
+    read_exec_only = (ldt_info.flags >> 3) & 1;
+    limit_in_pages = (ldt_info.flags >> 4) & 1;
+    seg_not_present = (ldt_info.flags >> 5) & 1;
+    useable = (ldt_info.flags >> 6) & 1;
+#ifdef TARGET_ABI32
+    lm = 0;
+#else
+    lm = (ldt_info.flags >> 7) & 1;
+#endif
+    if (contents == 3) {
+        if (oldmode)
+            return -TARGET_EINVAL;
+        if (seg_not_present == 0)
+            return -TARGET_EINVAL;
+    }
+    /* allocate the LDT */
+    if (!ldt_table) {
+        env->ldt.base = target_mmap(0,
+                                    TARGET_LDT_ENTRIES * TARGET_LDT_ENTRY_SIZE,
+                                    PROT_READ|PROT_WRITE,
+                                    MAP_ANONYMOUS|MAP_PRIVATE, -1, 0, 0);
+        if (env->ldt.base == -1)
+            return -TARGET_ENOMEM;
+        memset(g2h_untagged(env->ldt.base), 0,
+               TARGET_LDT_ENTRIES * TARGET_LDT_ENTRY_SIZE);
+        env->ldt.limit = 0xffff;
+        ldt_table = g2h_untagged(env->ldt.base);
+    }
+
+    /* NOTE: same code as Linux kernel */
+    /* Allow LDTs to be cleared by the user. */
+    if (ldt_info.base_addr == 0 && ldt_info.limit == 0) {
+        if (oldmode ||
+            (contents == 0		&&
+             read_exec_only == 1	&&
+             seg_32bit == 0		&&
+             limit_in_pages == 0	&&
+             seg_not_present == 1	&&
+             useable == 0 )) {
+            entry_1 = 0;
+            entry_2 = 0;
+            goto install;
+        }
+    }
+
+    entry_1 = ((ldt_info.base_addr & 0x0000ffff) << 16) |
+        (ldt_info.limit & 0x0ffff);
+    entry_2 = (ldt_info.base_addr & 0xff000000) |
+        ((ldt_info.base_addr & 0x00ff0000) >> 16) |
+        (ldt_info.limit & 0xf0000) |
+        ((read_exec_only ^ 1) << 9) |
+        (contents << 10) |
+        ((seg_not_present ^ 1) << 15) |
+        (seg_32bit << 22) |
+        (limit_in_pages << 23) |
+        (lm << 21) |
+        0x7000;
+    if (!oldmode)
+        entry_2 |= (useable << 20);
+
+    /* Install the new entry ...  */
+install:
+    lp = (uint32_t *)(ldt_table + (ldt_info.entry_number << 3));
+    lp[0] = tswap32(entry_1);
+    lp[1] = tswap32(entry_2);
+    return 0;
+}
+
+/* specific and weird i386 syscalls */
+static abi_long do_modify_ldt(CPUX86State *env, int func, abi_ulong ptr,
+                              unsigned long bytecount)
+{
+    abi_long ret;
+
+    switch (func) {
+    case 0:
+        ret = read_ldt(ptr, bytecount);
+        break;
+    case 1:
+        ret = write_ldt(env, ptr, bytecount, 1);
+        break;
+    case 0x11:
+        ret = write_ldt(env, ptr, bytecount, 0);
+        break;
+    default:
+        ret = -TARGET_ENOSYS;
+        break;
+    }
+    return ret;
+}
+
+#ifdef TARGET_X86_64
+static
+#endif
+abi_long do_set_thread_area(CPUX86State *env, abi_ulong ptr)
+{
+    uint64_t *gdt_table = g2h_untagged(env->gdt.base);
+    struct target_modify_ldt_ldt_s ldt_info;
+#ifdef TARGET_X86_64
+    struct target_modify_ldt_ldt_s_32 *target_ldt_info;
+#else
+    struct target_modify_ldt_ldt_s *target_ldt_info;
+#endif
+    int seg_32bit, contents, read_exec_only, limit_in_pages;
+    int seg_not_present, useable, lm;
+    uint32_t *lp, entry_1, entry_2;
+    int i;
+
+    lock_user_struct(VERIFY_WRITE, target_ldt_info, ptr, 1);
+    if (!target_ldt_info)
+        return -TARGET_EFAULT;
+    ldt_info.entry_number = tswap32(target_ldt_info->entry_number);
+    ldt_info.base_addr = tswapal(target_ldt_info->base_addr);
+    ldt_info.limit = tswap32(target_ldt_info->limit);
+    ldt_info.flags = tswap32(target_ldt_info->flags);
+    if (ldt_info.entry_number == -1) {
+        for (i=TARGET_GDT_ENTRY_TLS_MIN; i<=TARGET_GDT_ENTRY_TLS_MAX; i++) {
+            if (gdt_table[i] == 0) {
+                ldt_info.entry_number = i;
+                target_ldt_info->entry_number = tswap32(i);
+                break;
+            }
+        }
+    }
+    unlock_user_struct(target_ldt_info, ptr, 1);
+
+    if (ldt_info.entry_number < TARGET_GDT_ENTRY_TLS_MIN ||
+        ldt_info.entry_number > TARGET_GDT_ENTRY_TLS_MAX)
+           return -TARGET_EINVAL;
+    seg_32bit = ldt_info.flags & 1;
+    contents = (ldt_info.flags >> 1) & 3;
+    read_exec_only = (ldt_info.flags >> 3) & 1;
+    limit_in_pages = (ldt_info.flags >> 4) & 1;
+    seg_not_present = (ldt_info.flags >> 5) & 1;
+    useable = (ldt_info.flags >> 6) & 1;
+#ifdef TARGET_ABI32
+    lm = 0;
+#else
+    lm = (ldt_info.flags >> 7) & 1;
+#endif
+
+    if (contents == 3) {
+        if (seg_not_present == 0)
+            return -TARGET_EINVAL;
+    }
+
+    /* NOTE: same code as Linux kernel */
+    /* Allow LDTs to be cleared by the user. */
+    if (ldt_info.base_addr == 0 && ldt_info.limit == 0) {
+        if ((contents == 0             &&
+             read_exec_only == 1       &&
+             seg_32bit == 0            &&
+             limit_in_pages == 0       &&
+             seg_not_present == 1      &&
+             useable == 0 )) {
+            entry_1 = 0;
+            entry_2 = 0;
+            goto install;
+        }
+    }
+
+    entry_1 = ((ldt_info.base_addr & 0x0000ffff) << 16) |
+        (ldt_info.limit & 0x0ffff);
+    entry_2 = (ldt_info.base_addr & 0xff000000) |
+        ((ldt_info.base_addr & 0x00ff0000) >> 16) |
+        (ldt_info.limit & 0xf0000) |
+        ((read_exec_only ^ 1) << 9) |
+        (contents << 10) |
+        ((seg_not_present ^ 1) << 15) |
+        (seg_32bit << 22) |
+        (limit_in_pages << 23) |
+        (useable << 20) |
+        (lm << 21) |
+        0x7000;
+
+    /* Install the new entry ...  */
+install:
+    lp = (uint32_t *)(gdt_table + ldt_info.entry_number);
+    lp[0] = tswap32(entry_1);
+    lp[1] = tswap32(entry_2);
+    return 0;
+}
+
+static abi_long do_get_thread_area(CPUX86State *env, abi_ulong ptr)
+{
+#ifdef TARGET_X86_64
+    struct target_modify_ldt_ldt_s_32 *target_ldt_info;
+#else
+    struct target_modify_ldt_ldt_s *target_ldt_info;
+#endif
+    uint64_t *gdt_table = g2h_untagged(env->gdt.base);
+    uint32_t base_addr, limit, flags;
+    int seg_32bit, contents, read_exec_only, limit_in_pages, idx;
+    int seg_not_present, useable, lm;
+    uint32_t *lp, entry_1, entry_2;
+
+    lock_user_struct(VERIFY_WRITE, target_ldt_info, ptr, 1);
+    if (!target_ldt_info)
+        return -TARGET_EFAULT;
+    idx = tswap32(target_ldt_info->entry_number);
+    if (idx < TARGET_GDT_ENTRY_TLS_MIN ||
+        idx > TARGET_GDT_ENTRY_TLS_MAX) {
+        unlock_user_struct(target_ldt_info, ptr, 1);
+        return -TARGET_EINVAL;
+    }
+    lp = (uint32_t *)(gdt_table + idx);
+    entry_1 = tswap32(lp[0]);
+    entry_2 = tswap32(lp[1]);
+
+    read_exec_only = ((entry_2 >> 9) & 1) ^ 1;
+    contents = (entry_2 >> 10) & 3;
+    seg_not_present = ((entry_2 >> 15) & 1) ^ 1;
+    seg_32bit = (entry_2 >> 22) & 1;
+    limit_in_pages = (entry_2 >> 23) & 1;
+    useable = (entry_2 >> 20) & 1;
+#ifdef TARGET_ABI32
+    lm = 0;
+#else
+    lm = (entry_2 >> 21) & 1;
+#endif
+    flags = (seg_32bit << 0) | (contents << 1) |
+        (read_exec_only << 3) | (limit_in_pages << 4) |
+        (seg_not_present << 5) | (useable << 6) | (lm << 7);
+    limit = (entry_1 & 0xffff) | (entry_2  & 0xf0000);
+    base_addr = (entry_1 >> 16) |
+        (entry_2 & 0xff000000) |
+        ((entry_2 & 0xff) << 16);
+    target_ldt_info->base_addr = tswapal(base_addr);
+    target_ldt_info->limit = tswap32(limit);
+    target_ldt_info->flags = tswap32(flags);
+    unlock_user_struct(target_ldt_info, ptr, 1);
+    return 0;
+}
+
+#if defined(TARGET_ABI32)
+abi_long do_arch_prctl(CPUX86State *env, int code, abi_ulong addr)
+{
+    return -TARGET_ENOSYS;
+}
+#else
+abi_long do_arch_prctl(CPUX86State *env, int code, abi_ulong addr)
+{
+    abi_long ret = 0;
+    abi_ulong val;
+    int idx;
+
+    switch(code) {
+    case TARGET_ARCH_SET_GS:
+    case TARGET_ARCH_SET_FS:
+        if (code == TARGET_ARCH_SET_GS)
+            idx = R_GS;
+        else
+            idx = R_FS;
+        cpu_x86_load_seg(env, idx, 0);
+        env->segs[idx].base = addr;
+        break;
+    case TARGET_ARCH_GET_GS:
+    case TARGET_ARCH_GET_FS:
+        if (code == TARGET_ARCH_GET_GS)
+            idx = R_GS;
+        else
+            idx = R_FS;
+        val = env->segs[idx].base;
+        if (put_user(val, addr, abi_ulong))
+            ret = -TARGET_EFAULT;
+        break;
+    default:
+        ret = -TARGET_EINVAL;
+        break;
+    }
+    return ret;
+}
+#endif /* defined(TARGET_ABI32 */
+
+#endif /* defined(TARGET_I386) */
+
+#define NEW_STACK_SIZE 0x200000
+
+
+static pthread_mutex_t clone_lock = PTHREAD_MUTEX_INITIALIZER;
+static int do_sys_futex(int *uaddr, int op, int val,
+                        const struct timespec *timeout, int *uaddr2,
+                        int val3);
+
+typedef struct {
+    CPUArchState *env;
+    pthread_mutex_t mutex;
+    pthread_cond_t cond;
+    pthread_t thread;
+    uint32_t tid;
+    abi_ulong child_tidptr;
+    abi_ulong parent_tidptr;
+    sigset_t sigmask;
+} new_thread_info;
+
+static void *clone_func(void *arg)
+{
+    new_thread_info *info = arg;
+    CPUArchState *env;
+    CPUState *cpu;
+    TaskState *ts;
+
+    rcu_register_thread();
+    tcg_register_thread();
+    env = info->env;
+    cpu = env_cpu(env);
+    thread_cpu = cpu;
+    ts = (TaskState *)cpu->opaque;
+    info->tid = sys_gettid();
+    task_settid(ts);
+    if (info->child_tidptr)
+        put_user_u32(info->tid, info->child_tidptr);
+    if (info->parent_tidptr)
+        put_user_u32(info->tid, info->parent_tidptr);
+    qemu_guest_random_seed_thread_part2(cpu->random_seed);
+#ifdef CONFIG_LATX
+    latx_lsenv_init(env);
+#endif
+    /* Enable signals.  */
+    sigprocmask(SIG_SETMASK, &info->sigmask, NULL);
+    /* Signal to the parent that we're ready.  */
+    pthread_mutex_lock(&info->mutex);
+    pthread_cond_broadcast(&info->cond);
+    pthread_mutex_unlock(&info->mutex);
+    /* Wait until the parent has finished initializing the tls state.  */
+    pthread_mutex_lock(&clone_lock);
+    pthread_mutex_unlock(&clone_lock);
+    cpu_loop(env);
+    /* never exits */
+    return NULL;
+}
+
+static void cleanup_guest_thread_resources(CPUArchState *env)
+{
+    assert(env->gdt.base);
+    target_munmap(env->gdt.base, sizeof(uint64_t) * TARGET_GDT_ENTRIES, 0);
+}
+
+static void cleanup_guest_seccomp(TaskState *ts)
+{
+    /* Keep fork's CPU-list snapshot consistent with the filter references. */
+    cpu_list_lock();
+    ts->seccomp_exiting = true;
+    guest_seccomp_filter_unref(ts->seccomp_filter);
+    ts->seccomp_filter = NULL;
+    cpu_list_unlock();
+}
+
+/* The child has not started; the caller still owns its CPU and TaskState. */
+static void cleanup_failed_guest_thread(CPUArchState *env)
+{
+    CPUState *cpu = env_cpu(env);
+    TaskState *ts = cpu->opaque;
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+    void *fast_jmp_cache = env->tb_jmp_cache_ptr;
+#endif
+
+    cleanup_guest_seccomp(ts);
+    cleanup_guest_thread_resources(env);
+    object_property_set_bool(OBJECT(cpu), "realized", false, NULL);
+    object_unparent(OBJECT(cpu));
+    object_unref(OBJECT(cpu));
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+    latx_fast_jmp_cache_free_rcu(fast_jmp_cache);
+#endif
+    g_free(ts);
+}
+
+/* clone_lock is held and at least one other guest thread exists. */
+static void QEMU_NORETURN exit_guest_thread_locked(CPUArchState *env)
+{
+    CPUState *cpu = env_cpu(env);
+    TaskState *ts = cpu->opaque;
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+    CPUX86State *x86env = env;
+    void *fast_jmp_cache = x86env->tb_jmp_cache_ptr;
+#endif
+
+    cleanup_guest_seccomp(ts);
+    object_property_set_bool(OBJECT(cpu), "realized", false, NULL);
+    object_unparent(OBJECT(cpu));
+    object_unref(OBJECT(cpu));
+    pthread_mutex_unlock(&clone_lock);
+
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+    latx_fast_jmp_cache_free_rcu(fast_jmp_cache);
+#endif
+
+    if (ts->child_tidptr) {
+        put_user_u32(0, ts->child_tidptr);
+        do_sys_futex(g2h(cpu, ts->child_tidptr), FUTEX_WAKE, INT_MAX,
+                     NULL, NULL, 0);
+    }
+    thread_cpu = NULL;
+    g_free(ts);
+    reset_16k_buf();
+#ifdef CONFIG_LATX
+    latx_lsenv_destroy();
+#endif
+#ifdef CONFIG_LATX_SMC_OPT
+    latx_smc_thread_cleanup();
+#endif
+    rcu_unregister_thread();
+    pthread_exit(NULL);
+}
+
+static void QEMU_NORETURN seccomp_kill_thread(CPUArchState *env)
+{
+#ifdef CONFIG_LATX_AOT
+    CPUState *cpu = env_cpu(env);
+#endif
+
+    /* KILL actions take precedence over already-pending guest signals. */
+    block_signals();
+    cleanup_guest_thread_resources(env);
+    pthread_mutex_lock(&clone_lock);
+#ifdef CONFIG_LATX_AOT
+    if (current_cpu->cpu_index == 0) {
+        aot_exit_entry(cpu, AOT_EXIT_THREAD);
+    }
+#endif
+    if (CPU_NEXT(first_cpu)) {
+        exit_guest_thread_locked(env);
+    }
+    pthread_mutex_unlock(&clone_lock);
+
+    /* A single-thread KILL_THREAD terminates the process as SIGSYS. */
+    force_sig_abort(TARGET_SIGSYS);
+}
+
+typedef struct ForkCloneContext {
+    jmp_buf jump_buffer;
+} ForkCloneContext;
+
+/*
+ * Fortified longjmp rejects the deliberate jump from a clone child stack.
+ * Bind directly to the unchecked implementation; do_fork() has already
+ * blocked signals and this path does not need to restore a signal mask.
+ */
+extern void fork_clone_longjmp(jmp_buf env, int value)
+    __asm__("_longjmp") __attribute__((noreturn));
+
+static int fork_clone_func(void *opaque)
+{
+    ForkCloneContext *context = opaque;
+
+    fork_clone_longjmp(context->jump_buffer, 1);
+}
+
+static int fork_with_flags(unsigned int flags)
+{
+    char stack[PTHREAD_STACK_MIN] __attribute__((aligned(16)));
+    ForkCloneContext context;
+
+    if (_setjmp(context.jump_buffer) == 0) {
+        return clone(fork_clone_func, stack + sizeof(stack), flags, &context);
+    }
+    return 0;
+}
+
+/* do_fork() Must return host values and target errnos (unlike most
+   do_*() functions). */
+static int do_fork(CPUArchState *env, unsigned int flags, abi_ulong newsp,
+                   abi_ulong parent_tidptr, target_ulong newtls,
+                   abi_ulong child_tidptr)
+{
+    CPUState *cpu = env_cpu(env);
+    unsigned int namespace_flags;
+    unsigned int direct_fork_flags;
+    bool userns_via_unshare;
+    bool rcu_child_was_deferred = false;
+    int namespace_pipe[2] = { -1, -1 };
+    int ret;
+    TaskState *ts;
+    CPUState *new_cpu;
+    CPUArchState *new_env;
+    sigset_t sigmask;
+
+    flags &= ~CLONE_IGNORED_FLAGS;
+    namespace_flags = flags & CLONE_FORK_NAMESPACE_FLAGS;
+
+    /* Emulate vfork() with fork() */
+    if (flags & CLONE_VFORK)
+        flags &= ~(CLONE_VFORK | CLONE_VM);
+
+    direct_fork_flags = flags & (CLONE_DIRECT_FORK_FLAGS & ~CLONE_NEWUSER);
+    userns_via_unshare = namespace_flags == CLONE_NEWUSER &&
+                         !direct_fork_flags;
+
+    if (flags & CLONE_PARENT_SETTID) {
+        uint32_t *parent_tid = lock_user(VERIFY_WRITE, parent_tidptr,
+                                         sizeof(*parent_tid), 0);
+
+        if (!parent_tid) {
+            return -TARGET_EFAULT;
+        }
+        unlock_user(parent_tid, parent_tidptr, 0);
+    }
+
+    if (flags & CLONE_VM) {
+        TaskState *parent_ts = (TaskState *)cpu->opaque;
+        new_thread_info info;
+        pthread_attr_t attr;
+        int thread_errno = 0;
+
+        rcu_start_deferred_thread();
+
+        if (((flags & CLONE_THREAD_FLAGS) != CLONE_THREAD_FLAGS) ||
+            (flags & CLONE_INVALID_THREAD_FLAGS)) {
+            return -TARGET_EINVAL;
+        }
+
+        ts = g_new0(TaskState, 1);
+        init_task_state(ts);
+
+        /* Grab a mutex so that thread setup appears atomic.  */
+        pthread_mutex_lock(&clone_lock);
+
+        /*
+         * If this is our first additional thread, we need to ensure we
+         * generate code for parallel execution and flush old translations.
+         * Do this now so that the copy gets CF_PARALLEL too.
+         */
+        if (!close_latx_parallel && !(cpu->tcg_cflags & CF_PARALLEL)) {
+            cpu->tcg_cflags |= CF_PARALLEL;
+            tb_flush(cpu);
+        }
+
+        /* we create a new CPU instance. */
+        new_env = cpu_copy(env);
+        /* Init regs that differ from the parent.  */
+        cpu_clone_regs_child(new_env, newsp, flags);
+        cpu_clone_regs_parent(env, flags);
+        new_cpu = env_cpu(new_env);
+        ts->bprm = parent_ts->bprm;
+        ts->info = parent_ts->info;
+        ts->signal_mask = parent_ts->signal_mask;
+        ts->ipc_namespace_isolated = parent_ts->ipc_namespace_isolated;
+
+        if (flags & CLONE_CHILD_CLEARTID) {
+            ts->child_tidptr = child_tidptr;
+        }
+
+        if (flags & CLONE_SETTLS) {
+            cpu_set_tls (new_env, newtls);
+        }
+
+        /* Publish the initialized task together with its inherited root.
+         * TSYNC uses this lock and skips CPUs whose task is not yet visible. */
+        cpu_list_lock();
+        ts->seccomp_filter = guest_seccomp_filter_ref(parent_ts->seccomp_filter);
+        new_cpu->opaque = ts;
+        cpu_list_unlock();
+
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+        /* cpu_copy copied the parent's pointer; it remains parent-owned. */
+        new_env->tb_jmp_cache_ptr = NULL;
+        if (!latx_fast_jmp_cache_init(new_env)) {
+            cleanup_failed_guest_thread(new_env);
+            pthread_mutex_unlock(&clone_lock);
+            errno = ENOMEM;
+            return -1;
+        }
+#endif
+        memset(&info, 0, sizeof(info));
+        pthread_mutex_init(&info.mutex, NULL);
+        pthread_mutex_lock(&info.mutex);
+        pthread_cond_init(&info.cond, NULL);
+        info.env = new_env;
+        if (flags & CLONE_CHILD_SETTID) {
+            info.child_tidptr = child_tidptr;
+        }
+        if (flags & CLONE_PARENT_SETTID) {
+            info.parent_tidptr = parent_tidptr;
+        }
+
+        ret = pthread_attr_init(&attr);
+        ret = pthread_attr_setstacksize(&attr, NEW_STACK_SIZE);
+        ret = pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+        /* It is not safe to deliver signals until the child has finished
+           initializing, so temporarily block all signals.  */
+        sigfillset(&sigmask);
+        sigprocmask(SIG_BLOCK, &sigmask, &info.sigmask);
+        cpu->random_seed = qemu_guest_random_seed_thread_part1();
+
+        ret = pthread_create(&info.thread, &attr, clone_func, &info);
+
+        sigprocmask(SIG_SETMASK, &info.sigmask, NULL);
+        pthread_attr_destroy(&attr);
+        if (ret == 0) {
+            /* Wait for the child to initialize.  */
+            pthread_cond_wait(&info.cond, &info.mutex);
+            ret = info.tid;
+        } else {
+            thread_errno = ret;
+            cleanup_failed_guest_thread(new_env);
+            ret = -1;
+        }
+        pthread_mutex_unlock(&info.mutex);
+        pthread_cond_destroy(&info.cond);
+        pthread_mutex_destroy(&info.mutex);
+        pthread_mutex_unlock(&clone_lock);
+        if (thread_errno) {
+            errno = thread_errno;
+        }
+    } else {
+        /* if no CLONE_VM, we consider it is a fork */
+        if (flags & CLONE_INVALID_FORK_FLAGS) {
+            return -TARGET_EINVAL;
+        }
+
+        if (userns_via_unshare && pipe2(namespace_pipe, O_CLOEXEC) < 0) {
+            return -1;
+        }
+
+        /* We can't support custom termination signals */
+        /* We don't support child exit with no SIGCHLD sent
+        if ((flags & CSIGNAL) != TARGET_SIGCHLD) {
+            return -TARGET_EINVAL;
+        }
+        */
+
+        if (block_signals()) {
+            if (userns_via_unshare) {
+                close(namespace_pipe[0]);
+                close(namespace_pipe[1]);
+            }
+            return -TARGET_ERESTARTSYS;
+        }
+
+        fork_start();
+#if defined(TARGET_NR_timer_create)
+        posix_timer_fork_start();
+#endif
+        if (userns_via_unshare) {
+            rcu_child_was_deferred = rcu_defer_atfork_child();
+        }
+        if (direct_fork_flags) {
+            rcu_raw_clone_prepare();
+            ret = fork_with_flags(flags &
+                                  (CLONE_DIRECT_FORK_FLAGS | CSIGNAL));
+            if (ret == 0) {
+                rcu_raw_clone_child();
+            } else {
+                rcu_raw_clone_parent();
+            }
+        } else {
+            ret = fork();
+        }
+        if (ret == 0) {
+            int namespace_errno = 0;
+            ssize_t len;
+
+            if (userns_via_unshare) {
+                close(namespace_pipe[0]);
+                if (unshare(CLONE_NEWUSER) < 0) {
+                    namespace_errno = errno;
+                }
+                do {
+                    len = write(namespace_pipe[1], &namespace_errno,
+                                sizeof(namespace_errno));
+                } while (len < 0 && errno == EINTR);
+                close(namespace_pipe[1]);
+                if (len != (ssize_t)sizeof(namespace_errno) ||
+                    namespace_errno) {
+                    _exit(EXIT_FAILURE);
+                }
+            }
+
+            /* Child Process.  */
+            cpu_clone_regs_child(env, newsp, flags);
+            fork_end(1);
+#if defined(TARGET_NR_timer_create)
+            posix_timer_fork_end(true);
+#endif
+            /* There is a race condition here.  The parent process could
+               theoretically read the TID in the child process before the child
+               tid is set.  This would require using either ptrace
+               (not implemented) or having *_tidptr to point at a shared memory
+               mapping.  We can't repeat the spinlock hack used above because
+               the child process gets its own copy of the lock.  */
+            if (flags & CLONE_CHILD_SETTID)
+                put_user_u32(sys_gettid(), child_tidptr);
+            ts = (TaskState *)cpu->opaque;
+#if defined(CONFIG_LATX) && defined(TARGET_I386) && !defined(TARGET_X86_64)
+            qatomic_set(&ts->robust_list_head, 0);
+#endif
+            /* Linux clears syscall user dispatch in every fork child. */
+#ifdef TARGET_I386
+            ts->sys_dispatch = 0;
+            ts->sys_dispatch_selector = 0;
+            ts->sys_dispatch_len = -1;
+            ts->sys_dispatch_inclusive = false;
+#endif
+            ts->child_tidptr = 0;
+#ifdef TARGET_I386
+            if (!(flags & CLONE_VM) &&
+                (ts->info->prctl_mdwe & TARGET_PR_MDWE_NO_INHERIT)) {
+                ts->info->prctl_mdwe = 0;
+            }
+            ts->info->prctl_timer_restore_ids = false;
+            ts->info->prctl_futex_hash_slots = 0;
+            ts->info->prctl_futex_hash_custom = false;
+#endif
+            if (flags & CLONE_NEWIPC) {
+                ts->ipc_namespace_isolated = true;
+            }
+            if (flags & CLONE_SETTLS)
+                cpu_set_tls (env, newtls);
+            if (flags & CLONE_CHILD_CLEARTID)
+                ts->child_tidptr = child_tidptr;
+        } else {
+            int namespace_errno = EIO;
+            ssize_t len = -1;
+
+            if (userns_via_unshare) {
+                close(namespace_pipe[1]);
+                rcu_restore_atfork_child_defer(rcu_child_was_deferred);
+            }
+            cpu_clone_regs_parent(env, flags);
+            fork_end(0);
+#if defined(TARGET_NR_timer_create)
+            posix_timer_fork_end(false);
+#endif
+
+            if (userns_via_unshare && ret > 0) {
+                do {
+                    len = read(namespace_pipe[0], &namespace_errno,
+                               sizeof(namespace_errno));
+                } while (len < 0 && errno == EINTR);
+                close(namespace_pipe[0]);
+            } else if (userns_via_unshare) {
+                close(namespace_pipe[0]);
+            }
+
+            if (userns_via_unshare && ret > 0 &&
+                (len != (ssize_t)sizeof(namespace_errno) ||
+                 namespace_errno)) {
+                int status;
+
+                while (waitpid(ret, &status, 0) < 0 && errno == EINTR) {
+                    /* Retry until the namespace child can be reaped. */
+                }
+                errno = len == (ssize_t)sizeof(namespace_errno) ?
+                        namespace_errno : EIO;
+                ret = -1;
+            }
+            if (ret > 0 && (flags & CLONE_PARENT_SETTID)) {
+                if (put_user_u32(ret, parent_tidptr)) {
+                    int status;
+
+                    kill(ret, SIGKILL);
+                    while (waitpid(ret, &status, 0) < 0 && errno == EINTR) {
+                        /* Retry until the failed clone child is reaped. */
+                    }
+                    errno = EFAULT;
+                    ret = -1;
+                }
+            }
+        }
+        g_assert(!cpu_in_exclusive_context(cpu));
+    }
+    return ret;
+}
+
+/* warning : doesn't handle linux specific flags... */
+static int target_to_host_fcntl_cmd(int cmd)
+{
+    int ret;
+
+    switch(cmd) {
+    case TARGET_F_DUPFD:
+    case TARGET_F_GETFD:
+    case TARGET_F_SETFD:
+    case TARGET_F_GETFL:
+    case TARGET_F_SETFL:
+    case TARGET_F_OFD_GETLK:
+    case TARGET_F_OFD_SETLK:
+    case TARGET_F_OFD_SETLKW:
+        ret = cmd;
+        break;
+    case TARGET_F_GETLK:
+        ret = F_GETLK64;
+        break;
+    case TARGET_F_SETLK:
+        ret = F_SETLK64;
+        break;
+    case TARGET_F_SETLKW:
+        ret = F_SETLKW64;
+        break;
+    case TARGET_F_GETOWN:
+        ret = F_GETOWN;
+        break;
+    case TARGET_F_SETOWN:
+        ret = F_SETOWN;
+        break;
+    case TARGET_F_GETSIG:
+        ret = F_GETSIG;
+        break;
+    case TARGET_F_SETSIG:
+        ret = F_SETSIG;
+        break;
+#if TARGET_ABI_BITS == 32
+    case TARGET_F_GETLK64:
+        ret = F_GETLK64;
+        break;
+    case TARGET_F_SETLK64:
+        ret = F_SETLK64;
+        break;
+    case TARGET_F_SETLKW64:
+        ret = F_SETLKW64;
+        break;
+#endif
+    case TARGET_F_SETLEASE:
+        ret = F_SETLEASE;
+        break;
+    case TARGET_F_GETLEASE:
+        ret = F_GETLEASE;
+        break;
+#ifdef F_DUPFD_CLOEXEC
+    case TARGET_F_DUPFD_CLOEXEC:
+        ret = F_DUPFD_CLOEXEC;
+        break;
+#endif
+    case TARGET_F_NOTIFY:
+        ret = F_NOTIFY;
+        break;
+#ifdef F_GETOWN_EX
+    case TARGET_F_GETOWN_EX:
+        ret = F_GETOWN_EX;
+        break;
+#endif
+#ifdef F_SETOWN_EX
+    case TARGET_F_SETOWN_EX:
+        ret = F_SETOWN_EX;
+        break;
+#endif
+#ifdef F_SETPIPE_SZ
+    case TARGET_F_SETPIPE_SZ:
+        ret = F_SETPIPE_SZ;
+        break;
+    case TARGET_F_GETPIPE_SZ:
+        ret = F_GETPIPE_SZ;
+        break;
+#endif
+#ifdef F_ADD_SEALS
+    case TARGET_F_ADD_SEALS:
+        ret = F_ADD_SEALS;
+        break;
+    case TARGET_F_GET_SEALS:
+        ret = F_GET_SEALS;
+        break;
+#endif
+#ifdef F_CANCELLK
+    case TARGET_F_CANCELLK:
+        ret = F_CANCELLK;
+        break;
+#endif
+    default:
+        ret = -TARGET_EINVAL;
+        break;
+    }
+
+#if defined(__powerpc64__)
+    /* On PPC64, glibc headers has the F_*LK* defined to 12, 13 and 14 and
+     * is not supported by kernel. The glibc fcntl call actually adjusts
+     * them to 5, 6 and 7 before making the syscall(). Since we make the
+     * syscall directly, adjust to what is supported by the kernel.
+     */
+    if (ret >= F_GETLK64 && ret <= F_SETLKW64) {
+        ret -= F_GETLK64 - 5;
+    }
+#endif
+
+    return ret;
+}
+
+#define FLOCK_TRANSTBL \
+    switch (type) { \
+    TRANSTBL_CONVERT(F_RDLCK); \
+    TRANSTBL_CONVERT(F_WRLCK); \
+    TRANSTBL_CONVERT(F_UNLCK); \
+    }
+
+static int target_to_host_flock(int type)
+{
+#define TRANSTBL_CONVERT(a) case TARGET_##a: return a
+    FLOCK_TRANSTBL
+#undef  TRANSTBL_CONVERT
+    return -TARGET_EINVAL;
+}
+
+static int host_to_target_flock(int type)
+{
+#define TRANSTBL_CONVERT(a) case a: return TARGET_##a
+    FLOCK_TRANSTBL
+#undef  TRANSTBL_CONVERT
+    /* if we don't know how to convert the value coming
+     * from the host we copy to the target field as-is
+     */
+    return type;
+}
+
+static inline abi_long copy_from_user_flock(struct flock64 *fl,
+                                            abi_ulong target_flock_addr)
+{
+    struct target_flock *target_fl;
+    int l_type;
+
+    if (!lock_user_struct(VERIFY_READ, target_fl, target_flock_addr, 1)) {
+        return -TARGET_EFAULT;
+    }
+
+    __get_user(l_type, &target_fl->l_type);
+    l_type = target_to_host_flock(l_type);
+    if (l_type < 0) {
+        return l_type;
+    }
+    fl->l_type = l_type;
+    __get_user(fl->l_whence, &target_fl->l_whence);
+    __get_user(fl->l_start, &target_fl->l_start);
+    __get_user(fl->l_len, &target_fl->l_len);
+    __get_user(fl->l_pid, &target_fl->l_pid);
+    unlock_user_struct(target_fl, target_flock_addr, 0);
+    return 0;
+}
+
+static inline abi_long copy_to_user_flock(abi_ulong target_flock_addr,
+                                          const struct flock64 *fl)
+{
+    struct target_flock *target_fl;
+    short l_type;
+
+    if (!lock_user_struct(VERIFY_WRITE, target_fl, target_flock_addr, 0)) {
+        return -TARGET_EFAULT;
+    }
+
+    l_type = host_to_target_flock(fl->l_type);
+    __put_user(l_type, &target_fl->l_type);
+    __put_user(fl->l_whence, &target_fl->l_whence);
+    __put_user(fl->l_start, &target_fl->l_start);
+    __put_user(fl->l_len, &target_fl->l_len);
+    __put_user(fl->l_pid, &target_fl->l_pid);
+    unlock_user_struct(target_fl, target_flock_addr, 1);
+    return 0;
+}
+
+typedef abi_long from_flock64_fn(struct flock64 *fl, abi_ulong target_addr);
+typedef abi_long to_flock64_fn(abi_ulong target_addr, const struct flock64 *fl);
+
+#if defined(TARGET_ARM) && TARGET_ABI_BITS == 32
+static inline abi_long copy_from_user_oabi_flock64(struct flock64 *fl,
+                                                   abi_ulong target_flock_addr)
+{
+    struct target_oabi_flock64 *target_fl;
+    int l_type;
+
+    if (!lock_user_struct(VERIFY_READ, target_fl, target_flock_addr, 1)) {
+        return -TARGET_EFAULT;
+    }
+
+    __get_user(l_type, &target_fl->l_type);
+    l_type = target_to_host_flock(l_type);
+    if (l_type < 0) {
+        return l_type;
+    }
+    fl->l_type = l_type;
+    __get_user(fl->l_whence, &target_fl->l_whence);
+    __get_user(fl->l_start, &target_fl->l_start);
+    __get_user(fl->l_len, &target_fl->l_len);
+    __get_user(fl->l_pid, &target_fl->l_pid);
+    unlock_user_struct(target_fl, target_flock_addr, 0);
+    return 0;
+}
+
+static inline abi_long copy_to_user_oabi_flock64(abi_ulong target_flock_addr,
+                                                 const struct flock64 *fl)
+{
+    struct target_oabi_flock64 *target_fl;
+    short l_type;
+
+    if (!lock_user_struct(VERIFY_WRITE, target_fl, target_flock_addr, 0)) {
+        return -TARGET_EFAULT;
+    }
+
+    l_type = host_to_target_flock(fl->l_type);
+    __put_user(l_type, &target_fl->l_type);
+    __put_user(fl->l_whence, &target_fl->l_whence);
+    __put_user(fl->l_start, &target_fl->l_start);
+    __put_user(fl->l_len, &target_fl->l_len);
+    __put_user(fl->l_pid, &target_fl->l_pid);
+    unlock_user_struct(target_fl, target_flock_addr, 1);
+    return 0;
+}
+#endif
+
+static inline abi_long copy_from_user_flock64(struct flock64 *fl,
+                                              abi_ulong target_flock_addr)
+{
+    struct target_flock64 *target_fl;
+    int l_type;
+
+    if (!lock_user_struct(VERIFY_READ, target_fl, target_flock_addr, 1)) {
+        return -TARGET_EFAULT;
+    }
+
+    __get_user(l_type, &target_fl->l_type);
+    l_type = target_to_host_flock(l_type);
+    if (l_type < 0) {
+        return l_type;
+    }
+    fl->l_type = l_type;
+    __get_user(fl->l_whence, &target_fl->l_whence);
+    __get_user(fl->l_start, &target_fl->l_start);
+    __get_user(fl->l_len, &target_fl->l_len);
+    __get_user(fl->l_pid, &target_fl->l_pid);
+    unlock_user_struct(target_fl, target_flock_addr, 0);
+    return 0;
+}
+
+static inline abi_long copy_to_user_flock64(abi_ulong target_flock_addr,
+                                            const struct flock64 *fl)
+{
+    struct target_flock64 *target_fl;
+    short l_type;
+
+    if (!lock_user_struct(VERIFY_WRITE, target_fl, target_flock_addr, 0)) {
+        return -TARGET_EFAULT;
+    }
+
+    l_type = host_to_target_flock(fl->l_type);
+    __put_user(l_type, &target_fl->l_type);
+    __put_user(fl->l_whence, &target_fl->l_whence);
+    __put_user(fl->l_start, &target_fl->l_start);
+    __put_user(fl->l_len, &target_fl->l_len);
+    __put_user(fl->l_pid, &target_fl->l_pid);
+    unlock_user_struct(target_fl, target_flock_addr, 1);
+    return 0;
+}
+
+#ifdef TARGET_I386
+/*
+ * The executable identity fd belongs to the translator, not to the guest fd
+ * table.  If a guest operation would mutate or destroy that descriptor,
+ * move the identity reference first and let the operation keep its normal
+ * result on the old descriptor number.
+ */
+static abi_long guest_exe_identity_relocate(CPUArchState *env, int fd)
+{
+    TaskState *ts = env_cpu(env)->opaque;
+    int new_fd = -1;
+    abi_long ret = 0;
+
+    mmap_lock();
+    if (ts->info->prctl_mm_exe_fd == fd) {
+        new_fd = fcntl(fd, F_DUPFD_CLOEXEC, 0);
+        if (new_fd < 0) {
+            ret = get_errno(-1);
+        } else {
+            ts->info->prctl_mm_exe_fd = new_fd;
+        }
+    }
+    mmap_unlock();
+
+    if (new_fd >= 0) {
+        fd_trans_unregister(new_fd);
+    }
+    if (!ret) {
+        ret = get_errno(latc_aot_v2_relocate_source_fd(fd));
+    }
+    return ret;
+}
+#endif
+
+static abi_long do_fcntl(CPUArchState *env, int fd, int cmd, abi_ulong arg)
+{
+    struct flock64 fl64;
+#ifdef F_GETOWN_EX
+    struct f_owner_ex fox;
+    struct target_f_owner_ex *target_fox;
+#endif
+    abi_long ret;
+    int host_cmd = target_to_host_fcntl_cmd(cmd);
+
+    if (host_cmd == -TARGET_EINVAL)
+	    return host_cmd;
+
+#ifdef TARGET_I386
+    /* The identity copy is already close-on-exec.  Setting that same bit is
+     * harmless; only clearing it would mutate the translator's reference. */
+    if (cmd == TARGET_F_SETFD && !(arg & FD_CLOEXEC)) {
+        ret = guest_exe_identity_relocate(env, fd);
+        if (ret) {
+            return ret;
+        }
+    }
+#endif
+
+    switch(cmd) {
+    case TARGET_F_GETLK:
+        ret = copy_from_user_flock(&fl64, arg);
+        if (ret) {
+            return ret;
+        }
+        ret = get_errno(safe_fcntl(fd, host_cmd, &fl64));
+        if (ret == 0) {
+            ret = copy_to_user_flock(arg, &fl64);
+        }
+        break;
+
+    case TARGET_F_SETLK:
+    case TARGET_F_SETLKW:
+        ret = copy_from_user_flock(&fl64, arg);
+        if (ret) {
+            return ret;
+        }
+        ret = get_errno(safe_fcntl(fd, host_cmd, &fl64));
+        break;
+
+    case TARGET_F_GETLK64:
+    case TARGET_F_OFD_GETLK:
+        ret = copy_from_user_flock64(&fl64, arg);
+        if (ret) {
+            return ret;
+        }
+        ret = get_errno(safe_fcntl(fd, host_cmd, &fl64));
+        if (ret == 0) {
+            ret = copy_to_user_flock64(arg, &fl64);
+        }
+        break;
+    case TARGET_F_SETLK64:
+    case TARGET_F_SETLKW64:
+    case TARGET_F_OFD_SETLK:
+    case TARGET_F_OFD_SETLKW:
+        ret = copy_from_user_flock64(&fl64, arg);
+        if (ret) {
+            return ret;
+        }
+        ret = get_errno(safe_fcntl(fd, host_cmd, &fl64));
+        break;
+
+    case TARGET_F_GETFL:
+        ret = get_errno(safe_fcntl(fd, host_cmd, arg));
+        if (ret >= 0) {
+            ret = host_to_target_bitmask(ret, fcntl_flags_tbl);
+        }
+        break;
+
+    case TARGET_F_SETFL:
+        ret = get_errno(safe_fcntl(fd, host_cmd,
+                                   target_to_host_bitmask(arg,
+                                                          fcntl_flags_tbl)));
+        break;
+
+#ifdef F_GETOWN_EX
+    case TARGET_F_GETOWN_EX:
+        ret = get_errno(safe_fcntl(fd, host_cmd, &fox));
+        if (ret >= 0) {
+            if (!lock_user_struct(VERIFY_WRITE, target_fox, arg, 0))
+                return -TARGET_EFAULT;
+            target_fox->type = tswap32(fox.type);
+            target_fox->pid = tswap32(fox.pid);
+            unlock_user_struct(target_fox, arg, 1);
+        }
+        break;
+#endif
+
+#ifdef F_SETOWN_EX
+    case TARGET_F_SETOWN_EX:
+        if (!lock_user_struct(VERIFY_READ, target_fox, arg, 1))
+            return -TARGET_EFAULT;
+        fox.type = tswap32(target_fox->type);
+        fox.pid = tswap32(target_fox->pid);
+        unlock_user_struct(target_fox, arg, 0);
+        ret = get_errno(safe_fcntl(fd, host_cmd, &fox));
+        break;
+#endif
+
+    case TARGET_F_SETSIG:
+        ret = get_errno(safe_fcntl(fd, host_cmd, target_to_host_signal(arg)));
+        break;
+
+    case TARGET_F_GETSIG:
+        ret = host_to_target_signal(get_errno(safe_fcntl(fd, host_cmd, arg)));
+        break;
+
+    case TARGET_F_SETOWN:
+    case TARGET_F_GETOWN:
+    case TARGET_F_SETLEASE:
+    case TARGET_F_GETLEASE:
+    case TARGET_F_SETPIPE_SZ:
+    case TARGET_F_GETPIPE_SZ:
+    case TARGET_F_ADD_SEALS:
+    case TARGET_F_GET_SEALS:
+        ret = get_errno(safe_fcntl(fd, host_cmd, arg));
+        break;
+
+    default:
+        ret = get_errno(safe_fcntl(fd, cmd, arg));
+        break;
+    }
+    return ret;
+}
+
+#ifdef USE_UID16
+
+static inline int high2lowuid(int uid)
+{
+    if (uid > 65535)
+        return 65534;
+    else
+        return uid;
+}
+
+static inline int high2lowgid(int gid)
+{
+    if (gid > 65535)
+        return 65534;
+    else
+        return gid;
+}
+
+static inline int low2highuid(int uid)
+{
+    if ((int16_t)uid == -1)
+        return -1;
+    else
+        return uid;
+}
+
+static inline int low2highgid(int gid)
+{
+    if ((int16_t)gid == -1)
+        return -1;
+    else
+        return gid;
+}
+static inline int tswapid(int id)
+{
+    return tswap16(id);
+}
+
+#define put_user_id(x, gaddr) put_user_u16(x, gaddr)
+
+#else /* !USE_UID16 */
+static inline int high2lowuid(int uid)
+{
+    return uid;
+}
+static inline int high2lowgid(int gid)
+{
+    return gid;
+}
+static inline int low2highuid(int uid)
+{
+    return uid;
+}
+static inline int low2highgid(int gid)
+{
+    return gid;
+}
+static inline int tswapid(int id)
+{
+    return tswap32(id);
+}
+
+#define put_user_id(x, gaddr) put_user_u32(x, gaddr)
+
+#endif /* USE_UID16 */
+
+/* We must do direct syscalls for setting UID/GID, because we want to
+ * implement the Linux system call semantics of "change only for this thread",
+ * not the libc/POSIX semantics of "change for all threads in process".
+ * (See http://ewontfix.com/17/ for more details.)
+ * We use the 32-bit version of the syscalls if present; if it is not
+ * then either the host architecture supports 32-bit UIDs natively with
+ * the standard syscall, or the 16-bit UID is the best we can do.
+ */
+#ifdef __NR_setuid32
+#define __NR_sys_setuid __NR_setuid32
+#else
+#define __NR_sys_setuid __NR_setuid
+#endif
+#ifdef __NR_setgid32
+#define __NR_sys_setgid __NR_setgid32
+#else
+#define __NR_sys_setgid __NR_setgid
+#endif
+#ifdef __NR_setresuid32
+#define __NR_sys_setresuid __NR_setresuid32
+#else
+#define __NR_sys_setresuid __NR_setresuid
+#endif
+#ifdef __NR_setresgid32
+#define __NR_sys_setresgid __NR_setresgid32
+#else
+#define __NR_sys_setresgid __NR_setresgid
+#endif
+
+_syscall1(int, sys_setuid, uid_t, uid)
+_syscall1(int, sys_setgid, gid_t, gid)
+_syscall3(int, sys_setresuid, uid_t, ruid, uid_t, euid, uid_t, suid)
+_syscall3(int, sys_setresgid, gid_t, rgid, gid_t, egid, gid_t, sgid)
+
+void syscall_init(void)
+{
+    IOCTLEntry *ie;
+    const argtype *arg_type;
+    int size;
+    int i;
+
+    thunk_init(STRUCT_MAX);
+
+#define STRUCT(name, ...) thunk_register_struct(STRUCT_ ## name, #name, struct_ ## name ## _def);
+#define STRUCT_SPECIAL(name) thunk_register_struct_direct(STRUCT_ ## name, #name, &struct_ ## name ## _def);
+#include "syscall_types.h"
+#undef STRUCT
+#undef STRUCT_SPECIAL
+
+    /* Build target_to_host_errno_table[] table from
+     * host_to_target_errno_table[]. */
+    for (i = 0; i < ERRNO_TABLE_SIZE; i++) {
+        target_to_host_errno_table[host_to_target_errno_table[i]] = i;
+    }
+
+    /* we patch the ioctl size if necessary. We rely on the fact that
+       no ioctl has all the bits at '1' in the size field */
+    ie = ioctl_entries;
+    while (ie->target_cmd != 0) {
+        if (((ie->target_cmd >> TARGET_IOC_SIZESHIFT) & TARGET_IOC_SIZEMASK) ==
+            TARGET_IOC_SIZEMASK) {
+            arg_type = ie->arg_type;
+            if (arg_type[0] != TYPE_PTR) {
+                fprintf(stderr, "cannot patch size for ioctl 0x%x\n",
+                        ie->target_cmd);
+                exit(1);
+            }
+            arg_type++;
+            size = thunk_type_size(arg_type, 0);
+            ie->target_cmd = (ie->target_cmd &
+                              ~(TARGET_IOC_SIZEMASK << TARGET_IOC_SIZESHIFT)) |
+                (size << TARGET_IOC_SIZESHIFT);
+        }
+
+        /* automatic consistency check if same arch */
+#if (defined(__i386__) && defined(TARGET_I386) && defined(TARGET_ABI32)) || \
+    (defined(__x86_64__) && defined(TARGET_X86_64)) || \
+    (defined(CONFIG_LATX_DEBUG) && defined(TARGET_X86_64))
+        if (unlikely(ie->target_cmd != ie->host_cmd)) {
+            /* fprintf(stderr, "ERROR: ioctl(%s): target=0x%x host=0x%x\n", */
+            /*         ie->name, ie->target_cmd, ie->host_cmd); */
+        }
+#endif
+        ie++;
+    }
+}
+
+#ifdef TARGET_NR_truncate64
+static inline abi_long target_truncate64(void *cpu_env, const char *arg1,
+                                         abi_long arg2,
+                                         abi_long arg3,
+                                         abi_long arg4)
+{
+    if (regpairs_aligned(cpu_env, TARGET_NR_truncate64)) {
+        arg2 = arg3;
+        arg3 = arg4;
+    }
+    return get_errno(truncate64(arg1, target_offset64(arg2, arg3)));
+}
+#endif
+
+#ifdef TARGET_NR_ftruncate64
+static inline abi_long target_ftruncate64(void *cpu_env, abi_long arg1,
+                                          abi_long arg2,
+                                          abi_long arg3,
+                                          abi_long arg4)
+{
+    if (regpairs_aligned(cpu_env, TARGET_NR_ftruncate64)) {
+        arg2 = arg3;
+        arg3 = arg4;
+    }
+    return get_errno(ftruncate64(arg1, target_offset64(arg2, arg3)));
+}
+#endif
+
+#if defined(TARGET_NR_timer_settime) || \
+    (defined(TARGET_NR_timerfd_settime) && defined(CONFIG_TIMERFD))
+static inline abi_long target_to_host_itimerspec(struct itimerspec *host_its,
+                                                 abi_ulong target_addr)
+{
+    if (target_to_host_timespec(&host_its->it_interval, target_addr +
+                                offsetof(struct target_itimerspec,
+                                         it_interval)) ||
+        target_to_host_timespec(&host_its->it_value, target_addr +
+                                offsetof(struct target_itimerspec,
+                                         it_value))) {
+        return -TARGET_EFAULT;
+    }
+
+    return 0;
+}
+#endif
+
+#if defined(TARGET_NR_timer_settime64) || \
+    (defined(TARGET_NR_timerfd_settime64) && defined(CONFIG_TIMERFD))
+static inline abi_long target_to_host_itimerspec64(struct itimerspec *host_its,
+                                                   abi_ulong target_addr)
+{
+    if (target_to_host_timespec64(&host_its->it_interval, target_addr +
+                                  offsetof(struct target__kernel_itimerspec,
+                                           it_interval)) ||
+        target_to_host_timespec64(&host_its->it_value, target_addr +
+                                  offsetof(struct target__kernel_itimerspec,
+                                           it_value))) {
+        return -TARGET_EFAULT;
+    }
+
+    return 0;
+}
+#endif
+
+#if ((defined(TARGET_NR_timerfd_gettime) || \
+      defined(TARGET_NR_timerfd_settime)) && defined(CONFIG_TIMERFD)) || \
+      defined(TARGET_NR_timer_gettime) || defined(TARGET_NR_timer_settime)
+static inline abi_long host_to_target_itimerspec(abi_ulong target_addr,
+                                                 struct itimerspec *host_its)
+{
+    if (host_to_target_timespec(target_addr + offsetof(struct target_itimerspec,
+                                                       it_interval),
+                                &host_its->it_interval) ||
+        host_to_target_timespec(target_addr + offsetof(struct target_itimerspec,
+                                                       it_value),
+                                &host_its->it_value)) {
+        return -TARGET_EFAULT;
+    }
+    return 0;
+}
+#endif
+
+#if ((defined(TARGET_NR_timerfd_gettime64) || \
+      defined(TARGET_NR_timerfd_settime64)) && defined(CONFIG_TIMERFD)) || \
+      defined(TARGET_NR_timer_gettime64) || defined(TARGET_NR_timer_settime64)
+static inline abi_long host_to_target_itimerspec64(abi_ulong target_addr,
+                                                   struct itimerspec *host_its)
+{
+    if (host_to_target_timespec64(target_addr +
+                                  offsetof(struct target__kernel_itimerspec,
+                                           it_interval),
+                                  &host_its->it_interval) ||
+        host_to_target_timespec64(target_addr +
+                                  offsetof(struct target__kernel_itimerspec,
+                                           it_value),
+                                  &host_its->it_value)) {
+        return -TARGET_EFAULT;
+    }
+    return 0;
+}
+#endif
+
+#if defined(TARGET_NR_adjtimex) || \
+    (defined(TARGET_NR_clock_adjtime) && defined(CONFIG_CLOCK_ADJTIME))
+static inline abi_long target_to_host_timex(struct timex *host_tx,
+                                            abi_long target_addr)
+{
+    struct target_timex *target_tx;
+
+    if (!lock_user_struct(VERIFY_READ, target_tx, target_addr, 1)) {
+        return -TARGET_EFAULT;
+    }
+
+    __get_user(host_tx->modes, &target_tx->modes);
+    __get_user(host_tx->offset, &target_tx->offset);
+    __get_user(host_tx->freq, &target_tx->freq);
+    __get_user(host_tx->maxerror, &target_tx->maxerror);
+    __get_user(host_tx->esterror, &target_tx->esterror);
+    __get_user(host_tx->status, &target_tx->status);
+    __get_user(host_tx->constant, &target_tx->constant);
+    __get_user(host_tx->precision, &target_tx->precision);
+    __get_user(host_tx->tolerance, &target_tx->tolerance);
+    __get_user(host_tx->time.tv_sec, &target_tx->time.tv_sec);
+    __get_user(host_tx->time.tv_usec, &target_tx->time.tv_usec);
+    __get_user(host_tx->tick, &target_tx->tick);
+    __get_user(host_tx->ppsfreq, &target_tx->ppsfreq);
+    __get_user(host_tx->jitter, &target_tx->jitter);
+    __get_user(host_tx->shift, &target_tx->shift);
+    __get_user(host_tx->stabil, &target_tx->stabil);
+    __get_user(host_tx->jitcnt, &target_tx->jitcnt);
+    __get_user(host_tx->calcnt, &target_tx->calcnt);
+    __get_user(host_tx->errcnt, &target_tx->errcnt);
+    __get_user(host_tx->stbcnt, &target_tx->stbcnt);
+    __get_user(host_tx->tai, &target_tx->tai);
+
+    unlock_user_struct(target_tx, target_addr, 0);
+    return 0;
+}
+
+static inline abi_long host_to_target_timex(abi_long target_addr,
+                                            struct timex *host_tx)
+{
+    struct target_timex *target_tx;
+
+    if (!lock_user_struct(VERIFY_WRITE, target_tx, target_addr, 0)) {
+        return -TARGET_EFAULT;
+    }
+
+    __put_user(host_tx->modes, &target_tx->modes);
+    __put_user(host_tx->offset, &target_tx->offset);
+    __put_user(host_tx->freq, &target_tx->freq);
+    __put_user(host_tx->maxerror, &target_tx->maxerror);
+    __put_user(host_tx->esterror, &target_tx->esterror);
+    __put_user(host_tx->status, &target_tx->status);
+    __put_user(host_tx->constant, &target_tx->constant);
+    __put_user(host_tx->precision, &target_tx->precision);
+    __put_user(host_tx->tolerance, &target_tx->tolerance);
+    __put_user(host_tx->time.tv_sec, &target_tx->time.tv_sec);
+    __put_user(host_tx->time.tv_usec, &target_tx->time.tv_usec);
+    __put_user(host_tx->tick, &target_tx->tick);
+    __put_user(host_tx->ppsfreq, &target_tx->ppsfreq);
+    __put_user(host_tx->jitter, &target_tx->jitter);
+    __put_user(host_tx->shift, &target_tx->shift);
+    __put_user(host_tx->stabil, &target_tx->stabil);
+    __put_user(host_tx->jitcnt, &target_tx->jitcnt);
+    __put_user(host_tx->calcnt, &target_tx->calcnt);
+    __put_user(host_tx->errcnt, &target_tx->errcnt);
+    __put_user(host_tx->stbcnt, &target_tx->stbcnt);
+    __put_user(host_tx->tai, &target_tx->tai);
+
+    unlock_user_struct(target_tx, target_addr, 1);
+    return 0;
+}
+#endif
+
+
+#if defined(TARGET_NR_clock_adjtime64) && defined(CONFIG_CLOCK_ADJTIME)
+static inline abi_long target_to_host_timex64(struct timex *host_tx,
+                                              abi_long target_addr)
+{
+    struct target__kernel_timex *target_tx;
+
+    if (copy_from_user_timeval64(&host_tx->time, target_addr +
+                                 offsetof(struct target__kernel_timex,
+                                          time))) {
+        return -TARGET_EFAULT;
+    }
+
+    if (!lock_user_struct(VERIFY_READ, target_tx, target_addr, 1)) {
+        return -TARGET_EFAULT;
+    }
+
+    __get_user(host_tx->modes, &target_tx->modes);
+    __get_user(host_tx->offset, &target_tx->offset);
+    __get_user(host_tx->freq, &target_tx->freq);
+    __get_user(host_tx->maxerror, &target_tx->maxerror);
+    __get_user(host_tx->esterror, &target_tx->esterror);
+    __get_user(host_tx->status, &target_tx->status);
+    __get_user(host_tx->constant, &target_tx->constant);
+    __get_user(host_tx->precision, &target_tx->precision);
+    __get_user(host_tx->tolerance, &target_tx->tolerance);
+    __get_user(host_tx->tick, &target_tx->tick);
+    __get_user(host_tx->ppsfreq, &target_tx->ppsfreq);
+    __get_user(host_tx->jitter, &target_tx->jitter);
+    __get_user(host_tx->shift, &target_tx->shift);
+    __get_user(host_tx->stabil, &target_tx->stabil);
+    __get_user(host_tx->jitcnt, &target_tx->jitcnt);
+    __get_user(host_tx->calcnt, &target_tx->calcnt);
+    __get_user(host_tx->errcnt, &target_tx->errcnt);
+    __get_user(host_tx->stbcnt, &target_tx->stbcnt);
+    __get_user(host_tx->tai, &target_tx->tai);
+
+    unlock_user_struct(target_tx, target_addr, 0);
+    return 0;
+}
+
+static inline abi_long host_to_target_timex64(abi_long target_addr,
+                                              struct timex *host_tx)
+{
+    struct target__kernel_timex *target_tx;
+
+   if (copy_to_user_timeval64(target_addr +
+                              offsetof(struct target__kernel_timex, time),
+                              &host_tx->time)) {
+        return -TARGET_EFAULT;
+    }
+
+    if (!lock_user_struct(VERIFY_WRITE, target_tx, target_addr, 0)) {
+        return -TARGET_EFAULT;
+    }
+
+    __put_user(host_tx->modes, &target_tx->modes);
+    __put_user(host_tx->offset, &target_tx->offset);
+    __put_user(host_tx->freq, &target_tx->freq);
+    __put_user(host_tx->maxerror, &target_tx->maxerror);
+    __put_user(host_tx->esterror, &target_tx->esterror);
+    __put_user(host_tx->status, &target_tx->status);
+    __put_user(host_tx->constant, &target_tx->constant);
+    __put_user(host_tx->precision, &target_tx->precision);
+    __put_user(host_tx->tolerance, &target_tx->tolerance);
+    __put_user(host_tx->tick, &target_tx->tick);
+    __put_user(host_tx->ppsfreq, &target_tx->ppsfreq);
+    __put_user(host_tx->jitter, &target_tx->jitter);
+    __put_user(host_tx->shift, &target_tx->shift);
+    __put_user(host_tx->stabil, &target_tx->stabil);
+    __put_user(host_tx->jitcnt, &target_tx->jitcnt);
+    __put_user(host_tx->calcnt, &target_tx->calcnt);
+    __put_user(host_tx->errcnt, &target_tx->errcnt);
+    __put_user(host_tx->stbcnt, &target_tx->stbcnt);
+    __put_user(host_tx->tai, &target_tx->tai);
+
+    unlock_user_struct(target_tx, target_addr, 1);
+    return 0;
+}
+#endif
+
+static inline abi_long target_to_host_sigevent(struct sigevent *host_sevp,
+                                               abi_ulong target_addr)
+{
+    struct target_sigevent *target_sevp;
+
+    if (!lock_user_struct(VERIFY_READ, target_sevp, target_addr, 1)) {
+        return -TARGET_EFAULT;
+    }
+
+    /* This union is awkward on 64 bit systems because it has a 32 bit
+     * integer and a pointer in it; we follow the conversion approach
+     * used for handling sigval types in signal.c so the guest should get
+     * the correct value back even if we did a 64 bit byteswap and it's
+     * using the 32 bit integer.
+     */
+    host_sevp->sigev_value.sival_ptr =
+        (void *)(uintptr_t)tswapal(target_sevp->sigev_value.sival_ptr);
+    host_sevp->sigev_signo =
+        target_to_host_signal(tswap32(target_sevp->sigev_signo));
+    host_sevp->sigev_notify = tswap32(target_sevp->sigev_notify);
+    host_sevp->_sigev_un._tid = tswap32(target_sevp->_sigev_un._tid);
+
+    unlock_user_struct(target_sevp, target_addr, 1);
+    return 0;
+}
+
+#if defined(TARGET_NR_mlockall)
+static inline int target_to_host_mlockall_arg(int arg)
+{
+    int result = 0;
+
+    if (arg & TARGET_MCL_CURRENT) {
+        result |= MCL_CURRENT;
+    }
+    if (arg & TARGET_MCL_FUTURE) {
+        result |= MCL_FUTURE;
+    }
+#ifdef MCL_ONFAULT
+    if (arg & TARGET_MCL_ONFAULT) {
+        result |= MCL_ONFAULT;
+    }
+#endif
+
+    return result;
+}
+#endif
+
+#if (defined(TARGET_NR_stat64) || defined(TARGET_NR_lstat64) ||     \
+     defined(TARGET_NR_fstat64) || defined(TARGET_NR_fstatat64) ||  \
+     defined(TARGET_NR_newfstatat))
+static inline abi_long host_to_target_stat64(void *cpu_env,
+                                             abi_ulong target_addr,
+                                             struct stat *host_st)
+{
+#if defined(TARGET_ARM) && defined(TARGET_ABI32)
+    if (((CPUARMState *)cpu_env)->eabi) {
+        struct target_eabi_stat64 *target_st;
+
+        if (!lock_user_struct(VERIFY_WRITE, target_st, target_addr, 0))
+            return -TARGET_EFAULT;
+        memset(target_st, 0, sizeof(struct target_eabi_stat64));
+        __put_user(host_st->st_dev, &target_st->st_dev);
+        __put_user(host_st->st_ino, &target_st->st_ino);
+#ifdef TARGET_STAT64_HAS_BROKEN_ST_INO
+        __put_user(host_st->st_ino, &target_st->__st_ino);
+#endif
+        __put_user(host_st->st_mode, &target_st->st_mode);
+        __put_user(host_st->st_nlink, &target_st->st_nlink);
+        __put_user(host_st->st_uid, &target_st->st_uid);
+        __put_user(host_st->st_gid, &target_st->st_gid);
+        __put_user(host_st->st_rdev, &target_st->st_rdev);
+        __put_user(host_st->st_size, &target_st->st_size);
+        __put_user(host_st->st_blksize, &target_st->st_blksize);
+        __put_user(host_st->st_blocks, &target_st->st_blocks);
+        __put_user(host_st->st_atime, &target_st->target_st_atime);
+        __put_user(host_st->st_mtime, &target_st->target_st_mtime);
+        __put_user(host_st->st_ctime, &target_st->target_st_ctime);
+#if _POSIX_C_SOURCE >= 200809L || _XOPEN_SOURCE >= 700
+        __put_user(host_st->st_atim.tv_nsec, &target_st->target_st_atime_nsec);
+        __put_user(host_st->st_mtim.tv_nsec, &target_st->target_st_mtime_nsec);
+        __put_user(host_st->st_ctim.tv_nsec, &target_st->target_st_ctime_nsec);
+#endif
+        unlock_user_struct(target_st, target_addr, 1);
+    } else
+#endif
+    {
+#if defined(TARGET_HAS_STRUCT_STAT64)
+        struct target_stat64 *target_st;
+#else
+        struct target_stat *target_st;
+#endif
+
+        if (!lock_user_struct(VERIFY_WRITE, target_st, target_addr, 0))
+            return -TARGET_EFAULT;
+        memset(target_st, 0, sizeof(*target_st));
+        __put_user(host_st->st_dev, &target_st->st_dev);
+        __put_user(host_st->st_ino, &target_st->st_ino);
+#ifdef TARGET_STAT64_HAS_BROKEN_ST_INO
+        __put_user(host_st->st_ino, &target_st->__st_ino);
+#endif
+        __put_user(host_st->st_mode, &target_st->st_mode);
+        __put_user(host_st->st_nlink, &target_st->st_nlink);
+        __put_user(host_st->st_uid, &target_st->st_uid);
+        __put_user(host_st->st_gid, &target_st->st_gid);
+        __put_user(host_st->st_rdev, &target_st->st_rdev);
+        /* XXX: better use of kernel struct */
+        __put_user(host_st->st_size, &target_st->st_size);
+        __put_user(host_st->st_blksize, &target_st->st_blksize);
+        __put_user(host_st->st_blocks, &target_st->st_blocks);
+        __put_user(host_st->st_atime, &target_st->target_st_atime);
+        __put_user(host_st->st_mtime, &target_st->target_st_mtime);
+        __put_user(host_st->st_ctime, &target_st->target_st_ctime);
+#if _POSIX_C_SOURCE >= 200809L || _XOPEN_SOURCE >= 700
+        __put_user(host_st->st_atim.tv_nsec, &target_st->target_st_atime_nsec);
+        __put_user(host_st->st_mtim.tv_nsec, &target_st->target_st_mtime_nsec);
+        __put_user(host_st->st_ctim.tv_nsec, &target_st->target_st_ctime_nsec);
+#endif
+        unlock_user_struct(target_st, target_addr, 1);
+    }
+
+    return 0;
+}
+#endif
+
+#if defined(TARGET_NR_statx) && defined(__NR_statx)
+static inline abi_long host_to_target_statx(struct target_statx *host_stx,
+                                            abi_ulong target_addr)
+{
+    struct target_statx *target_stx;
+
+    if (!lock_user_struct(VERIFY_WRITE, target_stx, target_addr,  0)) {
+        return -TARGET_EFAULT;
+    }
+    memset(target_stx, 0, sizeof(*target_stx));
+
+    __put_user(host_stx->stx_mask, &target_stx->stx_mask);
+    __put_user(host_stx->stx_blksize, &target_stx->stx_blksize);
+    __put_user(host_stx->stx_attributes, &target_stx->stx_attributes);
+    __put_user(host_stx->stx_nlink, &target_stx->stx_nlink);
+    __put_user(host_stx->stx_uid, &target_stx->stx_uid);
+    __put_user(host_stx->stx_gid, &target_stx->stx_gid);
+    __put_user(host_stx->stx_mode, &target_stx->stx_mode);
+    __put_user(host_stx->stx_ino, &target_stx->stx_ino);
+    __put_user(host_stx->stx_size, &target_stx->stx_size);
+    __put_user(host_stx->stx_blocks, &target_stx->stx_blocks);
+    __put_user(host_stx->stx_attributes_mask, &target_stx->stx_attributes_mask);
+    __put_user(host_stx->stx_atime.tv_sec, &target_stx->stx_atime.tv_sec);
+    __put_user(host_stx->stx_atime.tv_nsec, &target_stx->stx_atime.tv_nsec);
+    __put_user(host_stx->stx_btime.tv_sec, &target_stx->stx_btime.tv_sec);
+    __put_user(host_stx->stx_btime.tv_nsec, &target_stx->stx_btime.tv_nsec);
+    __put_user(host_stx->stx_ctime.tv_sec, &target_stx->stx_ctime.tv_sec);
+    __put_user(host_stx->stx_ctime.tv_nsec, &target_stx->stx_ctime.tv_nsec);
+    __put_user(host_stx->stx_mtime.tv_sec, &target_stx->stx_mtime.tv_sec);
+    __put_user(host_stx->stx_mtime.tv_nsec, &target_stx->stx_mtime.tv_nsec);
+    __put_user(host_stx->stx_rdev_major, &target_stx->stx_rdev_major);
+    __put_user(host_stx->stx_rdev_minor, &target_stx->stx_rdev_minor);
+    __put_user(host_stx->stx_dev_major, &target_stx->stx_dev_major);
+    __put_user(host_stx->stx_dev_minor, &target_stx->stx_dev_minor);
+
+    unlock_user_struct(target_stx, target_addr, 1);
+
+    return 0;
+}
+#endif
+
+static int do_sys_futex(int *uaddr, int op, int val,
+                         const struct timespec *timeout, int *uaddr2,
+                         int val3)
+{
+#if HOST_LONG_BITS == 64
+#if defined(__NR_futex)
+    /* always a 64-bit time_t, it doesn't define _time64 version  */
+    return sys_futex(uaddr, op, val, timeout, uaddr2, val3);
+
+#endif
+#else /* HOST_LONG_BITS == 64 */
+#if defined(__NR_futex_time64)
+    if (sizeof(timeout->tv_sec) == 8) {
+        /* _time64 function on 32bit arch */
+        return sys_futex_time64(uaddr, op, val, timeout, uaddr2, val3);
+    }
+#endif
+#if defined(__NR_futex)
+    /* old function on 32bit arch */
+    return sys_futex(uaddr, op, val, timeout, uaddr2, val3);
+#endif
+#endif /* HOST_LONG_BITS == 64 */
+    g_assert_not_reached();
+}
+
+static int do_safe_futex(int *uaddr, int op, int val,
+                         const struct timespec *timeout, int *uaddr2,
+                         int val3)
+{
+#if HOST_LONG_BITS == 64
+#if defined(__NR_futex)
+    /* always a 64-bit time_t, it doesn't define _time64 version  */
+    return get_errno(safe_futex(uaddr, op, val, timeout, uaddr2, val3));
+#endif
+#else /* HOST_LONG_BITS == 64 */
+#if defined(__NR_futex_time64)
+    if (sizeof(timeout->tv_sec) == 8) {
+        /* _time64 function on 32bit arch */
+        return get_errno(safe_futex_time64(uaddr, op, val, timeout, uaddr2,
+                                           val3));
+    }
+#endif
+#if defined(__NR_futex)
+    /* old function on 32bit arch */
+    return get_errno(safe_futex(uaddr, op, val, timeout, uaddr2, val3));
+#endif
+#endif /* HOST_LONG_BITS == 64 */
+    return -TARGET_ENOSYS;
+}
+
+#if defined(CONFIG_LATX) && defined(TARGET_I386) && !defined(TARGET_X86_64)
+#define I386_ROBUST_LIST_HEAD_SIZE       (3 * sizeof(uint32_t))
+
+static abi_long i386_latx_set_robust_list(CPUState *cpu, abi_ulong head,
+                                           abi_ulong len)
+{
+    if (len != I386_ROBUST_LIST_HEAD_SIZE) {
+        return -TARGET_EINVAL;
+    }
+
+    /* The i386 list layout cannot be registered with the native kernel. */
+    qatomic_set(&((TaskState *)cpu->opaque)->robust_list_head, head);
+    return 0;
+}
+
+static abi_long i386_latx_get_robust_list(CPUState *cpu, abi_long pid,
+                                           abi_ulong head_ptr,
+                                           abi_ulong len_ptr)
+{
+    TaskState *current = cpu->opaque;
+
+    if (pid && pid != sys_gettid()) {
+        return -TARGET_ESRCH;
+    }
+    if (put_user_u32(I386_ROBUST_LIST_HEAD_SIZE, len_ptr) ||
+        put_user_u32(qatomic_read(&current->robust_list_head), head_ptr)) {
+        return -TARGET_EFAULT;
+    }
+    return 0;
+}
+#endif
+
+/* ??? Using host futex calls even when target atomic operations
+   are not really atomic probably breaks things.  However implementing
+   futexes locally would make futexes shared between multiple processes
+   tricky.  However they're probably useless because guest atomic
+   operations won't work either.  */
+#if defined(TARGET_NR_futex)
+static int do_futex(CPUState *cpu, target_ulong uaddr, int op, int val,
+                    target_ulong timeout, target_ulong uaddr2, int val3)
+{
+    struct timespec ts, *pts;
+    int base_op;
+
+    /* ??? We assume FUTEX_* constants are the same on both host
+       and target.  */
+#ifdef FUTEX_CMD_MASK
+    base_op = op & FUTEX_CMD_MASK;
+#else
+    base_op = op;
+#endif
+    switch (base_op) {
+    case FUTEX_WAIT:
+    case FUTEX_WAIT_BITSET:
+        if (timeout) {
+            pts = &ts;
+            target_to_host_timespec(pts, timeout);
+        } else {
+            pts = NULL;
+        }
+        return do_safe_futex(g2h(cpu, uaddr),
+                             op, tswap32(val), pts, NULL, val3);
+#ifdef TARGET_X86_64
+    case FUTEX_LOCK_PI:
+    case FUTEX_LOCK_PI2:
+        if (timeout) {
+            pts = &ts;
+            if (target_to_host_timespec(pts, timeout)) {
+                return -TARGET_EFAULT;
+            }
+        } else {
+            pts = NULL;
+        }
+        return do_safe_futex(g2h(cpu, uaddr), op, val, pts, NULL, 0);
+#endif
+    /* wine use FUTEX_WAKE_BITSET, so we need support FUTEX_WAKE_BITSET */
+    case FUTEX_WAKE_BITSET:
+    case FUTEX_WAKE:
+        return do_safe_futex(g2h(cpu, uaddr),
+                             op, val, NULL, NULL, val3);
+#ifdef TARGET_X86_64
+    case FUTEX_TRYLOCK_PI:
+    case FUTEX_UNLOCK_PI:
+        return do_safe_futex(g2h(cpu, uaddr),
+                             op, val, NULL, NULL, val3);
+#endif
+    case FUTEX_FD:
+        return do_safe_futex(g2h(cpu, uaddr),
+                             op, val, NULL, NULL, 0);
+    case FUTEX_REQUEUE:
+    case FUTEX_CMP_REQUEUE:
+    case FUTEX_WAKE_OP:
+        /* For FUTEX_REQUEUE, FUTEX_CMP_REQUEUE, and FUTEX_WAKE_OP, the
+           TIMEOUT parameter is interpreted as a uint32_t by the kernel.
+           But the prototype takes a `struct timespec *'; insert casts
+           to satisfy the compiler.  We do not need to tswap TIMEOUT
+           since it's not compared to guest memory.  */
+        pts = (struct timespec *)(uintptr_t) timeout;
+        return do_safe_futex(g2h(cpu, uaddr), op, val, pts, g2h(cpu, uaddr2),
+                             (base_op == FUTEX_CMP_REQUEUE
+                              ? tswap32(val3) : val3));
+    default:
+        return -TARGET_ENOSYS;
+    }
+}
+#endif
+
+#if defined(TARGET_NR_futex_time64)
+static int do_futex_time64(CPUState *cpu, target_ulong uaddr, int op,
+                           int val, target_ulong timeout,
+                           target_ulong uaddr2, int val3)
+{
+    struct timespec ts, *pts;
+    int base_op;
+
+    /* ??? We assume FUTEX_* constants are the same on both host
+       and target.  */
+#ifdef FUTEX_CMD_MASK
+    base_op = op & FUTEX_CMD_MASK;
+#else
+    base_op = op;
+#endif
+    switch (base_op) {
+    case FUTEX_WAIT:
+    case FUTEX_WAIT_BITSET:
+        if (timeout) {
+            pts = &ts;
+            if (target_to_host_timespec64(pts, timeout)) {
+                return -TARGET_EFAULT;
+            }
+        } else {
+            pts = NULL;
+        }
+        return do_safe_futex(g2h(cpu, uaddr), op,
+                             tswap32(val), pts, NULL, val3);
+#ifdef TARGET_X86_64
+    case FUTEX_LOCK_PI:
+        if (timeout) {
+            pts = &ts;
+            target_to_host_timespec(pts, timeout);
+        } else {
+            pts = NULL;
+        }
+        return do_safe_futex(g2h(cpu, uaddr), op, val, pts, NULL, 0);
+#endif
+    /* wine use FUTEX_WAKE_BITSET, so we need support FUTEX_WAKE_BITSET */
+    case FUTEX_WAKE_BITSET:
+    case FUTEX_WAKE:
+        return do_safe_futex(g2h(cpu, uaddr), op, val, NULL, NULL, 0);
+#ifdef TARGET_X86_64
+    case FUTEX_TRYLOCK_PI:
+    case FUTEX_UNLOCK_PI:
+        return do_safe_futex(g2h(cpu, uaddr),
+                             op, val, NULL, NULL, val3);
+#endif
+    case FUTEX_FD:
+        return do_safe_futex(g2h(cpu, uaddr), op, val, NULL, NULL, 0);
+    case FUTEX_REQUEUE:
+    case FUTEX_CMP_REQUEUE:
+    case FUTEX_WAKE_OP:
+        /* For FUTEX_REQUEUE, FUTEX_CMP_REQUEUE, and FUTEX_WAKE_OP, the
+           TIMEOUT parameter is interpreted as a uint32_t by the kernel.
+           But the prototype takes a `struct timespec *'; insert casts
+           to satisfy the compiler.  We do not need to tswap TIMEOUT
+           since it's not compared to guest memory.  */
+        pts = (struct timespec *)(uintptr_t) timeout;
+        return do_safe_futex(g2h(cpu, uaddr), op, val, pts, g2h(cpu, uaddr2),
+                             (base_op == FUTEX_CMP_REQUEUE
+                              ? tswap32(val3) : val3));
+    default:
+        return -TARGET_ENOSYS;
+    }
+}
+#endif
+
+#if defined(TARGET_NR_name_to_handle_at) && defined(CONFIG_OPEN_BY_HANDLE)
+static abi_long do_name_to_handle_at(abi_long dirfd, abi_long pathname,
+                                     abi_long handle, abi_long mount_id,
+                                     abi_long flags)
+{
+    struct file_handle *target_fh;
+    struct file_handle *fh;
+    int mid = 0;
+    abi_long ret;
+    char *name;
+    unsigned int size, total_size;
+
+    if (get_user_s32(size, handle)) {
+        return -TARGET_EFAULT;
+    }
+
+    name = lock_user_string(pathname);
+    if (!name) {
+        return -TARGET_EFAULT;
+    }
+
+    total_size = sizeof(struct file_handle) + size;
+    target_fh = lock_user(VERIFY_WRITE, handle, total_size, 0);
+    if (!target_fh) {
+        unlock_user(name, pathname, 0);
+        return -TARGET_EFAULT;
+    }
+
+    fh = g_malloc0(total_size);
+    fh->handle_bytes = size;
+
+    ret = get_errno(name_to_handle_at(dirfd, path(name), fh, &mid, flags));
+    unlock_user(name, pathname, 0);
+
+    /* man name_to_handle_at(2):
+     * Other than the use of the handle_bytes field, the caller should treat
+     * the file_handle structure as an opaque data type
+     */
+
+    memcpy(target_fh, fh, total_size);
+    target_fh->handle_bytes = tswap32(fh->handle_bytes);
+    target_fh->handle_type = tswap32(fh->handle_type);
+    g_free(fh);
+    unlock_user(target_fh, handle, total_size);
+
+    if (put_user_s32(mid, mount_id)) {
+        return -TARGET_EFAULT;
+    }
+
+    return ret;
+
+}
+#endif
+
+#if defined(TARGET_NR_open_by_handle_at) && defined(CONFIG_OPEN_BY_HANDLE)
+static abi_long do_open_by_handle_at(abi_long mount_fd, abi_long handle,
+                                     abi_long flags)
+{
+    struct file_handle *target_fh;
+    struct file_handle *fh;
+    unsigned int size, total_size;
+    abi_long ret;
+
+    if (get_user_s32(size, handle)) {
+        return -TARGET_EFAULT;
+    }
+
+    total_size = sizeof(struct file_handle) + size;
+    target_fh = lock_user(VERIFY_READ, handle, total_size, 1);
+    if (!target_fh) {
+        return -TARGET_EFAULT;
+    }
+
+    fh = g_memdup(target_fh, total_size);
+    fh->handle_bytes = size;
+    fh->handle_type = tswap32(target_fh->handle_type);
+
+    ret = get_errno(open_by_handle_at(mount_fd, fh,
+                    target_to_host_bitmask(flags, fcntl_flags_tbl)));
+
+    g_free(fh);
+
+    unlock_user(target_fh, handle, total_size);
+
+    return ret;
+}
+#endif
+
+#if defined(TARGET_NR_signalfd) || defined(TARGET_NR_signalfd4)
+
+static abi_long do_signalfd4(int fd, abi_long mask, int flags)
+{
+    int host_flags;
+    target_sigset_t *target_mask;
+    sigset_t host_mask;
+    abi_long ret;
+
+    if (flags & ~(TARGET_O_NONBLOCK_MASK | TARGET_O_CLOEXEC)) {
+        return -TARGET_EINVAL;
+    }
+    if (!lock_user_struct(VERIFY_READ, target_mask, mask, 1)) {
+        return -TARGET_EFAULT;
+    }
+
+    target_to_host_sigset(&host_mask, target_mask);
+
+    host_flags = target_to_host_bitmask(flags, fcntl_flags_tbl);
+
+    ret = get_errno(signalfd(fd, &host_mask, host_flags));
+    if (ret >= 0) {
+        fd_trans_register(ret, &target_signalfd_trans);
+    }
+
+    unlock_user_struct(target_mask, mask, 0);
+
+    return ret;
+}
+#endif
+
+/* Map host to target signal numbers for the wait family of syscalls.
+   Assume all other status bits are the same.  */
+int host_to_target_waitstatus(int status)
+{
+    if (WIFSIGNALED(status)) {
+        return host_to_target_signal(WTERMSIG(status)) | (status & ~0x7f);
+    }
+    if (WIFSTOPPED(status)) {
+        return (host_to_target_signal(WSTOPSIG(status)) << 8)
+               | (status & 0xff);
+    }
+    return status;
+}
+
+#ifdef TARGET_X86_64
+static bool read_seccomp_trace(pid_t pid, const TaskState *ts,
+                               GuestSeccompTraceState *trace)
+{
+    /* Forked linux-user processes retain TaskState at the same host VA. */
+    struct iovec local = { trace, sizeof(*trace) };
+    struct iovec remote = { (void *)&ts->seccomp_trace, sizeof(*trace) };
+
+    return process_vm_readv(pid, &local, 1, &remote, 1, 0) == sizeof(*trace);
+}
+
+static bool write_seccomp_trace(pid_t pid, const TaskState *ts,
+                                const GuestSeccompTraceState *trace)
+{
+    struct iovec local = { (void *)trace, sizeof(*trace) };
+    struct iovec remote = { (void *)&ts->seccomp_trace, sizeof(*trace) };
+
+    return process_vm_writev(pid, &local, 1, &remote, 1, 0) == sizeof(*trace);
+}
+
+static int seccomp_trace_waitstatus(pid_t pid, int status,
+                                    const TaskState *ts)
+{
+    GuestSeccompTraceState trace;
+
+    if (WIFSTOPPED(status) && read_seccomp_trace(pid, ts, &trace) &&
+        trace.pending) {
+        return (PTRACE_EVENT_SECCOMP << 16) | (TARGET_SIGTRAP << 8) | 0x7f;
+    }
+    return host_to_target_waitstatus(status);
+}
+
+static void seccomp_trace_to_regs(const GuestSeccompTraceState *trace,
+                                  struct target_pt_regs *regs)
+{
+    memset(regs, 0, sizeof(*regs));
+    regs->r15 = trace->regs[15];
+    regs->r14 = trace->regs[14];
+    regs->r13 = trace->regs[13];
+    regs->r12 = trace->regs[12];
+    regs->rbp = trace->regs[R_EBP];
+    regs->rbx = trace->regs[R_EBX];
+    regs->r11 = trace->regs[11];
+    regs->r10 = trace->regs[10];
+    regs->r9 = trace->regs[9];
+    regs->r8 = trace->regs[8];
+    regs->rax = trace->result;
+    regs->rcx = trace->regs[R_ECX];
+    regs->rdx = trace->regs[R_EDX];
+    regs->rsi = trace->regs[R_ESI];
+    regs->rdi = trace->regs[R_EDI];
+    regs->orig_rax = trace->syscall_nr;
+    regs->rip = trace->eip;
+    regs->cs = __USER_CS;
+    regs->eflags = trace->eflags;
+    regs->rsp = trace->regs[R_ESP];
+    regs->ss = __USER_DS;
+}
+
+static void regs_to_seccomp_trace(const struct target_pt_regs *regs,
+                                  GuestSeccompTraceState *trace)
+{
+    trace->regs[15] = regs->r15;
+    trace->regs[14] = regs->r14;
+    trace->regs[13] = regs->r13;
+    trace->regs[12] = regs->r12;
+    trace->regs[R_EBP] = regs->rbp;
+    trace->regs[R_EBX] = regs->rbx;
+    trace->regs[11] = regs->r11;
+    trace->regs[10] = regs->r10;
+    trace->regs[9] = regs->r9;
+    trace->regs[8] = regs->r8;
+    trace->regs[R_EAX] = regs->rax;
+    trace->regs[R_ECX] = regs->rcx;
+    trace->regs[R_EDX] = regs->rdx;
+    trace->regs[R_ESI] = regs->rsi;
+    trace->regs[R_EDI] = regs->rdi;
+    trace->syscall_nr = regs->orig_rax;
+    trace->result = regs->rax;
+    trace->eip = regs->rip;
+    trace->eflags = regs->eflags;
+    trace->regs[R_ESP] = regs->rsp;
+}
+#endif
+
+#ifdef TARGET_I386
+static int write_guest_proc_range(int fd, abi_ulong start, abi_ulong end)
+{
+    while (start < end) {
+        size_t len = MIN((abi_ulong)TARGET_PAGE_SIZE, end - start);
+        void *ptr = lock_user(VERIFY_READ, start, len, 1);
+        ssize_t written;
+
+        if (!ptr) {
+            return -1;
+        }
+        written = qemu_write_full(fd, ptr, len);
+        unlock_user(ptr, start, 0);
+        if (written != len) {
+            return -1;
+        }
+        start += len;
+    }
+    return 0;
+}
+#endif
+
+/* Include the environment tail when userspace has overwritten argv. */
+static int open_self_cmdline(void *cpu_env, int fd, const char *oldpath)
+{
+    CPUState *cpu = env_cpu((CPUArchState *)cpu_env);
+#ifdef TARGET_I386
+    struct image_info *info = ((TaskState *)cpu->opaque)->info;
+    abi_ulong start, end, env_end;
+    uint8_t last = 0;
+
+    mmap_lock();
+    start = info->prctl_mm_arg_start;
+    end = info->prctl_mm_arg_end;
+    env_end = info->prctl_mm_env_end;
+    mmap_unlock();
+
+    if (end > start && get_user_u8(last, end - 1)) {
+        return -1;
+    }
+    if (last && env_end > end) {
+        end = env_end;
+    }
+    return write_guest_proc_range(fd, start, end);
+#else
+    struct linux_binprm *bprm = ((TaskState *)cpu->opaque)->bprm;
+    int i;
+
+    for (i = 0; i < bprm->argc; i++) {
+        size_t len = strlen(bprm->argv[i]) + 1;
+
+        if (write(fd, bprm->argv[i], len) != len) {
+            return -1;
+        }
+    }
+#endif
+    return 0;
+}
+
+#ifdef TARGET_I386
+static int open_self_environ(void *cpu_env, int fd, const char *oldpath)
+{
+    TaskState *ts = env_cpu((CPUArchState *)cpu_env)->opaque;
+    abi_ulong start, end;
+
+    mmap_lock();
+    start = ts->info->prctl_mm_env_start;
+    end = ts->info->prctl_mm_env_end;
+    mmap_unlock();
+    return write_guest_proc_range(fd, start, end);
+}
+#endif
+
+static const char *guest_self_exe_open_path(CPUArchState *env, char *buffer,
+                                            size_t size, int *owned_fd)
+{
+    *owned_fd = -1;
+#ifdef TARGET_I386
+    TaskState *ts = env_cpu(env)->opaque;
+    bool overridden;
+
+    mmap_lock();
+    overridden = ts->info->prctl_mm_exe_fd >= 0;
+    if (overridden) {
+        *owned_fd = fcntl(ts->info->prctl_mm_exe_fd, F_DUPFD_CLOEXEC, 0);
+    }
+    mmap_unlock();
+    if (overridden) {
+        if (*owned_fd < 0) {
+            return NULL;
+        }
+        snprintf(buffer, size, "/proc/self/fd/%d", *owned_fd);
+        return buffer;
+    }
+#endif
+    return exec_path;
+}
+
+static const char *guest_self_exe_link_path(CPUArchState *env,
+                                            char *buffer, size_t size)
+{
+#ifdef TARGET_I386
+    TaskState *ts = env_cpu(env)->opaque;
+    char fd_path[64];
+    bool overridden;
+    ssize_t len;
+    int fd = -1;
+
+    mmap_lock();
+    overridden = ts->info->prctl_mm_exe_fd >= 0;
+    if (overridden) {
+        fd = fcntl(ts->info->prctl_mm_exe_fd, F_DUPFD_CLOEXEC, 0);
+    }
+    mmap_unlock();
+    if (overridden) {
+        if (fd < 0) {
+            return NULL;
+        }
+        snprintf(fd_path, sizeof(fd_path), "/proc/self/fd/%d", fd);
+        len = readlink(fd_path, buffer, size - 1);
+        close(fd);
+        if (len < 0) {
+            return NULL;
+        }
+        buffer[len] = 0;
+        return buffer;
+    }
+#endif
+    return realpath(exec_path, buffer);
+}
+
+static bool guest_self_exe_exec_paths(CPUArchState *env, char *link_buffer,
+                                      size_t link_size,
+                                      const char **link_path,
+                                      char *open_buffer, size_t open_size,
+                                      const char **open_path, int *owned_fd)
+{
+    *owned_fd = -1;
+#ifdef TARGET_I386
+    TaskState *ts = env_cpu(env)->opaque;
+    bool overridden;
+    ssize_t len;
+
+    mmap_lock();
+    overridden = ts->info->prctl_mm_exe_fd >= 0;
+    if (overridden) {
+        *owned_fd = fcntl(ts->info->prctl_mm_exe_fd, F_DUPFD_CLOEXEC, 0);
+    }
+    mmap_unlock();
+    if (overridden) {
+        if (*owned_fd < 0) {
+            return false;
+        }
+        snprintf(open_buffer, open_size, "/proc/self/fd/%d", *owned_fd);
+        len = readlink(open_buffer, link_buffer, link_size - 1);
+        if (len < 0) {
+            close(*owned_fd);
+            *owned_fd = -1;
+            return false;
+        }
+        link_buffer[len] = 0;
+        *link_path = link_buffer;
+        *open_path = open_buffer;
+        return true;
+    }
+#endif
+    *link_path = realpath(exec_path, link_buffer);
+    *open_path = exec_path;
+    return *link_path != NULL;
+}
+
+static char * get_key_value_from_file(const char * key, char * real_path)
+{
+    char buf[PATH_MAX];
+    char key_value_str[PATH_MAX];
+    snprintf(key_value_str, PATH_MAX - 1, "%s %%s", key);
+    FILE *f = fopen(real_path, "r");
+    char value [PATH_MAX];
+    if(!f)
+        return NULL;
+    while(!feof(f)) {
+        char* ret = fgets(buf, sizeof(buf), f);
+        (void)ret;
+        if (ret) {
+            if (sscanf(buf, key_value_str, &value) == 1) {
+                fclose(f);
+                char *rvalue = malloc(strlen(value) + 1);
+                strcpy(rvalue, value);
+                return rvalue;
+            }
+        }
+    }
+    fclose(f);
+    return NULL;
+}
+
+static char* get_latx_binfmtinterpreter(void)
+{
+    char *is_indocker = getenv("LATX_DOCKER");
+    const char *binfmt_path = "/proc/sys/fs/binfmt_misc/";
+    if (is_indocker) {
+        binfmt_path = "/binfmt_misc/";
+    }
+#if defined(TARGET_X86_64)
+    const char * magic = "7f454c4602";
+#else
+    const char * magic = "7f454c4601";
+#endif
+    char tmpstr [PATH_MAX];
+    DIR *dir = opendir(binfmt_path);
+    if (dir == NULL) {
+       lsassertm(0, "dir %s not exist\n", binfmt_path);
+       return NULL;
+    }
+
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+        if(entry->d_type == DT_DIR || !strcmp(entry->d_name, "register")  || !strcmp(entry->d_name, "status")) {
+            continue;
+        }
+        snprintf(tmpstr, PATH_MAX - 1, "%s%s", binfmt_path, entry->d_name);
+        char * value = get_key_value_from_file("magic", tmpstr);
+        if (value) {
+            if(!strncmp(value, magic, strlen(magic))) {
+                value = get_key_value_from_file("interpreter", tmpstr);
+                lsassert(value);
+                return value;
+            }
+            free(value);
+        }
+    }
+    fprintf(stderr, "fixme:%s:latx cannot find %sXX\n", binfmt_path, __func__);
+    return NULL;
+}
+static int open_other_cmdline(void *cpu_env, int fd, const char *oldpath)
+{
+    char buf[PATH_MAX] = {0};
+    int argc_max = 100;
+    char **argv = malloc(argc_max*sizeof(void *));
+    int argc = 0;
+    static char* latx_binfmtinterpreter = NULL;
+    int ret = 0;
+    int cpy_offset = 0;
+    if (!latx_binfmtinterpreter) {
+        latx_binfmtinterpreter = get_latx_binfmtinterpreter();
+    }
+    FILE *f = fopen(oldpath, "r");
+    lsassertm(f, "can open %s", oldpath);
+    if(!f) {
+        free(argv);
+        return -1;
+    }
+    size_t f_offset = 0;
+    while(!feof(f)) {
+        size_t ret = fread(buf, 1, sizeof(buf), f);
+        if (ret == 0 && !strlen(buf)&&feof(f)) {// /proc/%d/cmdline is nil
+            return 0;
+        }
+        if (ret > 0) {
+            int len = strlen(buf);
+            argv[argc] = malloc(len + 1);
+            argv[argc][len] = '\0';
+            strcpy(argv[argc], buf);
+            argc++;
+            if (unlikely(argc>argc_max)) {
+                argc_max += 100;
+                argv = realloc(argv, argc_max*sizeof(void *));
+            }
+            if (len == ret - 1) {
+                break;
+            }
+            f_offset += len + 1;
+            fseek(f, f_offset, SEEK_SET);
+        }
+    }
+    fclose(f);
+    if (argc <= 0) {
+        free(argv);
+        return -1;
+    }
+    if (argc >= 5 && !strcmp(argv[1], argv[2])) {
+        long long hash = 0;
+        for (int i = 4; i < argc; ++i) {
+            for (int j = 0; argv[i][j] != '\0'; ++j) {
+                hash += argv[i][j];
+            }
+        }
+        if (hash == atoll(argv[3])) {
+            for (int i = 4; i < argc; i++) {
+                int len = strlen(argv[i]);
+                len++;
+                if (write(fd, argv[i], len) != len) {
+                    lsassert(0);
+                    ret = -1;
+                    goto out;
+                }
+            }
+            ret = 0;
+            goto out;
+        }
+    }
+    if (!strcmp(argv[0], latx_binfmtinterpreter)) {
+        cpy_offset = 1;
+    }
+    for (int i = cpy_offset; i < argc; i++) {
+        int len = strlen(argv[i]);
+        len++;
+        if (write(fd, argv[i], len) != len) {
+            lsassert(0);
+            ret = -1;
+            goto out;
+        }
+    }
+    ret = 0;
+out:
+    for (int i = 0;i<argc ; i++) {
+        free(argv[i]);
+    }
+    free(argv);
+    return ret;
+}
+
+#ifndef CONFIG_LOONGARCH_NEW_WORLD
+static uint64_t convert_sigcgt_host_to_x86(const char *hex128)
+{
+    uint64_t words[2] = {0, 0};
+
+    sscanf(hex128, "%16lx%16lx", &words[1], &words[0]);
+
+    uint64_t result = 0;
+
+    for (int sig = 1; sig < 128; sig++) {
+        int idx = (sig - 1) / 64;
+        int bit = (sig - 1) % 64;
+
+        if (words[idx] & (1ULL << bit)) {
+
+            int tsig = host_to_target_signal(sig);
+
+            if (tsig >= 1 && tsig <= 64) {
+                result |= (1ULL << (tsig - 1));
+            }
+        }
+    }
+
+    return result;
+}
+
+static void convert_sigcgt_line(const char *src, char *dst, size_t dstsz)
+{
+    char key[8];
+    memcpy(key, src, 7);
+    key[7] = '\0';
+
+    const char *hex = src + 7;
+    while (*hex == ' ' || *hex == '\t') hex++;
+
+    char buf[128];
+    size_t len = strcspn(hex, "\n");
+    if (len >= sizeof(buf))
+        len = sizeof(buf) - 1;
+
+    memcpy(buf, hex, len);
+    buf[len] = '\0';
+
+    uint64_t result = convert_sigcgt_host_to_x86(buf);
+
+    snprintf(dst, dstsz, "%s\t%016lx\n", key, result);
+}
+
+static int open_proc_status(void *cpu_env, int fd, const char *path)
+{
+    char line[512];
+
+    FILE *fp = fopen(path, "r");
+    if (!fp) {
+        return -1;
+    }
+
+    while (fgets(line, sizeof(line), fp)) {
+        if (strncmp(line, "SigPnd:", 7) == 0 ||
+            strncmp(line, "ShdPnd:", 7) == 0 ||
+            strncmp(line, "SigBlk:", 7) == 0 ||
+            strncmp(line, "SigIgn:", 7) == 0 ||
+            strncmp(line, "SigCgt:", 7) == 0) {
+            char new_line[512];
+            convert_sigcgt_line(line, new_line, sizeof(new_line));
+            dprintf(fd, "%s", new_line);
+        } else {
+            dprintf(fd, "%s", line);
+        }
+    }
+
+    fclose(fp);
+    return 0;
+}
+#endif
+struct open_self_maps_data {
+    TaskState *ts;
+    IntervalTreeRoot *host_maps;
+    int fd;
+    bool smaps;
+};
+
+#ifdef TARGET_I386
+typedef struct GuestVmaName {
+    abi_ulong start;
+    abi_ulong end;
+    char *name;
+} GuestVmaName;
+
+static GList *guest_vma_names;
+
+static GuestVmaName *guest_vma_name_new(abi_ulong start, abi_ulong end,
+                                        const char *name)
+{
+    GuestVmaName *entry = g_new(GuestVmaName, 1);
+
+    entry->start = start;
+    entry->end = end;
+    entry->name = g_strdup(name);
+    return entry;
+}
+
+static void guest_vma_name_free(GuestVmaName *entry)
+{
+    g_free(entry->name);
+    g_free(entry);
+}
+
+static gint guest_vma_name_compare(gconstpointer lhs, gconstpointer rhs)
+{
+    const GuestVmaName *a = lhs;
+    const GuestVmaName *b = rhs;
+
+    return a->start < b->start ? -1 : a->start != b->start;
+}
+
+static void guest_vma_name_merge_locked(void)
+{
+    GList *link = guest_vma_names;
+
+    guest_vma_names = g_list_sort(guest_vma_names, guest_vma_name_compare);
+    link = guest_vma_names;
+    while (link && link->next) {
+        GuestVmaName *entry = link->data;
+        GuestVmaName *next = link->next->data;
+
+        if (entry->end == next->start &&
+            strcmp(entry->name, next->name) == 0) {
+            GList *next_link = link->next;
+
+            entry->end = next->end;
+            guest_vma_names = g_list_delete_link(guest_vma_names,
+                                                  next_link);
+            guest_vma_name_free(next);
+        } else {
+            link = link->next;
+        }
+    }
+}
+
+static void guest_vma_name_apply_locked(abi_ulong start, abi_ulong end,
+                                        const char *name)
+{
+    GList *link;
+
+    for (link = guest_vma_names; link; ) {
+        GList *next_link = link->next;
+        GuestVmaName *entry = link->data;
+
+        if (entry->start < end && start < entry->end) {
+            if (entry->start < start) {
+                guest_vma_names = g_list_prepend(
+                    guest_vma_names,
+                    guest_vma_name_new(entry->start, start, entry->name));
+            }
+            if (end < entry->end) {
+                guest_vma_names = g_list_prepend(
+                    guest_vma_names,
+                    guest_vma_name_new(end, entry->end, entry->name));
+            }
+            guest_vma_names = g_list_delete_link(guest_vma_names, link);
+            guest_vma_name_free(entry);
+        }
+        link = next_link;
+    }
+    if (name) {
+        guest_vma_names = g_list_prepend(
+            guest_vma_names, guest_vma_name_new(start, end, name));
+    }
+    guest_vma_name_merge_locked();
+}
+
+static const GuestVmaName *guest_vma_name_find_locked(abi_ulong addr,
+                                                       abi_ulong *next)
+{
+    GList *link;
+
+    for (link = guest_vma_names; link; link = link->next) {
+        const GuestVmaName *entry = link->data;
+
+        if (addr < entry->start) {
+            *next = entry->start;
+            return NULL;
+        }
+        if (addr < entry->end) {
+            *next = entry->end;
+            return entry;
+        }
+    }
+    *next = -1;
+    return NULL;
+}
+
+void guest_vma_name_reset(abi_ulong start, abi_ulong len)
+{
+    abi_ulong end = start + len;
+
+    if (len && end > start) {
+        guest_vma_name_apply_locked(start, end, NULL);
+    }
+}
+
+void guest_vma_name_remap(abi_ulong old_start, abi_ulong old_len,
+                          abi_ulong new_start, abi_ulong new_len,
+                          bool keep_old)
+{
+    GPtrArray *saved = g_ptr_array_new_with_free_func(
+        (GDestroyNotify)guest_vma_name_free);
+    abi_ulong old_end = old_start + old_len;
+    abi_ulong new_end = new_start + new_len;
+    char *tail_name = NULL;
+    GList *link;
+    guint i;
+
+    for (link = guest_vma_names; link; link = link->next) {
+        GuestVmaName *entry = link->data;
+        abi_ulong start = MAX(entry->start, old_start);
+        abi_ulong end = MIN(entry->end, old_end);
+
+        if (start < end) {
+            g_ptr_array_add(saved, guest_vma_name_new(start - old_start,
+                                                      end - old_start,
+                                                      entry->name));
+            if (end == old_end) {
+                g_free(tail_name);
+                tail_name = g_strdup(entry->name);
+            }
+        }
+    }
+
+    if (!keep_old) {
+        guest_vma_name_apply_locked(old_start, old_end, NULL);
+    }
+    guest_vma_name_apply_locked(new_start, new_end, NULL);
+    for (i = 0; i < saved->len; i++) {
+        GuestVmaName *entry = g_ptr_array_index(saved, i);
+
+        if (entry->start >= new_len) {
+            continue;
+        }
+        guest_vma_name_apply_locked(new_start + entry->start,
+                                    new_start + MIN(entry->end, new_len),
+                                    entry->name);
+    }
+    if (new_len > old_len && tail_name) {
+        guest_vma_name_apply_locked(new_start + old_len, new_end, tail_name);
+    }
+    g_free(tail_name);
+    g_ptr_array_free(saved, true);
+}
+#endif
+
+/*
+ * Subroutine to output one line of /proc/self/maps,
+ * or one region of /proc/self/smaps.
+ */
+
+#ifdef TARGET_HPPA
+# define test_stack(S, E, L)  (E == L)
+#else
+# define test_stack(S, E, L)  (S == L)
+#endif
+
+static void open_self_maps_4_line(const struct open_self_maps_data *d,
+                                  const MapInfo *mi, abi_ptr start,
+                                  abi_ptr end, unsigned flags,
+                                  const char *vma_name)
+{
+    const struct image_info *info = d->ts->info;
+    const char *path = mi->path;
+    char named_path[96];
+    uint64_t offset;
+    int fd = d->fd;
+    int count;
+
+    if (vma_name) {
+        snprintf(named_path, sizeof(named_path),
+                 mi->is_priv ? "[anon:%s]" : "[anon_shmem:%s]", vma_name);
+        path = named_path;
+    } else if (test_stack(start, end, info->stack_limit)) {
+        path = "[stack]";
+#ifdef TARGET_I386
+    } else if (start == info->prctl_mm_start_brk) {
+        path = "[heap]";
+#else
+    } else if (start == info->brk) {
+        path = "[heap]";
+#endif
+    } else if (start == info->vdso) {
+        path = "[vdso]";
+#ifdef TARGET_X86_64
+    } else if (start == TARGET_VSYSCALL_PAGE) {
+        path = "[vsyscall]";
+#endif
+    }
+
+    /* Except null device (MAP_ANON), adjust offset for this fragment. */
+    offset = mi->offset;
+    if (mi->dev) {
+        uintptr_t hstart = (uintptr_t)g2h_untagged(start);
+        offset += hstart - mi->itree.start;
+    }
+
+    count = dprintf(fd, TARGET_ABI_FMT_ptr "-" TARGET_ABI_FMT_ptr
+                    " %c%c%c%c %08" PRIx64 " %02x:%02x %"PRId64,
+                    start, end,
+                    (flags & PAGE_READ) ? 'r' : '-',
+                    (flags & PAGE_WRITE_ORG) ? 'w' : '-',
+                    (flags & PAGE_EXEC) ? 'x' : '-',
+                    mi->is_priv ? 'p' : 's',
+                    offset, major(mi->dev), minor(mi->dev),
+                    (uint64_t)mi->inode);
+    if (path) {
+        dprintf(fd, "%*s%s\n", 73 - count, "", path);
+    } else {
+        dprintf(fd, "\n");
+    }
+
+    if (d->smaps) {
+        unsigned long size = end - start;
+        unsigned long page_size_kb = TARGET_PAGE_SIZE >> 10;
+        unsigned long size_kb = size >> 10;
+
+        dprintf(fd, "Size:                  %lu kB\n"
+                "KernelPageSize:        %lu kB\n"
+                "MMUPageSize:           %lu kB\n"
+                "Rss:                   0 kB\n"
+                "Pss:                   0 kB\n"
+                "Pss_Dirty:             0 kB\n"
+                "Shared_Clean:          0 kB\n"
+                "Shared_Dirty:          0 kB\n"
+                "Private_Clean:         0 kB\n"
+                "Private_Dirty:         0 kB\n"
+                "Referenced:            0 kB\n"
+                "Anonymous:             %lu kB\n"
+                "LazyFree:              0 kB\n"
+                "AnonHugePages:         0 kB\n"
+                "ShmemPmdMapped:        0 kB\n"
+                "FilePmdMapped:         0 kB\n"
+                "Shared_Hugetlb:        0 kB\n"
+                "Private_Hugetlb:       0 kB\n"
+                "Swap:                  0 kB\n"
+                "SwapPss:               0 kB\n"
+                "Locked:                0 kB\n"
+                "THPeligible:    0\n"
+                "VmFlags:%s%s%s%s%s%s%s%s\n",
+                size_kb, page_size_kb, page_size_kb,
+                (flags & PAGE_ANON ? size_kb : 0),
+                (flags & PAGE_READ) ? " rd" : "",
+                (flags & PAGE_WRITE_ORG) ? " wr" : "",
+                (flags & PAGE_EXEC) ? " ex" : "",
+                mi->is_priv ? "" : " sh",
+                (flags & PAGE_READ) ? " mr" : "",
+                (flags & PAGE_WRITE_ORG) ? " mw" : "",
+                (flags & PAGE_EXEC) ? " me" : "",
+                mi->is_priv ? "" : " ms");
+    }
+}
+
+static void open_self_maps_4(const struct open_self_maps_data *d,
+                             const MapInfo *mi, abi_ptr start,
+                             abi_ptr end, unsigned flags)
+{
+#ifdef TARGET_I386
+    while (start < end) {
+        abi_ulong next;
+        const GuestVmaName *entry = guest_vma_name_find_locked(start, &next);
+
+        next = MIN(next, end);
+        open_self_maps_4_line(d, mi, start, next, flags,
+                              entry ? entry->name : NULL);
+        start = next;
+    }
+#else
+    open_self_maps_4_line(d, mi, start, end, flags, NULL);
+#endif
+}
+
+/*
+ * Callback for walk_memory_regions, when read_self_maps() fails.
+ * Proceed without the benefit of host /proc/self/maps cross-check.
+ */
+static int open_self_maps_3(void *opaque, target_ulong guest_start,
+                            target_ulong guest_end, unsigned long flags)
+{
+    static const MapInfo mi = { .is_priv = true };
+
+    open_self_maps_4(opaque, &mi, guest_start, guest_end, flags);
+    return 0;
+}
+
+/*
+ * Callback for walk_memory_regions, when read_self_maps() succeeds.
+ */
+static int open_self_maps_2(void *opaque, target_ulong guest_start,
+                            target_ulong guest_end, unsigned long flags)
+{
+    const struct open_self_maps_data *d = opaque;
+    uintptr_t host_start = (uintptr_t)g2h_untagged(guest_start);
+    uintptr_t host_last = (uintptr_t)g2h_untagged(guest_end - 1);
+
+#ifdef TARGET_X86_64
+    /*
+     * Because of the extremely high position of the page within the guest
+     * virtual address space, this is not backed by host memory at all.
+     * Therefore the loop below would fail.  This is the only instance
+     * of not having host backing memory.
+     */
+    if (guest_start == TARGET_VSYSCALL_PAGE) {
+        return open_self_maps_3(opaque, guest_start, guest_end, flags);
+    }
+#endif
+
+    while (1) {
+        IntervalTreeNode *n =
+            interval_tree_iter_first(d->host_maps, host_start, host_start);
+        MapInfo *mi = container_of(n, MapInfo, itree);
+        uintptr_t this_hlast = MIN(host_last, n->last);
+        target_ulong this_gend = h2g(this_hlast) + 1;
+
+        open_self_maps_4(d, mi, guest_start, this_gend, flags);
+
+        if (this_hlast == host_last) {
+            return 0;
+        }
+        host_start = this_hlast + 1;
+        guest_start = h2g(host_start);
+    }
+}
+
+static int open_self_maps_1_real(CPUArchState *env, int fd, bool smaps)
+{
+    struct open_self_maps_data d = {
+        .ts = env_cpu(env)->opaque,
+        .host_maps = read_self_maps(),
+        .fd = fd,
+        .smaps = smaps
+    };
+
+    if (d.host_maps) {
+        walk_memory_regions(&d, open_self_maps_2);
+        free_self_maps(d.host_maps);
+    } else {
+        walk_memory_regions(&d, open_self_maps_3);
+    }
+
+    return 0;
+}
+
+static void show_smaps(int fd, unsigned long size)
+{
+    unsigned long page_size_kb = TARGET_PAGE_SIZE >> 10;
+    unsigned long size_kb = size >> 10;
+
+    dprintf(fd, "Size:                  %lu kB\n"
+                "KernelPageSize:        %lu kB\n"
+                "MMUPageSize:           %lu kB\n"
+                "Rss:                   0 kB\n"
+                "Pss:                   0 kB\n"
+                "Pss_Dirty:             0 kB\n"
+                "Shared_Clean:          0 kB\n"
+                "Shared_Dirty:          0 kB\n"
+                "Private_Clean:         0 kB\n"
+                "Private_Dirty:         0 kB\n"
+                "Referenced:            0 kB\n"
+                "Anonymous:             0 kB\n"
+                "LazyFree:              0 kB\n"
+                "AnonHugePages:         0 kB\n"
+                "ShmemPmdMapped:        0 kB\n"
+                "FilePmdMapped:         0 kB\n"
+                "Shared_Hugetlb:        0 kB\n"
+                "Private_Hugetlb:       0 kB\n"
+                "Swap:                  0 kB\n"
+                "SwapPss:               0 kB\n"
+                "Locked:                0 kB\n"
+                "THPeligible:    0\n", size_kb, page_size_kb, page_size_kb);
+}
+
+static int open_self_maps_1(CPUArchState *cpu_env, int fd, bool smaps)
+{
+    CPUState *cpu = env_cpu((CPUArchState *)cpu_env);
+    TaskState *ts = cpu->opaque;
+    IntervalTreeRoot *map_info = read_self_maps();
+#ifdef TARGET_I386
+    struct open_self_maps_data data = {
+        .ts = ts,
+        .host_maps = map_info,
+        .fd = fd,
+        .smaps = smaps,
+    };
+#endif
+    IntervalTreeNode *s;
+    int count;
+
+    mmap_lock();
+    for (s = interval_tree_iter_first(map_info, 0, -1); s;
+         s = interval_tree_iter_next(s, 0, -1)) {
+        MapInfo *e = container_of(s, MapInfo, itree);
+
+        if (h2g_valid(e->itree.start)) {
+            unsigned long min = e->itree.start;
+            unsigned long max = e->itree.last + 1;
+            int flags = page_get_flags(h2g(min));
+            const char *path;
+#ifdef TARGET_I386
+            abi_ulong next_name;
+            const GuestVmaName *name;
+#endif
+
+            max = h2g_valid(max - 1) ?
+                max : (uintptr_t) g2h_untagged(GUEST_ADDR_MAX) + 1;
+
+            if (!page_check_range(h2g(min), max - min, flags)) {
+                continue;
+            }
+
+#ifdef TARGET_I386
+            name = guest_vma_name_find_locked(h2g(min), &next_name);
+            if (name || next_name < h2g(max - 1) + 1) {
+                open_self_maps_4(&data, e, h2g(min), h2g(max - 1) + 1,
+                                 flags);
+                continue;
+            }
+#endif
+
+            if (h2g(min) == ts->info->stack_limit) {
+                path = "[stack]";
+            } else {
+                path = e->path;
+            }
+
+            count = dprintf(fd, TARGET_ABI_FMT_ptr "-" TARGET_ABI_FMT_ptr
+                            " %c%c%c%c %08" PRIx64 " %02x:%02x %"PRId64,
+                            h2g(min), h2g(max - 1) + 1,
+                            (flags & PAGE_READ) ? 'r' : '-',
+                            (flags & PAGE_WRITE_ORG) ? 'w' : '-',
+                            (flags & PAGE_EXEC) ? 'x' : '-',
+                            e->is_priv ? 'p' : 's',
+                            (uint64_t)e->offset,
+                            major(e->dev), minor(e->dev),
+                            (uint64_t)e->inode);
+            if (path) {
+                dprintf(fd, "%*s%s\n", 73 - count, "", path);
+            } else {
+                dprintf(fd, "\n");
+            }
+            if (smaps) {
+                show_smaps(fd, max - min);
+                dprintf(fd, "VmFlags:%s%s%s%s%s%s%s%s\n",
+                        (flags & PAGE_READ) ? " rd" : "",
+                        (flags & PAGE_WRITE_ORG) ? " wr" : "",
+                        (flags & PAGE_EXEC) ? " ex" : "",
+                        e->is_priv ? "" : " sh",
+                        (flags & PAGE_READ) ? " mr" : "",
+                        (flags & PAGE_WRITE_ORG) ? " mw" : "",
+                        (flags & PAGE_EXEC) ? " me" : "",
+                        e->is_priv ? "" : " ms");
+            }
+        }
+    }
+    mmap_unlock();
+
+    free_self_maps(map_info);
+
+#ifdef TARGET_VSYSCALL_PAGE
+    /*
+     * We only support execution from the vsyscall page.
+     * This is as if CONFIG_LEGACY_VSYSCALL_XONLY=y from v5.3.
+     */
+    count = dprintf(fd, TARGET_FMT_lx "-" TARGET_FMT_lx
+                    " --xp 00000000 00:00 0",
+                    TARGET_VSYSCALL_PAGE, TARGET_VSYSCALL_PAGE + TARGET_PAGE_SIZE);
+    dprintf(fd, "%*s%s\n", 73 - count, "",  "[vsyscall]");
+#endif
+    if (smaps) {
+        show_smaps(fd, TARGET_PAGE_SIZE);
+        dprintf(fd, "VmFlags: ex\n");
+    }
+
+    return 0;
+}
+
+static int open_self_maps(void *cpu_env, int fd, const char *oldpath)
+{
+#ifdef TARGET_I386
+    bool have_guest_vma_names;
+
+    mmap_lock();
+    have_guest_vma_names = guest_vma_names != NULL;
+    mmap_unlock();
+    if (have_guest_vma_names) {
+        return open_self_maps_1_real((CPUArchState *)cpu_env, fd, false);
+    }
+#endif
+    return option_real_maps ? open_self_maps_1_real((CPUArchState *)cpu_env, fd, false)
+        : open_self_maps_1((CPUArchState *)cpu_env, fd, false);
+}
+
+static int open_self_smaps(void *cpu_env, int fd, const char *oldpath)
+{
+#ifdef TARGET_I386
+    bool have_guest_vma_names;
+
+    mmap_lock();
+    have_guest_vma_names = guest_vma_names != NULL;
+    mmap_unlock();
+    if (have_guest_vma_names) {
+        return open_self_maps_1_real((CPUArchState *)cpu_env, fd, true);
+    }
+#endif
+    return option_real_maps ? open_self_maps_1_real((CPUArchState *)cpu_env, fd, true)
+        : open_self_maps_1((CPUArchState *)cpu_env, fd, true);
+}
+
+#ifdef CONFIG_LATX
+static unsigned int latx_guest_thread_count(void)
+{
+    CPUState *cpu;
+    unsigned int count = 0;
+
+    cpu_list_lock();
+    CPU_FOREACH(cpu) {
+        TaskState *ts = cpu->opaque;
+
+        if (ts && ts->ts_tid > 0) {
+            count++;
+        }
+    }
+    cpu_list_unlock();
+
+    return count;
+}
+#endif
+
+static int open_self_stat(void *cpu_env, int fd, const char *oldpath)
+{
+    CPUState *cpu = env_cpu((CPUArchState *)cpu_env);
+    TaskState *ts = cpu->opaque;
+    g_autoptr(GString) buf = g_string_new(NULL);
+    int i = 0;
+    FILE *fp;
+    char *line = NULL;
+    char *orig = NULL;
+    char *word = NULL;
+    size_t orig_len = 0;
+    int word_len = 0;
+#ifdef TARGET_I386
+    struct {
+        abi_ulong start_code;
+        abi_ulong end_code;
+        abi_ulong start_stack;
+        abi_ulong start_data;
+        abi_ulong end_data;
+        abi_ulong start_brk;
+        abi_ulong arg_start;
+        abi_ulong arg_end;
+        abi_ulong env_start;
+        abi_ulong env_end;
+    } mm;
+
+    mmap_lock();
+    mm.start_code = ts->info->prctl_mm_start_code;
+    mm.end_code = ts->info->prctl_mm_end_code;
+    mm.start_stack = ts->info->prctl_mm_start_stack;
+    mm.start_data = ts->info->prctl_mm_start_data;
+    mm.end_data = ts->info->prctl_mm_end_data;
+    mm.start_brk = ts->info->prctl_mm_start_brk;
+    mm.arg_start = ts->info->prctl_mm_arg_start;
+    mm.arg_end = ts->info->prctl_mm_arg_end;
+    mm.env_start = ts->info->prctl_mm_env_start;
+    mm.env_end = ts->info->prctl_mm_env_end;
+    mmap_unlock();
+#endif
+
+    fp = fopen("/proc/self/stat", "r");
+    if (fp == NULL) {
+        return -1;
+    }
+    if (getline(&line, &orig_len, fp) == -1) {
+        int saved_errno = errno;
+
+        fclose(fp);
+        g_free(line);
+        errno = saved_errno;
+        return -1;
+    }
+
+    word = line;
+
+    do {
+        orig = word;
+        word = strchr(orig, ' ');
+
+        /* last word */
+        if (word == NULL) {
+            /* Find a pointer to '\0' */
+            word = strchr(orig, '\0');
+            if (word == NULL) {
+                goto fail;
+            }
+            /* \0 not needed */
+            word --;
+            /* Don't enter the loop next time */
+            i = -1;
+        }
+        word_len = ++word - orig;
+
+        if (i == 1) {
+            /* app name */
+            gchar *bin = g_strrstr(ts->bprm->argv[0], "/");
+            bin = bin ? bin + 1 : ts->bprm->argv[0];
+            g_string_printf(buf, "(%.15s) ", bin);
+#ifdef CONFIG_LATX
+        } else if (i == 19) {
+            /* Hide translator-only threads from the guest process view. */
+            g_string_printf(buf, "%u ", latx_guest_thread_count());
+#endif
+#ifdef TARGET_I386
+        } else if (i == 25) {
+            g_string_printf(buf, TARGET_ABI_FMT_ld " ",
+                            mm.start_code);
+        } else if (i == 26) {
+            g_string_printf(buf, TARGET_ABI_FMT_ld " ",
+                            mm.end_code);
+        } else if (i == 27) {
+            /* stack bottom */
+            g_string_printf(buf, TARGET_ABI_FMT_ld " ",
+                            mm.start_stack);
+        } else if (i == 44) {
+            g_string_printf(buf, TARGET_ABI_FMT_ld " ",
+                            mm.start_data);
+        } else if (i == 45) {
+            g_string_printf(buf, TARGET_ABI_FMT_ld " ",
+                            mm.end_data);
+        } else if (i == 46) {
+            g_string_printf(buf, TARGET_ABI_FMT_ld " ",
+                            mm.start_brk);
+        } else if (i == 47) {
+            g_string_printf(buf, TARGET_ABI_FMT_ld " ",
+                            mm.arg_start);
+        } else if (i == 48) {
+            g_string_printf(buf, TARGET_ABI_FMT_ld " ",
+                            mm.arg_end);
+        } else if (i == 49) {
+            g_string_printf(buf, TARGET_ABI_FMT_ld " ",
+                            mm.env_start);
+        } else if (i == 50) {
+            g_string_printf(buf, TARGET_ABI_FMT_ld " ",
+                            mm.env_end);
+#else
+        } else if (i == 27) {
+            /* stack bottom */
+            g_string_printf(buf, TARGET_ABI_FMT_ld " ",
+                            ts->info->start_stack);
+#endif
+        } else {
+            if (qemu_write_full(fd, orig, word_len) != word_len) {
+                goto fail;
+            }
+            continue;
+        }
+
+        if (qemu_write_full(fd, buf->str, buf->len) != buf->len) {
+            goto fail;
+        }
+
+    } while(++i);
+
+    fclose(fp);
+    g_free(line);
+    return 0;
+
+fail:
+    i = errno;
+    fclose(fp);
+    g_free(line);
+    errno = i;
+    return -1;
+}
+
+static int open_self_auxv(void *cpu_env, int fd, const char *oldpath)
+{
+    CPUState *cpu = env_cpu((CPUArchState *)cpu_env);
+    TaskState *ts = cpu->opaque;
+#ifdef TARGET_I386
+    uint8_t auxv[TARGET_X86_PRCTL_AUXV_SIZE];
+    size_t offset;
+    size_t len;
+
+    mmap_lock();
+    memcpy(auxv, ts->info->prctl_auxv, sizeof(auxv));
+    mmap_unlock();
+    for (offset = 0; offset + 2 * sizeof(abi_ulong) <= sizeof(auxv);
+         offset += 2 * sizeof(abi_ulong)) {
+        abi_ulong type;
+
+        memcpy(&type, auxv + offset, sizeof(type));
+        if (tswapal(type) == 0) {
+            break;
+        }
+    }
+    len = MIN(offset + 2 * sizeof(abi_ulong), sizeof(auxv));
+    if (qemu_write_full(fd, auxv, len) != len) {
+        return -1;
+    }
+    lseek(fd, 0, SEEK_SET);
+#else
+    abi_ulong auxv = ts->info->saved_auxv;
+    abi_ulong len = ts->info->auxv_len;
+    char *ptr;
+
+    /*
+     * Auxiliary vector is stored in target process stack.
+     * read in whole auxv vector and copy it to file
+     */
+    ptr = lock_user(VERIFY_READ, auxv, len, 0);
+    if (ptr != NULL) {
+        if (qemu_write_full(fd, ptr, len) != len) {
+            unlock_user(ptr, auxv, 0);
+            return -1;
+        }
+        lseek(fd, 0, SEEK_SET);
+        unlock_user(ptr, auxv, 0);
+    }
+#endif
+
+    return 0;
+}
+
+static int is_proc_myself(const char *filename, const char *entry)
+{
+    if (!strncmp(filename, "/proc/", strlen("/proc/"))) {
+        filename += strlen("/proc/");
+        if (!strncmp(filename, "self/", strlen("self/"))) {
+            filename += strlen("self/");
+        } else if (*filename >= '1' && *filename <= '9') {
+            char myself[80];
+            snprintf(myself, sizeof(myself), "%d/", getpid());
+            if (!strncmp(filename, myself, strlen(myself))) {
+                filename += strlen(myself);
+            } else {
+                return 0;
+            }
+        } else {
+            return 0;
+        }
+        if (!strcmp(filename, entry)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+#ifdef CONFIG_LATX
+static bool latx_stat_same_object(const struct stat *a, const struct stat *b)
+{
+    return a->st_dev == b->st_dev && a->st_ino == b->st_ino;
+}
+
+static bool latx_stat_is_proc_self_task(const struct stat *st)
+{
+    struct stat task_st;
+
+    return stat("/proc/self/task", &task_st) == 0 &&
+           latx_stat_same_object(st, &task_st);
+}
+
+static bool latx_stat_is_proc_self_task_fd(int fd, const struct stat *st)
+{
+    struct stat fd_st;
+    struct stat task_st;
+    struct statfs fs;
+
+    /*
+     * A saved /proc/self/task fd remains usable after a shared chroot makes
+     * the absolute procfs path unreachable.  Verify both the filesystem and
+     * the directory's identity: ../../self/task resolves to the current
+     * process task directory, while another process's task fd does not.
+     */
+    return fd >= 0 && fstatfs(fd, &fs) == 0 &&
+           fs.f_type == PROC_SUPER_MAGIC && fstat(fd, &fd_st) == 0 &&
+           latx_stat_same_object(st, &fd_st) &&
+           fstatat(fd, "../../self/task", &task_st, 0) == 0 &&
+           latx_stat_same_object(st, &task_st);
+}
+
+static bool latx_stat_is_proc_self_task_at(int dirfd, const char *pathname,
+                                           int flags,
+                                           const struct stat *st)
+{
+    struct stat task_st;
+    struct statfs fs;
+
+    if (latx_stat_is_proc_self_task(st)) {
+        return true;
+    }
+
+    if (pathname && pathname[0] == '\0') {
+        return (flags & AT_EMPTY_PATH) &&
+               latx_stat_is_proc_self_task_fd(dirfd, st);
+    }
+
+    /*
+     * Chromium keeps an fd for the procfs root before sharing a sandbox
+     * chroot with CLONE_FS.  At that point /proc/self/task is no longer
+     * reachable by an absolute path, but self/task remains reachable through
+     * the saved procfd.  Verify that the dirfd is procfs before using that
+     * relative reference so an ordinary self/task directory is not rewritten.
+     */
+    return pathname && pathname[0] != '/' && dirfd >= 0 &&
+           fstatfs(dirfd, &fs) == 0 && fs.f_type == PROC_SUPER_MAGIC &&
+           fstatat(dirfd, "self/task", &task_st, 0) == 0 &&
+           latx_stat_same_object(st, &task_st);
+}
+
+static bool latx_statx_is_proc_self_task(const struct target_statx *stx)
+{
+    struct stat task_st;
+
+    return stat("/proc/self/task", &task_st) == 0 &&
+           stx->stx_dev_major == major(task_st.st_dev) &&
+           stx->stx_dev_minor == minor(task_st.st_dev) &&
+           stx->stx_ino == task_st.st_ino;
+}
+
+static bool latx_statx_is_proc_self_task_at(int dirfd, const char *pathname,
+                                            int flags,
+                                            const struct target_statx *stx)
+{
+    struct stat task_st;
+    struct statfs fs;
+
+    if ((stx->stx_mask & STATX_TYPE) && !S_ISDIR(stx->stx_mode)) {
+        return false;
+    }
+
+    if (latx_statx_is_proc_self_task(stx)) {
+        return true;
+    }
+
+    if (pathname && pathname[0] == '\0') {
+        return (flags & AT_EMPTY_PATH) && fstat(dirfd, &task_st) == 0 &&
+               latx_stat_is_proc_self_task_fd(dirfd, &task_st) &&
+               stx->stx_dev_major == major(task_st.st_dev) &&
+               stx->stx_dev_minor == minor(task_st.st_dev) &&
+               stx->stx_ino == task_st.st_ino;
+    }
+
+    return pathname && pathname[0] != '/' && dirfd >= 0 &&
+           fstatfs(dirfd, &fs) == 0 && fs.f_type == PROC_SUPER_MAGIC &&
+           fstatat(dirfd, "self/task", &task_st, 0) == 0 &&
+           stx->stx_dev_major == major(task_st.st_dev) &&
+           stx->stx_dev_minor == minor(task_st.st_dev) &&
+           stx->stx_ino == task_st.st_ino;
+}
+
+static void latx_adjust_proc_self_task_stat(struct stat *st)
+{
+    if (S_ISDIR(st->st_mode) && latx_stat_is_proc_self_task(st)) {
+        st->st_nlink = latx_guest_thread_count() + 2;
+    }
+}
+static void latx_adjust_proc_self_task_fstat(int fd, struct stat *st)
+{
+    if (S_ISDIR(st->st_mode) &&
+        (latx_stat_is_proc_self_task(st) ||
+         latx_stat_is_proc_self_task_fd(fd, st))) {
+        st->st_nlink = latx_guest_thread_count() + 2;
+    }
+}
+
+static void latx_adjust_proc_self_task_stat_at(int dirfd, const char *pathname,
+                                               int flags,
+                                               struct stat *st)
+{
+    if (S_ISDIR(st->st_mode) &&
+        latx_stat_is_proc_self_task_at(dirfd, pathname, flags, st)) {
+        st->st_nlink = latx_guest_thread_count() + 2;
+    }
+}
+#endif
+static int is_proc_other(const char *filename, const char *entry)
+{
+    if (!strncmp(filename, "/proc/", strlen("/proc/"))) {
+        filename += strlen("/proc/");
+        if (*filename >= '1' && *filename <= '9') {
+            char myself[80];
+            snprintf(myself, sizeof(myself), "%d/", getpid());
+            if (!strncmp(filename, myself, strlen(myself))) {
+                return 0;//skip self
+            }
+            int elen = strlen(entry);
+            int flen = strlen(filename);
+            if (flen <= elen) {
+                return 0;
+            } else if(!strncmp(filename + (flen - elen), entry, elen)) {
+                return 1;
+            }
+        } else {
+            return 0;
+        }
+    }
+    return 0;
+}
+#if defined(HOST_WORDS_BIGENDIAN) != defined(TARGET_WORDS_BIGENDIAN) || \
+    defined(TARGET_SPARC) || defined(TARGET_M68K) || defined(TARGET_HPPA) || \
+    defined(TARGET_I386)
+static int is_proc(const char *filename, const char *entry)
+{
+    return strcmp(filename, entry) == 0;
+}
+#endif
+
+#if defined(HOST_WORDS_BIGENDIAN) != defined(TARGET_WORDS_BIGENDIAN)
+static int open_net_route(void *cpu_env, int fd, const char *oldpath)
+{
+    FILE *fp;
+    char *line = NULL;
+    size_t len = 0;
+    ssize_t read;
+
+    fp = fopen("/proc/net/route", "r");
+    if (fp == NULL) {
+        return -1;
+    }
+
+    /* read header */
+
+    read = getline(&line, &len, fp);
+    dprintf(fd, "%s", line);
+
+    /* read routes */
+
+    while ((read = getline(&line, &len, fp)) != -1) {
+        char iface[16];
+        uint32_t dest, gw, mask;
+        unsigned int flags, refcnt, use, metric, mtu, window, irtt;
+        int fields;
+
+        fields = sscanf(line,
+                        "%s\t%08x\t%08x\t%04x\t%d\t%d\t%d\t%08x\t%d\t%u\t%u\n",
+                        iface, &dest, &gw, &flags, &refcnt, &use, &metric,
+                        &mask, &mtu, &window, &irtt);
+        if (fields != 11) {
+            continue;
+        }
+        dprintf(fd, "%s\t%08x\t%08x\t%04x\t%d\t%d\t%d\t%08x\t%d\t%u\t%u\n",
+                iface, tswap32(dest), tswap32(gw), flags, refcnt, use,
+                metric, tswap32(mask), mtu, window, irtt);
+    }
+
+    free(line);
+    fclose(fp);
+
+    return 0;
+}
+#endif
+
+#if defined(TARGET_SPARC)
+static int open_cpuinfo(void *cpu_env, int fd, const char *oldpath)
+{
+    dprintf(fd, "type\t\t: sun4u\n");
+    return 0;
+}
+#endif
+
+#if defined(TARGET_HPPA)
+static int open_cpuinfo(void *cpu_env, int fd, const char *oldpath)
+{
+    dprintf(fd, "cpu family\t: PA-RISC 1.1e\n");
+    dprintf(fd, "cpu\t\t: PA7300LC (PCX-L2)\n");
+    dprintf(fd, "capabilities\t: os32\n");
+    dprintf(fd, "model\t\t: 9000/778/B160L\n");
+    dprintf(fd, "model name\t: Merlin L2 160 QEMU (9000/778/B160L)\n");
+    return 0;
+}
+#endif
+
+#if defined(TARGET_I386)
+enum cpuid_flags_group {
+CPUID_GROUP_BASE = 0,
+CPUID_GROUP_EXT,
+CPUID_GROUP_EXT2,
+CPUID_GROUP_EXT3,
+CPUID_GROUP_EBX,
+CPUID_GROUP_ECX,
+CPUID_GROUP_XSAVE,
+};
+const char *__x86_cpuid_flags_table[] = {
+"fp87", "vme", "de", "pse", "tsc", "msr", "pae", "mce",
+"cx8", "apic", "", "sep", "mtrr", "pge", "mca", "cmov",
+"pat", "pse36", "pn", "clflush", "", "dts", "acpi", "mmx",
+"fxsr", "sse", "sse2", "ss", "ht", "tm", "ia64", "pbe",
+/*ext*/
+"sse3", "pclmulqdq", "dtes64", "monitor", "dscpl", "vmx", "smx", "est",
+"tm2", "ssse3", "cid", "", "fma", "cx16", "xtpr", "pdcm ",
+"", "pcid", "dca", "sse4_1", "sse4_2", "x2apic", "movbe", "popcnt",
+"tsc_deadline_timer", "aes", "xsave", "osxsave",
+"avx", "f16c", "rdrand", "hypervisor",
+/*ext2*/
+"fpu", "vme", "de", "pse", "tsc", "msr", "pae", "mce",
+"cx8", "apic", "", "sep", "mtrr" "pge", "mca", "cmov",
+"pat", "pse36", "mp", "", "nx", "", "mmxext", "mmx",
+"fxsr", "fxsr_opt", "pdpe1gb", "rdtscp", "", "lm", "3dnowext", "3dnowprefetch",
+/*ext3*/
+"lahf_lm", "cmp_legacy", "svm", "extapic",
+"cr8_legacy", "abm", "sse4a", "misalignsse",
+"3dnowprefetch", "osvw", "ibs", "xop", "skinit", "wdt", "", "lwp",
+"fma4", "tce", "", "nodeid", "", "tbm", "topoext", "perfctr_core",
+"perfctr_nb","", "", "", "", "", "", "", "",
+/*ebx*/
+"fsgsbse", "tsc_adjust", "","bmi1", "hle", "avx2", "","smep",
+"bmi2", "erms", "invpcid","rtm", "", "", "mpx", "",
+"avx512f", "avx512dq", "rdseed","adx", "smap", "avx512ifma", "pcommit", "clflushopt",
+"clwb", "intel_pt", "avx512pf", "avx512er", "avx512cd", "sha_ni", "avx512bw", "avx512vl",
+/*xsave*/
+"", "avx512vbmi", "umip", "pku", "ospke", "waitpkg", "avx512vbmi2", "",
+"gfni", "vaes", "vpclmulqdq", "avx512vnni", "avx512bitalg", "", "avx512-vpopcntdq", "",
+"la57", "", "", "", "", "", "rdpid", "",
+"bus-lock-detect", "cldemote", "", "movdiri", "movdir64b", "", "", "pks",
+/*xsave*/
+"xsaveopt", "xsavec", "xgetbv1", "xsaves", "", "", "", "",
+"", "", "", "", "" "", "", "",
+"", "", "", "", "", "", "", "",
+"", "", "", "", "", "", "", ""
+};
+
+char *g_cpu_flags;
+static char *cpuinfo_flags(CPUArchState *env)
+{
+    char l_flags[5000] = {0};
+    char l_tmp[20] = {0};
+    char *r_flags = NULL;
+    for (int i = 0; i < FEATURE_WORDS; i++) {
+        if (env->features[i]) {
+            int group = 0;
+            if (i == FEAT_1_EDX) {
+                group = CPUID_GROUP_BASE;
+            } else if (i == FEAT_1_ECX) {
+                group = CPUID_GROUP_EXT;
+            } else if (i == FEAT_8000_0001_EDX) {
+                group = CPUID_GROUP_EXT2;
+            } else if (i == FEAT_8000_0001_ECX) {
+                group = CPUID_GROUP_EXT3;
+            } else if (i == FEAT_7_0_EBX) {
+                group = CPUID_GROUP_EBX;
+            } else if (i == FEAT_7_0_ECX) {
+                group = CPUID_GROUP_ECX;
+            } else if (i == FEAT_XSAVE) {
+                group = CPUID_GROUP_XSAVE;
+            } else if (i == FEAT_XSAVE_COMP_LO || i ==FEAT_XSAVE_COMP_HI) {
+                break;
+            } else {
+			    fprintf(stderr, "ERROR:cpu features= %d\n", i);
+                g_assert(0);
+                break;
+            };
+            for (int j = 0; j < 32; j++) {
+                if (env->features[i] & (1U << j)) {
+                    snprintf(l_tmp, 20, "%s ",
+                        __x86_cpuid_flags_table[32 * group + j]);
+                    if (!strstr(l_flags, l_tmp)) {
+                        strcat(l_flags, l_tmp);
+                    }
+                }
+            }
+        }
+    }
+    g_assert(strlen(l_flags));
+    r_flags = calloc(1, strlen(l_flags));
+    /*dec a space byte.*/
+    memcpy(r_flags, l_flags, strlen(l_flags) - 1);
+    return r_flags;
+}
+static int open_cpuinfo(void *cpu_env, int fd, const char *oldpath)
+{
+    int i;
+    int nprocs = get_nprocs();
+    for (i =0; i < nprocs; i ++) {
+        dprintf(fd, "processor	: %d\n", i);
+        dprintf(fd, "vendor_id	: Loongson\n");
+#if defined(TARGET_X86_64) && defined(CONFIG_LATX)
+        dprintf(fd, "model name	: LATX64\n");
+#elif !defined(TARGET_X86_64) && defined(CONFIG_LATX)
+        dprintf(fd, "model name	: LATX32\n");
+#elif defined(TARGET_X86_64) && !defined(CONFIG_LATX)
+        dprintf(fd, "model name	: TCG64\n");
+#else
+        dprintf(fd, "model name	: TCG32\n");
+#endif
+        dprintf(fd, "cpu MHz	: 2500\n");
+        dprintf(fd, "physical id	: 0\n");
+        dprintf(fd, "siblings	: %d\n", nprocs);
+        dprintf(fd, "core id		: %d\n", i);
+        dprintf(fd, "cpu cores	: %d\n", nprocs);
+        if (!g_cpu_flags) {
+            CPUState *cpu = env_cpu(cpu_env);
+            CPUArchState *env = cpu->env_ptr;
+            g_cpu_flags = cpuinfo_flags(env);
+        }
+        dprintf(fd, "flags\t: %s\n", g_cpu_flags);
+        dprintf(fd, "\n");
+    }
+
+    return 0;
+}
+
+static int open_version(void *cpu_env, int fd, const char *oldpath)
+{
+    dprintf(fd, "Linux version 4.19.0-19-loongson-3 (abuild@10.40.52.160) (gcc version 8.3.0 (Ubuntu 8.3.0-6.lnd.vec.36)) #1 SMP 4.19.190.8.14 Thu Aug 24 08:54:20 UTC 2023\n");
+    return 0;
+}
+#endif
+
+#if defined(TARGET_M68K)
+static int open_hardware(void *cpu_env, int fd, const char *oldpath)
+{
+    dprintf(fd, "Model:\t\tqemu-m68k\n");
+    return 0;
+}
+#endif
+
+static int has_x_permission(struct stat *st) {
+    uid_t uid = getuid();
+    gid_t gid = getgid();
+
+    if (uid == 0) {
+        return 1;
+    } else if (uid == st->st_uid) {
+        return st->st_mode & S_IXUSR;
+    } else if (gid == st->st_gid) {
+        return st->st_mode & S_IXGRP;
+    } else {
+        return st->st_mode & S_IXOTH;
+    }
+}
+
+static int do_openat(void *cpu_env, int dirfd, const char *pathname, int flags, mode_t mode)
+{
+    struct fake_open {
+        const char *filename;
+        int (*fill)(void *cpu_env, int fd, const char *oldpath);
+        int (*cmp)(const char *s1, const char *s2);
+    };
+    const struct fake_open *fake_open;
+    static const struct fake_open fakes[] = {
+        { "maps", open_self_maps, is_proc_myself },
+        { "smaps", open_self_smaps, is_proc_myself },
+        { "stat", open_self_stat, is_proc_myself },
+        { "auxv", open_self_auxv, is_proc_myself },
+        { "cmdline", open_self_cmdline, is_proc_myself },
+#ifdef TARGET_I386
+        { "environ", open_self_environ, is_proc_myself },
+#endif
+        { "cmdline", open_other_cmdline, is_proc_other},
+#ifndef CONFIG_LOONGARCH_NEW_WORLD
+        { "status", open_proc_status, is_proc_other },
+        { "status", open_proc_status, is_proc_myself },
+#endif
+#if defined(HOST_WORDS_BIGENDIAN) != defined(TARGET_WORDS_BIGENDIAN)
+        { "/proc/net/route", open_net_route, is_proc },
+#endif
+#if defined(TARGET_SPARC) || defined(TARGET_HPPA) || defined(TARGET_I386)
+        { "/proc/cpuinfo", open_cpuinfo, is_proc },
+#endif
+#if defined(TARGET_M68K)
+        { "/proc/hardware", open_hardware, is_proc },
+#endif
+        { "/proc/version", open_version, is_proc },
+        { NULL, NULL, NULL }
+    };
+
+    if (is_proc_myself(pathname, "exe")) {
+        char exe_path_buffer[64];
+        int exe_fd;
+        const char *exe_pathname;
+        int ret;
+
+        exe_pathname = guest_self_exe_open_path(cpu_env, exe_path_buffer,
+                                                sizeof(exe_path_buffer),
+                                                &exe_fd);
+        if (!exe_pathname) {
+            return -1;
+        }
+        ret = safe_openat(AT_FDCWD, exe_pathname, flags, mode);
+        if (exe_fd >= 0) {
+            close(exe_fd);
+        }
+        return ret;
+    }
+
+    for (fake_open = fakes; fake_open->filename; fake_open++) {
+        if (fake_open->cmp(pathname, fake_open->filename)) {
+            break;
+        }
+    }
+
+    if (fake_open->filename) {
+        const char *tmpdir;
+        char filename[PATH_MAX];
+        int fd, r;
+        const char *latx_filename;
+        const char *slash;
+
+        /* create temporary file to map stat to */
+        tmpdir = getenv("TMPDIR");
+        if (!tmpdir)
+            tmpdir = "/tmp";
+
+        slash = strrchr(fake_open->filename, '/');
+        if (slash) {
+            latx_filename = slash + 1;
+        } else {
+            latx_filename = fake_open->filename;
+        }
+        snprintf(filename, sizeof(filename), "%s/latxopen-%s.XXXXXX",
+                    tmpdir, latx_filename);
+        fd = mkstemp(filename);
+        if (fd < 0) {
+            return fd;
+        }
+
+        if ((r = fake_open->fill(cpu_env, fd, pathname))) {
+            int e = errno;
+            close(fd);
+            unlink(filename);
+            errno = e;
+            return r;
+        }
+        close(fd);
+        fd = safe_openat(-1, path(filename), flags, mode);
+        unlink(filename);
+        return fd;
+    }
+    const char *realpath = path(pathname);
+    struct stat st;
+
+    if (fstatat(dirfd, realpath, &st, 0) == 0) {
+        if (S_ISDIR(st.st_mode)) {
+            if (!has_x_permission(&st)) {
+                errno = EACCES;
+                return -1;
+            }
+        }
+    }
+    return safe_openat(dirfd, path(pathname), flags, mode);
+}
+
+#define MAX_PATH_SIZE 1024
+static int real_proc_self_fd(int ofd)
+{
+    char buf_in[MAX_PATH_SIZE] = {'\0'};
+    char buf_out[MAX_PATH_SIZE] = {'\0'};
+    const char *tmpdir;
+    char *filename = buf_out;
+    int len;
+    int fd = -1;
+
+    /* get filename */
+    snprintf(buf_in, sizeof(buf_in), "/proc/self/fd/%d", ofd);
+    len = readlink(buf_in, buf_out, sizeof(buf_out) - 1);
+    if (len < 0) {
+        return fd;
+    }
+    buf_out[len] = 0;
+
+    /*is /proc/myself */
+    tmpdir = getenv("TMPDIR");
+    if (!tmpdir) {
+        tmpdir = "/tmp";
+    }
+
+    len = strlen("/latxopen-");
+    filename += strlen(tmpdir);
+    if (!strncmp(filename, "/latxopen-", len)) {
+        filename += len;
+        filename = strtok(filename, ".");
+    } else {
+        return -1;
+    }
+
+    /* open the real file */
+    snprintf(buf_in, sizeof(buf_in), "/proc/self/%s", filename);
+    fd = openat(AT_FDCWD, buf_in, O_RDONLY);
+    return fd;
+
+}
+
+static int proc_self_fstat(int ofd, struct stat *st)
+{
+    int ret = -1;
+    int fd = real_proc_self_fd(ofd);
+    if (fd == -1) {
+        return ret;
+    }
+
+    /* call fstat */
+    ret = get_errno(fstat(fd, st));
+    close(fd);
+
+    return ret;
+}
+
+/* Return a fixed-table index while holding posix_timer_lock on success. */
+static target_timer_t lock_host_timer(abi_long arg)
+{
+    target_timer_t timerid = arg;
+    int k;
+
+    if (timerid < 0) {
+        return -TARGET_EINVAL;
+    }
+
+    pthread_mutex_lock(&posix_timer_lock);
+    for (k = 0; k < ARRAY_SIZE(g_posix_timers); k++) {
+        if (g_posix_timer_state[k] == POSIX_TIMER_ACTIVE &&
+            g_posix_timer_ids[k] == timerid) {
+            return k;
+        }
+    }
+    pthread_mutex_unlock(&posix_timer_lock);
+    return -TARGET_EINVAL;
+}
+
+static int target_to_host_cpu_mask(unsigned long *host_mask,
+                                   size_t host_size,
+                                   abi_ulong target_addr,
+                                   size_t target_size)
+{
+    unsigned target_bits = sizeof(abi_ulong) * 8;
+    unsigned host_bits = sizeof(*host_mask) * 8;
+    abi_ulong *target_mask;
+    unsigned i, j;
+
+    assert(host_size >= target_size);
+
+    target_mask = lock_user(VERIFY_READ, target_addr, target_size, 1);
+    if (!target_mask) {
+        return -TARGET_EFAULT;
+    }
+    memset(host_mask, 0, host_size);
+
+    for (i = 0 ; i < target_size / sizeof(abi_ulong); i++) {
+        unsigned bit = i * target_bits;
+        abi_ulong val;
+
+        __get_user(val, &target_mask[i]);
+        for (j = 0; j < target_bits; j++, bit++) {
+            if (val & (1UL << j)) {
+                host_mask[bit / host_bits] |= 1UL << (bit % host_bits);
+            }
+        }
+    }
+
+    unlock_user(target_mask, target_addr, 0);
+    return 0;
+}
+
+static int host_to_target_cpu_mask(const unsigned long *host_mask,
+                                   size_t host_size,
+                                   abi_ulong target_addr,
+                                   size_t target_size)
+{
+    unsigned target_bits = sizeof(abi_ulong) * 8;
+    unsigned host_bits = sizeof(*host_mask) * 8;
+    abi_ulong *target_mask;
+    unsigned i, j;
+
+    assert(host_size >= target_size);
+
+    target_mask = lock_user(VERIFY_WRITE, target_addr, target_size, 0);
+    if (!target_mask) {
+        return -TARGET_EFAULT;
+    }
+
+    for (i = 0 ; i < target_size / sizeof(abi_ulong); i++) {
+        unsigned bit = i * target_bits;
+        abi_ulong val = 0;
+
+        for (j = 0; j < target_bits; j++, bit++) {
+            if (host_mask[bit / host_bits] & (1UL << (bit % host_bits))) {
+                val |= 1UL << j;
+            }
+        }
+        __put_user(val, &target_mask[i]);
+    }
+
+    unlock_user(target_mask, target_addr, target_size);
+    return 0;
+}
+
+static bool is_x86_elf_fd(int fd)
+{
+    Elf64_Ehdr ehdr;
+    char fd_path[64];
+    int read_fd = fd;
+    ssize_t read_size;
+
+    read_size = pread(read_fd, &ehdr, sizeof(ehdr), 0);
+    if (read_size < 0 && errno == EBADF) {
+        snprintf(fd_path, sizeof(fd_path), "/proc/self/fd/%d", fd);
+        read_fd = open(fd_path, O_RDONLY | O_CLOEXEC);
+        if (read_fd < 0) {
+            return false;
+        }
+        read_size = pread(read_fd, &ehdr, sizeof(ehdr), 0);
+        close(read_fd);
+    }
+
+    if (read_size != sizeof(ehdr)) {
+        return false;
+    }
+
+    if (ehdr.e_ident[EI_MAG0] != ELFMAG0 || ehdr.e_ident[EI_MAG1] != ELFMAG1 ||
+        ehdr.e_ident[EI_MAG2] != ELFMAG2 || ehdr.e_ident[EI_MAG3] != ELFMAG3) {
+        return false;
+    }
+
+    return (ehdr.e_machine == EM_386) || (ehdr.e_machine == EM_X86_64);
+}
+
+static int open_exec_inspection_file(int dirfd, const char *file_name,
+                                     int flags)
+{
+    int open_flags = O_RDONLY | O_CLOEXEC;
+
+    if (!file_name[0] && (flags & AT_EMPTY_PATH)) {
+        return fcntl(dirfd, F_DUPFD_CLOEXEC, 0);
+    }
+    if (flags & AT_SYMLINK_NOFOLLOW) {
+        open_flags |= O_NOFOLLOW;
+    }
+    return openat(dirfd, file_name, open_flags);
+}
+
+static bool is_x86_file_at(int dirfd, const char *file_name, int flags)
+{
+    int fd;
+    bool ret;
+
+    fd = open_exec_inspection_file(dirfd, file_name, flags);
+    if (fd < 0) {
+        return false;
+    }
+    ret = is_x86_elf_fd(fd);
+    close(fd);
+    return ret;
+}
+
+#ifdef TARGET_I386
+static bool is_self_exec_fd(int fd)
+{
+    struct stat target_st, self_st;
+
+    return fstat(fd, &target_st) == 0 &&
+           stat("/proc/self/exe", &self_st) == 0 &&
+           target_st.st_dev == self_st.st_dev &&
+           target_st.st_ino == self_st.st_ino;
+}
+
+typedef enum GuestScriptParseResult {
+    GUEST_SCRIPT_NONE,
+    GUEST_SCRIPT_VALID,
+    GUEST_SCRIPT_INVALID,
+} GuestScriptParseResult;
+
+#define GUEST_EXEC_MAX_SCRIPTS 5
+
+typedef struct GuestExecScript {
+    int fd;
+    char *fd_path;
+    char *interpreter;
+    char *argument;
+} GuestExecScript;
+
+typedef struct GuestExecResolution {
+    int terminal_fd;
+    bool initial_is_x86;
+    bool restore_prctl;
+    unsigned int script_count;
+    GuestExecScript scripts[GUEST_EXEC_MAX_SCRIPTS];
+} GuestExecResolution;
+
+static ssize_t guest_exec_pread(int fd, void *buffer, size_t size)
+{
+    char fd_path[64];
+    int read_fd;
+    ssize_t ret;
+
+    ret = pread(fd, buffer, size, 0);
+    if (ret >= 0 || errno != EBADF) {
+        return ret;
+    }
+    snprintf(fd_path, sizeof(fd_path), "/proc/self/fd/%d", fd);
+    read_fd = open(fd_path, O_RDONLY | O_CLOEXEC);
+    if (read_fd < 0) {
+        return -1;
+    }
+    ret = pread(read_fd, buffer, size, 0);
+    close(read_fd);
+    return ret;
+}
+
+static const char *guest_script_nonspace(const char *first, const char *last)
+{
+    while (first <= last) {
+        if (*first != ' ' && *first != '\t') {
+            return first;
+        }
+        first++;
+    }
+    return NULL;
+}
+
+static const char *guest_script_terminator(const char *first,
+                                           const char *last)
+{
+    while (first <= last) {
+        if (*first == ' ' || *first == '\t' || *first == '\0') {
+            return first;
+        }
+        first++;
+    }
+    return NULL;
+}
+
+static GuestScriptParseResult guest_exec_parse_script(int fd,
+                                                       char **interpreter,
+                                                       char **argument)
+{
+    char header[256] = { 0 };
+    const char *buffer_end = header + sizeof(header) - 1;
+    const char *name, *separator, *arg, *end;
+    ssize_t len = guest_exec_pread(fd, header, sizeof(header));
+
+    *interpreter = NULL;
+    *argument = NULL;
+    if (len < 2 || header[0] != '#' || header[1] != '!') {
+        return GUEST_SCRIPT_NONE;
+    }
+    end = memchr(header, '\n', sizeof(header));
+    if (!end) {
+        end = guest_script_nonspace(header + 2, buffer_end);
+        if (!end || !guest_script_terminator(end, buffer_end)) {
+            return GUEST_SCRIPT_INVALID;
+        }
+        end = buffer_end;
+    }
+    while (end > header + 2 && (end[-1] == ' ' || end[-1] == '\t')) {
+        end--;
+    }
+    name = guest_script_nonspace(header + 2, end);
+    if (!name || name == end || *name == '\0') {
+        return GUEST_SCRIPT_INVALID;
+    }
+    separator = guest_script_terminator(name, end);
+    if (!separator) {
+        separator = end;
+    }
+    *interpreter = g_strndup(name, separator - name);
+    if (separator < end && *separator != '\0') {
+        arg = guest_script_nonspace(separator, end);
+        if (arg && arg < end && *arg != '\0') {
+            *argument = g_strndup(arg, end - arg);
+        }
+    }
+    return GUEST_SCRIPT_VALID;
+}
+
+static int guest_self_exe_dup_fd(CPUArchState *env)
+{
+    char path_buffer[64];
+    const char *exe_pathname;
+    int owned_fd;
+
+    exe_pathname = guest_self_exe_open_path(env, path_buffer,
+                                            sizeof(path_buffer), &owned_fd);
+    if (!exe_pathname) {
+        return -1;
+    }
+    if (owned_fd >= 0) {
+        return owned_fd;
+    }
+    return open(exe_pathname, O_RDONLY | O_CLOEXEC);
+}
+
+static void guest_exec_resolution_cleanup(GuestExecResolution *resolution)
+{
+    unsigned int i;
+
+    if (resolution->terminal_fd >= 0) {
+        close(resolution->terminal_fd);
+    }
+    for (i = 0; i < resolution->script_count; i++) {
+        close(resolution->scripts[i].fd);
+        g_free(resolution->scripts[i].fd_path);
+        g_free(resolution->scripts[i].interpreter);
+        g_free(resolution->scripts[i].argument);
+    }
+    memset(resolution, 0, sizeof(*resolution));
+    resolution->terminal_fd = -1;
+}
+
+static int guest_exec_resolve(CPUArchState *env, int dirfd,
+                              const char *file_name, int flags,
+                              bool self_exe, GuestExecResolution *resolution)
+{
+    int fd_flags;
+    int fd;
+
+    memset(resolution, 0, sizeof(*resolution));
+    resolution->terminal_fd = -1;
+    if (flags & ~(AT_EMPTY_PATH | AT_SYMLINK_NOFOLLOW)) {
+        errno = EINVAL;
+        return -1;
+    }
+    fd = self_exe ? guest_self_exe_dup_fd(env) :
+         open_exec_inspection_file(dirfd, file_name, flags);
+    if (fd < 0) {
+        return -1;
+    }
+    resolution->initial_is_x86 = is_x86_elf_fd(fd);
+    while (true) {
+        GuestExecScript *script;
+        GuestScriptParseResult parsed;
+        char *interpreter;
+        char *argument;
+        int interpreter_fd;
+
+        parsed = guest_exec_parse_script(fd, &interpreter, &argument);
+        if (parsed != GUEST_SCRIPT_VALID) {
+            resolution->terminal_fd = fd;
+            resolution->restore_prctl = is_x86_elf_fd(fd) ||
+                                         is_self_exec_fd(fd);
+            return 0;
+        }
+        if (resolution->script_count == GUEST_EXEC_MAX_SCRIPTS) {
+            g_free(interpreter);
+            g_free(argument);
+            close(fd);
+            errno = ELOOP;
+            guest_exec_resolution_cleanup(resolution);
+            return -1;
+        }
+        interpreter_fd = open(interpreter, O_RDONLY | O_CLOEXEC);
+        if (interpreter_fd < 0) {
+            int saved_errno = errno;
+
+            g_free(interpreter);
+            g_free(argument);
+            close(fd);
+            guest_exec_resolution_cleanup(resolution);
+            errno = saved_errno;
+            return -1;
+        }
+        /*
+         * Linux requires the script fd to survive execveat(AT_EMPTY_PATH):
+         * closing it during exec makes /proc/self/fd/N unavailable to the
+         * interpreter and yields ENOENT.  Keep one carrier fd per script
+         * layer.  GUEST_EXEC_MAX_SCRIPTS bounds one resolution; as with
+         * native execveat(), the interpreter owns the inherited fd lifetime.
+         */
+        fd_flags = fcntl(fd, F_GETFD);
+        if (fd_flags < 0 || fcntl(fd, F_SETFD, fd_flags & ~FD_CLOEXEC) < 0) {
+            int saved_errno = errno;
+
+            g_free(interpreter);
+            g_free(argument);
+            close(interpreter_fd);
+            close(fd);
+            guest_exec_resolution_cleanup(resolution);
+            errno = saved_errno;
+            return -1;
+        }
+        script = &resolution->scripts[resolution->script_count++];
+        script->fd = fd;
+        script->fd_path = g_strdup_printf("/proc/self/fd/%d", fd);
+        script->interpreter = interpreter;
+        script->argument = argument;
+        fd = interpreter_fd;
+    }
+}
+
+static char **guest_exec_script_argv(const GuestExecResolution *resolution,
+                                     char **argp)
+{
+    char **current = argp;
+    size_t current_count = g_strv_length(current);
+    unsigned int i;
+
+    for (i = 0; i < resolution->script_count; i++) {
+        const GuestExecScript *script = &resolution->scripts[i];
+        size_t tail_count = current_count ? current_count - 1 : 0;
+        size_t prefix_count = script->argument ? 3 : 2;
+        char **next = g_new0(char *, prefix_count + tail_count + 1);
+        size_t pos = 0;
+
+        next[pos++] = script->interpreter;
+        if (script->argument) {
+            next[pos++] = script->argument;
+        }
+        next[pos++] = script->fd_path;
+        if (tail_count) {
+            memcpy(next + pos, current + 1, tail_count * sizeof(*next));
+        }
+        if (current != argp) {
+            g_free(current);
+        }
+        current = next;
+        current_count = prefix_count + tail_count;
+    }
+    return current;
+}
+
+static bool guest_prctl_exec_state_active(CPUArchState *env)
+{
+    TaskState *ts = env_cpu(env)->opaque;
+    unsigned int mdwe;
+
+    mmap_lock();
+    mdwe = ts->info->prctl_mdwe;
+    mmap_unlock();
+    return mdwe || (((CPUX86State *)env)->cr[4] & CR4_TSD_MASK);
+}
+#endif /* TARGET_I386 */
+
+#ifdef TARGET_I386
+static abi_long do_prctl_syscall_user_dispatch(CPUArchState *env,
+                                               abi_ulong mode,
+                                               abi_ulong offset,
+                                               abi_ulong length,
+                                               abi_ulong selector)
+{
+    CPUState *cpu = env_cpu(env);
+    TaskState *ts = cpu->opaque;
+
+    switch (mode) {
+    case PR_SYS_DISPATCH_OFF:
+        if (offset || length || selector) {
+            return -TARGET_EINVAL;
+        }
+        ts->sys_dispatch_len = -1;
+        ts->sys_dispatch_inclusive = false;
+        return 0;
+    case PR_SYS_DISPATCH_ON:
+    case PR_SYS_DISPATCH_INCLUSIVE_ON:
+        if ((mode == PR_SYS_DISPATCH_INCLUSIVE_ON && !length) ||
+            (offset && offset + length <= offset)) {
+            return -TARGET_EINVAL;
+        }
+        if (selector && !access_ok(cpu, VERIFY_READ, selector, 1)) {
+            return -TARGET_EFAULT;
+        }
+        ts->sys_dispatch = offset;
+        ts->sys_dispatch_len = length;
+        ts->sys_dispatch_selector = selector;
+        ts->sys_dispatch_inclusive =
+            mode == PR_SYS_DISPATCH_INCLUSIVE_ON;
+        return 0;
+    default:
+        return -TARGET_EINVAL;
+    }
+}
+#endif
+
+#ifdef TARGET_I386
+typedef struct TargetPrctlMmMap {
+    uint64_t start_code;
+    uint64_t end_code;
+    uint64_t start_data;
+    uint64_t end_data;
+    uint64_t start_brk;
+    uint64_t brk;
+    uint64_t start_stack;
+    uint64_t arg_start;
+    uint64_t arg_end;
+    uint64_t env_start;
+    uint64_t env_end;
+    uint64_t auxv;
+    uint32_t auxv_size;
+    uint32_t exe_fd;
+} TargetPrctlMmMap;
+
+typedef struct GuestPrctlMmMap {
+    abi_ulong start_code;
+    abi_ulong end_code;
+    abi_ulong start_data;
+    abi_ulong end_data;
+    abi_ulong start_brk;
+    abi_ulong brk;
+    abi_ulong start_stack;
+    abi_ulong arg_start;
+    abi_ulong arg_end;
+    abi_ulong env_start;
+    abi_ulong env_end;
+} GuestPrctlMmMap;
+
+static abi_long do_prctl_get_auxv(CPUArchState *env, abi_ulong addr,
+                                  abi_ulong len)
+{
+    TaskState *ts = env_cpu(env)->opaque;
+    struct image_info *info = ts->info;
+    size_t size = MIN((size_t)len, sizeof(info->prctl_auxv));
+
+    mmap_lock();
+    if (!info->prctl_auxv_initialized) {
+        size_t initial_size = MIN((size_t)info->auxv_len,
+                                  sizeof(info->prctl_auxv));
+
+        memset(info->prctl_auxv, 0, sizeof(info->prctl_auxv));
+        if (initial_size && copy_from_user(info->prctl_auxv,
+                                           info->saved_auxv,
+                                           initial_size)) {
+            mmap_unlock();
+            return -TARGET_EFAULT;
+        }
+        info->prctl_auxv_initialized = true;
+    }
+
+    if (size && copy_to_user(addr, info->prctl_auxv, size)) {
+        mmap_unlock();
+        return -TARGET_EFAULT;
+    }
+    mmap_unlock();
+    return sizeof(info->prctl_auxv);
+}
+
+static void guest_prctl_auxv_terminate(uint8_t *auxv)
+{
+    memset(auxv + TARGET_X86_PRCTL_AUXV_SIZE - 2 * sizeof(uint64_t), 0,
+           2 * sizeof(uint64_t));
+}
+
+static bool guest_has_capability(unsigned int capability)
+{
+    struct __user_cap_header_struct header = {
+        .version = _LINUX_CAPABILITY_VERSION_3,
+        .pid = 0,
+    };
+    struct __user_cap_data_struct data[2] = { };
+    unsigned int word = capability / 32;
+
+    return word < ARRAY_SIZE(data) && capget(&header, data) == 0 &&
+           (data[word].effective & (1U << (capability % 32)));
+}
+
+static bool guest_has_initial_sys_resource_capability(void)
+{
+    return prctl(PR_GET_IO_FLUSHER, 0, 0, 0, 0) >= 0;
+}
+
+static abi_ulong guest_mmap_min_addr(void)
+{
+    FILE *fp = fopen("/proc/sys/vm/mmap_min_addr", "r");
+    unsigned long long value;
+
+    if (fp) {
+        if (fscanf(fp, "%llu", &value) == 1) {
+            fclose(fp);
+            return value;
+        }
+        fclose(fp);
+    }
+    return TARGET_PAGE_SIZE;
+}
+
+static void guest_prctl_mm_read(const struct image_info *info,
+                                GuestPrctlMmMap *map)
+{
+    *map = (GuestPrctlMmMap) {
+        .start_code = info->prctl_mm_start_code,
+        .end_code = info->prctl_mm_end_code,
+        .start_data = info->prctl_mm_start_data,
+        .end_data = info->prctl_mm_end_data,
+        .start_brk = info->prctl_mm_start_brk,
+        .brk = info->prctl_mm_brk,
+        .start_stack = info->prctl_mm_start_stack,
+        .arg_start = info->prctl_mm_arg_start,
+        .arg_end = info->prctl_mm_arg_end,
+        .env_start = info->prctl_mm_env_start,
+        .env_end = info->prctl_mm_env_end,
+    };
+}
+
+static void guest_prctl_mm_write(struct image_info *info,
+                                 const GuestPrctlMmMap *map)
+{
+    info->prctl_mm_start_code = info->start_code = map->start_code;
+    info->prctl_mm_end_code = info->end_code = map->end_code;
+    info->prctl_mm_start_data = info->start_data = map->start_data;
+    info->prctl_mm_end_data = info->end_data = map->end_data;
+    info->prctl_mm_start_brk = info->start_brk = map->start_brk;
+    info->prctl_mm_brk = info->brk = map->brk;
+    info->prctl_mm_start_stack = info->start_stack = map->start_stack;
+    info->prctl_mm_arg_start = map->arg_start;
+    info->prctl_mm_arg_end = map->arg_end;
+    info->prctl_mm_env_start = map->env_start;
+    info->prctl_mm_env_end = map->env_end;
+
+    target_original_brk = map->start_brk;
+    target_brk = map->brk;
+    brk_page = HOST_PAGE_ALIGN(target_brk);
+}
+
+static abi_long guest_prctl_mm_validate(const GuestPrctlMmMap *map)
+{
+    const abi_ulong value[] = {
+        map->start_code, map->end_code,
+        map->start_data, map->end_data,
+        map->start_brk, map->brk,
+        map->start_stack,
+        map->arg_start, map->arg_end,
+        map->env_start, map->env_end,
+    };
+    abi_ulong mmap_min = guest_mmap_min_addr();
+    struct rlimit rlim;
+    size_t i;
+
+    for (i = 0; i < ARRAY_SIZE(value); i++) {
+        if (value[i] < mmap_min || value[i] > GUEST_ADDR_MAX) {
+            return -TARGET_EINVAL;
+        }
+    }
+    if (map->start_code >= map->end_code ||
+        map->start_data > map->end_data ||
+        map->start_brk > map->brk ||
+        map->arg_start > map->arg_end ||
+        map->env_start > map->env_end) {
+        return -TARGET_EINVAL;
+    }
+
+    if (getrlimit(RLIMIT_DATA, &rlim) == 0 && rlim.rlim_cur != RLIM_INFINITY) {
+        uint64_t data_size = map->end_data - map->start_data;
+        uint64_t brk_size = map->brk - map->start_brk;
+
+        if (data_size > rlim.rlim_cur ||
+            brk_size > rlim.rlim_cur - data_size) {
+            return -TARGET_EINVAL;
+        }
+    }
+    return 0;
+}
+
+static abi_long guest_prctl_set_auxv(struct image_info *info,
+                                     abi_ulong addr, abi_ulong len,
+                                     bool replace_all)
+{
+    uint8_t auxv[TARGET_X86_PRCTL_AUXV_SIZE] = { };
+
+    if (len > sizeof(auxv)) {
+        return -TARGET_EINVAL;
+    }
+    if (len && copy_from_user(auxv, addr, len)) {
+        return -TARGET_EFAULT;
+    }
+    guest_prctl_auxv_terminate(auxv);
+    mmap_lock();
+    if (replace_all) {
+        memcpy(info->prctl_auxv, auxv, sizeof(auxv));
+    } else {
+        memcpy(info->prctl_auxv, auxv, len);
+    }
+    mmap_unlock();
+    return 0;
+}
+
+typedef struct GuestPrctlExeFile {
+    int fd;
+} GuestPrctlExeFile;
+
+static abi_long guest_prctl_prepare_exe_file(unsigned int fd,
+                                             GuestPrctlExeFile *file)
+{
+    struct stat st;
+    struct statvfs fs;
+    int saved_fd;
+
+    file->fd = -1;
+
+    if (fstat(fd, &st) < 0) {
+        return get_errno(-1);
+    }
+    if (!S_ISREG(st.st_mode)) {
+        return -TARGET_EACCES;
+    }
+    if (fstatvfs(fd, &fs) < 0) {
+        return get_errno(-1);
+    }
+    if (fs.f_flag & ST_NOEXEC) {
+        return -TARGET_EACCES;
+    }
+    if (faccessat(fd, "", X_OK, AT_EMPTY_PATH | AT_EACCESS) < 0) {
+        return get_errno(-1);
+    }
+
+    saved_fd = fcntl(fd, F_DUPFD_CLOEXEC, 0);
+    if (saved_fd < 0) {
+        return get_errno(-1);
+    }
+    file->fd = saved_fd;
+    return 0;
+}
+
+/* Called with the linux-user mmap lock held. */
+static void guest_prctl_commit_exe_file(struct image_info *info,
+                                        GuestPrctlExeFile *file)
+{
+    int old_fd = info->prctl_mm_exe_fd;
+
+    info->prctl_mm_exe_fd = file->fd;
+    file->fd = -1;
+    if (old_fd >= 0) {
+        close(old_fd);
+    }
+}
+
+static abi_long guest_prctl_set_exe_file(struct image_info *info,
+                                         unsigned int fd)
+{
+    GuestPrctlExeFile file;
+    abi_long ret = guest_prctl_prepare_exe_file(fd, &file);
+
+    if (ret) {
+        return ret;
+    }
+    mmap_lock();
+    guest_prctl_commit_exe_file(info, &file);
+    mmap_unlock();
+    return 0;
+}
+
+static abi_long do_prctl_set_mm(CPUArchState *env, abi_ulong option,
+                                abi_ulong addr, abi_ulong arg4,
+                                abi_ulong arg5)
+{
+    struct image_info *info = ((TaskState *)env_cpu(env)->opaque)->info;
+    GuestPrctlMmMap map;
+    abi_long ret;
+
+    if (arg5 || (arg4 && option != PR_SET_MM_AUXV &&
+                 option != PR_SET_MM_MAP &&
+                 option != PR_SET_MM_MAP_SIZE)) {
+        return -TARGET_EINVAL;
+    }
+
+    if (option == PR_SET_MM_MAP_SIZE) {
+        return put_user_u32(sizeof(TargetPrctlMmMap), addr) ?
+               -TARGET_EFAULT : 0;
+    }
+
+    if (option == PR_SET_MM_MAP) {
+        TargetPrctlMmMap *target_map;
+        uint8_t new_auxv[TARGET_X86_PRCTL_AUXV_SIZE] = { };
+        GuestPrctlExeFile new_exe = { .fd = -1 };
+        uint64_t auxv64;
+        abi_ulong auxv;
+        uint32_t auxv_size, exe_fd;
+        bool replace_exe = false;
+
+        if (arg4 != sizeof(*target_map)) {
+            return -TARGET_EINVAL;
+        }
+        if (!lock_user_struct(VERIFY_READ, target_map, addr, 1)) {
+            return -TARGET_EFAULT;
+        }
+        {
+            const uint64_t values[] = {
+                tswap64(target_map->start_code),
+                tswap64(target_map->end_code),
+                tswap64(target_map->start_data),
+                tswap64(target_map->end_data),
+                tswap64(target_map->start_brk),
+                tswap64(target_map->brk),
+                tswap64(target_map->start_stack),
+                tswap64(target_map->arg_start),
+                tswap64(target_map->arg_end),
+                tswap64(target_map->env_start),
+                tswap64(target_map->env_end),
+            };
+            abi_ulong *fields[] = {
+                &map.start_code, &map.end_code,
+                &map.start_data, &map.end_data,
+                &map.start_brk, &map.brk,
+                &map.start_stack,
+                &map.arg_start, &map.arg_end,
+                &map.env_start, &map.env_end,
+            };
+            size_t i;
+
+            for (i = 0; i < ARRAY_SIZE(values); i++) {
+                if (values[i] > GUEST_ADDR_MAX) {
+                    unlock_user_struct(target_map, addr, 0);
+                    return -TARGET_EINVAL;
+                }
+                *fields[i] = values[i];
+            }
+        }
+        auxv64 = tswap64(target_map->auxv);
+        auxv_size = tswap32(target_map->auxv_size);
+        exe_fd = tswap32(target_map->exe_fd);
+        unlock_user_struct(target_map, addr, 0);
+
+        if (auxv_size && auxv64 > GUEST_ADDR_MAX) {
+            return -TARGET_EINVAL;
+        }
+        auxv = auxv64;
+
+        ret = guest_prctl_mm_validate(&map);
+        if (ret) {
+            return ret;
+        }
+        if (auxv_size && (!auxv || auxv_size > sizeof(info->prctl_auxv))) {
+            return -TARGET_EINVAL;
+        }
+        if (auxv_size) {
+            if (copy_from_user(new_auxv, auxv, auxv_size)) {
+                return -TARGET_EFAULT;
+            }
+            guest_prctl_auxv_terminate(new_auxv);
+        }
+        if (exe_fd != UINT32_MAX) {
+            unsigned int checkpoint_cap =
+#ifdef CAP_CHECKPOINT_RESTORE
+                CAP_CHECKPOINT_RESTORE;
+#else
+                40;
+#endif
+            if (!guest_has_capability(CAP_SYS_ADMIN) &&
+                !guest_has_capability(checkpoint_cap)) {
+                return -TARGET_EPERM;
+            }
+            ret = guest_prctl_prepare_exe_file(exe_fd, &new_exe);
+            if (ret) {
+                return ret;
+            }
+            replace_exe = true;
+        }
+        mmap_lock();
+        if (auxv_size) {
+            memcpy(info->prctl_auxv, new_auxv, sizeof(new_auxv));
+        }
+        if (replace_exe) {
+            guest_prctl_commit_exe_file(info, &new_exe);
+        }
+        guest_prctl_mm_write(info, &map);
+        mmap_unlock();
+        return 0;
+    }
+
+    if (!guest_has_initial_sys_resource_capability()) {
+        return -TARGET_EPERM;
+    }
+    if (option == PR_SET_MM_AUXV) {
+        return guest_prctl_set_auxv(info, addr, arg4, false);
+    }
+    if (option == PR_SET_MM_EXE_FILE) {
+        return guest_prctl_set_exe_file(info, addr);
+    }
+    if (addr < guest_mmap_min_addr() || addr > GUEST_ADDR_MAX) {
+        return -TARGET_EINVAL;
+    }
+
+    mmap_lock();
+    guest_prctl_mm_read(info, &map);
+    switch (option) {
+    case PR_SET_MM_START_CODE:
+        map.start_code = addr;
+        break;
+    case PR_SET_MM_END_CODE:
+        map.end_code = addr;
+        break;
+    case PR_SET_MM_START_DATA:
+        map.start_data = addr;
+        break;
+    case PR_SET_MM_END_DATA:
+        map.end_data = addr;
+        break;
+    case PR_SET_MM_START_STACK:
+        map.start_stack = addr;
+        break;
+    case PR_SET_MM_START_BRK:
+        map.start_brk = addr;
+        break;
+    case PR_SET_MM_BRK:
+        map.brk = addr;
+        break;
+    case PR_SET_MM_ARG_START:
+        map.arg_start = addr;
+        break;
+    case PR_SET_MM_ARG_END:
+        map.arg_end = addr;
+        break;
+    case PR_SET_MM_ENV_START:
+        map.env_start = addr;
+        break;
+    case PR_SET_MM_ENV_END:
+        map.env_end = addr;
+        break;
+    default:
+        mmap_unlock();
+        return -TARGET_EINVAL;
+    }
+
+    ret = guest_prctl_mm_validate(&map);
+    if (ret) {
+        mmap_unlock();
+        return ret;
+    }
+    switch (option) {
+    case PR_SET_MM_START_STACK:
+    case PR_SET_MM_ARG_START:
+    case PR_SET_MM_ARG_END:
+    case PR_SET_MM_ENV_START:
+    case PR_SET_MM_ENV_END:
+        if (!page_get_flags(addr)) {
+            mmap_unlock();
+            return -TARGET_EFAULT;
+        }
+    }
+    guest_prctl_mm_write(info, &map);
+    mmap_unlock();
+    return 0;
+}
+
+static abi_long do_prctl_get_tsc(CPUX86State *env, abi_ulong addr)
+{
+    int mode = env->cr[4] & CR4_TSD_MASK ? PR_TSC_SIGSEGV : PR_TSC_ENABLE;
+
+    return put_user_s32(mode, addr) ? -TARGET_EFAULT : 0;
+}
+
+static abi_long do_prctl_set_tsc(CPUX86State *env, abi_ulong mode)
+{
+    switch (mode) {
+    case PR_TSC_ENABLE:
+        env->cr[4] &= ~CR4_TSD_MASK;
+        return 0;
+    case PR_TSC_SIGSEGV:
+        env->cr[4] |= CR4_TSD_MASK;
+        return 0;
+    default:
+        return -TARGET_EINVAL;
+    }
+}
+
+static abi_long do_prctl_speculation_ctrl(bool set, abi_ulong which,
+                                          abi_ulong control,
+                                          abi_ulong arg4, abi_ulong arg5)
+{
+    if ((!set && (control || arg4 || arg5)) ||
+        (set && (arg4 || arg5))) {
+        return -TARGET_EINVAL;
+    }
+    switch (which) {
+    case PR_SPEC_STORE_BYPASS:
+        return set ? -TARGET_ENXIO : PR_SPEC_NOT_AFFECTED;
+    case PR_SPEC_INDIRECT_BRANCH:
+        if (!set) {
+            return PR_SPEC_NOT_AFFECTED;
+        }
+        switch (control) {
+        case PR_SPEC_ENABLE:
+            return 0;
+        case PR_SPEC_DISABLE:
+        case PR_SPEC_FORCE_DISABLE:
+            return -TARGET_EPERM;
+        default:
+            return -TARGET_ERANGE;
+        }
+    case PR_SPEC_L1D_FLUSH:
+        return set ? -TARGET_EPERM : PR_SPEC_FORCE_DISABLE;
+    default:
+        return -TARGET_ENODEV;
+    }
+}
+
+static abi_long do_prctl_mdwe(CPUArchState *env, bool set,
+                              abi_ulong arg2, abi_ulong arg3,
+                              abi_ulong arg4, abi_ulong arg5)
+{
+    struct image_info *info = ((TaskState *)env_cpu(env)->opaque)->info;
+    unsigned long valid = PR_MDWE_REFUSE_EXEC_GAIN | PR_MDWE_NO_INHERIT;
+    abi_long ret;
+
+    mmap_lock();
+    if (!set) {
+        if (arg2 || arg3 || arg4 || arg5) {
+            mmap_unlock();
+            return -TARGET_EINVAL;
+        }
+        ret = info->prctl_mdwe;
+        mmap_unlock();
+        return ret;
+    }
+    if (arg3 || arg4 || arg5 || (arg2 & ~valid) ||
+        ((arg2 & PR_MDWE_NO_INHERIT) &&
+         !(arg2 & PR_MDWE_REFUSE_EXEC_GAIN))) {
+        mmap_unlock();
+        return -TARGET_EINVAL;
+    }
+    if (info->prctl_mdwe && info->prctl_mdwe != arg2) {
+        mmap_unlock();
+        return -TARGET_EPERM;
+    }
+    info->prctl_mdwe = arg2;
+    mmap_unlock();
+    return 0;
+}
+
+static abi_long do_prctl_timer_create_restore_ids(CPUArchState *env,
+                                                   abi_ulong control,
+                                                   abi_ulong arg3,
+                                                   abi_ulong arg4,
+                                                   abi_ulong arg5)
+{
+    TaskState *ts = env_cpu(env)->opaque;
+    abi_long ret;
+
+    if (arg3 || arg4 || arg5) {
+        return -TARGET_EINVAL;
+    }
+    mmap_lock();
+    switch (control) {
+    case PR_TIMER_CREATE_RESTORE_IDS_OFF:
+        ts->info->prctl_timer_restore_ids = false;
+        ret = 0;
+        break;
+    case PR_TIMER_CREATE_RESTORE_IDS_ON:
+        ts->info->prctl_timer_restore_ids = true;
+        ret = 0;
+        break;
+    case PR_TIMER_CREATE_RESTORE_IDS_GET:
+        ret = ts->info->prctl_timer_restore_ids;
+        break;
+    default:
+        ret = -TARGET_EINVAL;
+        break;
+    }
+    mmap_unlock();
+    return ret;
+}
+
+static abi_long do_prctl_futex_hash(CPUArchState *env, abi_ulong operation,
+                                    abi_ulong arg3, abi_ulong arg4)
+{
+    TaskState *ts = env_cpu(env)->opaque;
+    unsigned int slots = arg3;
+    abi_long ret;
+
+    /*
+     * Private hash sizing is a performance control; host futex operations
+     * remain functionally equivalent on the global hash.  Keep the guest MM
+     * state here instead of retuning the translator's own host futexes.
+     */
+    switch (operation) {
+    case PR_FUTEX_HASH_SET_SLOTS:
+        if (arg4 || (slots && (slots == 1 || (slots & (slots - 1))))) {
+            return -TARGET_EINVAL;
+        }
+        mmap_lock();
+        if (ts->info->prctl_futex_hash_custom &&
+            !ts->info->prctl_futex_hash_slots) {
+            ret = -TARGET_EBUSY;
+        } else {
+            ts->info->prctl_futex_hash_slots = slots;
+            ts->info->prctl_futex_hash_custom = true;
+            ret = 0;
+        }
+        mmap_unlock();
+        return ret;
+    case PR_FUTEX_HASH_GET_SLOTS:
+        mmap_lock();
+        ret = ts->info->prctl_futex_hash_slots;
+        mmap_unlock();
+        return ret;
+    default:
+        return -TARGET_EINVAL;
+    }
+}
+
+static abi_long do_prctl_set_vma(abi_ulong operation, abi_ulong start,
+                                 abi_ulong len,
+                                 abi_ulong name_addr)
+{
+    char name_buffer[80];
+    const char *name = NULL;
+    abi_ulong rounded_len;
+    abi_ulong end;
+    abi_ulong addr;
+    abi_ulong anon_start = 0;
+    bool in_anon = false;
+    abi_long ret;
+    size_t name_len;
+
+    if (operation != PR_SET_VMA_ANON_NAME) {
+        return -TARGET_EINVAL;
+    }
+    if (name_addr) {
+        for (name_len = 0; name_len < sizeof(name_buffer); name_len++) {
+            uint8_t ch;
+
+            if (get_user_u8(ch, name_addr + name_len)) {
+                return -TARGET_EFAULT;
+            }
+            name_buffer[name_len] = ch;
+            if (!ch) {
+                break;
+            }
+            if (ch <= 0x1f || ch >= 0x7f || strchr("\\`$[]", ch)) {
+                return -TARGET_EINVAL;
+            }
+        }
+        if (name_len == sizeof(name_buffer)) {
+            return -TARGET_ENAMETOOLONG;
+        }
+        name = name_buffer;
+    }
+    if (start & ~TARGET_PAGE_MASK) {
+        return -TARGET_EINVAL;
+    }
+    rounded_len = TARGET_PAGE_ALIGN(len);
+    if ((len && !rounded_len) || start + rounded_len < start) {
+        return -TARGET_EINVAL;
+    }
+    if (!rounded_len) {
+        return 0;
+    }
+    end = start + rounded_len;
+    ret = 0;
+
+    mmap_lock();
+    for (addr = start; addr < end; addr += TARGET_PAGE_SIZE) {
+        int flags = page_get_flags(addr);
+
+        if ((flags & (PAGE_VALID | PAGE_ANON)) ==
+            (PAGE_VALID | PAGE_ANON)) {
+            if (!in_anon) {
+                anon_start = addr;
+                in_anon = true;
+            }
+            continue;
+        }
+        if (in_anon) {
+            guest_vma_name_apply_locked(anon_start, addr, name);
+            in_anon = false;
+        }
+        if (flags & PAGE_VALID) {
+            ret = -TARGET_EBADF;
+            break;
+        }
+        ret = -TARGET_ENOMEM;
+    }
+    if (in_anon) {
+        guest_vma_name_apply_locked(anon_start, addr, name);
+    }
+    mmap_unlock();
+    return ret;
+}
+
+/* Called with the linux-user mmap lock held. */
+static abi_long guest_mdwe_mmap(CPUState *cpu, abi_ulong len, int prot)
+{
+    TaskState *ts = cpu->opaque;
+    unsigned int mdwe;
+    int valid = PROT_READ | PROT_WRITE | PROT_EXEC | TARGET_PROT_SEM;
+    int current_personality;
+
+    mdwe = ts->info->prctl_mdwe;
+    if (!(mdwe & TARGET_PR_MDWE_REFUSE_EXEC_GAIN) ||
+        !len || (prot & ~valid)) {
+        return 0;
+    }
+    current_personality = personality(0xffffffffUL);
+    if ((prot & PROT_READ) && current_personality != -1 &&
+        (current_personality & READ_IMPLIES_EXEC)) {
+        prot |= PROT_EXEC;
+    }
+    return (prot & (PROT_WRITE | PROT_EXEC)) ==
+           (PROT_WRITE | PROT_EXEC) ? -TARGET_EACCES : 0;
+}
+
+/* Called with the linux-user mmap lock held. */
+static abi_long guest_mdwe_mprotect(CPUState *cpu, abi_ulong start,
+                                    abi_ulong len, int prot)
+{
+    TaskState *ts = cpu->opaque;
+    abi_ulong end, addr;
+    unsigned int mdwe;
+    int valid = PROT_READ | PROT_WRITE | PROT_EXEC | TARGET_PROT_SEM;
+
+    mdwe = ts->info->prctl_mdwe;
+    if (!(mdwe & TARGET_PR_MDWE_REFUSE_EXEC_GAIN) ||
+        !(prot & PROT_EXEC) || (prot & ~valid) ||
+        (start & ~TARGET_PAGE_MASK)) {
+        return 0;
+    }
+    len = TARGET_PAGE_ALIGN(len);
+    end = start + len;
+    if (!len || end < start || !guest_range_valid_untagged(start, len) ||
+        !page_check_range(start, len, PAGE_VALID)) {
+        return 0;
+    }
+    if (prot & PROT_WRITE) {
+        return -TARGET_EACCES;
+    }
+    for (addr = start; addr < end; addr += TARGET_PAGE_SIZE) {
+        if (!(page_get_flags(addr) & PAGE_EXEC)) {
+            return -TARGET_EACCES;
+        }
+    }
+    return 0;
+}
+
+static char *guest_prctl_exec_env(CPUArchState *env, const char *name)
+{
+    TaskState *ts = env_cpu(env)->opaque;
+
+    if (strcmp(name, LATX_GUEST_MDWE_ENV) == 0) {
+        unsigned int mdwe;
+
+        mmap_lock();
+        mdwe = ts->info->prctl_mdwe;
+        mmap_unlock();
+        if (mdwe == TARGET_PR_MDWE_REFUSE_EXEC_GAIN) {
+            return g_strdup_printf("%s=%u", LATX_GUEST_MDWE_ENV, mdwe);
+        }
+    } else if (strcmp(name, LATX_GUEST_TSC_ENV) == 0) {
+        CPUX86State *x86_env = (CPUX86State *)env;
+
+        if (x86_env->cr[4] & CR4_TSD_MASK) {
+            return g_strdup_printf("%s=1", LATX_GUEST_TSC_ENV);
+        }
+    }
+    return NULL;
+}
+
+static bool guest_prctl_exec_env_reserved(const char *entry, const char *name)
+{
+    size_t len = strlen(name);
+
+    return strncmp(entry, name, len) == 0 && entry[len] == '=';
+}
+
+static char **prepare_guest_prctl_exec_env(CPUArchState *env, char **envp,
+                                           int envc, bool restore,
+                                           char **mdwe_env, char **tsc_env)
+{
+    char **exec_envp;
+    int kept = 0;
+    int extra = 0;
+    int i;
+
+    *mdwe_env = restore ?
+        guest_prctl_exec_env(env, LATX_GUEST_MDWE_ENV) : NULL;
+    *tsc_env = restore ?
+        guest_prctl_exec_env(env, LATX_GUEST_TSC_ENV) : NULL;
+    extra += *mdwe_env != NULL;
+    extra += *tsc_env != NULL;
+    exec_envp = g_new(char *, envc + extra + 1);
+    for (i = 0; i < envc; i++) {
+        if (!guest_prctl_exec_env_reserved(envp[i], LATX_GUEST_MDWE_ENV) &&
+            !guest_prctl_exec_env_reserved(envp[i], LATX_GUEST_TSC_ENV)) {
+            exec_envp[kept++] = envp[i];
+        }
+    }
+    if (*mdwe_env) {
+        exec_envp[kept++] = *mdwe_env;
+    }
+    if (*tsc_env) {
+        exec_envp[kept++] = *tsc_env;
+    }
+    exec_envp[kept] = NULL;
+    return exec_envp;
+}
+#endif
+
+/*
+ * This is an internal helper for do_syscall so that it is easier
+ * to have a single return point, so that actions, such as logging
+ * of syscall results, can be performed.
+ * All errnos that do_syscall() returns must be -TARGET_<errcode>.
+ */
+static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
+                            abi_long arg2, abi_long arg3, abi_long arg4,
+                            abi_long arg5, abi_long arg6, abi_long arg7,
+                            abi_long arg8)
+{
+    CPUState *cpu = env_cpu(cpu_env);
+    CPUArchState *env = cpu->env_ptr;
+    abi_long ret;
+#if defined(TARGET_NR_stat) || defined(TARGET_NR_stat64) \
+    || defined(TARGET_NR_lstat) || defined(TARGET_NR_lstat64) \
+    || defined(TARGET_NR_fstat) || defined(TARGET_NR_fstat64) \
+    || defined(TARGET_NR_statx)
+    struct stat st;
+#endif
+#if defined(TARGET_NR_statfs) || defined(TARGET_NR_statfs64) \
+    || defined(TARGET_NR_fstatfs)
+    struct statfs stfs;
+#endif
+    void *p;
+    TargetFdDataFunc fd_data_trans;
+
+    switch(num) {
+    case TARGET_NR_ioperm:
+    #define IO_BITMAP_BITS 65536
+        if (((uint32_t)arg1 + (size_t)arg2 <=
+            (uint32_t)arg1) ||
+            ((uint32_t)arg1 + (size_t)arg2 > IO_BITMAP_BITS)) {
+                return -TARGET_EINVAL;
+            }
+        return -TARGET_EPERM;
+        break;
+    case TARGET_NR_iopl:
+        if (arg1 == 0) {
+            ret = 0;
+        } else {
+            ret = -TARGET_EPERM;
+        }
+        return ret;
+    case TARGET_NR_exit:
+        /*
+         * During thread exit, need to free gdt table to avoid memory leak.
+         */
+        cleanup_guest_thread_resources(env);
+        /* In old applications this may be used to implement _exit(2).
+           However in threaded applications it is used for thread termination,
+           and _exit_group is used for application termination.
+           Do thread termination if we have more then one thread.  */
+        if (block_signals()) {
+            return -TARGET_ERESTARTSYS;
+        }
+        pthread_mutex_lock(&clone_lock);
+#ifdef CONFIG_LATX_AOT
+        if(current_cpu->cpu_index == 0) {
+            aot_exit_entry(cpu, AOT_EXIT_THREAD);
+        }
+#endif
+
+        if (CPU_NEXT(first_cpu)) {
+            exit_guest_thread_locked(env);
+        }
+
+        pthread_mutex_unlock(&clone_lock);
+#if defined(CONFIG_LATX) && defined(TARGET_X86_64)
+        latc_aot_v2_report_stats();
+#endif
+        preexit_cleanup(cpu_env, arg1);
+
+        /* dump basic block here. TODO */
+
+        _exit(arg1);
+        return 0; /* avoid warning */
+    case TARGET_NR_read:
+        if (arg3 == 0) {
+            return get_errno(safe_read(arg1, 0, 0));
+        } else {
+            if (!(p = lock_user(VERIFY_WRITE, arg2, arg3, 0)))
+                return -TARGET_EFAULT;
+            ret = get_errno(safe_read(arg1, p, arg3));
+            fd_data_trans = fd_trans_host_to_target_data(arg1);
+            if (ret >= 0 && fd_data_trans) {
+                ret = fd_data_trans(p, ret);
+            }
+            unlock_user(p, arg2, ret);
+        }
+        return ret;
+    case TARGET_NR_write:
+        if (arg3 == 0) {
+            return get_errno(safe_write(arg1, 0, 0));
+        }
+        if (!(p = lock_user(VERIFY_READ, arg2, arg3, 1)))
+            return -TARGET_EFAULT;
+        fd_data_trans = fd_trans_target_to_host_data(arg1);
+        if (fd_data_trans) {
+            void *copy = g_malloc(arg3);
+            memcpy(copy, p, arg3);
+            ret = fd_data_trans(copy, arg3);
+            if (ret >= 0) {
+                ret = get_errno(safe_write(arg1, copy, ret));
+            }
+            g_free(copy);
+        } else {
+            ret = get_errno(safe_write(arg1, p, arg3));
+        }
+        unlock_user(p, arg2, 0);
+        return ret;
+
+#ifdef TARGET_NR_open
+    case TARGET_NR_open:
+        if (!(p = lock_user_string(arg1)))
+            return -TARGET_EFAULT;
+        ret = get_errno(do_openat(cpu_env, AT_FDCWD, p,
+                                  target_to_host_bitmask(arg2, fcntl_flags_tbl),
+                                  arg3));
+        fd_trans_unregister(ret);
+        unlock_user(p, arg1, 0);
+        return ret;
+#endif
+    case TARGET_NR_openat:
+        if (!(p = lock_user_string(arg2)))
+            return -TARGET_EFAULT;
+        ret = get_errno(do_openat(cpu_env, arg1, p,
+                                  target_to_host_bitmask(arg3, fcntl_flags_tbl),
+                                  arg4));
+        fd_trans_unregister(ret);
+        unlock_user(p, arg2, 0);
+        return ret;
+#if defined(TARGET_NR_name_to_handle_at) && defined(CONFIG_OPEN_BY_HANDLE)
+    case TARGET_NR_name_to_handle_at:
+        ret = do_name_to_handle_at(arg1, arg2, arg3, arg4, arg5);
+        return ret;
+#endif
+#if defined(TARGET_NR_open_by_handle_at) && defined(CONFIG_OPEN_BY_HANDLE)
+    case TARGET_NR_open_by_handle_at:
+        ret = do_open_by_handle_at(arg1, arg2, arg3);
+        fd_trans_unregister(ret);
+        return ret;
+#endif
+    case TARGET_NR_close:
+#ifdef TARGET_I386
+        ret = guest_exe_identity_relocate(cpu_env, arg1);
+        if (ret) {
+            return ret;
+        }
+#endif
+        fd_trans_unregister(arg1);
+        return get_errno(close(arg1));
+
+    case TARGET_NR_brk:
+        return do_brk(arg1);
+#ifdef TARGET_NR_fork
+    case TARGET_NR_fork:
+        return get_errno(do_fork(cpu_env, TARGET_SIGCHLD, 0, 0, 0, 0));
+#endif
+#ifdef TARGET_NR_waitpid
+    case TARGET_NR_waitpid:
+        {
+            int status;
+            /* We don't support child exit with no SIGCHLD sent */
+            if(arg3 & __WCLONE) {
+                arg3 &= ~__WCLONE;
+                arg3 |= __WALL;
+            }
+            ret = get_errno(safe_wait4(arg1, &status, arg3, 0));
+            if (!is_error(ret) && arg2 && ret
+                && put_user_s32(
+#ifdef TARGET_X86_64
+                    seccomp_trace_waitstatus(ret, status, cpu->opaque),
+#else
+                    host_to_target_waitstatus(status),
+#endif
+                    arg2))
+                return -TARGET_EFAULT;
+        }
+        return ret;
+#endif
+#ifdef TARGET_NR_waitid
+    case TARGET_NR_waitid:
+        {
+            siginfo_t info;
+            info.si_pid = 0;
+            ret = get_errno(safe_waitid(arg1, arg2, &info, arg4, NULL));
+            if (!is_error(ret) && arg3 && info.si_pid != 0) {
+                if (!(p = lock_user(VERIFY_WRITE, arg3, sizeof(target_siginfo_t), 0)))
+                    return -TARGET_EFAULT;
+                host_to_target_siginfo(p, &info);
+                unlock_user(p, arg3, sizeof(target_siginfo_t));
+            }
+        }
+        return ret;
+#endif
+#ifdef TARGET_NR_creat /* not on alpha */
+    case TARGET_NR_creat:
+        if (!(p = lock_user_string(arg1)))
+            return -TARGET_EFAULT;
+        ret = get_errno(creat(p, arg2));
+        fd_trans_unregister(ret);
+        unlock_user(p, arg1, 0);
+        return ret;
+#endif
+#ifdef TARGET_NR_link
+    case TARGET_NR_link:
+        {
+            void * p2;
+            p = lock_user_string(arg1);
+            p2 = lock_user_string(arg2);
+            if (!p || !p2)
+                ret = -TARGET_EFAULT;
+            else
+                ret = get_errno(link(p, p2));
+            unlock_user(p2, arg2, 0);
+            unlock_user(p, arg1, 0);
+        }
+        return ret;
+#endif
+#if defined(TARGET_NR_linkat)
+    case TARGET_NR_linkat:
+        {
+            void * p2 = NULL;
+            if (!arg2 || !arg4)
+                return -TARGET_EFAULT;
+            p  = lock_user_string(arg2);
+            p2 = lock_user_string(arg4);
+            if (!p || !p2)
+                ret = -TARGET_EFAULT;
+            else
+                ret = get_errno(linkat(arg1, p, arg3, p2, arg5));
+            unlock_user(p, arg2, 0);
+            unlock_user(p2, arg4, 0);
+        }
+        return ret;
+#endif
+#ifdef TARGET_NR_unlink
+    case TARGET_NR_unlink:
+        if (!(p = lock_user_string(arg1)))
+            return -TARGET_EFAULT;
+        ret = get_errno(unlink(p));
+        unlock_user(p, arg1, 0);
+        return ret;
+#endif
+#if defined(TARGET_NR_unlinkat)
+    case TARGET_NR_unlinkat:
+        if (!(p = lock_user_string(arg2)))
+            return -TARGET_EFAULT;
+        ret = get_errno(unlinkat(arg1, p, arg3));
+        unlock_user(p, arg2, 0);
+        return ret;
+#endif
+#ifdef TARGET_NR_execveat
+    case TARGET_NR_execveat:
+        latc_aot_v2_flush_pending_keys();
+        {
+            char **argp, **envp, **exec_envp = NULL;
+            char **exec_argp = NULL;
+            char *hash_str = NULL;
+            char *pidof_arg = NULL;
+            const char *pname;
+            const char *exec_pathname;
+            bool self_exe;
+            bool x86_file;
+#ifdef TARGET_I386
+            GuestExecResolution exec_resolution = { .terminal_fd = -1 };
+            char *prctl_mdwe_env = NULL;
+            char *prctl_tsc_env = NULL;
+            bool pinned_exec;
+            bool restore_prctl;
+#endif
+            int argc, envc;
+            abi_ulong gp;
+            abi_ulong guest_argp;
+            abi_ulong guest_envp;
+            abi_ulong addr;
+            char **q;
+
+            p = NULL;
+            argc = 0;
+            guest_argp = arg3;
+            for (gp = guest_argp; gp; gp += sizeof(abi_ulong)) {
+                if (get_user_ual(addr, gp)) {
+                    return -TARGET_EFAULT;
+                }
+                if (!addr) {
+                    break;
+                }
+                argc++;
+            }
+            envc = 0;
+            guest_envp = arg4;
+            for (gp = guest_envp; gp; gp += sizeof(abi_ulong)) {
+                if (get_user_ual(addr, gp)) {
+                    return -TARGET_EFAULT;
+                }
+                if (!addr) {
+                    break;
+                }
+                envc++;
+            }
+
+            argp = g_new0(char *, argc + 1);
+            envp = g_new0(char *, envc + 1);
+
+            for (gp = guest_argp, q = argp; gp;
+                  gp += sizeof(abi_ulong), q++) {
+                if (get_user_ual(addr, gp)) {
+                    goto execveat_efault;
+                }
+                if (!addr) {
+                    break;
+                }
+                *q = lock_user_string(addr);
+                if (!(*q)) {
+                    goto execveat_efault;
+                }
+            }
+            *q = NULL;
+
+            for (gp = guest_envp, q = envp; gp;
+                  gp += sizeof(abi_ulong), q++) {
+                if (get_user_ual(addr, gp)) {
+                    goto execveat_efault;
+                }
+                if (!addr) {
+                    break;
+                }
+                *q = lock_user_string(addr);
+                if (!(*q)) {
+                    goto execveat_efault;
+                }
+            }
+            *q = NULL;
+
+            p = lock_user_string(arg2);
+            if (!(p)) {
+                goto execveat_efault;
+            }
+
+            pname = strrchr(p, '/');
+            exec_pathname = path(p);
+            self_exe = is_proc_myself((const char *)p, "exe");
+#ifdef TARGET_I386
+            pinned_exec = guest_prctl_exec_state_active(env);
+            if (pinned_exec) {
+                if (guest_exec_resolve(env, arg1, exec_pathname, arg5,
+                                       self_exe, &exec_resolution) < 0) {
+                    ret = get_errno(-1);
+                    goto execveat_end;
+                }
+                x86_file = exec_resolution.initial_is_x86;
+                restore_prctl = exec_resolution.restore_prctl;
+            } else {
+                x86_file = self_exe ||
+                           is_x86_file_at(arg1, exec_pathname, arg5);
+                restore_prctl = false;
+            }
+
+            exec_envp = prepare_guest_prctl_exec_env(env, envp, envc,
+                                                     restore_prctl,
+                                                     &prctl_mdwe_env,
+                                                     &prctl_tsc_env);
+#else
+            x86_file = self_exe ||
+                       is_x86_file_at(arg1, exec_pathname, arg5);
+
+            exec_envp = envp;
+#endif
+            exec_argp = argp;
+            if (argp[0] && p && pname && strcmp(p, argp[0]) &&
+                    strcmp(pname + 1, argp[0]) && x86_file) {
+                int exec_argc = argc + 3;
+                char **new_argp = g_new0(char *, exec_argc + 1);
+                long long hash = 0;
+
+                hash_str = g_new0(char, 8 * sizeof(long long));
+                for (int i = 3; i < exec_argc; ++i) {
+                    new_argp[i] = argp[i - 3];
+                    for (int j = 0; argp[i - 3][j] != '\0'; ++j) {
+                        hash += argp[i - 3][j];
+                    }
+                }
+                sprintf(hash_str, "%lld", hash);
+                new_argp[0] = new_argp[1] = p;
+                new_argp[2] = hash_str;
+                new_argp[exec_argc] = NULL;
+                exec_argp = new_argp;
+            }
+
+            if (!x86_file) {
+                for (int i = 0; i < argc; ++i) {
+                    char *found = strstr(exec_argp[i], "pidof");
+                    if (found != NULL) {
+                        size_t old_sub_len = strlen("pidof");
+                        size_t new_sub_len = strlen("pidof -x");
+                        size_t prefix_len = found - exec_argp[i];
+                        size_t suffix_len = strlen(found + old_sub_len);
+
+                        /* Allocate new string: prefix + "pidof -x" + suffix */
+                        if (exec_argp == argp) {
+                            exec_argp = g_new(char *, argc + 1);
+                            memcpy(exec_argp, argp,
+                                   sizeof(*argp) * (argc + 1));
+                        }
+                        pidof_arg = g_malloc(prefix_len + new_sub_len +
+                                             suffix_len + 1);
+
+                        /* Build the new string */
+                        memcpy(pidof_arg, exec_argp[i], prefix_len);
+                        strcpy(pidof_arg + prefix_len, "pidof -x");
+                        strcpy(pidof_arg + prefix_len + new_sub_len,
+                               found + old_sub_len);
+                        exec_argp[i] = pidof_arg;
+                        break;
+                    }
+                }
+            }
+
+            /*
+             * Although execve() is not an interruptible syscall it is
+             * a special case where we must use the safe_syscall wrapper:
+             * if we allow a signal to happen before we make the host
+             * syscall then we will 'lose' it, because at the point of
+             * execve the process leaves QEMU's control. So we use the
+             * safe syscall wrapper to ensure that we either take the
+             * signal as a guest signal, or else it does not happen
+             * before the execve completes and makes it the other
+             * program's problem.
+             */
+            if (pinned_exec) {
+                char **before_script_argp = exec_argp;
+
+                exec_argp = guest_exec_script_argv(&exec_resolution,
+                                                    exec_argp);
+                if (before_script_argp != argp &&
+                    before_script_argp != exec_argp) {
+                    g_free(before_script_argp);
+                }
+                ret = get_errno(safe_execveat(exec_resolution.terminal_fd,
+                                              "", exec_argp, exec_envp,
+                                              AT_EMPTY_PATH));
+            } else if (self_exe) {
+                char exe_path_buffer[64];
+                const char *exe_pathname;
+                int exe_fd;
+
+                exe_pathname = guest_self_exe_open_path(
+                    cpu_env, exe_path_buffer, sizeof(exe_path_buffer),
+                    &exe_fd);
+                if (!exe_pathname) {
+                    ret = get_errno(-1);
+                } else {
+                    ret = get_errno(safe_execveat(AT_FDCWD, exe_pathname,
+                                                  exec_argp, exec_envp, arg5));
+                    if (exe_fd >= 0) {
+                        close(exe_fd);
+                    }
+                }
+            } else {
+                ret = get_errno(safe_execveat(arg1, exec_pathname, exec_argp,
+                                              exec_envp, arg5));
+            }
+
+            goto execveat_end;
+
+        execveat_efault:
+            ret = -TARGET_EFAULT;
+
+        execveat_end:
+            unlock_user(p, arg2, 0);
+            for (gp = guest_argp, q = argp; *q;
+                  gp += sizeof(abi_ulong), q++) {
+                if (get_user_ual(addr, gp)
+                    || !addr) {
+                    break;
+                }
+                unlock_user(*q, addr, 0);
+            }
+            for (gp = guest_envp, q = envp; *q;
+                  gp += sizeof(abi_ulong), q++) {
+                if (get_user_ual(addr, gp)
+                    || !addr) {
+                    break;
+                }
+                unlock_user(*q, addr, 0);
+            }
+
+            if (exec_argp != argp) {
+                g_free(exec_argp);
+            }
+            g_free(pidof_arg);
+            g_free(hash_str);
+            g_free(argp);
+#ifdef TARGET_I386
+            guest_exec_resolution_cleanup(&exec_resolution);
+            g_free(prctl_mdwe_env);
+            g_free(prctl_tsc_env);
+#endif
+            if (exec_envp != envp) {
+                g_free(exec_envp);
+            }
+            g_free(envp);
+        }
+        return ret;
+#endif
+    case TARGET_NR_execve:
+        latc_aot_v2_flush_pending_keys();
+        {
+            char **argp, **envp, **exec_envp = NULL;
+            char **exec_argp = NULL;
+            char *hash_str = NULL;
+            char *pidof_arg = NULL;
+            const char *pname;
+            bool self_exe;
+            bool x86_file;
+#ifdef TARGET_I386
+            GuestExecResolution exec_resolution = { .terminal_fd = -1 };
+            char *prctl_mdwe_env = NULL;
+            char *prctl_tsc_env = NULL;
+            bool pinned_exec;
+            bool restore_prctl;
+#endif
+            int argc, envc;
+            abi_ulong gp;
+            abi_ulong guest_argp;
+            abi_ulong guest_envp;
+            abi_ulong addr;
+            char **q;
+
+            p = NULL;
+            argc = 0;
+            guest_argp = arg2;
+            for (gp = guest_argp; gp; gp += sizeof(abi_ulong)) {
+                if (get_user_ual(addr, gp))
+                    return -TARGET_EFAULT;
+                if (!addr)
+                    break;
+                argc++;
+            }
+            envc = 0;
+            guest_envp = arg3;
+            for (gp = guest_envp; gp; gp += sizeof(abi_ulong)) {
+                if (get_user_ual(addr, gp))
+                    return -TARGET_EFAULT;
+                if (!addr)
+                    break;
+                envc++;
+            }
+
+            argp = g_new0(char *, argc + 1);
+            envp = g_new0(char *, envc + 1);
+
+            for (gp = guest_argp, q = argp; gp;
+                  gp += sizeof(abi_ulong), q++) {
+                if (get_user_ual(addr, gp))
+                    goto execve_efault;
+                if (!addr)
+                    break;
+                if (!(*q = lock_user_string(addr)))
+                    goto execve_efault;
+            }
+            *q = NULL;
+
+            for (gp = guest_envp, q = envp; gp;
+                  gp += sizeof(abi_ulong), q++) {
+                if (get_user_ual(addr, gp))
+                    goto execve_efault;
+                if (!addr)
+                    break;
+                if (!(*q = lock_user_string(addr)))
+                    goto execve_efault;
+            }
+            *q = NULL;
+
+            p = lock_user_string(arg1);
+            if (!p) {
+                goto execve_efault;
+            }
+
+            pname = strrchr(p, '/');
+            self_exe = is_proc_myself((const char *)p, "exe");
+#ifdef TARGET_I386
+            pinned_exec = guest_prctl_exec_state_active(env);
+            if (pinned_exec) {
+                if (guest_exec_resolve(env, AT_FDCWD, path(p), 0,
+                                       self_exe, &exec_resolution) < 0) {
+                    ret = get_errno(-1);
+                    goto execve_end;
+                }
+                x86_file = exec_resolution.initial_is_x86;
+                restore_prctl = exec_resolution.restore_prctl;
+            } else {
+                x86_file = self_exe ||
+                           is_x86_file_at(AT_FDCWD, path(p), 0);
+                restore_prctl = false;
+            }
+
+            exec_envp = prepare_guest_prctl_exec_env(env, envp, envc,
+                                                     restore_prctl,
+                                                     &prctl_mdwe_env,
+                                                     &prctl_tsc_env);
+#else
+            x86_file = self_exe ||
+                       is_x86_file_at(AT_FDCWD, path(p), 0);
+
+            exec_envp = envp;
+#endif
+            exec_argp = argp;
+            if (argp[0] && p && pname && strcmp(p, argp[0]) &&
+                    strcmp(pname + 1, argp[0]) && x86_file) {
+                int exec_argc = argc + 3;
+                char **new_argp = g_new0(char *, exec_argc + 1);
+                long long hash = 0;
+
+                hash_str = g_new0(char, 8 * sizeof(long long));
+                for (int i = 3; i < exec_argc; ++i) {
+                    new_argp[i] = argp[i - 3];
+                    for (int j = 0; argp[i - 3][j] != '\0'; ++j) {
+                        hash += argp[i - 3][j];
+                    }
+                }
+                sprintf(hash_str, "%lld", hash);
+                new_argp[0] = new_argp[1] = p;
+                new_argp[2] = hash_str;
+                new_argp[exec_argc] = NULL;
+                exec_argp = new_argp;
+            }
+
+            if (!x86_file) {
+                for (int i = 0; i < argc; ++i) {
+                    char *found = strstr(exec_argp[i], "pidof");
+                    if (found != NULL) {
+                        size_t old_sub_len = strlen("pidof");
+                        size_t new_sub_len = strlen("pidof -x");
+                        size_t prefix_len = found - exec_argp[i];
+                        size_t suffix_len = strlen(found + old_sub_len);
+
+                        /* Allocate new string: prefix + "pidof -x" + suffix */
+                        if (exec_argp == argp) {
+                            exec_argp = g_new(char *, argc + 1);
+                            memcpy(exec_argp, argp,
+                                   sizeof(*argp) * (argc + 1));
+                        }
+                        pidof_arg = g_malloc(prefix_len + new_sub_len +
+                                             suffix_len + 1);
+
+                        /* Build the new string */
+                        memcpy(pidof_arg, exec_argp[i], prefix_len);
+                        strcpy(pidof_arg + prefix_len, "pidof -x");
+                        strcpy(pidof_arg + prefix_len + new_sub_len,
+                               found + old_sub_len);
+                        exec_argp[i] = pidof_arg;
+                        break;
+                    }
+                }
+            }
+
+            if (self_exe) {
+                char real[PATH_MAX];
+                char exe_path_buffer[64];
+                const char *temp;
+                const char *exe_pathname;
+                int exe_fd;
+
+                if (pinned_exec) {
+                    temp = guest_self_exe_link_path(cpu_env, real,
+                                                    sizeof(real));
+                    if (!temp) {
+                        ret = get_errno(-1);
+                        goto execve_end;
+                    }
+                    exe_pathname = NULL;
+                    exe_fd = -1;
+                } else if (!guest_self_exe_exec_paths(
+                               cpu_env, real, sizeof(real), &temp,
+                               exe_path_buffer, sizeof(exe_path_buffer),
+                               &exe_pathname, &exe_fd)) {
+                    ret = get_errno(-1);
+                    if (exe_fd >= 0) {
+                        close(exe_fd);
+                    }
+                    goto execve_end;
+                }
+                if (exec_argp[0] &&
+                    !strcmp(exec_argp[0], "/proc/self/exe")) {
+                    if (exec_argp == argp) {
+                        exec_argp = g_new(char *, argc + 1);
+                        memcpy(exec_argp, argp,
+                               sizeof(*argp) * (argc + 1));
+                    }
+                    *exec_argp = (char *)temp;
+                }
+                if (pinned_exec) {
+                    char **before_script_argp = exec_argp;
+
+                    exec_argp = guest_exec_script_argv(&exec_resolution,
+                                                        exec_argp);
+                    if (before_script_argp != argp &&
+                        before_script_argp != exec_argp) {
+                        g_free(before_script_argp);
+                    }
+                    ret = get_errno(safe_execveat(
+                                        exec_resolution.terminal_fd, "",
+                                        exec_argp, exec_envp, AT_EMPTY_PATH));
+                } else {
+                    ret = get_errno(safe_execve(exe_pathname, exec_argp,
+                                                exec_envp));
+                }
+                if (exe_fd >= 0) {
+                    close(exe_fd);
+                }
+            } else if (pinned_exec) {
+                char **before_script_argp = exec_argp;
+
+                exec_argp = guest_exec_script_argv(&exec_resolution,
+                                                    exec_argp);
+                if (before_script_argp != argp &&
+                    before_script_argp != exec_argp) {
+                    g_free(before_script_argp);
+                }
+                ret = get_errno(safe_execveat(exec_resolution.terminal_fd,
+                                              "", exec_argp, exec_envp,
+                                              AT_EMPTY_PATH));
+            } else {
+
+                /* Although execve() is not an interruptible syscall it is
+                 * a special case where we must use the safe_syscall wrapper:
+                 * if we allow a signal to happen before we make the host
+                 * syscall then we will 'lose' it, because at the point of
+                 * execve the process leaves QEMU's control. So we use the
+                 * safe syscall wrapper to ensure that we either take the
+                 * signal as a guest signal, or else it does not happen
+                 * before the execve completes and makes it the other
+                 * program's problem.
+                 */
+                ret = get_errno(safe_execve(path(p), exec_argp, exec_envp));
+            }
+
+            goto execve_end;
+
+        execve_efault:
+            ret = -TARGET_EFAULT;
+
+        execve_end:
+            unlock_user(p, arg1, 0);
+            for (gp = guest_argp, q = argp; *q;
+                  gp += sizeof(abi_ulong), q++) {
+                if (get_user_ual(addr, gp)
+                    || !addr)
+                    break;
+                unlock_user(*q, addr, 0);
+            }
+            for (gp = guest_envp, q = envp; *q;
+                  gp += sizeof(abi_ulong), q++) {
+                if (get_user_ual(addr, gp)
+                    || !addr)
+                    break;
+                unlock_user(*q, addr, 0);
+            }
+
+            if (exec_argp != argp) {
+                g_free(exec_argp);
+            }
+            g_free(pidof_arg);
+            g_free(hash_str);
+            g_free(argp);
+#ifdef TARGET_I386
+            guest_exec_resolution_cleanup(&exec_resolution);
+            g_free(prctl_mdwe_env);
+            g_free(prctl_tsc_env);
+#endif
+            if (exec_envp != envp) {
+                g_free(exec_envp);
+            }
+            g_free(envp);
+        }
+        return ret;
+    case TARGET_NR_chdir:
+        if (!(p = lock_user_string(arg1)))
+            return -TARGET_EFAULT;
+        ret = get_errno(chdir(p));
+        unlock_user(p, arg1, 0);
+        return ret;
+#ifdef TARGET_NR_time
+    case TARGET_NR_time:
+        {
+            time_t host_time;
+            ret = get_errno(time(&host_time));
+            if (!is_error(ret)
+                && arg1
+                && put_user_sal(host_time, arg1))
+                return -TARGET_EFAULT;
+        }
+        return ret;
+#endif
+#ifdef TARGET_NR_mknod
+    case TARGET_NR_mknod:
+        if (!(p = lock_user_string(arg1)))
+            return -TARGET_EFAULT;
+        ret = get_errno(mknod(p, arg2, arg3));
+        unlock_user(p, arg1, 0);
+        return ret;
+#endif
+#if defined(TARGET_NR_mknodat)
+    case TARGET_NR_mknodat:
+        if (!(p = lock_user_string(arg2)))
+            return -TARGET_EFAULT;
+        ret = get_errno(mknodat(arg1, p, arg3, arg4));
+        unlock_user(p, arg2, 0);
+        return ret;
+#endif
+#ifdef TARGET_NR_chmod
+    case TARGET_NR_chmod:
+        if (!(p = lock_user_string(arg1)))
+            return -TARGET_EFAULT;
+        ret = get_errno(chmod(p, arg2));
+        unlock_user(p, arg1, 0);
+        return ret;
+#endif
+#ifdef TARGET_NR_lseek
+    case TARGET_NR_lseek:
+        return get_errno(lseek(arg1, arg2, arg3));
+#endif
+#if defined(TARGET_NR_getxpid) && defined(TARGET_ALPHA)
+    /* Alpha specific */
+    case TARGET_NR_getxpid:
+        ((CPUAlphaState *)cpu_env)->ir[IR_A4] = getppid();
+        return get_errno(getpid());
+#endif
+#ifdef TARGET_NR_getpid
+    case TARGET_NR_getpid:
+        return get_errno(getpid());
+#endif
+    case TARGET_NR_mount:
+        {
+            /* need to look at the data field */
+            void *p2, *p3;
+
+            if (arg1) {
+                p = lock_user_string(arg1);
+                if (!p) {
+                    return -TARGET_EFAULT;
+                }
+            } else {
+                p = NULL;
+            }
+
+            p2 = lock_user_string(arg2);
+            if (!p2) {
+                if (arg1) {
+                    unlock_user(p, arg1, 0);
+                }
+                return -TARGET_EFAULT;
+            }
+
+            if (arg3) {
+                p3 = lock_user_string(arg3);
+                if (!p3) {
+                    if (arg1) {
+                        unlock_user(p, arg1, 0);
+                    }
+                    unlock_user(p2, arg2, 0);
+                    return -TARGET_EFAULT;
+                }
+            } else {
+                p3 = NULL;
+            }
+
+            /* FIXME - arg5 should be locked, but it isn't clear how to
+             * do that since it's not guaranteed to be a NULL-terminated
+             * string.
+             */
+            if (!arg5) {
+                ret = mount(p, p2, p3, (unsigned long)arg4, NULL);
+            } else {
+                ret = mount(p, p2, p3, (unsigned long)arg4, g2h(cpu, arg5));
+            }
+            ret = get_errno(ret);
+
+            if (arg1) {
+                unlock_user(p, arg1, 0);
+            }
+            unlock_user(p2, arg2, 0);
+            if (arg3) {
+                unlock_user(p3, arg3, 0);
+            }
+        }
+        return ret;
+#if defined(TARGET_NR_umount) || defined(TARGET_NR_oldumount)
+#if defined(TARGET_NR_umount)
+    case TARGET_NR_umount:
+#endif
+#if defined(TARGET_NR_oldumount)
+    case TARGET_NR_oldumount:
+#endif
+        if (!(p = lock_user_string(arg1)))
+            return -TARGET_EFAULT;
+        ret = get_errno(umount(p));
+        unlock_user(p, arg1, 0);
+        return ret;
+#endif
+#ifdef TARGET_NR_stime /* not on alpha */
+    case TARGET_NR_stime:
+        {
+            struct timespec ts;
+            ts.tv_nsec = 0;
+            if (get_user_sal(ts.tv_sec, arg1)) {
+                return -TARGET_EFAULT;
+            }
+            return get_errno(clock_settime(CLOCK_REALTIME, &ts));
+        }
+#endif
+#ifdef TARGET_NR_alarm /* not on alpha */
+    case TARGET_NR_alarm:
+        return alarm((unsigned int)arg1);
+#endif
+#ifdef TARGET_NR_pause /* not on alpha */
+    case TARGET_NR_pause:
+        if (!block_signals()) {
+            sigsuspend(&((TaskState *)cpu->opaque)->signal_mask);
+        }
+        return -TARGET_EINTR;
+#endif
+#ifdef TARGET_NR_utime
+    case TARGET_NR_utime:
+        {
+            struct utimbuf tbuf, *host_tbuf;
+            struct target_utimbuf *target_tbuf;
+            if (arg2) {
+                if (!lock_user_struct(VERIFY_READ, target_tbuf, arg2, 1))
+                    return -TARGET_EFAULT;
+                tbuf.actime = tswapal(target_tbuf->actime);
+                tbuf.modtime = tswapal(target_tbuf->modtime);
+                unlock_user_struct(target_tbuf, arg2, 0);
+                host_tbuf = &tbuf;
+            } else {
+                host_tbuf = NULL;
+            }
+            if (!(p = lock_user_string(arg1)))
+                return -TARGET_EFAULT;
+            ret = get_errno(utime(p, host_tbuf));
+            unlock_user(p, arg1, 0);
+        }
+        return ret;
+#endif
+#ifdef TARGET_NR_utimes
+    case TARGET_NR_utimes:
+        {
+            struct timeval *tvp, tv[2];
+            if (arg2) {
+                if (copy_from_user_timeval(&tv[0], arg2)
+                    || copy_from_user_timeval(&tv[1],
+                                              arg2 + sizeof(struct target_timeval)))
+                    return -TARGET_EFAULT;
+                tvp = tv;
+            } else {
+                tvp = NULL;
+            }
+            if (!(p = lock_user_string(arg1)))
+                return -TARGET_EFAULT;
+            ret = get_errno(utimes(p, tvp));
+            unlock_user(p, arg1, 0);
+        }
+        return ret;
+#endif
+#if defined(TARGET_NR_futimesat)
+    case TARGET_NR_futimesat:
+        {
+            struct timeval *tvp, tv[2];
+            if (arg3) {
+                if (copy_from_user_timeval(&tv[0], arg3)
+                    || copy_from_user_timeval(&tv[1],
+                                              arg3 + sizeof(struct target_timeval)))
+                    return -TARGET_EFAULT;
+                tvp = tv;
+            } else {
+                tvp = NULL;
+            }
+            if (!(p = lock_user_string(arg2))) {
+                return -TARGET_EFAULT;
+            }
+            ret = get_errno(futimesat(arg1, path(p), tvp));
+            unlock_user(p, arg2, 0);
+        }
+        return ret;
+#endif
+#ifdef TARGET_NR_access
+    case TARGET_NR_access:
+        if (!(p = lock_user_string(arg1))) {
+            return -TARGET_EFAULT;
+        }
+        ret = get_errno(access(path(p), arg2));
+        unlock_user(p, arg1, 0);
+        return ret;
+#endif
+#if defined(TARGET_NR_faccessat) && defined(__NR_faccessat)
+    case TARGET_NR_faccessat:
+        if (!(p = lock_user_string(arg2))) {
+            return -TARGET_EFAULT;
+        }
+        ret = get_errno(faccessat(arg1, p, arg3, 0));
+        unlock_user(p, arg2, 0);
+        return ret;
+#endif
+#ifdef TARGET_NR_faccessat2
+    case TARGET_NR_faccessat2:
+        if (!(p = lock_user_string(arg2))) {
+            return -TARGET_EFAULT;
+        }
+        ret = get_errno(faccessat(arg1, p, arg3, arg4));
+        unlock_user(p, arg2, 0);
+        return ret;
+#endif
+#ifdef TARGET_NR_nice /* not on alpha */
+    case TARGET_NR_nice:
+        return get_errno(nice(arg1));
+#endif
+    case TARGET_NR_sync:
+        sync();
+        return 0;
+#if defined(TARGET_NR_syncfs) && defined(CONFIG_SYNCFS)
+    case TARGET_NR_syncfs:
+        return get_errno(syncfs(arg1));
+#endif
+    case TARGET_NR_kill:
+#ifdef CONFIG_LATX_AOT
+        if (arg1 == getpid() && target_to_host_signal(arg2) == SIGKILL)
+        {
+            aot_exit_entry(cpu, AOT_EXIT_FINAL);
+        }
+#endif
+        return get_errno(safe_kill(arg1, target_to_host_signal(arg2)));
+#ifdef TARGET_NR_rename
+    case TARGET_NR_rename:
+        {
+            void *p2;
+            p = lock_user_string(arg1);
+            p2 = lock_user_string(arg2);
+            if (!p || !p2)
+                ret = -TARGET_EFAULT;
+            else
+                ret = get_errno(rename(p, p2));
+            unlock_user(p2, arg2, 0);
+            unlock_user(p, arg1, 0);
+        }
+        return ret;
+#endif
+#if defined(TARGET_NR_renameat)
+    case TARGET_NR_renameat:
+        {
+            void *p2;
+            p  = lock_user_string(arg2);
+            p2 = lock_user_string(arg4);
+            if (!p || !p2)
+                ret = -TARGET_EFAULT;
+            else
+                ret = get_errno(renameat(arg1, p, arg3, p2));
+            unlock_user(p2, arg4, 0);
+            unlock_user(p, arg2, 0);
+        }
+        return ret;
+#endif
+#if defined(TARGET_NR_renameat2)
+    case TARGET_NR_renameat2:
+        {
+            void *p2;
+            p  = lock_user_string(arg2);
+            p2 = lock_user_string(arg4);
+            if (!p || !p2) {
+                ret = -TARGET_EFAULT;
+            } else {
+                ret = get_errno(sys_renameat2(arg1, p, arg3, p2, arg5));
+            }
+            unlock_user(p2, arg4, 0);
+            unlock_user(p, arg2, 0);
+        }
+        return ret;
+#endif
+#ifdef TARGET_NR_mkdir
+    case TARGET_NR_mkdir:
+        if (!(p = lock_user_string(arg1)))
+            return -TARGET_EFAULT;
+        ret = get_errno(mkdir(p, arg2));
+        unlock_user(p, arg1, 0);
+        return ret;
+#endif
+#if defined(TARGET_NR_mkdirat)
+    case TARGET_NR_mkdirat:
+        if (!(p = lock_user_string(arg2)))
+            return -TARGET_EFAULT;
+        ret = get_errno(mkdirat(arg1, p, arg3));
+        unlock_user(p, arg2, 0);
+        return ret;
+#endif
+#ifdef TARGET_NR_rmdir
+    case TARGET_NR_rmdir:
+        if (!(p = lock_user_string(arg1)))
+            return -TARGET_EFAULT;
+        ret = get_errno(rmdir(p));
+        unlock_user(p, arg1, 0);
+        return ret;
+#endif
+    case TARGET_NR_dup:
+        ret = get_errno(dup(arg1));
+        if (ret >= 0) {
+            fd_trans_dup(arg1, ret);
+        }
+        return ret;
+#ifdef TARGET_NR_pipe
+    case TARGET_NR_pipe:
+        return do_pipe(cpu_env, arg1, 0, 0);
+#endif
+#ifdef TARGET_NR_pipe2
+    case TARGET_NR_pipe2:
+        return do_pipe(cpu_env, arg1,
+                       target_to_host_bitmask(arg2, fcntl_flags_tbl), 1);
+#endif
+#ifdef TARGET_NR_ptrace
+    case TARGET_NR_ptrace:
+        {
+            TaskState *ts = cpu->opaque;
+            union sigval sig_value;
+            sig_value.sival_ptr = ts->ptrace_poke_page;
+#ifdef CONFIG_PTRACE_DEBUG
+            fprintf(stderr, "[PTRACE_DEBUG] %d request %d addr %x\n",
+                    getpid(), arg1,  arg3);
+#endif
+            void *addr = g2h_untagged(arg3);
+            switch (arg1) {
+#ifdef TARGET_X86_64
+            case PTRACE_SETOPTIONS:
+            {
+                GuestSeccompTraceState trace;
+
+                ret = get_errno(ptrace(arg1, arg2, addr, arg4));
+                if (ret == 0 && read_seccomp_trace(arg2, ts, &trace)) {
+                    trace.enabled = (arg4 & PTRACE_O_TRACESECCOMP) != 0;
+                    write_seccomp_trace(arg2, ts, &trace);
+                }
+                return ret;
+            }
+            case PTRACE_GETEVENTMSG:
+            {
+                GuestSeccompTraceState trace;
+
+                if (read_seccomp_trace(arg2, ts, &trace) && trace.pending) {
+                    return put_user_ual(trace.data, arg4) ?
+                           -TARGET_EFAULT : 0;
+                }
+                break;
+            }
+            case PTRACE_GETREGS:
+            {
+                GuestSeccompTraceState trace;
+                struct target_pt_regs *regs;
+
+                if (read_seccomp_trace(arg2, ts, &trace) && trace.pending) {
+                    if (!lock_user_struct(VERIFY_WRITE, regs, arg4, 0)) {
+                        return -TARGET_EFAULT;
+                    }
+                    seccomp_trace_to_regs(&trace, regs);
+                    unlock_user_struct(regs, arg4, 1);
+                    return 0;
+                }
+                break;
+            }
+            case PTRACE_SETREGS:
+            {
+                GuestSeccompTraceState trace;
+                struct target_pt_regs *regs;
+
+                if (read_seccomp_trace(arg2, ts, &trace) && trace.pending) {
+                    if (!lock_user_struct(VERIFY_READ, regs, arg4, 1)) {
+                        return -TARGET_EFAULT;
+                    }
+                    regs_to_seccomp_trace(regs, &trace);
+                    unlock_user_struct(regs, arg4, 0);
+                    return write_seccomp_trace(arg2, ts, &trace) ?
+                           0 : -TARGET_EIO;
+                }
+                break;
+            }
+#endif
+            case PTRACE_PEEKTEXT:
+            case PTRACE_PEEKDATA:
+            case PTRACE_PEEKUSER:
+            {
+                ret = ptrace(arg1, arg2, addr, 0);
+                if (ret >= 0) {
+#if (defined(TARGET_I386) && defined(TARGET_ABI32))
+                    abi_long *p = (abi_long *)((uint64_t)(uint32_t)arg4);
+#else
+                    abi_long *p = (abi_long *)((uint64_t)arg4);
+#endif
+                    *p = ret;
+                    return ret;
+                }
+                return get_errno(ret);
+                break;
+            }
+            case PTRACE_POKETEXT:
+            case PTRACE_POKEDATA:
+            {
+                void *page = (void *)((unsigned long)arg3 & TARGET_PAGE_MASK);
+                if (!ts->ptrace_poke_page) {
+                    ts->ptrace_poke_page = page;
+                } else if (ts->ptrace_poke_page != page) {
+                    ts->ptrace_poke_page = (void *)-1;
+                }
+                unsigned long da;
+
+#if (defined(TARGET_I386) && defined(TARGET_ABI32))
+                /*
+                 * PTRACE_POKETEXT, PTRACE_POKEDATA:
+                 *   Copy the word data to the address addr in the
+                 *   tracee's memory.
+                 *
+                 * I386:
+                 *   __WORDSIZE 32
+                 *
+                 * LA64:
+                 *   __WORDSIZE 64
+                 */
+                da = ptrace(PTRACE_PEEKDATA, arg2, addr, 0);
+                da = (da & 0xffffffff00000000) | (arg4 & 0xffffffff);
+#else
+                da = arg4;
+#endif
+
+#ifdef CONFIG_PTRACE_DEBUG
+                fprintf(stderr, "[PTRACE_DEBUG] da %lx\n", da);
+#endif
+                return get_errno(ptrace(arg1, arg2, addr, da));
+                break;
+            }
+            case PTRACE_CONT:
+                if (ts->ptrace_poke_page) {
+                    if (sigqueue(arg2, LA_HOOK_PTRACE, sig_value) != 0) {
+#ifdef CONFIG_PTRACE_DEBUG
+                        fprintf(stderr, "[PTRACE_DEBUG] sigqueue error!\n");
+#endif
+                    }
+                    ts->ptrace_poke_page = NULL;
+                }
+                break;
+            case PTRACE_ATTACH:
+                ts->ptrace_poke_page = NULL;
+                break;
+            case PTRACE_DETACH:
+                if (ts->ptrace_poke_page) {
+                    if (sigqueue(arg2, LA_HOOK_PTRACE, sig_value) != 0) {
+#ifdef CONFIG_PTRACE_DEBUG
+                        fprintf(stderr, "[PTRACE_DEBUG] sigqueue error!\n");
+#endif
+                    }
+                    ts->ptrace_poke_page = NULL;
+                }
+#ifdef TARGET_X86_64
+                {
+                    GuestSeccompTraceState trace;
+
+                    if (read_seccomp_trace(arg2, ts, &trace)) {
+                        trace.enabled = false;
+                        trace.pending = false;
+                        write_seccomp_trace(arg2, ts, &trace);
+                    }
+                }
+#endif
+                break;
+            default:
+                break;
+            }
+
+            return get_errno(ptrace(arg1, arg2, addr, arg4));
+        }
+#endif
+    case TARGET_NR_times:
+        {
+            struct target_tms *tmsp;
+            struct tms tms;
+            ret = get_errno(times(&tms));
+            if (arg1) {
+                tmsp = lock_user(VERIFY_WRITE, arg1, sizeof(struct target_tms), 0);
+                if (!tmsp)
+                    return -TARGET_EFAULT;
+                tmsp->tms_utime = tswapal(host_to_target_clock_t(tms.tms_utime));
+                tmsp->tms_stime = tswapal(host_to_target_clock_t(tms.tms_stime));
+                tmsp->tms_cutime = tswapal(host_to_target_clock_t(tms.tms_cutime));
+                tmsp->tms_cstime = tswapal(host_to_target_clock_t(tms.tms_cstime));
+            }
+            if (!is_error(ret))
+                ret = host_to_target_clock_t(ret);
+        }
+        return ret;
+    case TARGET_NR_acct:
+        if (arg1 == 0) {
+            ret = get_errno(acct(NULL));
+        } else {
+            if (!(p = lock_user_string(arg1))) {
+                return -TARGET_EFAULT;
+            }
+            ret = get_errno(acct(path(p)));
+            unlock_user(p, arg1, 0);
+        }
+        return ret;
+#ifdef TARGET_NR_umount2
+    case TARGET_NR_umount2:
+        if (!(p = lock_user_string(arg1)))
+            return -TARGET_EFAULT;
+        ret = get_errno(umount2(p, arg2));
+        unlock_user(p, arg1, 0);
+        return ret;
+#endif
+    case TARGET_NR_ioctl:
+        ret = do_ioctl(arg1, arg2, arg3);
+#ifdef CONFIG_LATX_DEBUG
+        if (ret) {
+            qemu_log_mask(LAT_LOG_SYSCALL,
+                    "[LATX_SYSCALL] do_ioctl error fd " TARGET_FMT_ld
+                    " cmd 0x" TARGET_FMT_lx " ret " TARGET_FMT_ld "\n",
+                    arg1, arg2, ret);
+        }
+#endif
+        return ret;
+#ifdef TARGET_NR_fcntl
+    case TARGET_NR_fcntl:
+        return do_fcntl(cpu_env, arg1, arg2, arg3);
+#endif
+    case TARGET_NR_setpgid:
+        return get_errno(setpgid(arg1, arg2));
+    case TARGET_NR_umask:
+        return get_errno(umask(arg1));
+    case TARGET_NR_chroot:
+        if (!(p = lock_user_string(arg1)))
+            return -TARGET_EFAULT;
+        ret = get_errno(chroot(p));
+        unlock_user(p, arg1, 0);
+        return ret;
+#ifdef TARGET_NR_dup2
+    case TARGET_NR_dup2:
+#ifdef TARGET_I386
+        if (arg1 != arg2) {
+            ret = guest_exe_identity_relocate(cpu_env, arg2);
+            if (ret) {
+                return ret;
+            }
+        }
+#endif
+        ret = get_errno(dup2(arg1, arg2));
+        if (ret >= 0) {
+            fd_trans_dup(arg1, arg2);
+        }
+        return ret;
+#endif
+#if defined(CONFIG_DUP3) && defined(TARGET_NR_dup3)
+    case TARGET_NR_dup3:
+    {
+        int host_flags;
+
+        if ((arg3 & ~TARGET_O_CLOEXEC) != 0) {
+            return -EINVAL;
+        }
+        host_flags = target_to_host_bitmask(arg3, fcntl_flags_tbl);
+#ifdef TARGET_I386
+        if (arg1 != arg2) {
+            ret = guest_exe_identity_relocate(cpu_env, arg2);
+            if (ret) {
+                return ret;
+            }
+        }
+#endif
+        ret = get_errno(dup3(arg1, arg2, host_flags));
+        if (ret >= 0) {
+            fd_trans_dup(arg1, arg2);
+        }
+        return ret;
+    }
+#endif
+#ifdef TARGET_NR_getppid /* not on alpha */
+    case TARGET_NR_getppid:
+        return get_errno(getppid());
+#endif
+#ifdef TARGET_NR_getpgrp
+    case TARGET_NR_getpgrp:
+        return get_errno(getpgrp());
+#endif
+    case TARGET_NR_setsid:
+        return get_errno(setsid());
+#ifdef TARGET_NR_sigaction
+    case TARGET_NR_sigaction:
+        {
+#if defined(TARGET_ALPHA)
+            struct target_sigaction act, oact, *pact = 0;
+            struct target_old_sigaction *old_act;
+            if (arg2) {
+                if (!lock_user_struct(VERIFY_READ, old_act, arg2, 1))
+                    return -TARGET_EFAULT;
+                act._sa_handler = old_act->_sa_handler;
+                target_siginitset(&act.sa_mask, old_act->sa_mask);
+                act.sa_flags = old_act->sa_flags;
+                act.sa_restorer = 0;
+                unlock_user_struct(old_act, arg2, 0);
+                pact = &act;
+            }
+            ret = get_errno(do_sigaction(arg1, pact, &oact));
+            if (!is_error(ret) && arg3) {
+                if (!lock_user_struct(VERIFY_WRITE, old_act, arg3, 0))
+                    return -TARGET_EFAULT;
+                old_act->_sa_handler = oact._sa_handler;
+                old_act->sa_mask = oact.sa_mask.sig[0];
+                old_act->sa_flags = oact.sa_flags;
+                unlock_user_struct(old_act, arg3, 1);
+            }
+#elif defined(TARGET_MIPS)
+	    struct target_sigaction act, oact, *pact, *old_act;
+
+	    if (arg2) {
+                if (!lock_user_struct(VERIFY_READ, old_act, arg2, 1))
+                    return -TARGET_EFAULT;
+		act._sa_handler = old_act->_sa_handler;
+		target_siginitset(&act.sa_mask, old_act->sa_mask.sig[0]);
+		act.sa_flags = old_act->sa_flags;
+		unlock_user_struct(old_act, arg2, 0);
+		pact = &act;
+	    } else {
+		pact = NULL;
+	    }
+
+	    ret = get_errno(do_sigaction(arg1, pact, &oact));
+
+	    if (!is_error(ret) && arg3) {
+                if (!lock_user_struct(VERIFY_WRITE, old_act, arg3, 0))
+                    return -TARGET_EFAULT;
+		old_act->_sa_handler = oact._sa_handler;
+		old_act->sa_flags = oact.sa_flags;
+		old_act->sa_mask.sig[0] = oact.sa_mask.sig[0];
+		old_act->sa_mask.sig[1] = 0;
+		old_act->sa_mask.sig[2] = 0;
+		old_act->sa_mask.sig[3] = 0;
+		unlock_user_struct(old_act, arg3, 1);
+	    }
+#else
+            struct target_old_sigaction *old_act;
+            struct target_sigaction act, oact, *pact;
+            if (arg2) {
+                if (!lock_user_struct(VERIFY_READ, old_act, arg2, 1))
+                    return -TARGET_EFAULT;
+                act._sa_handler = old_act->_sa_handler;
+                target_siginitset(&act.sa_mask, old_act->sa_mask);
+                act.sa_flags = old_act->sa_flags;
+                act.sa_restorer = old_act->sa_restorer;
+#ifdef TARGET_ARCH_HAS_KA_RESTORER
+                act.ka_restorer = 0;
+#endif
+                unlock_user_struct(old_act, arg2, 0);
+                pact = &act;
+            } else {
+                pact = NULL;
+            }
+            ret = get_errno(do_sigaction(arg1, pact, &oact));
+            if (!is_error(ret) && arg3) {
+                if (!lock_user_struct(VERIFY_WRITE, old_act, arg3, 0))
+                    return -TARGET_EFAULT;
+                old_act->_sa_handler = oact._sa_handler;
+                old_act->sa_mask = oact.sa_mask.sig[0];
+                old_act->sa_flags = oact.sa_flags;
+                old_act->sa_restorer = oact.sa_restorer;
+                unlock_user_struct(old_act, arg3, 1);
+            }
+#endif
+        }
+        return ret;
+#endif
+    case TARGET_NR_rt_sigaction:
+        {
+#if defined(TARGET_ALPHA)
+            /* For Alpha and SPARC this is a 5 argument syscall, with
+             * a 'restorer' parameter which must be copied into the
+             * sa_restorer field of the sigaction struct.
+             * For Alpha that 'restorer' is arg5; for SPARC it is arg4,
+             * and arg5 is the sigsetsize.
+             * Alpha also has a separate rt_sigaction struct that it uses
+             * here; SPARC uses the usual sigaction struct.
+             */
+            struct target_rt_sigaction *rt_act;
+            struct target_sigaction act, oact, *pact = 0;
+
+            if (arg4 != sizeof(target_sigset_t)) {
+                return -TARGET_EINVAL;
+            }
+            if (arg2) {
+                if (!lock_user_struct(VERIFY_READ, rt_act, arg2, 1))
+                    return -TARGET_EFAULT;
+                act._sa_handler = rt_act->_sa_handler;
+                act.sa_mask = rt_act->sa_mask;
+                act.sa_flags = rt_act->sa_flags;
+                act.sa_restorer = arg5;
+                unlock_user_struct(rt_act, arg2, 0);
+                pact = &act;
+            }
+            ret = get_errno(do_sigaction(arg1, pact, &oact));
+            if (!is_error(ret) && arg3) {
+                if (!lock_user_struct(VERIFY_WRITE, rt_act, arg3, 0))
+                    return -TARGET_EFAULT;
+                rt_act->_sa_handler = oact._sa_handler;
+                rt_act->sa_mask = oact.sa_mask;
+                rt_act->sa_flags = oact.sa_flags;
+                unlock_user_struct(rt_act, arg3, 1);
+            }
+#else
+#ifdef TARGET_SPARC
+            target_ulong restorer = arg4;
+            target_ulong sigsetsize = arg5;
+#else
+            target_ulong sigsetsize = arg4;
+#endif
+            struct target_sigaction *act;
+            struct target_sigaction *oact;
+
+            if (sigsetsize != sizeof(target_sigset_t)) {
+                return -TARGET_EINVAL;
+            }
+            if (arg2) {
+                if (!lock_user_struct(VERIFY_READ, act, arg2, 1)) {
+                    return -TARGET_EFAULT;
+                }
+#ifdef TARGET_ARCH_HAS_KA_RESTORER
+                act->ka_restorer = restorer;
+#endif
+            } else {
+                act = NULL;
+            }
+            if (arg3) {
+                if (!lock_user_struct(VERIFY_WRITE, oact, arg3, 0)) {
+                    ret = -TARGET_EFAULT;
+                    goto rt_sigaction_fail;
+                }
+            } else
+                oact = NULL;
+            ret = get_errno(do_sigaction(arg1, act, oact));
+	rt_sigaction_fail:
+            if (act)
+                unlock_user_struct(act, arg2, 0);
+            if (oact)
+                unlock_user_struct(oact, arg3, 1);
+#endif
+        }
+        return ret;
+#ifdef TARGET_NR_sgetmask /* not on alpha */
+    case TARGET_NR_sgetmask:
+        {
+            sigset_t cur_set;
+            abi_ulong target_set;
+            ret = do_sigprocmask(0, NULL, &cur_set);
+            if (!ret) {
+                host_to_target_old_sigset(&target_set, &cur_set);
+                ret = target_set;
+            }
+        }
+        return ret;
+#endif
+#ifdef TARGET_NR_ssetmask /* not on alpha */
+    case TARGET_NR_ssetmask:
+        {
+            sigset_t set, oset;
+            abi_ulong target_set = arg1;
+            target_to_host_old_sigset(&set, &target_set);
+            ret = do_sigprocmask(SIG_SETMASK, &set, &oset);
+            if (!ret) {
+                host_to_target_old_sigset(&target_set, &oset);
+                ret = target_set;
+            }
+        }
+        return ret;
+#endif
+#ifdef TARGET_NR_sigprocmask
+    case TARGET_NR_sigprocmask:
+        {
+#if defined(TARGET_ALPHA)
+            sigset_t set, oldset;
+            abi_ulong mask;
+            int how;
+
+            switch (arg1) {
+            case TARGET_SIG_BLOCK:
+                how = SIG_BLOCK;
+                break;
+            case TARGET_SIG_UNBLOCK:
+                how = SIG_UNBLOCK;
+                break;
+            case TARGET_SIG_SETMASK:
+                how = SIG_SETMASK;
+                break;
+            default:
+                return -TARGET_EINVAL;
+            }
+            mask = arg2;
+            target_to_host_old_sigset(&set, &mask);
+
+            ret = do_sigprocmask(how, &set, &oldset);
+            if (!is_error(ret)) {
+                host_to_target_old_sigset(&mask, &oldset);
+                ret = mask;
+                ((CPUAlphaState *)cpu_env)->ir[IR_V0] = 0; /* force no error */
+            }
+#else
+            sigset_t set, oldset, *set_ptr;
+            int how;
+
+            if (arg2) {
+                switch (arg1) {
+                case TARGET_SIG_BLOCK:
+                    how = SIG_BLOCK;
+                    break;
+                case TARGET_SIG_UNBLOCK:
+                    how = SIG_UNBLOCK;
+                    break;
+                case TARGET_SIG_SETMASK:
+                    how = SIG_SETMASK;
+                    break;
+                default:
+                    return -TARGET_EINVAL;
+                }
+                if (!(p = lock_user(VERIFY_READ, arg2, sizeof(target_sigset_t), 1)))
+                    return -TARGET_EFAULT;
+                target_to_host_old_sigset(&set, p);
+                unlock_user(p, arg2, 0);
+                set_ptr = &set;
+            } else {
+                how = 0;
+                set_ptr = NULL;
+            }
+            ret = do_sigprocmask(how, set_ptr, &oldset);
+            if (!is_error(ret) && arg3) {
+                if (!(p = lock_user(VERIFY_WRITE, arg3, sizeof(target_sigset_t), 0)))
+                    return -TARGET_EFAULT;
+                host_to_target_old_sigset(p, &oldset);
+                unlock_user(p, arg3, sizeof(target_sigset_t));
+            }
+#endif
+        }
+        return ret;
+#endif
+    case TARGET_NR_rt_sigprocmask:
+        {
+            int how = arg1;
+            sigset_t set, oldset, *set_ptr;
+
+            if (arg4 != sizeof(target_sigset_t)) {
+                return -TARGET_EINVAL;
+            }
+
+            if (arg2) {
+                switch(how) {
+                case TARGET_SIG_BLOCK:
+                    how = SIG_BLOCK;
+                    break;
+                case TARGET_SIG_UNBLOCK:
+                    how = SIG_UNBLOCK;
+                    break;
+                case TARGET_SIG_SETMASK:
+                    how = SIG_SETMASK;
+                    break;
+                default:
+                    return -TARGET_EINVAL;
+                }
+                if (!(p = lock_user(VERIFY_READ, arg2, sizeof(target_sigset_t), 1)))
+                    return -TARGET_EFAULT;
+                target_to_host_sigset(&set, p);
+                unlock_user(p, arg2, 0);
+                set_ptr = &set;
+            } else {
+                how = 0;
+                set_ptr = NULL;
+            }
+            ret = do_sigprocmask(how, set_ptr, &oldset);
+            if (!is_error(ret) && arg3) {
+                if (!(p = lock_user(VERIFY_WRITE, arg3, sizeof(target_sigset_t), 0)))
+                    return -TARGET_EFAULT;
+                host_to_target_sigset(p, &oldset);
+                unlock_user(p, arg3, sizeof(target_sigset_t));
+            }
+        }
+        return ret;
+#ifdef TARGET_NR_sigpending
+    case TARGET_NR_sigpending:
+        {
+            sigset_t set;
+            ret = get_errno(sigpending(&set));
+            if (!is_error(ret)) {
+                if (!(p = lock_user(VERIFY_WRITE, arg1, sizeof(target_sigset_t), 0)))
+                    return -TARGET_EFAULT;
+                host_to_target_old_sigset(p, &set);
+                target_sigpending(p);
+                unlock_user(p, arg1, sizeof(target_sigset_t));
+            }
+        }
+        return ret;
+#endif
+    case TARGET_NR_rt_sigpending:
+        {
+            sigset_t set;
+
+            /* Yes, this check is >, not != like most. We follow the kernel's
+             * logic and it does it like this because it implements
+             * NR_sigpending through the same code path, and in that case
+             * the old_sigset_t is smaller in size.
+             */
+            if (arg2 > sizeof(target_sigset_t)) {
+                return -TARGET_EINVAL;
+            }
+
+            ret = get_errno(sigpending(&set));
+            if (!is_error(ret)) {
+                if (!(p = lock_user(VERIFY_WRITE, arg1, sizeof(target_sigset_t), 0)))
+                    return -TARGET_EFAULT;
+                host_to_target_sigset(p, &set);
+                target_sigpending(p);
+                unlock_user(p, arg1, sizeof(target_sigset_t));
+            }
+        }
+        return ret;
+#ifdef TARGET_NR_sigsuspend
+    case TARGET_NR_sigsuspend:
+        {
+            sigset_t *set;
+
+#if defined(TARGET_ALPHA)
+            TaskState *ts = cpu->opaque;
+            abi_ulong mask = arg1;
+            set = &ts->sigsuspend_mask;
+            target_to_host_old_sigset(set, &mask);
+#else
+            ret = process_sigsuspend_mask(&set, arg1, sizeof(target_sigset_t));
+            if (ret != 0) {
+                return ret;
+            }
+#endif
+            ret = get_errno(safe_rt_sigsuspend(set, SIGSET_T_SIZE));
+            finish_sigsuspend_mask(ret);
+        }
+        return ret;
+#endif
+    case TARGET_NR_rt_sigsuspend:
+        {
+            sigset_t *set;
+            ret = process_sigsuspend_mask(&set, arg1, arg2);
+            if (ret != 0) {
+                return ret;
+            }
+            ret = get_errno(safe_rt_sigsuspend(set, SIGSET_T_SIZE));
+            finish_sigsuspend_mask(ret);
+        }
+        return ret;
+#ifdef TARGET_NR_rt_sigtimedwait
+    case TARGET_NR_rt_sigtimedwait:
+        {
+            sigset_t set;
+            struct timespec uts, *puts;
+            siginfo_t uinfo;
+
+            if (arg4 != sizeof(target_sigset_t)) {
+                return -TARGET_EINVAL;
+            }
+
+            if (!(p = lock_user(VERIFY_READ, arg1, sizeof(target_sigset_t), 1)))
+                return -TARGET_EFAULT;
+            target_to_host_sigset(&set, p);
+            unlock_user(p, arg1, 0);
+            if (arg3) {
+                puts = &uts;
+                if (target_to_host_timespec(puts, arg3)) {
+                    return -TARGET_EFAULT;
+                }
+            } else {
+                puts = NULL;
+            }
+            ret = get_errno(safe_rt_sigtimedwait(&set, &uinfo, puts,
+                                                 SIGSET_T_SIZE));
+            if (!is_error(ret)) {
+                if (arg2) {
+                    p = lock_user(VERIFY_WRITE, arg2, sizeof(target_siginfo_t),
+                                  0);
+                    if (!p) {
+                        return -TARGET_EFAULT;
+                    }
+                    host_to_target_siginfo(p, &uinfo);
+                    unlock_user(p, arg2, sizeof(target_siginfo_t));
+                }
+                ret = host_to_target_signal(ret);
+            }
+        }
+        return ret;
+#endif
+#ifdef TARGET_NR_rt_sigtimedwait_time64
+    case TARGET_NR_rt_sigtimedwait_time64:
+        {
+            sigset_t set;
+            struct timespec uts, *puts;
+            siginfo_t uinfo;
+
+            if (arg4 != sizeof(target_sigset_t)) {
+                return -TARGET_EINVAL;
+            }
+
+            p = lock_user(VERIFY_READ, arg1, sizeof(target_sigset_t), 1);
+            if (!p) {
+                return -TARGET_EFAULT;
+            }
+            target_to_host_sigset(&set, p);
+            unlock_user(p, arg1, 0);
+            if (arg3) {
+                puts = &uts;
+                if (target_to_host_timespec64(puts, arg3)) {
+                    return -TARGET_EFAULT;
+                }
+            } else {
+                puts = NULL;
+            }
+            ret = get_errno(safe_rt_sigtimedwait(&set, &uinfo, puts,
+                                                 SIGSET_T_SIZE));
+            if (!is_error(ret)) {
+                if (arg2) {
+                    p = lock_user(VERIFY_WRITE, arg2,
+                                  sizeof(target_siginfo_t), 0);
+                    if (!p) {
+                        return -TARGET_EFAULT;
+                    }
+                    host_to_target_siginfo(p, &uinfo);
+                    unlock_user(p, arg2, sizeof(target_siginfo_t));
+                }
+                ret = host_to_target_signal(ret);
+            }
+        }
+        return ret;
+#endif
+    case TARGET_NR_rt_sigqueueinfo:
+        {
+            siginfo_t uinfo;
+
+            p = lock_user(VERIFY_READ, arg3, sizeof(target_siginfo_t), 1);
+            if (!p) {
+                return -TARGET_EFAULT;
+            }
+            target_to_host_siginfo(&uinfo, p);
+            unlock_user(p, arg3, 0);
+            ret = get_errno(sys_rt_sigqueueinfo(arg1, target_to_host_signal(arg2), &uinfo));
+        }
+        return ret;
+    case TARGET_NR_rt_tgsigqueueinfo:
+        {
+            int host_sig = target_to_host_signal(arg3);
+            siginfo_t uinfo;
+
+            p = lock_user(VERIFY_READ, arg4, sizeof(target_siginfo_t), 1);
+            if (!p) {
+                return -TARGET_EFAULT;
+            }
+            target_to_host_siginfo(&uinfo, p);
+            unlock_user(p, arg4, 0);
+            if (arg1 == getpid() && arg2 == sys_gettid() &&
+                (host_sig == SIGSEGV || host_sig == SIGBUS) &&
+                uinfo.si_code > 0) {
+                guest_fault_signal_requeue = host_sig;
+            }
+            ret = get_errno(sys_rt_tgsigqueueinfo(arg1, arg2, host_sig,
+                                                  &uinfo));
+            guest_fault_signal_requeue = 0;
+        }
+        return ret;
+#ifdef TARGET_NR_sigreturn
+    case TARGET_NR_sigreturn:
+        if (block_signals()) {
+            return -TARGET_ERESTARTSYS;
+        }
+        return do_sigreturn(cpu_env);
+#endif
+    case TARGET_NR_rt_sigreturn:
+        if (block_signals()) {
+            return -TARGET_ERESTARTSYS;
+        }
+        return do_rt_sigreturn(cpu_env);
+    case TARGET_NR_sethostname:
+        if (!(p = lock_user_string(arg1)))
+            return -TARGET_EFAULT;
+        ret = get_errno(sethostname(p, arg2));
+        unlock_user(p, arg1, 0);
+        return ret;
+#ifdef TARGET_NR_setrlimit
+#ifdef TARGET_HPPA
+#define STACK_GROWS_DOWN 0
+#endif /* TARGET_HPPA */
+#ifndef STACK_GROWS_DOWN
+#define STACK_GROWS_DOWN 1
+#endif
+    case TARGET_NR_setrlimit:
+        {
+            int resource = target_to_host_resource(arg1);
+            struct target_rlimit *target_rlim;
+            struct rlimit rlim;
+            if (!lock_user_struct(VERIFY_READ, target_rlim, arg2, 1))
+                return -TARGET_EFAULT;
+            rlim.rlim_cur = target_to_host_rlim(target_rlim->rlim_cur);
+            rlim.rlim_max = target_to_host_rlim(target_rlim->rlim_max);
+            unlock_user_struct(target_rlim, arg2, 0);
+            /*
+             * If we just passed through resource limit settings for memory then
+             * they would also apply to QEMU's own allocations, and QEMU will
+             * crash or hang or die if its allocations fail. Ideally we would
+             * track the guest allocations in QEMU and apply the limits ourselves.
+             * For now, just tell the guest the call succeeded but don't actually
+             * limit anything.
+             */
+            if (resource != RLIMIT_AS &&
+                resource != RLIMIT_DATA &&
+                resource != RLIMIT_STACK) {
+                return get_errno(setrlimit(resource, &rlim));
+            } else {
+                if (resource == RLIMIT_STACK) {
+                    if (rlim.rlim_cur > real_guest_stack_size) {
+#if defined(CONFIG_LATX_DEBUG)
+                        fprintf(stderr, "WARNING: target stack size exceed 128m\n");
+#endif
+                        rlim.rlim_cur = real_guest_stack_size;
+                        /*return -TARGET_EFAULT;*/
+                    }
+                    TaskState *ts = cpu->opaque;
+                    if (rlim.rlim_cur < vir_guest_stack_size) {
+                        /* stack shrink is not emulated */
+                        return 0;
+                    }
+                    if (STACK_GROWS_DOWN) {
+                        target_mprotect(ts->info->stack_limit - (rlim.rlim_cur -
+                            vir_guest_stack_size), rlim.rlim_cur - vir_guest_stack_size,
+                            PROT_READ | PROT_WRITE);
+                        ts->info->stack_limit -= rlim.rlim_cur - vir_guest_stack_size;
+                    } else {
+                        target_mprotect(ts->info->stack_limit + (rlim.rlim_cur -
+                            vir_guest_stack_size), rlim.rlim_cur - vir_guest_stack_size,
+                            PROT_READ | PROT_WRITE);
+                        ts->info->stack_limit += rlim.rlim_cur - vir_guest_stack_size;
+                    }
+                    vir_guest_stack_size = rlim.rlim_cur;
+                }
+                if (resource == RLIMIT_AS || resource == RLIMIT_DATA) {
+                    vir_rlimit_as_old = vir_rlimit_as;
+                    vir_rlimit_as = rlim.rlim_cur;
+                    if (vir_rlimit_as != RLIM_INFINITY) {
+                        vir_rlimit_as_acc = 0;
+                    }
+                }
+                return 0;
+            }
+        }
+#endif
+#ifdef TARGET_NR_getrlimit
+    case TARGET_NR_getrlimit:
+        {
+            int resource = target_to_host_resource(arg1);
+            struct target_rlimit *target_rlim;
+            struct rlimit rlim;
+
+            ret = get_errno(getrlimit(resource, &rlim));
+            if (!is_error(ret)) {
+                if (!lock_user_struct(VERIFY_WRITE, target_rlim, arg2, 0))
+                    return -TARGET_EFAULT;
+                target_rlim->rlim_cur = host_to_target_rlim(rlim.rlim_cur);
+                target_rlim->rlim_max = host_to_target_rlim(rlim.rlim_max);
+                if (resource == RLIMIT_AS || resource == RLIMIT_DATA) {
+                    target_rlim->rlim_cur = tswap64(vir_rlimit_as);
+                } else if (resource == RLIMIT_STACK) {
+                    target_rlim->rlim_cur = tswap64(vir_guest_stack_size);
+                }
+                unlock_user_struct(target_rlim, arg2, 1);
+            }
+        }
+        return ret;
+#endif
+    case TARGET_NR_getrusage:
+        {
+            struct rusage rusage;
+            ret = get_errno(getrusage(arg1, &rusage));
+            if (!is_error(ret)) {
+                ret = host_to_target_rusage(arg2, &rusage);
+            }
+        }
+        return ret;
+#if defined(TARGET_NR_gettimeofday)
+    case TARGET_NR_gettimeofday:
+        {
+            struct timeval tv;
+            struct timezone tz;
+
+            ret = get_errno(gettimeofday(&tv, &tz));
+            if (!is_error(ret)) {
+                if (arg1 && copy_to_user_timeval(arg1, &tv)) {
+                    return -TARGET_EFAULT;
+                }
+                if (arg2 && copy_to_user_timezone(arg2, &tz)) {
+                    return -TARGET_EFAULT;
+                }
+            }
+        }
+        return ret;
+#endif
+#if defined(TARGET_NR_settimeofday)
+    case TARGET_NR_settimeofday:
+        {
+            struct timeval tv, *ptv = NULL;
+            struct timezone tz, *ptz = NULL;
+
+            if (arg1) {
+                if (copy_from_user_timeval(&tv, arg1)) {
+                    return -TARGET_EFAULT;
+                }
+                ptv = &tv;
+            }
+
+            if (arg2) {
+                if (copy_from_user_timezone(&tz, arg2)) {
+                    return -TARGET_EFAULT;
+                }
+                ptz = &tz;
+            }
+
+            return get_errno(settimeofday(ptv, ptz));
+        }
+#endif
+#if defined(TARGET_NR_select)
+    case TARGET_NR_select:
+#if defined(TARGET_WANT_NI_OLD_SELECT)
+        /* some architectures used to have old_select here
+         * but now ENOSYS it.
+         */
+        ret = -TARGET_ENOSYS;
+#elif defined(TARGET_WANT_OLD_SYS_SELECT)
+        ret = do_old_select(arg1);
+#else
+        ret = do_select(arg1, arg2, arg3, arg4, arg5);
+#endif
+        return ret;
+#endif
+#ifdef TARGET_NR_pselect6
+    case TARGET_NR_pselect6:
+        return do_pselect6(arg1, arg2, arg3, arg4, arg5, arg6, false);
+#endif
+#ifdef TARGET_NR_pselect6_time64
+    case TARGET_NR_pselect6_time64:
+        return do_pselect6(arg1, arg2, arg3, arg4, arg5, arg6, true);
+#endif
+#ifdef TARGET_NR_symlink
+    case TARGET_NR_symlink:
+        {
+            void *p2;
+            p = lock_user_string(arg1);
+            p2 = lock_user_string(arg2);
+            if (!p || !p2)
+                ret = -TARGET_EFAULT;
+            else
+                ret = get_errno(symlink(p, p2));
+            unlock_user(p2, arg2, 0);
+            unlock_user(p, arg1, 0);
+        }
+        return ret;
+#endif
+#if defined(TARGET_NR_symlinkat)
+    case TARGET_NR_symlinkat:
+        {
+            void *p2;
+            p  = lock_user_string(arg1);
+            p2 = lock_user_string(arg3);
+            if (!p || !p2)
+                ret = -TARGET_EFAULT;
+            else
+                ret = get_errno(symlinkat(p, arg2, p2));
+            unlock_user(p2, arg3, 0);
+            unlock_user(p, arg1, 0);
+        }
+        return ret;
+#endif
+#ifdef TARGET_NR_readlink
+    case TARGET_NR_readlink:
+        {
+            void *p2 = NULL;
+
+            p = lock_user_string(arg1);
+            if (!p) {
+                ret = -TARGET_EFAULT;
+            } else if (arg3 <= 0) {
+                ret = -TARGET_EINVAL;
+            } else {
+                p2 = lock_user(VERIFY_WRITE, arg2, arg3, 0);
+                if (!p2) {
+                    ret = -TARGET_EFAULT;
+                } else if (is_proc_myself((const char *)p, "exe")) {
+                    char real[PATH_MAX];
+                    const char *temp = guest_self_exe_link_path(
+                        cpu_env, real, sizeof(real));
+
+                    /* Return value is # of bytes written to the buffer. */
+                    if (temp == NULL) {
+                        ret = get_errno(-1);
+                    } else {
+                        ret = MIN(strlen(real), arg3);
+                        /* readlink does not NUL terminate the string. */
+                        memcpy(p2, real, ret);
+                    }
+                } else {
+                    ret = get_errno(readlink(path(p), p2, arg3));
+                }
+            }
+            unlock_user(p2, arg2, ret > 0 ? ret : 0);
+            unlock_user(p, arg1, 0);
+        }
+        return ret;
+#endif
+#if defined(TARGET_NR_readlinkat)
+    case TARGET_NR_readlinkat:
+        {
+            void *p2 = NULL;
+
+            p  = lock_user_string(arg2);
+            if (!p) {
+                ret = -TARGET_EFAULT;
+            } else if (arg4 <= 0) {
+                ret = -TARGET_EINVAL;
+            } else {
+                p2 = lock_user(VERIFY_WRITE, arg3, arg4, 0);
+                if (!p2) {
+                    ret = -TARGET_EFAULT;
+                } else if (is_proc_myself((const char *)p, "exe")) {
+                    char real[PATH_MAX];
+                    const char *temp = guest_self_exe_link_path(
+                        cpu_env, real, sizeof(real));
+
+                    if (temp == NULL) {
+                        ret = get_errno(-1);
+                    } else {
+                        ret = MIN(strlen(temp), arg4);
+                        memcpy(p2, temp, ret);
+                    }
+                } else {
+                    ret = get_errno(readlinkat(arg1, path(p), p2, arg4));
+                }
+            }
+            unlock_user(p2, arg3, ret > 0 ? ret : 0);
+            unlock_user(p, arg2, 0);
+        }
+        return ret;
+#endif
+#ifdef TARGET_NR_swapon
+    case TARGET_NR_swapon:
+        if (!(p = lock_user_string(arg1)))
+            return -TARGET_EFAULT;
+        ret = get_errno(swapon(p, arg2));
+        unlock_user(p, arg1, 0);
+        return ret;
+#endif
+    case TARGET_NR_reboot:
+        if (arg3 == LINUX_REBOOT_CMD_RESTART2) {
+           /* arg4 must be ignored in all other cases */
+           p = lock_user_string(arg4);
+           if (!p) {
+               return -TARGET_EFAULT;
+           }
+           ret = get_errno(reboot(arg1, arg2, arg3, p));
+           unlock_user(p, arg4, 0);
+        } else {
+           ret = get_errno(reboot(arg1, arg2, arg3, NULL));
+        }
+        return ret;
+#ifdef TARGET_NR_mmap
+    case TARGET_NR_mmap:
+#if (defined(TARGET_I386) && defined(TARGET_ABI32)) || \
+    (defined(TARGET_ARM) && defined(TARGET_ABI32)) || \
+    defined(TARGET_M68K) || defined(TARGET_CRIS) || defined(TARGET_MICROBLAZE) \
+    || defined(TARGET_S390X)
+        {
+            abi_ulong *v;
+            abi_ulong v1, v2, v3, v4, v5, v6;
+            if (!(v = lock_user(VERIFY_READ, arg1, 6 * sizeof(abi_ulong), 1)))
+                return -TARGET_EFAULT;
+            v1 = tswapal(v[0]);
+            v2 = tswapal(v[1]);
+            v3 = tswapal(v[2]);
+            v4 = tswapal(v[3]);
+            v5 = tswapal(v[4]);
+            v6 = tswapal(v[5]);
+            unlock_user(v, arg1, 0);
+#ifdef TARGET_I386
+            mmap_lock();
+            ret = guest_mdwe_mmap(cpu, v2, v3);
+            if (ret) {
+                mmap_unlock();
+                return ret;
+            }
+#endif
+            ret = get_errno(target_mmap(v1, v2, v3,
+                                        target_to_host_bitmask(v4, mmap_flags_tbl),
+                                        v5, v6, 1));
+#ifdef TARGET_I386
+            mmap_unlock();
+#if defined(CONFIG_LATX) && defined(TARGET_X86_64)
+            latc_aot_v2_drain_mmaps();
+#endif
+#endif
+        }
+#else
+
+        if (!(arg4 & TARGET_MAP_ANONYMOUS) && (arg4 & TARGET_MAP_SHARED_VALIDATE)) {
+            unsigned long flags_mask = LEGACY_MAP_MASK;
+#ifdef TARGET_X86_64
+            flags_mask |= X86_64_MAP_32BIT;
+#endif
+            if (arg4 & ~flags_mask) {
+                return -EOPNOTSUPP;
+            }
+        }
+
+#ifdef TARGET_I386
+        mmap_lock();
+        ret = guest_mdwe_mmap(cpu, arg2, arg3);
+        if (ret) {
+            mmap_unlock();
+            return ret;
+        }
+#endif
+        /* mmap pointers are always untagged */
+        ret = get_errno(target_mmap(arg1, arg2, arg3,
+                                    target_to_host_bitmask(arg4, mmap_flags_tbl),
+                                    arg5,
+                                    arg6, 1));
+#ifdef TARGET_I386
+        mmap_unlock();
+#if defined(CONFIG_LATX) && defined(TARGET_X86_64)
+        latc_aot_v2_drain_mmaps();
+#endif
+#endif
+#endif
+        return ret;
+#endif
+#ifdef TARGET_NR_mmap2
+    case TARGET_NR_mmap2:
+#ifndef MMAP_SHIFT
+#define MMAP_SHIFT 12
+#endif
+#ifdef TARGET_I386
+        mmap_lock();
+        ret = guest_mdwe_mmap(cpu, arg2, arg3);
+        if (ret) {
+            mmap_unlock();
+            return ret;
+        }
+#endif
+        ret = target_mmap(arg1, arg2, arg3,
+                          target_to_host_bitmask(arg4, mmap_flags_tbl),
+                          arg5, (uint64_t)arg6 << MMAP_SHIFT, 1);
+#ifdef TARGET_I386
+        mmap_unlock();
+#if defined(CONFIG_LATX) && defined(TARGET_X86_64)
+        latc_aot_v2_drain_mmaps();
+#endif
+#endif
+        return get_errno(ret);
+#endif
+    case TARGET_NR_munmap:
+        arg1 = cpu_untagged_addr(cpu, arg1);
+        return get_errno(target_munmap(arg1, arg2, 1));
+    case TARGET_NR_mprotect:
+        arg1 = cpu_untagged_addr(cpu, arg1);
+        {
+            TaskState *ts = cpu->opaque;
+            /* Special hack to detect libc making the stack executable.  */
+            if ((arg3 & PROT_GROWSDOWN)
+                && arg1 >= ts->info->stack_limit
+                && arg1 <= ts->info->start_stack) {
+                arg3 &= ~PROT_GROWSDOWN;
+                arg2 = arg2 + arg1 - ts->info->stack_limit;
+                arg1 = ts->info->stack_limit;
+            }
+        }
+#ifdef TARGET_I386
+        mmap_lock();
+        ret = guest_mdwe_mprotect(cpu, arg1, arg2, arg3);
+        if (ret) {
+            mmap_unlock();
+            return ret;
+        }
+#endif
+        ret = get_errno(target_mprotect_guest(arg1, arg2, arg3));
+#ifdef TARGET_I386
+        mmap_unlock();
+#endif
+        return ret;
+#ifdef TARGET_NR_mremap
+    case TARGET_NR_mremap:
+        arg1 = cpu_untagged_addr(cpu, arg1);
+        /* mremap new_addr (arg5) is always untagged */
+        return get_errno(target_mremap(arg1, arg2, arg3, arg4, arg5, 1));
+#endif
+        /* ??? msync/mlock/munlock are broken for softmmu.  */
+#ifdef TARGET_NR_msync
+    case TARGET_NR_msync:
+        {
+            if ((arg1 & ~TARGET_PAGE_MASK) != 0) {
+                return -TARGET_EINVAL;
+            }
+            if (!page_check_range(arg1, arg2, PAGE_VALID))
+                return -TARGET_ENOMEM;
+            return get_errno(target_msync(arg1, arg2, arg3));
+        }
+        return ret;
+#endif
+#ifdef TARGET_NR_mlock
+    case TARGET_NR_mlock:
+    {
+        if (!page_check_range(arg1, arg2, PAGE_VALID))
+            return -TARGET_ENOMEM;
+        return get_errno(mlock(g2h(cpu, arg1), arg2));
+    }
+#endif
+#ifdef TARGET_NR_mlock2
+    case TARGET_NR_mlock2:
+    {
+        if (!page_check_range(arg1, arg2, PAGE_VALID))
+            return -TARGET_ENOMEM;
+        return get_errno(mlock2(g2h(cpu, arg1), arg2, arg3));
+    }
+#endif
+#ifdef TARGET_NR_munlock
+    case TARGET_NR_munlock:
+    {
+        if (!page_check_range(arg1, arg2, PAGE_VALID))
+            return -TARGET_ENOMEM;
+        return get_errno(munlock(g2h(cpu, arg1), arg2));
+    }
+#endif
+#ifdef TARGET_NR_mlockall
+    case TARGET_NR_mlockall:
+    {
+        if (arg1 & ~(TARGET_MCL_CURRENT | TARGET_MCL_FUTURE | TARGET_MCL_ONFAULT)) {
+            return -TARGET_EINVAL;
+        } else {
+            ret = get_errno(mlockall(target_to_host_mlockall_arg(arg1)));
+        }
+    }
+    return ret;
+#endif
+#ifdef TARGET_NR_munlockall
+    case TARGET_NR_munlockall:
+        return get_errno(munlockall());
+#endif
+#ifdef TARGET_NR_truncate
+    case TARGET_NR_truncate:
+        if (!(p = lock_user_string(arg1)))
+            return -TARGET_EFAULT;
+        ret = get_errno(truncate(p, arg2));
+        unlock_user(p, arg1, 0);
+        return ret;
+#endif
+#ifdef TARGET_NR_ftruncate
+    case TARGET_NR_ftruncate:
+        return get_errno(ftruncate(arg1, arg2));
+#endif
+    case TARGET_NR_fchmod:
+        return get_errno(fchmod(arg1, arg2));
+#if defined(TARGET_NR_fchmodat)
+    case TARGET_NR_fchmodat:
+        if (!(p = lock_user_string(arg2)))
+            return -TARGET_EFAULT;
+        ret = get_errno(fchmodat(arg1, p, arg3, 0));
+        unlock_user(p, arg2, 0);
+        return ret;
+#endif
+    case TARGET_NR_getpriority:
+        /* Note that negative values are valid for getpriority, so we must
+           differentiate based on errno settings.  */
+        errno = 0;
+        ret = getpriority(arg1, arg2);
+        if (ret == -1 && errno != 0) {
+            return -host_to_target_errno(errno);
+        }
+#ifdef TARGET_ALPHA
+        /* Return value is the unbiased priority.  Signal no error.  */
+        ((CPUAlphaState *)cpu_env)->ir[IR_V0] = 0;
+#else
+        /* Return value is a biased priority to avoid negative numbers.  */
+        ret = 20 - ret;
+#endif
+        return ret;
+    case TARGET_NR_setpriority:
+        return get_errno(setpriority(arg1, arg2, arg3));
+#ifdef TARGET_NR_statfs
+    case TARGET_NR_statfs:
+        if (!(p = lock_user_string(arg1))) {
+            return -TARGET_EFAULT;
+        }
+        ret = get_errno(statfs(path(p), &stfs));
+        unlock_user(p, arg1, 0);
+    convert_statfs:
+        if (!is_error(ret)) {
+            struct target_statfs *target_stfs;
+
+            if (!lock_user_struct(VERIFY_WRITE, target_stfs, arg2, 0))
+                return -TARGET_EFAULT;
+            __put_user(stfs.f_type, &target_stfs->f_type);
+            __put_user(stfs.f_bsize, &target_stfs->f_bsize);
+            __put_user(stfs.f_blocks, &target_stfs->f_blocks);
+            __put_user(stfs.f_bfree, &target_stfs->f_bfree);
+            __put_user(stfs.f_bavail, &target_stfs->f_bavail);
+            __put_user(stfs.f_files, &target_stfs->f_files);
+            __put_user(stfs.f_ffree, &target_stfs->f_ffree);
+            __put_user(stfs.f_fsid.__val[0], &target_stfs->f_fsid.val[0]);
+            __put_user(stfs.f_fsid.__val[1], &target_stfs->f_fsid.val[1]);
+            __put_user(stfs.f_namelen, &target_stfs->f_namelen);
+            __put_user(stfs.f_frsize, &target_stfs->f_frsize);
+#ifdef _STATFS_F_FLAGS
+            __put_user(stfs.f_flags, &target_stfs->f_flags);
+#else
+            __put_user(0, &target_stfs->f_flags);
+#endif
+            memset(target_stfs->f_spare, 0, sizeof(target_stfs->f_spare));
+            unlock_user_struct(target_stfs, arg2, 1);
+        }
+        return ret;
+#endif
+#ifdef TARGET_NR_fstatfs
+    case TARGET_NR_fstatfs:
+        ret = get_errno(fstatfs(arg1, &stfs));
+        goto convert_statfs;
+#endif
+#ifdef TARGET_NR_statfs64
+    case TARGET_NR_statfs64:
+        if (!(p = lock_user_string(arg1))) {
+            return -TARGET_EFAULT;
+        }
+        ret = get_errno(statfs(path(p), &stfs));
+        unlock_user(p, arg1, 0);
+    convert_statfs64:
+        if (!is_error(ret)) {
+            struct target_statfs64 *target_stfs;
+
+            if (!lock_user_struct(VERIFY_WRITE, target_stfs, arg3, 0))
+                return -TARGET_EFAULT;
+            __put_user(stfs.f_type, &target_stfs->f_type);
+            __put_user(stfs.f_bsize, &target_stfs->f_bsize);
+            __put_user(stfs.f_blocks, &target_stfs->f_blocks);
+            __put_user(stfs.f_bfree, &target_stfs->f_bfree);
+            __put_user(stfs.f_bavail, &target_stfs->f_bavail);
+            __put_user(stfs.f_files, &target_stfs->f_files);
+            __put_user(stfs.f_ffree, &target_stfs->f_ffree);
+            __put_user(stfs.f_fsid.__val[0], &target_stfs->f_fsid.val[0]);
+            __put_user(stfs.f_fsid.__val[1], &target_stfs->f_fsid.val[1]);
+            __put_user(stfs.f_namelen, &target_stfs->f_namelen);
+            __put_user(stfs.f_frsize, &target_stfs->f_frsize);
+#ifdef _STATFS_F_FLAGS
+            __put_user(stfs.f_flags, &target_stfs->f_flags);
+#else
+            __put_user(0, &target_stfs->f_flags);
+#endif
+            memset(target_stfs->f_spare, 0, sizeof(target_stfs->f_spare));
+            unlock_user_struct(target_stfs, arg3, 1);
+        }
+        return ret;
+    case TARGET_NR_fstatfs64:
+        ret = get_errno(fstatfs(arg1, &stfs));
+        goto convert_statfs64;
+#endif
+#ifdef TARGET_NR_socketcall
+    case TARGET_NR_socketcall:
+        return do_socketcall(arg1, arg2);
+#endif
+#ifdef TARGET_NR_accept
+    case TARGET_NR_accept:
+        return do_accept4(arg1, arg2, arg3, 0);
+#endif
+#ifdef TARGET_NR_accept4
+    case TARGET_NR_accept4:
+        return do_accept4(arg1, arg2, arg3, arg4);
+#endif
+#ifdef TARGET_NR_perf_event_open
+    case TARGET_NR_perf_event_open:
+        return get_errno(syscall(__NR_perf_event_open, g2h_untagged(arg1), arg2,
+                        arg3, arg4, g2h_untagged(arg5)));
+#endif
+#ifdef TARGET_NR_bind
+    case TARGET_NR_bind:
+        return do_bind(arg1, arg2, arg3);
+#endif
+#ifdef TARGET_NR_connect
+    case TARGET_NR_connect:
+        return do_connect(arg1, arg2, arg3);
+#endif
+#ifdef TARGET_NR_getpeername
+    case TARGET_NR_getpeername:
+        return do_getpeername(arg1, arg2, arg3);
+#endif
+#ifdef TARGET_NR_getsockname
+    case TARGET_NR_getsockname:
+        return do_getsockname(arg1, arg2, arg3);
+#endif
+#ifdef TARGET_NR_getsockopt
+    case TARGET_NR_getsockopt:
+        return do_getsockopt(arg1, arg2, arg3, arg4, arg5);
+#endif
+#ifdef TARGET_NR_listen
+    case TARGET_NR_listen:
+        return get_errno(listen(arg1, arg2));
+#endif
+#ifdef TARGET_NR_recv
+    case TARGET_NR_recv:
+        return do_recvfrom(arg1, arg2, arg3, arg4, 0, 0);
+#endif
+#ifdef TARGET_NR_recvfrom
+    case TARGET_NR_recvfrom:
+        return do_recvfrom(arg1, arg2, arg3, arg4, arg5, arg6);
+#endif
+#ifdef TARGET_NR_recvmsg
+    case TARGET_NR_recvmsg:
+        return do_sendrecvmsg(arg1, arg2, arg3, 0);
+#endif
+#ifdef TARGET_NR_send
+    case TARGET_NR_send:
+        return do_sendto(arg1, arg2, arg3, arg4, 0, 0);
+#endif
+#ifdef TARGET_NR_sendmsg
+    case TARGET_NR_sendmsg:
+        return do_sendrecvmsg(arg1, arg2, arg3, 1);
+#endif
+#ifdef TARGET_NR_sendmmsg
+    case TARGET_NR_sendmmsg:
+        return do_sendrecvmmsg(arg1, arg2, arg3, arg4, 1, NULL);
+#endif
+#ifdef TARGET_NR_recvmmsg
+    case TARGET_NR_recvmmsg:
+        return do_sendrecvmmsg(arg1, arg2, arg3, arg4, 0, (struct timespec *)(uintptr_t)arg5);
+#endif
+#ifdef TARGET_NR_sendto
+    case TARGET_NR_sendto:
+        return do_sendto(arg1, arg2, arg3, arg4, arg5, arg6);
+#endif
+#ifdef TARGET_NR_shutdown
+    case TARGET_NR_shutdown:
+        return get_errno(shutdown(arg1, arg2));
+#endif
+#if defined(TARGET_NR_getrandom) && defined(__NR_getrandom)
+    case TARGET_NR_getrandom:
+        p = lock_user(VERIFY_WRITE, arg1, arg2, 0);
+        if (!p) {
+            return -TARGET_EFAULT;
+        }
+        ret = get_errno(getrandom(p, arg2, arg3));
+        unlock_user(p, arg1, ret);
+        return ret;
+#endif
+#ifdef TARGET_NR_socket
+    case TARGET_NR_socket:
+        return do_socket(arg1, arg2, arg3);
+#endif
+#ifdef TARGET_NR_socketpair
+    case TARGET_NR_socketpair:
+        return do_socketpair(arg1, arg2, arg3, arg4);
+#endif
+#ifdef TARGET_NR_setsockopt
+    case TARGET_NR_setsockopt:
+        return do_setsockopt(arg1, arg2, arg3, arg4, (socklen_t) arg5);
+#endif
+#if defined(TARGET_NR_syslog)
+    case TARGET_NR_syslog:
+        p = lock_user_string(arg2);
+        return get_errno(sys_syslog(arg1, p, arg3));
+        break;
+#endif
+    case TARGET_NR_setitimer:
+        {
+            struct itimerval value, ovalue, *pvalue;
+
+            if (arg2) {
+                pvalue = &value;
+                if (copy_from_user_timeval(&pvalue->it_interval, arg2)
+                    || copy_from_user_timeval(&pvalue->it_value,
+                                              arg2 + sizeof(struct target_timeval)))
+                    return -TARGET_EFAULT;
+            } else {
+                pvalue = NULL;
+            }
+            ret = get_errno(setitimer(arg1, pvalue, &ovalue));
+            if (!is_error(ret) && arg3) {
+                if (copy_to_user_timeval(arg3,
+                                         &ovalue.it_interval)
+                    || copy_to_user_timeval(arg3 + sizeof(struct target_timeval),
+                                            &ovalue.it_value))
+                    return -TARGET_EFAULT;
+            }
+        }
+        return ret;
+    case TARGET_NR_getitimer:
+        {
+            struct itimerval value;
+
+            ret = get_errno(getitimer(arg1, &value));
+            if (!is_error(ret) && arg2) {
+                if (copy_to_user_timeval(arg2,
+                                         &value.it_interval)
+                    || copy_to_user_timeval(arg2 + sizeof(struct target_timeval),
+                                            &value.it_value))
+                    return -TARGET_EFAULT;
+            }
+        }
+        return ret;
+#ifdef TARGET_NR_stat
+    case TARGET_NR_stat:
+        if (!(p = lock_user_string(arg1))) {
+            return -TARGET_EFAULT;
+        }
+        ret = get_errno(stat(path(p), &st));
+#ifdef CONFIG_LATX
+        if (!is_error(ret)) {
+            latx_adjust_proc_self_task_stat(&st);
+        }
+#endif
+        unlock_user(p, arg1, 0);
+        goto do_stat;
+#endif
+#ifdef TARGET_NR_lstat
+    case TARGET_NR_lstat:
+        if (!(p = lock_user_string(arg1))) {
+            return -TARGET_EFAULT;
+        }
+        ret = get_errno(lstat(path(p), &st));
+#ifdef CONFIG_LATX
+        if (!is_error(ret)) {
+            latx_adjust_proc_self_task_stat(&st);
+        }
+#endif
+        unlock_user(p, arg1, 0);
+        goto do_stat;
+#endif
+#ifdef TARGET_NR_fstat
+    case TARGET_NR_fstat:
+        {
+            ret = proc_self_fstat(arg1, &st);
+            if (ret) {
+                ret = get_errno(fstat(arg1, &st));
+            }
+#ifdef CONFIG_LATX
+            if (!is_error(ret)) {
+                latx_adjust_proc_self_task_fstat(arg1, &st);
+            }
+#endif
+#if defined(TARGET_NR_stat) || defined(TARGET_NR_lstat)
+        do_stat:
+#endif
+            if (!is_error(ret)) {
+                struct target_stat *target_st;
+
+                if (!lock_user_struct(VERIFY_WRITE, target_st, arg2, 0))
+                    return -TARGET_EFAULT;
+                memset(target_st, 0, sizeof(*target_st));
+                __put_user(st.st_dev, &target_st->st_dev);
+                __put_user(st.st_ino, &target_st->st_ino);
+                __put_user(st.st_mode, &target_st->st_mode);
+                __put_user(st.st_uid, &target_st->st_uid);
+                __put_user(st.st_gid, &target_st->st_gid);
+                __put_user(st.st_nlink, &target_st->st_nlink);
+                __put_user(st.st_rdev, &target_st->st_rdev);
+                __put_user(st.st_size, &target_st->st_size);
+                __put_user(st.st_blksize, &target_st->st_blksize);
+                __put_user(st.st_blocks, &target_st->st_blocks);
+                __put_user(st.st_atime, &target_st->target_st_atime);
+                __put_user(st.st_mtime, &target_st->target_st_mtime);
+                __put_user(st.st_ctime, &target_st->target_st_ctime);
+#if (_POSIX_C_SOURCE >= 200809L || _XOPEN_SOURCE >= 700) && \
+    defined(TARGET_STAT_HAVE_NSEC)
+                __put_user(st.st_atim.tv_nsec,
+                           &target_st->target_st_atime_nsec);
+                __put_user(st.st_mtim.tv_nsec,
+                           &target_st->target_st_mtime_nsec);
+                __put_user(st.st_ctim.tv_nsec,
+                           &target_st->target_st_ctime_nsec);
+#endif
+                unlock_user_struct(target_st, arg2, 1);
+            }
+        }
+        return ret;
+#endif
+    case TARGET_NR_vhangup:
+        return get_errno(vhangup());
+#ifdef TARGET_NR_syscall
+    case TARGET_NR_syscall:
+        return do_syscall(cpu_env, arg1 & 0xffff, arg2, arg3, arg4, arg5,
+                          arg6, arg7, arg8, 0);
+#endif
+#if defined(TARGET_NR_wait4)
+    case TARGET_NR_wait4:
+        {
+            int status;
+            abi_long status_ptr = arg2;
+            struct rusage rusage, *rusage_ptr;
+            abi_ulong target_rusage = arg4;
+            abi_long rusage_err;
+            if (target_rusage)
+                rusage_ptr = &rusage;
+            else
+                rusage_ptr = NULL;
+            if (arg3 & __WCLONE) {
+                arg3 |= __WALL;
+            }
+            ret = get_errno(safe_wait4(arg1, &status, arg3, rusage_ptr));
+            if (!is_error(ret)) {
+                if (status_ptr && ret) {
+                    status =
+#ifdef TARGET_X86_64
+                        seccomp_trace_waitstatus(ret, status, cpu->opaque);
+#else
+                        host_to_target_waitstatus(status);
+#endif
+                    if (put_user_s32(status, status_ptr))
+                        return -TARGET_EFAULT;
+                }
+                if (target_rusage) {
+                    rusage_err = host_to_target_rusage(target_rusage, &rusage);
+                    if (rusage_err) {
+                        ret = rusage_err;
+                    }
+                }
+            }
+        }
+        return ret;
+#endif
+#ifdef TARGET_NR_swapoff
+    case TARGET_NR_swapoff:
+        if (!(p = lock_user_string(arg1)))
+            return -TARGET_EFAULT;
+        ret = get_errno(swapoff(p));
+        unlock_user(p, arg1, 0);
+        return ret;
+#endif
+    case TARGET_NR_sysinfo:
+        {
+            struct target_sysinfo *target_value;
+            struct sysinfo value;
+            ret = get_errno(sysinfo(&value));
+            if (!is_error(ret) && arg1)
+            {
+                if (!lock_user_struct(VERIFY_WRITE, target_value, arg1, 0))
+                    return -TARGET_EFAULT;
+#ifndef TARGET_X86_64
+                #define upper_32_bits(n) ((u32)(((n) >> 16) >> 16))
+                if (upper_32_bits(value.totalram) || upper_32_bits(value.totalswap)) {
+                    int bitcount = 0;
+
+                    while (value.mem_unit < TARGET_PAGE_SIZE) {
+                        value.mem_unit <<= 1;
+                        bitcount++;
+                    }
+
+                    value.totalram >>= bitcount;
+                    value.freeram >>= bitcount;
+                    value.sharedram >>= bitcount;
+                    value.bufferram >>= bitcount;
+                    value.totalswap >>= bitcount;
+                    value.freeswap >>= bitcount;
+                    value.totalhigh >>= bitcount;
+                    value.freehigh >>= bitcount;
+                }
+#endif
+                __put_user(value.uptime, &target_value->uptime);
+                __put_user(value.loads[0], &target_value->loads[0]);
+                __put_user(value.loads[1], &target_value->loads[1]);
+                __put_user(value.loads[2], &target_value->loads[2]);
+                __put_user(value.totalram, &target_value->totalram);
+                __put_user(value.freeram, &target_value->freeram);
+                __put_user(value.sharedram, &target_value->sharedram);
+                __put_user(value.bufferram, &target_value->bufferram);
+                __put_user(value.totalswap, &target_value->totalswap);
+                __put_user(value.freeswap, &target_value->freeswap);
+                __put_user(value.procs, &target_value->procs);
+                __put_user(value.totalhigh, &target_value->totalhigh);
+                __put_user(value.freehigh, &target_value->freehigh);
+                __put_user(value.mem_unit, &target_value->mem_unit);
+                unlock_user_struct(target_value, arg1, 1);
+            }
+        }
+        return ret;
+#ifdef TARGET_NR_ipc
+    case TARGET_NR_ipc:
+        return do_ipc(cpu_env, arg1, arg2, arg3, arg4, arg5, arg6);
+#endif
+#ifdef TARGET_NR_semget
+    case TARGET_NR_semget:
+        return get_errno(semget(arg1, arg2, arg3));
+#endif
+#ifdef TARGET_NR_semop
+    case TARGET_NR_semop:
+        return do_semtimedop(arg1, arg2, arg3, 0, false);
+#endif
+#ifdef TARGET_NR_semtimedop
+    case TARGET_NR_semtimedop:
+        return do_semtimedop(arg1, arg2, arg3, arg4, false);
+#endif
+#ifdef TARGET_NR_semtimedop_time64
+    case TARGET_NR_semtimedop_time64:
+        return do_semtimedop(arg1, arg2, arg3, arg4, true);
+#endif
+#ifdef TARGET_NR_semctl
+    case TARGET_NR_semctl:
+        return do_semctl(arg1, arg2, arg3, arg4);
+#endif
+#ifdef TARGET_NR_msgctl
+    case TARGET_NR_msgctl:
+        return do_msgctl(arg1, arg2, arg3);
+#endif
+#ifdef TARGET_NR_msgget
+    case TARGET_NR_msgget:
+        return get_errno(msgget(arg1, arg2));
+#endif
+#ifdef TARGET_NR_msgrcv
+    case TARGET_NR_msgrcv:
+        return do_msgrcv(arg1, arg2, arg3, arg4, arg5);
+#endif
+#ifdef TARGET_NR_msgsnd
+    case TARGET_NR_msgsnd:
+        return do_msgsnd(arg1, arg2, arg3, arg4);
+#endif
+#ifdef TARGET_NR_shmget
+    case TARGET_NR_shmget:
+        return get_errno(shmget(arg1, arg2, arg3));
+#endif
+#ifdef TARGET_NR_shmctl
+    case TARGET_NR_shmctl:
+        return do_shmctl(arg1, arg2, arg3);
+#endif
+#ifdef TARGET_NR_shmat
+    case TARGET_NR_shmat:
+        return do_shmat(cpu_env, arg1, arg2, arg3);
+#endif
+#ifdef TARGET_NR_shmdt
+    case TARGET_NR_shmdt:
+        return do_shmdt(arg1);
+#endif
+    case TARGET_NR_fsync:
+        return get_errno(fsync(arg1));
+    case TARGET_NR_clone:
+        /* Linux manages to have three different orderings for its
+         * arguments to clone(); the BACKWARDS and BACKWARDS2 defines
+         * match the kernel's CONFIG_CLONE_* settings.
+         * Microblaze is further special in that it uses a sixth
+         * implicit argument to clone for the TLS pointer.
+         */
+#if defined(TARGET_MICROBLAZE)
+        ret = get_errno(do_fork(cpu_env, arg1, arg2, arg4, arg6, arg5));
+#elif defined(TARGET_CLONE_BACKWARDS)
+        ret = get_errno(do_fork(cpu_env, arg1, arg2, arg3, arg4, arg5));
+#elif defined(TARGET_CLONE_BACKWARDS2)
+        ret = get_errno(do_fork(cpu_env, arg2, arg1, arg3, arg5, arg4));
+#else
+        ret = get_errno(do_fork(cpu_env, arg1, arg2, arg3, arg5, arg4));
+#endif
+        return ret;
+#ifdef __NR_exit_group
+        /* new thread calls */
+    case TARGET_NR_exit_group:
+#if defined(CONFIG_LATX) && defined(TARGET_X86_64)
+        latc_aot_v2_report_stats();
+#endif
+        preexit_cleanup(cpu_env, arg1);
+        /* dump basic block here. TODO */
+#ifdef CONFIG_LATX_AOT
+        aot_exit_entry(cpu, AOT_EXIT_FINAL);
+#endif
+        return get_errno(exit_group(arg1));
+#endif
+    case TARGET_NR_setdomainname:
+        if (!(p = lock_user_string(arg1)))
+            return -TARGET_EFAULT;
+        ret = get_errno(setdomainname(p, arg2));
+        unlock_user(p, arg1, 0);
+        return ret;
+    case TARGET_NR_uname:
+        /* no need to transcode because we use the linux syscall */
+        {
+            struct new_utsname * buf;
+
+            if (!lock_user_struct(VERIFY_WRITE, buf, arg1, 0))
+                return -TARGET_EFAULT;
+            ret = get_errno(sys_uname(buf));
+            if (!is_error(ret)) {
+                /* Overwrite the native machine name with whatever is being
+                   emulated. */
+                g_strlcpy(buf->machine, cpu_to_uname_machine(cpu_env),
+                          sizeof(buf->machine));
+                /* Allow the user to override the reported release.  */
+                if (qemu_uname_release && *qemu_uname_release) {
+                    g_strlcpy(buf->release, qemu_uname_release,
+                              sizeof(buf->release));
+                }
+            }
+            unlock_user_struct(buf, arg1, 1);
+        }
+        return ret;
+    case TARGET_NR_modify_ldt:
+        if (!CODEIS64) {
+            return do_modify_ldt(cpu_env, arg1, arg2, arg3);
+        } else {
+            lsassert(0);
+            return -TARGET_ENOSYS;
+        }
+#if !defined(TARGET_X86_64)
+    case TARGET_NR_vm86:
+        return do_vm86(cpu_env, arg1, arg2);
+#endif
+#if defined(TARGET_NR_adjtimex)
+    case TARGET_NR_adjtimex:
+        {
+            struct timex host_buf;
+
+            if (target_to_host_timex(&host_buf, arg1) != 0) {
+                return -TARGET_EFAULT;
+            }
+            ret = get_errno(adjtimex(&host_buf));
+            if (!is_error(ret)) {
+                if (host_to_target_timex(arg1, &host_buf) != 0) {
+                    return -TARGET_EFAULT;
+                }
+            }
+        }
+        return ret;
+#endif
+#if defined(TARGET_NR_clock_adjtime) && defined(CONFIG_CLOCK_ADJTIME)
+    case TARGET_NR_clock_adjtime:
+        {
+            struct timex htx, *phtx = &htx;
+
+            if (target_to_host_timex(phtx, arg2) != 0) {
+                return -TARGET_EFAULT;
+            }
+            ret = get_errno(clock_adjtime(arg1, phtx));
+            if (!is_error(ret) && phtx) {
+                if (host_to_target_timex(arg2, phtx) != 0) {
+                    return -TARGET_EFAULT;
+                }
+            }
+        }
+        return ret;
+#endif
+#if defined(TARGET_NR_clock_adjtime64) && defined(CONFIG_CLOCK_ADJTIME)
+    case TARGET_NR_clock_adjtime64:
+        {
+            struct timex htx;
+
+            if (target_to_host_timex64(&htx, arg2) != 0) {
+                return -TARGET_EFAULT;
+            }
+            ret = get_errno(clock_adjtime(arg1, &htx));
+            if (!is_error(ret) && host_to_target_timex64(arg2, &htx)) {
+                    return -TARGET_EFAULT;
+            }
+        }
+        return ret;
+#endif
+    case TARGET_NR_getpgid:
+        return get_errno(getpgid(arg1));
+    case TARGET_NR_fchdir:
+        return get_errno(fchdir(arg1));
+    case TARGET_NR_personality:
+        return get_errno(personality(arg1));
+#ifdef TARGET_NR__llseek /* Not on alpha */
+    case TARGET_NR__llseek:
+        {
+            int64_t res;
+#if !defined(__NR_llseek)
+            res = lseek(arg1, ((uint64_t)arg2 << 32) | (abi_ulong)arg3, arg5);
+            if (res == -1) {
+                ret = get_errno(res);
+            } else {
+                ret = 0;
+            }
+#else
+            ret = get_errno(_llseek(arg1, arg2, arg3, &res, arg5));
+#endif
+            if ((ret == 0) && put_user_s64(res, arg4)) {
+                return -TARGET_EFAULT;
+            }
+        }
+        return ret;
+#endif
+#ifdef TARGET_NR_getdents
+    case TARGET_NR_getdents:
+#ifdef EMULATE_GETDENTS_WITH_GETDENTS
+#if TARGET_ABI_BITS == 32 && HOST_LONG_BITS == 64
+        {
+            struct target_dirent *target_dirp;
+            struct linux_dirent *dirp;
+            abi_long count = arg3;
+
+            dirp = g_try_malloc(count);
+            if (!dirp) {
+                return -TARGET_ENOMEM;
+            }
+
+            ret = get_errno(sys_getdents(arg1, dirp, count));
+            if (!is_error(ret)) {
+                struct linux_dirent *de;
+		struct target_dirent *tde;
+                int len = ret;
+                int reclen, treclen;
+		int count1, tnamelen;
+
+		count1 = 0;
+                de = dirp;
+                if (!(target_dirp = lock_user(VERIFY_WRITE, arg2, count, 0)))
+                    return -TARGET_EFAULT;
+		tde = target_dirp;
+                while (len > 0) {
+                    reclen = de->d_reclen;
+                    tnamelen = reclen - offsetof(struct linux_dirent, d_name);
+                    assert(tnamelen >= 0);
+                    treclen = tnamelen + offsetof(struct target_dirent, d_name);
+                    assert(count1 + treclen <= count);
+                    tde->d_reclen = tswap16(treclen);
+                    tde->d_ino = tswapal(de->d_ino);
+                    tde->d_off = tswapal(de->d_off);
+                    memcpy(tde->d_name, de->d_name, tnamelen);
+                    de = (struct linux_dirent *)((char *)de + reclen);
+                    len -= reclen;
+                    tde = (struct target_dirent *)((char *)tde + treclen);
+		    count1 += treclen;
+                }
+		ret = count1;
+                unlock_user(target_dirp, arg2, ret);
+            }
+            g_free(dirp);
+        }
+#else
+        {
+            struct linux_dirent *dirp;
+            abi_long count = arg3;
+
+            if (!(dirp = lock_user(VERIFY_WRITE, arg2, count, 0)))
+                return -TARGET_EFAULT;
+            ret = get_errno(sys_getdents(arg1, dirp, count));
+            if (!is_error(ret)) {
+                struct linux_dirent *de;
+                int len = ret;
+                int reclen;
+                de = dirp;
+                while (len > 0) {
+                    reclen = de->d_reclen;
+                    if (reclen > len)
+                        break;
+                    de->d_reclen = tswap16(reclen);
+                    tswapls(&de->d_ino);
+                    tswapls(&de->d_off);
+                    de = (struct linux_dirent *)((char *)de + reclen);
+                    len -= reclen;
+                }
+            }
+            unlock_user(dirp, arg2, ret);
+        }
+#endif
+#else
+        /* Implement getdents in terms of getdents64 */
+        {
+            struct linux_dirent64 *dirp;
+            abi_long count = arg3;
+
+            dirp = lock_user(VERIFY_WRITE, arg2, count, 0);
+            if (!dirp) {
+                return -TARGET_EFAULT;
+            }
+            ret = get_errno(sys_getdents64(arg1, dirp, count));
+            if (!is_error(ret)) {
+                /* Convert the dirent64 structs to target dirent.  We do this
+                 * in-place, since we can guarantee that a target_dirent is no
+                 * larger than a dirent64; however this means we have to be
+                 * careful to read everything before writing in the new format.
+                 */
+                struct linux_dirent64 *de;
+                struct target_dirent *tde;
+                int len = ret;
+                int tlen = 0;
+
+                de = dirp;
+                tde = (struct target_dirent *)dirp;
+                while (len > 0) {
+                    int namelen, treclen;
+                    int reclen = de->d_reclen;
+                    uint64_t ino = de->d_ino;
+                    int64_t off = de->d_off;
+                    uint8_t type = de->d_type;
+
+                    namelen = strlen(de->d_name);
+                    treclen = offsetof(struct target_dirent, d_name)
+                        + namelen + 2;
+                    treclen = QEMU_ALIGN_UP(treclen, sizeof(abi_long));
+
+                    memmove(tde->d_name, de->d_name, namelen + 1);
+                    tde->d_ino = tswapal(ino);
+                    tde->d_off = tswapal(off);
+                    tde->d_reclen = tswap16(treclen);
+                    /* The target_dirent type is in what was formerly a padding
+                     * byte at the end of the structure:
+                     */
+                    *(((char *)tde) + treclen - 1) = type;
+
+                    de = (struct linux_dirent64 *)((char *)de + reclen);
+                    tde = (struct target_dirent *)((char *)tde + treclen);
+                    len -= reclen;
+                    tlen += treclen;
+                }
+                ret = tlen;
+            }
+            unlock_user(dirp, arg2, ret);
+        }
+#endif
+        return ret;
+#endif /* TARGET_NR_getdents */
+#if defined(TARGET_NR_getdents64) && defined(__NR_getdents64)
+    case TARGET_NR_getdents64:
+    {
+        char proc_path[PATH_MAX];
+        char real_path[PATH_MAX];
+        int fd = arg1;
+        bool is_task_dir = false;
+
+        snprintf(proc_path, sizeof(proc_path), "/proc/self/fd/%d", fd);
+
+        ssize_t path_len = readlink(proc_path, real_path, sizeof(real_path) - 1);
+
+        if (path_len > 0) {
+            real_path[path_len] = '\0';
+            char *endptr;
+
+            if (!strncmp(real_path, "/proc/", 6)
+                && strtol(real_path + 6, &endptr, 10) > 0
+                && !strcmp(endptr, "/task")) {
+#ifdef CONFIG_LATX_DEBUG
+                fprintf(stderr, "latx: Detected task directory: %s\n", real_path);
+#endif
+                is_task_dir = true;
+            }
+        }
+
+        struct linux_dirent64 *dirp;
+        abi_long count = arg3;
+
+        if (!(dirp = lock_user(VERIFY_WRITE, arg2, count, 0)))
+            return -TARGET_EFAULT;
+        ret = get_errno(sys_getdents64(arg1, dirp, count));
+        if (!is_error(ret)) {
+            struct linux_dirent64 *de;
+            int len = ret;
+            /*
+            * Filter ghost threads only for /proc/<pid>/task
+            */
+            if (is_task_dir) {
+
+                int valid_tids[512];
+                int valid_count = 0;
+                CPUState *cpu_iter;
+
+                CPU_FOREACH(cpu_iter) {
+                    TaskState *ts = (TaskState *)cpu_iter->opaque;
+                    if (ts && valid_count < 512) {
+                        valid_tids[valid_count++] = ts->ts_tid;
+                    }
+                }
+
+                de = dirp;
+
+                while (len > 0) {
+                    int reclen = tswap16(de->d_reclen);
+                    if (reclen <= 0 || reclen > len)
+                        break;
+                    bool should_hide = true;
+
+                    if (!strcmp(de->d_name, ".") ||
+                        !strcmp(de->d_name, "..")) {
+                        should_hide = false;
+                    } else {
+                        char *endptr;
+                        long curr_tid = strtol(de->d_name, &endptr, 10);
+
+                        if (*endptr == '\0') {
+                            for (int i = 0; i < valid_count; i++) {
+                                if (curr_tid == valid_tids[i]) {
+                                    should_hide = false;
+                                    break;
+                                }
+                            }
+                        } else {
+                            should_hide = false;
+                        }
+                    }
+
+                    if (should_hide) {
+#ifdef CONFIG_LATX_DEBUG
+                        fprintf(stderr, "latx: Hiding ghost thread " "TID: %s\n", de->d_name);
+#endif
+                        int remaining_len = len - reclen;
+
+                        if (remaining_len > 0) {
+                            memmove(de, (char *)de + reclen, remaining_len);
+                        }
+                        ret -= reclen;
+                        len -= reclen;
+                        continue;
+                    }
+
+                    de = (struct linux_dirent64 *) ((char *)de + reclen);
+                    len -= reclen;
+                }
+            }
+
+            /*
+            * Common endian conversion
+            */
+            de = dirp;
+            len = ret;
+
+            while (len > 0) {
+                int reclen = de->d_reclen;
+                if (reclen > len || reclen <= 0)
+                    break;
+                de->d_reclen = tswap16(reclen);
+                tswap64s((uint64_t *)&de->d_ino);
+                tswap64s((uint64_t *)&de->d_off);
+#if TARGET_ABI_BITS == 32
+                de->d_off = (int32_t)de->d_off;
+                de->d_ino = tswap32(de->d_ino);
+#endif
+                de = (struct linux_dirent64 *) ((char *)de + reclen);
+                len -= reclen;
+            }
+        }
+
+        unlock_user(dirp, arg2, ret);
+    }
+    return ret;
+#endif /* TARGET_NR_getdents64 */
+#if defined(TARGET_NR__newselect)
+    case TARGET_NR__newselect:
+        return do_select(arg1, arg2, arg3, arg4, arg5);
+#endif
+#ifdef TARGET_NR_poll
+    case TARGET_NR_poll:
+        return do_ppoll(arg1, arg2, arg3, arg4, arg5, false, false);
+#endif
+#ifdef TARGET_NR_ppoll
+    case TARGET_NR_ppoll:
+        return do_ppoll(arg1, arg2, arg3, arg4, arg5, true, false);
+#endif
+#ifdef TARGET_NR_ppoll_time64
+    case TARGET_NR_ppoll_time64:
+        return do_ppoll(arg1, arg2, arg3, arg4, arg5, true, true);
+#endif
+    case TARGET_NR_flock:
+        /* NOTE: the flock constant seems to be the same for every
+           Linux platform */
+        return get_errno(safe_flock(arg1, arg2));
+    case TARGET_NR_readv:
+        {
+            struct iovec *vec = lock_iovec(VERIFY_WRITE, arg2, arg3, 0);
+            if (vec != NULL) {
+                ret = get_errno(safe_readv(arg1, vec, arg3));
+                unlock_iovec(vec, arg2, arg3, 1);
+            } else {
+                ret = -host_to_target_errno(errno);
+            }
+        }
+        return ret;
+    case TARGET_NR_writev:
+        {
+            struct iovec *vec = lock_iovec_remap(VERIFY_READ, arg2, arg3, 1);
+            if (vec != NULL) {
+                ret = get_errno(safe_writev(arg1, vec, arg3));
+                unlock_iovec_remap(vec, arg2, arg3, 0);
+            } else {
+                ret = -host_to_target_errno(errno);
+            }
+        }
+        return ret;
+#if defined(TARGET_NR_preadv)
+    case TARGET_NR_preadv:
+        {
+            struct iovec *vec = lock_iovec(VERIFY_WRITE, arg2, arg3, 0);
+            if (vec != NULL) {
+                unsigned long low, high;
+
+                target_to_host_low_high(arg4, arg5, &low, &high);
+                ret = get_errno(safe_preadv(arg1, vec, arg3, low, high));
+                unlock_iovec(vec, arg2, arg3, 1);
+            } else {
+                ret = -host_to_target_errno(errno);
+           }
+        }
+        return ret;
+#endif
+#if defined(TARGET_NR_pwritev)
+    case TARGET_NR_pwritev:
+        {
+            struct iovec *vec = lock_iovec(VERIFY_READ, arg2, arg3, 1);
+            if (vec != NULL) {
+                unsigned long low, high;
+
+                target_to_host_low_high(arg4, arg5, &low, &high);
+                ret = get_errno(safe_pwritev(arg1, vec, arg3, low, high));
+                unlock_iovec(vec, arg2, arg3, 0);
+            } else {
+                ret = -host_to_target_errno(errno);
+           }
+        }
+        return ret;
+#endif
+#if defined(TARGET_NR_preadv2)
+    case TARGET_NR_preadv2:
+        {
+            struct iovec *vec = lock_iovec(VERIFY_WRITE, arg2, arg3, 0);
+            if (vec != NULL) {
+                unsigned long low, high;
+
+                target_to_host_low_high(arg4, arg5, &low, &high);
+                ret = get_errno(safe_preadv2(arg1, vec, arg3, low, high,arg6));
+                unlock_iovec(vec, arg2, arg3, 1);
+            } else {
+                ret = -host_to_target_errno(errno);
+           }
+        }
+        return ret;
+#endif
+#if defined(TARGET_NR_pwritev2)
+    case TARGET_NR_pwritev2:
+        {
+            struct iovec *vec = lock_iovec(VERIFY_READ, arg2, arg3, 1);
+            if (vec != NULL) {
+                unsigned long low, high;
+
+                target_to_host_low_high(arg4, arg5, &low, &high);
+                ret = get_errno(safe_pwritev2(arg1, vec, arg3, low, high, arg6));
+                unlock_iovec(vec, arg2, arg3, 0);
+            } else {
+                ret = -host_to_target_errno(errno);
+           }
+        }
+        return ret;
+#endif
+    case TARGET_NR_getsid:
+        return get_errno(getsid(arg1));
+#if defined(TARGET_NR_fdatasync) /* Not on alpha (osf_datasync ?) */
+    case TARGET_NR_fdatasync:
+        return get_errno(fdatasync(arg1));
+#endif
+    case TARGET_NR_sched_getaffinity:
+        {
+            unsigned int mask_size;
+            unsigned long *mask;
+
+            /*
+             * sched_getaffinity needs multiples of ulong, so need to take
+             * care of mismatches between target ulong and host ulong sizes.
+             */
+            if (arg2 & (sizeof(abi_ulong) - 1)) {
+                return -TARGET_EINVAL;
+            }
+            mask_size = (arg2 + (sizeof(*mask) - 1)) & ~(sizeof(*mask) - 1);
+
+            mask = alloca(mask_size);
+            memset(mask, 0, mask_size);
+            ret = get_errno(sys_sched_getaffinity(arg1, mask_size, mask));
+
+            if (!is_error(ret)) {
+                if (ret > arg2) {
+                    /* More data returned than the caller's buffer will fit.
+                     * This only happens if sizeof(abi_long) < sizeof(long)
+                     * and the caller passed us a buffer holding an odd number
+                     * of abi_longs. If the host kernel is actually using the
+                     * extra 4 bytes then fail EINVAL; otherwise we can just
+                     * ignore them and only copy the interesting part.
+                     */
+                    int numcpus = sysconf(_SC_NPROCESSORS_CONF);
+                    if (numcpus > arg2 * 8) {
+                        return -TARGET_EINVAL;
+                    }
+                    ret = arg2;
+                }
+
+                if (host_to_target_cpu_mask(mask, mask_size, arg3, ret)) {
+                    return -TARGET_EFAULT;
+                }
+            }
+        }
+        return ret;
+    case TARGET_NR_sched_setaffinity:
+        {
+            unsigned int mask_size;
+            unsigned long *mask;
+
+            /*
+             * sched_setaffinity needs multiples of ulong, so need to take
+             * care of mismatches between target ulong and host ulong sizes.
+             */
+            if (arg2 & (sizeof(abi_ulong) - 1)) {
+                return -TARGET_EINVAL;
+            }
+            mask_size = (arg2 + (sizeof(*mask) - 1)) & ~(sizeof(*mask) - 1);
+            mask = alloca(mask_size);
+
+            ret = target_to_host_cpu_mask(mask, mask_size, arg3, arg2);
+            if (ret) {
+                return ret;
+            }
+
+            return get_errno(sys_sched_setaffinity(arg1, mask_size, mask));
+        }
+    case TARGET_NR_getcpu:
+        {
+            unsigned cpu, node;
+            ret = get_errno(sys_getcpu(arg1 ? &cpu : NULL,
+                                       arg2 ? &node : NULL,
+                                       NULL));
+            if (is_error(ret)) {
+                return ret;
+            }
+            if (arg1 && put_user_u32(cpu, arg1)) {
+                return -TARGET_EFAULT;
+            }
+            if (arg2 && put_user_u32(node, arg2)) {
+                return -TARGET_EFAULT;
+            }
+        }
+        return ret;
+    case TARGET_NR_sched_setparam:
+        {
+            struct sched_param *target_schp;
+            struct sched_param schp;
+
+            if (arg2 == 0) {
+                return -TARGET_EINVAL;
+            }
+            if (!lock_user_struct(VERIFY_READ, target_schp, arg2, 1))
+                return -TARGET_EFAULT;
+            schp.sched_priority = tswap32(target_schp->sched_priority);
+            unlock_user_struct(target_schp, arg2, 0);
+            return get_errno(sched_setparam(arg1, &schp));
+        }
+    case TARGET_NR_sched_getparam:
+        {
+            struct sched_param *target_schp;
+            struct sched_param schp;
+
+            if (arg2 == 0) {
+                return -TARGET_EINVAL;
+            }
+            ret = get_errno(sched_getparam(arg1, &schp));
+            if (!is_error(ret)) {
+                if (!lock_user_struct(VERIFY_WRITE, target_schp, arg2, 0))
+                    return -TARGET_EFAULT;
+                target_schp->sched_priority = tswap32(schp.sched_priority);
+                unlock_user_struct(target_schp, arg2, 1);
+            }
+        }
+        return ret;
+    case TARGET_NR_sched_setscheduler:
+        {
+            struct sched_param *target_schp;
+            struct sched_param schp;
+            if (arg3 == 0) {
+                return -TARGET_EINVAL;
+            }
+            if (!lock_user_struct(VERIFY_READ, target_schp, arg3, 1))
+                return -TARGET_EFAULT;
+            schp.sched_priority = tswap32(target_schp->sched_priority);
+            unlock_user_struct(target_schp, arg3, 0);
+            return get_errno(sched_setscheduler(arg1, arg2, &schp));
+        }
+    case TARGET_NR_sched_getscheduler:
+        return get_errno(sched_getscheduler(arg1));
+    case TARGET_NR_sched_yield:
+        return get_errno(sched_yield());
+    case TARGET_NR_sched_get_priority_max:
+        return get_errno(sched_get_priority_max(arg1));
+    case TARGET_NR_sched_get_priority_min:
+        return get_errno(sched_get_priority_min(arg1));
+#ifdef TARGET_NR_sched_rr_get_interval
+    case TARGET_NR_sched_rr_get_interval:
+        {
+            struct timespec ts;
+            ret = get_errno(sched_rr_get_interval(arg1, &ts));
+            if (!is_error(ret)) {
+                ret = host_to_target_timespec(arg2, &ts);
+            }
+        }
+        return ret;
+#endif
+#ifdef TARGET_NR_sched_rr_get_interval_time64
+    case TARGET_NR_sched_rr_get_interval_time64:
+        {
+            struct timespec ts;
+            ret = get_errno(sched_rr_get_interval(arg1, &ts));
+            if (!is_error(ret)) {
+                ret = host_to_target_timespec64(arg2, &ts);
+            }
+        }
+        return ret;
+#endif
+#if defined(TARGET_NR_nanosleep)
+    case TARGET_NR_nanosleep:
+        {
+            struct timespec req, rem;
+            target_to_host_timespec(&req, arg1);
+            ret = get_errno(safe_nanosleep(&req, &rem));
+            if (is_error(ret) && arg2) {
+                host_to_target_timespec(arg2, &rem);
+            }
+        }
+        return ret;
+#endif
+    case TARGET_NR_prctl:
+        switch (arg1) {
+        case PR_GET_PDEATHSIG:
+        {
+            int deathsig;
+            ret = get_errno(prctl(PR_GET_PDEATHSIG, &deathsig,
+                                  arg3, arg4, arg5));
+            if (!is_error(ret) &&
+                put_user_s32(host_to_target_signal(deathsig), arg2)) {
+                return -TARGET_EFAULT;
+            }
+            return ret;
+        }
+        case PR_SET_PDEATHSIG:
+            return get_errno(prctl(PR_SET_PDEATHSIG,
+                                   target_to_host_signal(arg2),
+                                   arg3, arg4, arg5));
+#ifdef PR_GET_NAME
+        case PR_GET_NAME:
+        {
+            void *name = lock_user(VERIFY_WRITE, arg2, 16, 1);
+            if (!name) {
+                return -TARGET_EFAULT;
+            }
+            ret = get_errno(prctl(PR_GET_NAME, (unsigned long)name,
+                                  arg3, arg4, arg5));
+            unlock_user(name, arg2, 16);
+            return ret;
+        }
+        case PR_SET_NAME:
+        {
+            void *name = lock_user(VERIFY_READ, arg2, 16, 1);
+            if (!name) {
+                return -TARGET_EFAULT;
+            }
+            ret = get_errno(prctl(PR_SET_NAME, (unsigned long)name,
+                                  arg3, arg4, arg5));
+            unlock_user(name, arg2, 0);
+            return ret;
+        }
+#endif
+#ifdef TARGET_MIPS
+        case TARGET_PR_GET_FP_MODE:
+        {
+            CPUMIPSState *env = ((CPUMIPSState *)cpu_env);
+            ret = 0;
+            if (env->CP0_Status & (1 << CP0St_FR)) {
+                ret |= TARGET_PR_FP_MODE_FR;
+            }
+            if (env->CP0_Config5 & (1 << CP0C5_FRE)) {
+                ret |= TARGET_PR_FP_MODE_FRE;
+            }
+            return ret;
+        }
+        case TARGET_PR_SET_FP_MODE:
+        {
+            CPUMIPSState *env = ((CPUMIPSState *)cpu_env);
+            bool old_fr = env->CP0_Status & (1 << CP0St_FR);
+            bool old_fre = env->CP0_Config5 & (1 << CP0C5_FRE);
+            bool new_fr = arg2 & TARGET_PR_FP_MODE_FR;
+            bool new_fre = arg2 & TARGET_PR_FP_MODE_FRE;
+
+            const unsigned int known_bits = TARGET_PR_FP_MODE_FR |
+                                            TARGET_PR_FP_MODE_FRE;
+
+            /* If nothing to change, return right away, successfully.  */
+            if (old_fr == new_fr && old_fre == new_fre) {
+                return 0;
+            }
+            /* Check the value is valid */
+            if (arg2 & ~known_bits) {
+                return -TARGET_EOPNOTSUPP;
+            }
+            /* Setting FRE without FR is not supported.  */
+            if (new_fre && !new_fr) {
+                return -TARGET_EOPNOTSUPP;
+            }
+            if (new_fr && !(env->active_fpu.fcr0 & (1 << FCR0_F64))) {
+                /* FR1 is not supported */
+                return -TARGET_EOPNOTSUPP;
+            }
+            if (!new_fr && (env->active_fpu.fcr0 & (1 << FCR0_F64))
+                && !(env->CP0_Status_rw_bitmask & (1 << CP0St_FR))) {
+                /* cannot set FR=0 */
+                return -TARGET_EOPNOTSUPP;
+            }
+            if (new_fre && !(env->active_fpu.fcr0 & (1 << FCR0_FREP))) {
+                /* Cannot set FRE=1 */
+                return -TARGET_EOPNOTSUPP;
+            }
+
+            int i;
+            fpr_t *fpr = env->active_fpu.fpr;
+            for (i = 0; i < 32 ; i += 2) {
+                if (!old_fr && new_fr) {
+                    fpr[i].w[!FP_ENDIAN_IDX] = fpr[i + 1].w[FP_ENDIAN_IDX];
+                } else if (old_fr && !new_fr) {
+                    fpr[i + 1].w[FP_ENDIAN_IDX] = fpr[i].w[!FP_ENDIAN_IDX];
+                }
+            }
+
+            if (new_fr) {
+                env->CP0_Status |= (1 << CP0St_FR);
+                env->hflags |= MIPS_HFLAG_F64;
+            } else {
+                env->CP0_Status &= ~(1 << CP0St_FR);
+                env->hflags &= ~MIPS_HFLAG_F64;
+            }
+            if (new_fre) {
+                env->CP0_Config5 |= (1 << CP0C5_FRE);
+                if (env->active_fpu.fcr0 & (1 << FCR0_FREP)) {
+                    env->hflags |= MIPS_HFLAG_FRE;
+                }
+            } else {
+                env->CP0_Config5 &= ~(1 << CP0C5_FRE);
+                env->hflags &= ~MIPS_HFLAG_FRE;
+            }
+
+            return 0;
+        }
+#endif /* MIPS */
+#ifdef TARGET_AARCH64
+        case TARGET_PR_SVE_SET_VL:
+            /*
+             * We cannot support either PR_SVE_SET_VL_ONEXEC or
+             * PR_SVE_VL_INHERIT.  Note the kernel definition
+             * of sve_vl_valid allows for VQ=512, i.e. VL=8192,
+             * even though the current architectural maximum is VQ=16.
+             */
+            ret = -TARGET_EINVAL;
+            if (cpu_isar_feature(aa64_sve, env_archcpu(cpu_env))
+                && arg2 >= 0 && arg2 <= 512 * 16 && !(arg2 & 15)) {
+                CPUARMState *env = cpu_env;
+                ARMCPU *cpu = env_archcpu(env);
+                uint32_t vq, old_vq;
+
+                old_vq = (env->vfp.zcr_el[1] & 0xf) + 1;
+                vq = MAX(arg2 / 16, 1);
+                vq = MIN(vq, cpu->sve_max_vq);
+
+                if (vq < old_vq) {
+                    aarch64_sve_narrow_vq(env, vq);
+                }
+                env->vfp.zcr_el[1] = vq - 1;
+                arm_rebuild_hflags(env);
+                ret = vq * 16;
+            }
+            return ret;
+        case TARGET_PR_SVE_GET_VL:
+            ret = -TARGET_EINVAL;
+            {
+                ARMCPU *cpu = env_archcpu(cpu_env);
+                if (cpu_isar_feature(aa64_sve, cpu)) {
+                    ret = ((cpu->env.vfp.zcr_el[1] & 0xf) + 1) * 16;
+                }
+            }
+            return ret;
+        case TARGET_PR_PAC_RESET_KEYS:
+            {
+                CPUARMState *env = cpu_env;
+                ARMCPU *cpu = env_archcpu(env);
+
+                if (arg3 || arg4 || arg5) {
+                    return -TARGET_EINVAL;
+                }
+                if (cpu_isar_feature(aa64_pauth, cpu)) {
+                    int all = (TARGET_PR_PAC_APIAKEY | TARGET_PR_PAC_APIBKEY |
+                               TARGET_PR_PAC_APDAKEY | TARGET_PR_PAC_APDBKEY |
+                               TARGET_PR_PAC_APGAKEY);
+                    int ret = 0;
+                    Error *err = NULL;
+
+                    if (arg2 == 0) {
+                        arg2 = all;
+                    } else if (arg2 & ~all) {
+                        return -TARGET_EINVAL;
+                    }
+                    if (arg2 & TARGET_PR_PAC_APIAKEY) {
+                        ret |= qemu_guest_getrandom(&env->keys.apia,
+                                                    sizeof(ARMPACKey), &err);
+                    }
+                    if (arg2 & TARGET_PR_PAC_APIBKEY) {
+                        ret |= qemu_guest_getrandom(&env->keys.apib,
+                                                    sizeof(ARMPACKey), &err);
+                    }
+                    if (arg2 & TARGET_PR_PAC_APDAKEY) {
+                        ret |= qemu_guest_getrandom(&env->keys.apda,
+                                                    sizeof(ARMPACKey), &err);
+                    }
+                    if (arg2 & TARGET_PR_PAC_APDBKEY) {
+                        ret |= qemu_guest_getrandom(&env->keys.apdb,
+                                                    sizeof(ARMPACKey), &err);
+                    }
+                    if (arg2 & TARGET_PR_PAC_APGAKEY) {
+                        ret |= qemu_guest_getrandom(&env->keys.apga,
+                                                    sizeof(ARMPACKey), &err);
+                    }
+                    if (ret != 0) {
+                        /*
+                         * Some unknown failure in the crypto.  The best
+                         * we can do is log it and fail the syscall.
+                         * The real syscall cannot fail this way.
+                         */
+                        qemu_log_mask(LOG_UNIMP,
+                                      "PR_PAC_RESET_KEYS: Crypto failure: %s",
+                                      error_get_pretty(err));
+                        error_free(err);
+                        return -TARGET_EIO;
+                    }
+                    return 0;
+                }
+            }
+            return -TARGET_EINVAL;
+        case TARGET_PR_SET_TAGGED_ADDR_CTRL:
+            {
+                abi_ulong valid_mask = TARGET_PR_TAGGED_ADDR_ENABLE;
+                CPUARMState *env = cpu_env;
+                ARMCPU *cpu = env_archcpu(env);
+
+                if (cpu_isar_feature(aa64_mte, cpu)) {
+                    valid_mask |= TARGET_PR_MTE_TCF_MASK;
+                    valid_mask |= TARGET_PR_MTE_TAG_MASK;
+                }
+
+                if ((arg2 & ~valid_mask) || arg3 || arg4 || arg5) {
+                    return -TARGET_EINVAL;
+                }
+                env->tagged_addr_enable = arg2 & TARGET_PR_TAGGED_ADDR_ENABLE;
+
+                if (cpu_isar_feature(aa64_mte, cpu)) {
+                    switch (arg2 & TARGET_PR_MTE_TCF_MASK) {
+                    case TARGET_PR_MTE_TCF_NONE:
+                    case TARGET_PR_MTE_TCF_SYNC:
+                    case TARGET_PR_MTE_TCF_ASYNC:
+                        break;
+                    default:
+                        return -EINVAL;
+                    }
+
+                    /*
+                     * Write PR_MTE_TCF to SCTLR_EL1[TCF0].
+                     * Note that the syscall values are consistent with hw.
+                     */
+                    env->cp15.sctlr_el[1] =
+                        deposit64(env->cp15.sctlr_el[1], 38, 2,
+                                  arg2 >> TARGET_PR_MTE_TCF_SHIFT);
+
+                    /*
+                     * Write PR_MTE_TAG to GCR_EL1[Exclude].
+                     * Note that the syscall uses an include mask,
+                     * and hardware uses an exclude mask -- invert.
+                     */
+                    env->cp15.gcr_el1 =
+                        deposit64(env->cp15.gcr_el1, 0, 16,
+                                  ~arg2 >> TARGET_PR_MTE_TAG_SHIFT);
+                    arm_rebuild_hflags(env);
+                }
+                return 0;
+            }
+        case TARGET_PR_GET_TAGGED_ADDR_CTRL:
+            {
+                abi_long ret = 0;
+                CPUARMState *env = cpu_env;
+                ARMCPU *cpu = env_archcpu(env);
+
+                if (arg2 || arg3 || arg4 || arg5) {
+                    return -TARGET_EINVAL;
+                }
+                if (env->tagged_addr_enable) {
+                    ret |= TARGET_PR_TAGGED_ADDR_ENABLE;
+                }
+                if (cpu_isar_feature(aa64_mte, cpu)) {
+                    /* See above. */
+                    ret |= (extract64(env->cp15.sctlr_el[1], 38, 2)
+                            << TARGET_PR_MTE_TCF_SHIFT);
+                    ret = deposit64(ret, TARGET_PR_MTE_TAG_SHIFT, 16,
+                                    ~env->cp15.gcr_el1);
+                }
+                return ret;
+            }
+#endif /* AARCH64 */
+#ifdef TARGET_I386
+        case PR_SET_SYSCALL_USER_DISPATCH:
+            return do_prctl_syscall_user_dispatch(env, arg2, arg3,
+                                                  arg4, arg5);
+        case PR_GET_TSC:
+            return do_prctl_get_tsc(env, arg2);
+        case PR_SET_TSC:
+            return do_prctl_set_tsc(env, arg2);
+        case PR_GET_AUXV:
+            if (arg4 || arg5) {
+                return -TARGET_EINVAL;
+            }
+            return do_prctl_get_auxv(env, arg2, arg3);
+        case PR_SET_MDWE:
+            return do_prctl_mdwe(env, true, arg2, arg3, arg4, arg5);
+        case PR_GET_MDWE:
+            return do_prctl_mdwe(env, false, arg2, arg3, arg4, arg5);
+        case PR_SET_VMA:
+            return do_prctl_set_vma(arg2, arg3, arg4, arg5);
+        case PR_SET_MM:
+            return do_prctl_set_mm(env, arg2, arg3, arg4, arg5);
+        case PR_GET_SPECULATION_CTRL:
+            return do_prctl_speculation_ctrl(false, arg2, arg3,
+                                             arg4, arg5);
+        case PR_SET_SPECULATION_CTRL:
+            return do_prctl_speculation_ctrl(true, arg2, arg3,
+                                             arg4, arg5);
+        case PR_TIMER_CREATE_RESTORE_IDS:
+            return do_prctl_timer_create_restore_ids(env, arg2, arg3,
+                                                     arg4, arg5);
+        case PR_FUTEX_HASH:
+            return do_prctl_futex_hash(env, arg2, arg3, arg4);
+        case PR_RSEQ_SLICE_EXTENSION:
+            /* linux-user has no rseq-v2 slice ABI to enable. */
+            return arg4 || arg5 ? -TARGET_EINVAL : -TARGET_EOPNOTSUPP;
+        case PR_SET_MEMORY_MERGE:
+        case PR_GET_MEMORY_MERGE:
+            /* KSM state belongs to the guest mm, not the translator mm. */
+            return -TARGET_EINVAL;
+        case PR_GET_CFI:
+        case PR_SET_CFI:
+            /* Native x86 has no branch-landing-pad prctl implementation. */
+            return -TARGET_EINVAL;
+#endif
+        case PR_GET_SECCOMP:
+        case PR_SET_SECCOMP:
+            return guest_seccomp_prctl(env, arg1, arg2, arg3);
+        case PR_CAP_AMBIENT:
+        case PR_CAPBSET_READ:
+        case PR_CAPBSET_DROP:
+        case PR_GET_DUMPABLE:
+        case PR_SET_DUMPABLE:
+        case PR_GET_KEEPCAPS:
+        case PR_SET_KEEPCAPS:
+        case PR_GET_SECUREBITS:
+        case PR_SET_SECUREBITS:
+        case PR_GET_TIMING:
+        case PR_SET_TIMING:
+        case PR_GET_TIMERSLACK:
+        case PR_SET_TIMERSLACK:
+        case PR_TASK_PERF_EVENTS_DISABLE:
+        case PR_TASK_PERF_EVENTS_ENABLE:
+        case PR_MCE_KILL:
+        case PR_MCE_KILL_GET:
+        case PR_GET_NO_NEW_PRIVS:
+        case PR_SET_NO_NEW_PRIVS:
+        case PR_GET_IO_FLUSHER:
+        case PR_SET_IO_FLUSHER:
+        case PR_SET_CHILD_SUBREAPER:
+        case PR_SET_PTRACER:
+        case PR_GET_THP_DISABLE:
+        case PR_SET_THP_DISABLE:
+#ifndef TARGET_I386
+        case PR_GET_SPECULATION_CTRL:
+        case PR_SET_SPECULATION_CTRL:
+#endif
+#ifndef TARGET_I386
+        case PR_SET_MEMORY_MERGE:
+        case PR_GET_MEMORY_MERGE:
+#endif
+            /* These options have only scalar arguments. */
+            return get_errno(prctl(arg1, arg2, arg3, arg4, arg5));
+        case PR_SCHED_CORE:
+            if (arg2 == PR_SCHED_CORE_GET) {
+                uint64_t cookie;
+
+                ret = get_errno(prctl(PR_SCHED_CORE, arg2, arg3, arg4,
+                                      &cookie));
+                if (!is_error(ret) && put_user_u64(cookie, arg5)) {
+                    return -TARGET_EFAULT;
+                }
+                return ret;
+            }
+            return get_errno(prctl(PR_SCHED_CORE, arg2, arg3,
+                                   arg4, arg5));
+        case PR_GET_CHILD_SUBREAPER:
+        {
+            int val;
+
+            ret = get_errno(prctl(PR_GET_CHILD_SUBREAPER, &val,
+                                  arg3, arg4, arg5));
+            if (!is_error(ret) && put_user_s32(val, arg2)) {
+                return -TARGET_EFAULT;
+            }
+            return ret;
+        }
+        case PR_GET_TID_ADDRESS:
+            return put_user_ual(((TaskState *)cpu->opaque)->child_tidptr,
+                                arg2);
+        case PR_GET_FPEXC:
+        case PR_SET_FPEXC:
+        case PR_GET_ENDIAN:
+        case PR_SET_ENDIAN:
+        case PR_GET_FPEMU:
+        case PR_SET_FPEMU:
+#ifndef TARGET_I386
+        case PR_SET_MM:
+        case PR_GET_TSC:
+        case PR_SET_TSC:
+#endif
+        case PR_MPX_ENABLE_MANAGEMENT:
+        case PR_MPX_DISABLE_MANAGEMENT:
+            /* Do not let the guest alter host execution state. */
+            return -TARGET_EINVAL;
+        default:
+#ifdef TARGET_I386
+            qemu_log_mask(LOG_UNIMP,
+                          "Unsupported prctl: " TARGET_ABI_FMT_ld "\n",
+                          arg1);
+            return -TARGET_EINVAL;
+#else
+            /* Preserve the generic linux-user behavior for other guests. */
+            return get_errno(prctl(arg1, g2h_untagged(arg2),
+                                   g2h_untagged(arg3),
+                                   g2h_untagged(arg4),
+                                   g2h_untagged(arg5)));
+#endif
+        }
+        break;
+#ifdef TARGET_NR_arch_prctl
+    case TARGET_NR_arch_prctl:
+        return do_arch_prctl(cpu_env, arg1, arg2);
+#endif
+#ifdef TARGET_NR_pread64
+    case TARGET_NR_pread64:
+        if (regpairs_aligned(cpu_env, num)) {
+            arg4 = arg5;
+            arg5 = arg6;
+        }
+        if (arg3 == 0) {
+            /* Special-case NULL buffer and zero length, which should succeed */
+            p = 0;
+        } else {
+            p = lock_user_remap(VERIFY_WRITE, arg2, arg3, 0);
+            if (!p) {
+                return -TARGET_EFAULT;
+            }
+        }
+        ret = get_errno(pread64(arg1, p, arg3, target_offset64(arg4, arg5)));
+#ifdef CONFIG_LATX
+        if (ret > 0) {
+            latx_wine_pe_prefer_image_base(arg1, p, ret);
+        }
+#endif
+        unlock_user_remap(p, arg2, ret);
+
+#ifdef CONFIG_LATX_AOT
+        if (option_aot && (arg1 > 2)) {
+            char buf[PATH_MAX];
+            int target_prot = page_get_flags(arg2) & (PAGE_READ | PAGE_WRITE | PAGE_EXEC);
+            if (option_aot_wine || (target_prot & PAGE_EXEC)) {
+                uint64_t aot_offset = target_offset64(arg4, arg5);
+                aot_offset = deal_seg(NULL, true, aot_offset, buf, arg1,
+                        target_prot, arg3, arg2);
+                /* Wine makes PE pread buffers executable via mprotect,
+                 * which has no AOT hook. Bind their cache while tracking. */
+                if (option_load_aot) {
+                    recover_aot_tb(buf, aot_offset, arg2, arg3);
+                }
+            }
+        }
+#endif
+
+        return ret;
+    case TARGET_NR_pwrite64:
+        if (regpairs_aligned(cpu_env, num)) {
+            arg4 = arg5;
+            arg5 = arg6;
+        }
+        if (arg3 == 0) {
+            /* Special-case NULL buffer and zero length, which should succeed */
+            p = 0;
+        } else {
+            p = lock_user_remap(VERIFY_READ, arg2, arg3, 1);
+            if (!p) {
+                return -TARGET_EFAULT;
+            }
+        }
+        ret = get_errno(pwrite64(arg1, p, arg3, target_offset64(arg4, arg5)));
+        unlock_user_remap(p, arg2, 0);
+        return ret;
+#endif
+    case TARGET_NR_getcwd:
+        if (!(p = lock_user(VERIFY_WRITE, arg1, arg2, 0)))
+            return -TARGET_EFAULT;
+        ret = get_errno(sys_getcwd1(p, arg2));
+        unlock_user(p, arg1, ret);
+        return ret;
+    case TARGET_NR_capget:
+    case TARGET_NR_capset:
+    {
+        struct target_user_cap_header *target_header;
+        struct target_user_cap_data *target_data = NULL;
+        struct __user_cap_header_struct header;
+        struct __user_cap_data_struct data[2];
+        struct __user_cap_data_struct *dataptr = NULL;
+        int i, target_datalen;
+        int data_items = 1;
+
+        if (!lock_user_struct(VERIFY_WRITE, target_header, arg1, 1)) {
+            return -TARGET_EFAULT;
+        }
+        header.version = tswap32(target_header->version);
+        header.pid = tswap32(target_header->pid);
+
+        if (header.version != _LINUX_CAPABILITY_VERSION) {
+            /* Version 2 and up takes pointer to two user_data structs */
+            data_items = 2;
+        }
+
+        target_datalen = sizeof(*target_data) * data_items;
+
+        if (arg2) {
+            if (num == TARGET_NR_capget) {
+                target_data = lock_user(VERIFY_WRITE, arg2, target_datalen, 0);
+            } else {
+                target_data = lock_user(VERIFY_READ, arg2, target_datalen, 1);
+            }
+            if (!target_data) {
+                unlock_user_struct(target_header, arg1, 0);
+                return -TARGET_EFAULT;
+            }
+
+            if (num == TARGET_NR_capset) {
+                for (i = 0; i < data_items; i++) {
+                    data[i].effective = tswap32(target_data[i].effective);
+                    data[i].permitted = tswap32(target_data[i].permitted);
+                    data[i].inheritable = tswap32(target_data[i].inheritable);
+                }
+            }
+
+            dataptr = data;
+        }
+
+        if (num == TARGET_NR_capget) {
+            ret = get_errno(capget(&header, dataptr));
+        } else {
+            ret = get_errno(capset(&header, dataptr));
+        }
+
+        /* The kernel always updates version for both capget and capset */
+        target_header->version = tswap32(header.version);
+        unlock_user_struct(target_header, arg1, 1);
+
+        if (arg2) {
+            if (num == TARGET_NR_capget) {
+                for (i = 0; i < data_items; i++) {
+                    target_data[i].effective = tswap32(data[i].effective);
+                    target_data[i].permitted = tswap32(data[i].permitted);
+                    target_data[i].inheritable = tswap32(data[i].inheritable);
+                }
+                unlock_user(target_data, arg2, target_datalen);
+            } else {
+                unlock_user(target_data, arg2, 0);
+            }
+        }
+        return ret;
+    }
+    case TARGET_NR_sigaltstack:
+        return do_sigaltstack(arg1, arg2,
+                              get_sp_from_cpustate((CPUArchState *)cpu_env));
+
+#ifdef CONFIG_SENDFILE
+#ifdef TARGET_NR_sendfile
+    case TARGET_NR_sendfile:
+    {
+        off_t *offp = NULL;
+        off_t off;
+        if (arg3) {
+            ret = get_user_sal(off, arg3);
+            if (is_error(ret)) {
+                return ret;
+            }
+            offp = &off;
+        }
+        ret = get_errno(sendfile(arg1, arg2, offp, arg4));
+        if (!is_error(ret) && arg3) {
+            abi_long ret2 = put_user_sal(off, arg3);
+            if (is_error(ret2)) {
+                ret = ret2;
+            }
+        }
+        return ret;
+    }
+#endif
+#ifdef TARGET_NR_sendfile64
+    case TARGET_NR_sendfile64:
+    {
+        off_t *offp = NULL;
+        off_t off;
+        if (arg3) {
+            ret = get_user_s64(off, arg3);
+            if (is_error(ret)) {
+                return ret;
+            }
+            offp = &off;
+        }
+        ret = get_errno(sendfile(arg1, arg2, offp, arg4));
+        if (!is_error(ret) && arg3) {
+            abi_long ret2 = put_user_s64(off, arg3);
+            if (is_error(ret2)) {
+                ret = ret2;
+            }
+        }
+        return ret;
+    }
+#endif
+#endif
+#ifdef TARGET_NR_vfork
+    case TARGET_NR_vfork:
+        return get_errno(do_fork(cpu_env,
+                         CLONE_VFORK | CLONE_VM | TARGET_SIGCHLD,
+                         0, 0, 0, 0));
+#endif
+#ifdef TARGET_NR_ugetrlimit
+    case TARGET_NR_ugetrlimit:
+    {
+	struct rlimit rlim;
+	int resource = target_to_host_resource(arg1);
+	ret = get_errno(getrlimit(resource, &rlim));
+	if (!is_error(ret)) {
+	    struct target_rlimit *target_rlim;
+            if (!lock_user_struct(VERIFY_WRITE, target_rlim, arg2, 0))
+                return -TARGET_EFAULT;
+	    target_rlim->rlim_cur = host_to_target_rlim(rlim.rlim_cur);
+	    target_rlim->rlim_max = host_to_target_rlim(rlim.rlim_max);
+            unlock_user_struct(target_rlim, arg2, 1);
+	}
+        return ret;
+    }
+#endif
+#ifdef TARGET_NR_truncate64
+    case TARGET_NR_truncate64:
+        if (!(p = lock_user_string(arg1)))
+            return -TARGET_EFAULT;
+	ret = target_truncate64(cpu_env, p, arg2, arg3, arg4);
+        unlock_user(p, arg1, 0);
+        return ret;
+#endif
+#ifdef TARGET_NR_ftruncate64
+    case TARGET_NR_ftruncate64:
+        return target_ftruncate64(cpu_env, arg1, arg2, arg3, arg4);
+#endif
+#ifdef TARGET_NR_stat64
+    case TARGET_NR_stat64:
+        if (!(p = lock_user_string(arg1))) {
+            return -TARGET_EFAULT;
+        }
+        ret = get_errno(stat(path(p), &st));
+#ifdef CONFIG_LATX
+        if (!is_error(ret)) {
+            latx_adjust_proc_self_task_stat(&st);
+        }
+#endif
+        unlock_user(p, arg1, 0);
+        if (!is_error(ret))
+            ret = host_to_target_stat64(cpu_env, arg2, &st);
+        return ret;
+#endif
+#ifdef TARGET_NR_lstat64
+    case TARGET_NR_lstat64:
+        if (!(p = lock_user_string(arg1))) {
+            return -TARGET_EFAULT;
+        }
+        ret = get_errno(lstat(path(p), &st));
+#ifdef CONFIG_LATX
+        if (!is_error(ret)) {
+            latx_adjust_proc_self_task_stat(&st);
+        }
+#endif
+        unlock_user(p, arg1, 0);
+        if (!is_error(ret))
+            ret = host_to_target_stat64(cpu_env, arg2, &st);
+        return ret;
+#endif
+#ifdef TARGET_NR_fstat64
+    case TARGET_NR_fstat64:
+        ret = proc_self_fstat(arg1, &st);
+        if (ret) {
+            ret = get_errno(fstat(arg1, &st));
+        }
+#ifdef CONFIG_LATX
+        if (!is_error(ret)) {
+            latx_adjust_proc_self_task_fstat(arg1, &st);
+        }
+#endif
+        if (!is_error(ret))
+            ret = host_to_target_stat64(cpu_env, arg2, &st);
+        return ret;
+#endif
+#if (defined(TARGET_NR_fstatat64) || defined(TARGET_NR_newfstatat))
+#ifdef TARGET_NR_fstatat64
+    case TARGET_NR_fstatat64:
+#endif
+#ifdef TARGET_NR_newfstatat
+    case TARGET_NR_newfstatat:
+#endif
+        if (!(p = lock_user_string(arg2))) {
+            return -TARGET_EFAULT;
+        }
+        ret = get_errno(fstatat(arg1, path(p), &st, arg4));
+
+        if (!is_error(ret)) {
+#ifdef CONFIG_LATX
+            latx_adjust_proc_self_task_stat_at(arg1, p, arg4, &st);
+#else
+            if (rcu_call_thread_is_running() &&
+                (!strcmp((const char *)p, "self/task/") ||
+                 is_proc_myself((const char *)p, "task/"))) {
+                st.st_nlink--;
+            }
+#endif
+        }
+
+        unlock_user(p, arg2, 0);
+        if (!is_error(ret))
+            ret = host_to_target_stat64(cpu_env, arg3, &st);
+        return ret;
+#endif
+#if defined(TARGET_NR_statx)
+    case TARGET_NR_statx:
+        {
+            struct target_statx *target_stx;
+            int dirfd = arg1;
+            int flags = arg3;
+
+            p = lock_user_string(arg2);
+            if (p == NULL) {
+                return -TARGET_EFAULT;
+            }
+#if defined(__NR_statx)
+            {
+                /*
+                 * It is assumed that struct statx is architecture independent.
+                 */
+                struct target_statx host_stx;
+                int mask = arg4;
+
+                ret = get_errno(sys_statx(dirfd, p, flags, mask, &host_stx));
+                if (!is_error(ret)) {
+#ifdef CONFIG_LATX
+                    if (latx_statx_is_proc_self_task_at(dirfd, p, flags,
+                                                        &host_stx)) {
+                        host_stx.stx_nlink = latx_guest_thread_count() + 2;
+                    }
+#endif
+                    if (host_to_target_statx(&host_stx, arg5) != 0) {
+                        unlock_user(p, arg2, 0);
+                        return -TARGET_EFAULT;
+                    }
+                }
+
+                if (ret != -TARGET_ENOSYS) {
+                    unlock_user(p, arg2, 0);
+                    return ret;
+                }
+            }
+#endif
+            ret = get_errno(fstatat(dirfd, path(p), &st, flags));
+
+#ifdef CONFIG_LATX
+            if (!is_error(ret)) {
+                latx_adjust_proc_self_task_stat_at(dirfd, p, flags, &st);
+            }
+#endif
+            unlock_user(p, arg2, 0);
+
+            if (!is_error(ret)) {
+                if (!lock_user_struct(VERIFY_WRITE, target_stx, arg5, 0)) {
+                    return -TARGET_EFAULT;
+                }
+                memset(target_stx, 0, sizeof(*target_stx));
+                __put_user(major(st.st_dev), &target_stx->stx_dev_major);
+                __put_user(minor(st.st_dev), &target_stx->stx_dev_minor);
+                __put_user(st.st_ino, &target_stx->stx_ino);
+                __put_user(st.st_mode, &target_stx->stx_mode);
+                __put_user(st.st_uid, &target_stx->stx_uid);
+                __put_user(st.st_gid, &target_stx->stx_gid);
+                __put_user(st.st_nlink, &target_stx->stx_nlink);
+                __put_user(major(st.st_rdev), &target_stx->stx_rdev_major);
+                __put_user(minor(st.st_rdev), &target_stx->stx_rdev_minor);
+                __put_user(st.st_size, &target_stx->stx_size);
+                __put_user(st.st_blksize, &target_stx->stx_blksize);
+                __put_user(st.st_blocks, &target_stx->stx_blocks);
+                __put_user(st.st_atime, &target_stx->stx_atime.tv_sec);
+                __put_user(st.st_mtime, &target_stx->stx_mtime.tv_sec);
+                __put_user(st.st_ctime, &target_stx->stx_ctime.tv_sec);
+                unlock_user_struct(target_stx, arg5, 1);
+            }
+        }
+        return ret;
+#endif
+#ifdef TARGET_NR_lchown
+    case TARGET_NR_lchown:
+        if (!(p = lock_user_string(arg1)))
+            return -TARGET_EFAULT;
+        ret = get_errno(lchown(p, low2highuid(arg2), low2highgid(arg3)));
+        unlock_user(p, arg1, 0);
+        return ret;
+#endif
+#ifdef TARGET_NR_getuid
+    case TARGET_NR_getuid:
+        return get_errno(high2lowuid(getuid()));
+#endif
+#ifdef TARGET_NR_getgid
+    case TARGET_NR_getgid:
+        return get_errno(high2lowgid(getgid()));
+#endif
+#ifdef TARGET_NR_geteuid
+    case TARGET_NR_geteuid:
+        return get_errno(high2lowuid(geteuid()));
+#endif
+#ifdef TARGET_NR_getegid
+    case TARGET_NR_getegid:
+        return get_errno(high2lowgid(getegid()));
+#endif
+    case TARGET_NR_setreuid:
+        return get_errno(sys_setreuid(low2highuid(arg1), low2highuid(arg2)));
+    case TARGET_NR_setregid:
+        return get_errno(sys_setregid(low2highgid(arg1), low2highgid(arg2)));
+    case TARGET_NR_getgroups:
+        {
+            int gidsetsize = arg1;
+            target_id *target_grouplist;
+            gid_t *grouplist;
+            int i;
+
+            grouplist = alloca(gidsetsize * sizeof(gid_t));
+            ret = get_errno(getgroups(gidsetsize, grouplist));
+            if (gidsetsize == 0)
+                return ret;
+            if (!is_error(ret)) {
+                target_grouplist = lock_user(VERIFY_WRITE, arg2, gidsetsize * sizeof(target_id), 0);
+                if (!target_grouplist)
+                    return -TARGET_EFAULT;
+                for(i = 0;i < ret; i++)
+                    target_grouplist[i] = tswapid(high2lowgid(grouplist[i]));
+                unlock_user(target_grouplist, arg2, gidsetsize * sizeof(target_id));
+            }
+        }
+        return ret;
+    case TARGET_NR_setgroups:
+        {
+            int gidsetsize = arg1;
+            target_id *target_grouplist;
+            gid_t *grouplist = NULL;
+            int i;
+            if (gidsetsize) {
+                grouplist = alloca(gidsetsize * sizeof(gid_t));
+                target_grouplist = lock_user(VERIFY_READ, arg2, gidsetsize * sizeof(target_id), 1);
+                if (!target_grouplist) {
+                    return -TARGET_EFAULT;
+                }
+                for (i = 0; i < gidsetsize; i++) {
+                    grouplist[i] = low2highgid(tswapid(target_grouplist[i]));
+                }
+                unlock_user(target_grouplist, arg2, 0);
+            }
+            return get_errno(sys_setgroups(gidsetsize, grouplist));
+        }
+    case TARGET_NR_fchown:
+        return get_errno(fchown(arg1, low2highuid(arg2), low2highgid(arg3)));
+#if defined(TARGET_NR_fchownat)
+    case TARGET_NR_fchownat:
+        if (!(p = lock_user_string(arg2)))
+            return -TARGET_EFAULT;
+        ret = get_errno(fchownat(arg1, p, low2highuid(arg3),
+                                 low2highgid(arg4), arg5));
+        unlock_user(p, arg2, 0);
+        return ret;
+#endif
+#ifdef TARGET_NR_setresuid
+    case TARGET_NR_setresuid:
+        return get_errno(sys_setresuid(low2highuid(arg1),
+                                       low2highuid(arg2),
+                                       low2highuid(arg3)));
+#endif
+#ifdef TARGET_NR_getresuid
+    case TARGET_NR_getresuid:
+        {
+            uid_t ruid, euid, suid;
+            ret = get_errno(getresuid(&ruid, &euid, &suid));
+            if (!is_error(ret)) {
+                if (put_user_id(high2lowuid(ruid), arg1)
+                    || put_user_id(high2lowuid(euid), arg2)
+                    || put_user_id(high2lowuid(suid), arg3))
+                    return -TARGET_EFAULT;
+            }
+        }
+        return ret;
+#endif
+#ifdef TARGET_NR_getresgid
+    case TARGET_NR_setresgid:
+        return get_errno(sys_setresgid(low2highgid(arg1),
+                                       low2highgid(arg2),
+                                       low2highgid(arg3)));
+#endif
+#ifdef TARGET_NR_getresgid
+    case TARGET_NR_getresgid:
+        {
+            gid_t rgid, egid, sgid;
+            ret = get_errno(getresgid(&rgid, &egid, &sgid));
+            if (!is_error(ret)) {
+                if (put_user_id(high2lowgid(rgid), arg1)
+                    || put_user_id(high2lowgid(egid), arg2)
+                    || put_user_id(high2lowgid(sgid), arg3))
+                    return -TARGET_EFAULT;
+            }
+        }
+        return ret;
+#endif
+#ifdef TARGET_NR_chown
+    case TARGET_NR_chown:
+        if (!(p = lock_user_string(arg1)))
+            return -TARGET_EFAULT;
+        ret = get_errno(chown(p, low2highuid(arg2), low2highgid(arg3)));
+        unlock_user(p, arg1, 0);
+        return ret;
+#endif
+    case TARGET_NR_setuid:
+        return get_errno(sys_setuid(low2highuid(arg1)));
+    case TARGET_NR_setgid:
+        return get_errno(sys_setgid(low2highgid(arg1)));
+    case TARGET_NR_setfsuid:
+        return get_errno(setfsuid(arg1));
+    case TARGET_NR_setfsgid:
+        return get_errno(setfsgid(arg1));
+
+#ifdef TARGET_NR_lchown32
+    case TARGET_NR_lchown32:
+        if (!(p = lock_user_string(arg1)))
+            return -TARGET_EFAULT;
+        ret = get_errno(lchown(p, arg2, arg3));
+        unlock_user(p, arg1, 0);
+        return ret;
+#endif
+#ifdef TARGET_NR_getuid32
+    case TARGET_NR_getuid32:
+        return get_errno(getuid());
+#endif
+
+#if defined(TARGET_NR_getxuid) && defined(TARGET_ALPHA)
+   /* Alpha specific */
+    case TARGET_NR_getxuid:
+         {
+            uid_t euid;
+            euid=geteuid();
+            ((CPUAlphaState *)cpu_env)->ir[IR_A4]=euid;
+         }
+        return get_errno(getuid());
+#endif
+#if defined(TARGET_NR_getxgid) && defined(TARGET_ALPHA)
+   /* Alpha specific */
+    case TARGET_NR_getxgid:
+         {
+            uid_t egid;
+            egid=getegid();
+            ((CPUAlphaState *)cpu_env)->ir[IR_A4]=egid;
+         }
+        return get_errno(getgid());
+#endif
+#if defined(TARGET_NR_osf_getsysinfo) && defined(TARGET_ALPHA)
+    /* Alpha specific */
+    case TARGET_NR_osf_getsysinfo:
+        ret = -TARGET_EOPNOTSUPP;
+        switch (arg1) {
+          case TARGET_GSI_IEEE_FP_CONTROL:
+            {
+                uint64_t fpcr = cpu_alpha_load_fpcr(cpu_env);
+                uint64_t swcr = ((CPUAlphaState *)cpu_env)->swcr;
+
+                swcr &= ~SWCR_STATUS_MASK;
+                swcr |= (fpcr >> 35) & SWCR_STATUS_MASK;
+
+                if (put_user_u64 (swcr, arg2))
+                        return -TARGET_EFAULT;
+                ret = 0;
+            }
+            break;
+
+          /* case GSI_IEEE_STATE_AT_SIGNAL:
+             -- Not implemented in linux kernel.
+             case GSI_UACPROC:
+             -- Retrieves current unaligned access state; not much used.
+             case GSI_PROC_TYPE:
+             -- Retrieves implver information; surely not used.
+             case GSI_GET_HWRPB:
+             -- Grabs a copy of the HWRPB; surely not used.
+          */
+        }
+        return ret;
+#endif
+#if defined(TARGET_NR_osf_setsysinfo) && defined(TARGET_ALPHA)
+    /* Alpha specific */
+    case TARGET_NR_osf_setsysinfo:
+        ret = -TARGET_EOPNOTSUPP;
+        switch (arg1) {
+          case TARGET_SSI_IEEE_FP_CONTROL:
+            {
+                uint64_t swcr, fpcr;
+
+                if (get_user_u64 (swcr, arg2)) {
+                    return -TARGET_EFAULT;
+                }
+
+                /*
+                 * The kernel calls swcr_update_status to update the
+                 * status bits from the fpcr at every point that it
+                 * could be queried.  Therefore, we store the status
+                 * bits only in FPCR.
+                 */
+                ((CPUAlphaState *)cpu_env)->swcr
+                    = swcr & (SWCR_TRAP_ENABLE_MASK | SWCR_MAP_MASK);
+
+                fpcr = cpu_alpha_load_fpcr(cpu_env);
+                fpcr &= ((uint64_t)FPCR_DYN_MASK << 32);
+                fpcr |= alpha_ieee_swcr_to_fpcr(swcr);
+                cpu_alpha_store_fpcr(cpu_env, fpcr);
+                ret = 0;
+            }
+            break;
+
+          case TARGET_SSI_IEEE_RAISE_EXCEPTION:
+            {
+                uint64_t exc, fpcr, fex;
+
+                if (get_user_u64(exc, arg2)) {
+                    return -TARGET_EFAULT;
+                }
+                exc &= SWCR_STATUS_MASK;
+                fpcr = cpu_alpha_load_fpcr(cpu_env);
+
+                /* Old exceptions are not signaled.  */
+                fex = alpha_ieee_fpcr_to_swcr(fpcr);
+                fex = exc & ~fex;
+                fex >>= SWCR_STATUS_TO_EXCSUM_SHIFT;
+                fex &= ((CPUArchState *)cpu_env)->swcr;
+
+                /* Update the hardware fpcr.  */
+                fpcr |= alpha_ieee_swcr_to_fpcr(exc);
+                cpu_alpha_store_fpcr(cpu_env, fpcr);
+
+                if (fex) {
+                    int si_code = TARGET_FPE_FLTUNK;
+                    target_siginfo_t info;
+
+                    if (fex & SWCR_TRAP_ENABLE_DNO) {
+                        si_code = TARGET_FPE_FLTUND;
+                    }
+                    if (fex & SWCR_TRAP_ENABLE_INE) {
+                        si_code = TARGET_FPE_FLTRES;
+                    }
+                    if (fex & SWCR_TRAP_ENABLE_UNF) {
+                        si_code = TARGET_FPE_FLTUND;
+                    }
+                    if (fex & SWCR_TRAP_ENABLE_OVF) {
+                        si_code = TARGET_FPE_FLTOVF;
+                    }
+                    if (fex & SWCR_TRAP_ENABLE_DZE) {
+                        si_code = TARGET_FPE_FLTDIV;
+                    }
+                    if (fex & SWCR_TRAP_ENABLE_INV) {
+                        si_code = TARGET_FPE_FLTINV;
+                    }
+
+                    info.si_signo = SIGFPE;
+                    info.si_errno = 0;
+                    info.si_code = si_code;
+                    info._sifields._sigfault._addr
+                        = ((CPUArchState *)cpu_env)->pc;
+                    queue_signal((CPUArchState *)cpu_env, info.si_signo,
+                                 QEMU_SI_FAULT, &info);
+                }
+                ret = 0;
+            }
+            break;
+
+          /* case SSI_NVPAIRS:
+             -- Used with SSIN_UACPROC to enable unaligned accesses.
+             case SSI_IEEE_STATE_AT_SIGNAL:
+             case SSI_IEEE_IGNORE_STATE_AT_SIGNAL:
+             -- Not implemented in linux kernel
+          */
+        }
+        return ret;
+#endif
+#ifdef TARGET_NR_osf_sigprocmask
+    /* Alpha specific.  */
+    case TARGET_NR_osf_sigprocmask:
+        {
+            abi_ulong mask;
+            int how;
+            sigset_t set, oldset;
+
+            switch(arg1) {
+            case TARGET_SIG_BLOCK:
+                how = SIG_BLOCK;
+                break;
+            case TARGET_SIG_UNBLOCK:
+                how = SIG_UNBLOCK;
+                break;
+            case TARGET_SIG_SETMASK:
+                how = SIG_SETMASK;
+                break;
+            default:
+                return -TARGET_EINVAL;
+            }
+            mask = arg2;
+            target_to_host_old_sigset(&set, &mask);
+            ret = do_sigprocmask(how, &set, &oldset);
+            if (!ret) {
+                host_to_target_old_sigset(&mask, &oldset);
+                ret = mask;
+            }
+        }
+        return ret;
+#endif
+
+#ifdef TARGET_NR_getgid32
+    case TARGET_NR_getgid32:
+        return get_errno(getgid());
+#endif
+#ifdef TARGET_NR_geteuid32
+    case TARGET_NR_geteuid32:
+        return get_errno(geteuid());
+#endif
+#ifdef TARGET_NR_getegid32
+    case TARGET_NR_getegid32:
+        return get_errno(getegid());
+#endif
+#ifdef TARGET_NR_setreuid32
+    case TARGET_NR_setreuid32:
+        return get_errno(sys_setreuid(arg1, arg2));
+#endif
+#ifdef TARGET_NR_setregid32
+    case TARGET_NR_setregid32:
+        return get_errno(sys_setregid(arg1, arg2));
+#endif
+#ifdef TARGET_NR_getgroups32
+    case TARGET_NR_getgroups32:
+        {
+            int gidsetsize = arg1;
+            uint32_t *target_grouplist;
+            gid_t *grouplist;
+            int i;
+
+            grouplist = alloca(gidsetsize * sizeof(gid_t));
+            ret = get_errno(getgroups(gidsetsize, grouplist));
+            if (gidsetsize == 0)
+                return ret;
+            if (!is_error(ret)) {
+                target_grouplist = lock_user(VERIFY_WRITE, arg2, gidsetsize * 4, 0);
+                if (!target_grouplist) {
+                    return -TARGET_EFAULT;
+                }
+                for(i = 0;i < ret; i++)
+                    target_grouplist[i] = tswap32(grouplist[i]);
+                unlock_user(target_grouplist, arg2, gidsetsize * 4);
+            }
+        }
+        return ret;
+#endif
+#ifdef TARGET_NR_setgroups32
+    case TARGET_NR_setgroups32:
+        {
+            int gidsetsize = arg1;
+            uint32_t *target_grouplist;
+            gid_t *grouplist;
+            int i;
+
+            grouplist = alloca(gidsetsize * sizeof(gid_t));
+            target_grouplist = lock_user(VERIFY_READ, arg2, gidsetsize * 4, 1);
+            if (!target_grouplist) {
+                return -TARGET_EFAULT;
+            }
+            for(i = 0;i < gidsetsize; i++)
+                grouplist[i] = tswap32(target_grouplist[i]);
+            unlock_user(target_grouplist, arg2, 0);
+            return get_errno(sys_setgroups(gidsetsize, grouplist));
+        }
+#endif
+#ifdef TARGET_NR_fchown32
+    case TARGET_NR_fchown32:
+        return get_errno(fchown(arg1, arg2, arg3));
+#endif
+#ifdef TARGET_NR_setresuid32
+    case TARGET_NR_setresuid32:
+        return get_errno(sys_setresuid(arg1, arg2, arg3));
+#endif
+#ifdef TARGET_NR_getresuid32
+    case TARGET_NR_getresuid32:
+        {
+            uid_t ruid, euid, suid;
+            ret = get_errno(getresuid(&ruid, &euid, &suid));
+            if (!is_error(ret)) {
+                if (put_user_u32(ruid, arg1)
+                    || put_user_u32(euid, arg2)
+                    || put_user_u32(suid, arg3))
+                    return -TARGET_EFAULT;
+            }
+        }
+        return ret;
+#endif
+#ifdef TARGET_NR_setresgid32
+    case TARGET_NR_setresgid32:
+        return get_errno(sys_setresgid(arg1, arg2, arg3));
+#endif
+#ifdef TARGET_NR_getresgid32
+    case TARGET_NR_getresgid32:
+        {
+            gid_t rgid, egid, sgid;
+            ret = get_errno(getresgid(&rgid, &egid, &sgid));
+            if (!is_error(ret)) {
+                if (put_user_u32(rgid, arg1)
+                    || put_user_u32(egid, arg2)
+                    || put_user_u32(sgid, arg3))
+                    return -TARGET_EFAULT;
+            }
+        }
+        return ret;
+#endif
+#ifdef TARGET_NR_chown32
+    case TARGET_NR_chown32:
+        if (!(p = lock_user_string(arg1)))
+            return -TARGET_EFAULT;
+        ret = get_errno(chown(p, arg2, arg3));
+        unlock_user(p, arg1, 0);
+        return ret;
+#endif
+#ifdef TARGET_NR_setuid32
+    case TARGET_NR_setuid32:
+        return get_errno(sys_setuid(arg1));
+#endif
+#ifdef TARGET_NR_setgid32
+    case TARGET_NR_setgid32:
+        return get_errno(sys_setgid(arg1));
+#endif
+#ifdef TARGET_NR_setfsuid32
+    case TARGET_NR_setfsuid32:
+        return get_errno(setfsuid(arg1));
+#endif
+#ifdef TARGET_NR_setfsgid32
+    case TARGET_NR_setfsgid32:
+        return get_errno(setfsgid(arg1));
+#endif
+#ifdef TARGET_NR_pivot_root
+    case TARGET_NR_pivot_root:
+        {
+            void *p2;
+            p = lock_user_string(arg1);
+            p2 = lock_user_string(arg2);
+            if (!p || !p2) {
+                ret = -TARGET_EFAULT;
+            } else {
+                ret = get_errno(safe_pivot_root(p, p2));
+            }
+            unlock_user(p2, arg2, 0);
+            unlock_user(p, arg1, 0);
+        }
+        return ret;
+#endif
+#ifdef TARGET_NR_mincore
+    case TARGET_NR_mincore:
+        {
+            if (arg1 & ~TARGET_PAGE_MASK) {
+                return -TARGET_EINVAL;
+            }
+            void *a = lock_user(VERIFY_READ, arg1, arg2, 0);
+            if (!a) {
+                /* Support mincore for write only pages */
+                a = lock_user(PAGE_WRITE, arg1, arg2, 0);
+            }
+            if (!a) {
+                a = lock_user(PAGE_VALID, arg1, arg2, 0);
+            }
+            if (!a) {
+                return -TARGET_ENOMEM;
+            }
+            p = lock_user_string(arg3);
+            if (!p) {
+                return -TARGET_EFAULT;
+            }
+
+            if (TARGET_PAGE_SIZE < qemu_host_page_size) {
+                int h_pages = DIV_ROUND_UP(arg2, qemu_host_page_size);
+                int g_pages = DIV_ROUND_UP(arg2, TARGET_PAGE_SIZE);
+                abi_ulong real_start = arg1 & qemu_host_page_mask;
+                abi_ulong offset, g_addr;
+                g_addr = arg1;
+                unsigned char *p2 = (unsigned char *)g_new0(char, h_pages);
+
+                ret = get_errno(mincore(g2h(cpu, real_start), arg2, p2));
+                for (int i = 0; i < g_pages; i++) {
+                    offset = g_addr - real_start;
+                    ((unsigned char *)p)[i] = 0;
+                    if (p2[offset / qemu_host_page_size]) {
+                        if (page_get_flags(g_addr) &&
+                           !(page_get_flags(g_addr) & PAGE_DONTNEED)) {
+                            ((unsigned char *)p)[i] = 1;
+                        }
+                    }
+                    g_addr += TARGET_PAGE_SIZE;
+                }
+                g_free(p2);
+                unlock_user(p, arg3, ret);
+            } else {
+                ret = get_errno(mincore(a, arg2, p));
+                unlock_user(p, arg3, ret);
+            }
+            unlock_user(a, arg1, 0);
+        }
+        return ret;
+#endif
+#ifdef TARGET_NR_arm_fadvise64_64
+    case TARGET_NR_arm_fadvise64_64:
+        /* arm_fadvise64_64 looks like fadvise64_64 but
+         * with different argument order: fd, advice, offset, len
+         * rather than the usual fd, offset, len, advice.
+         * Note that offset and len are both 64-bit so appear as
+         * pairs of 32-bit registers.
+         */
+        ret = posix_fadvise(arg1, target_offset64(arg3, arg4),
+                            target_offset64(arg5, arg6), arg2);
+        return -host_to_target_errno(ret);
+#endif
+
+#if TARGET_ABI_BITS == 32
+
+#ifdef TARGET_NR_fadvise64_64
+    case TARGET_NR_fadvise64_64:
+#if defined(TARGET_PPC) || defined(TARGET_XTENSA)
+        /* 6 args: fd, advice, offset (high, low), len (high, low) */
+        ret = arg2;
+        arg2 = arg3;
+        arg3 = arg4;
+        arg4 = arg5;
+        arg5 = arg6;
+        arg6 = ret;
+#else
+        /* 6 args: fd, offset (high, low), len (high, low), advice */
+        if (regpairs_aligned(cpu_env, num)) {
+            /* offset is in (3,4), len in (5,6) and advice in 7 */
+            arg2 = arg3;
+            arg3 = arg4;
+            arg4 = arg5;
+            arg5 = arg6;
+            arg6 = arg7;
+        }
+#endif
+        ret = posix_fadvise(arg1, target_offset64(arg2, arg3),
+                            target_offset64(arg4, arg5), arg6);
+        return -host_to_target_errno(ret);
+#endif
+
+#ifdef TARGET_NR_fadvise64
+    case TARGET_NR_fadvise64:
+        /* 5 args: fd, offset (high, low), len, advice */
+        if (regpairs_aligned(cpu_env, num)) {
+            /* offset is in (3,4), len in 5 and advice in 6 */
+            arg2 = arg3;
+            arg3 = arg4;
+            arg4 = arg5;
+            arg5 = arg6;
+        }
+        ret = posix_fadvise(arg1, target_offset64(arg2, arg3), arg4, arg5);
+        return -host_to_target_errno(ret);
+#endif
+
+#else /* not a 32-bit ABI */
+#if defined(TARGET_NR_fadvise64_64) || defined(TARGET_NR_fadvise64)
+#ifdef TARGET_NR_fadvise64_64
+    case TARGET_NR_fadvise64_64:
+#endif
+#ifdef TARGET_NR_fadvise64
+    case TARGET_NR_fadvise64:
+#endif
+#ifdef TARGET_S390X
+        switch (arg4) {
+        case 4: arg4 = POSIX_FADV_NOREUSE + 1; break; /* make sure it's an invalid value */
+        case 5: arg4 = POSIX_FADV_NOREUSE + 2; break; /* ditto */
+        case 6: arg4 = POSIX_FADV_DONTNEED; break;
+        case 7: arg4 = POSIX_FADV_NOREUSE; break;
+        default: break;
+        }
+#endif
+        return -host_to_target_errno(posix_fadvise(arg1, arg2, arg3, arg4));
+#endif
+#endif /* end of 64-bit ABI fadvise handling */
+
+#ifdef TARGET_NR_madvise
+    case TARGET_NR_madvise:
+        /* A straight passthrough may not be safe because qemu sometimes
+           turns private file-backed mappings into anonymous mappings.
+           This will break MADV_DONTNEED.
+           This is a hint, so ignoring and returning success is ok.  */
+	/* TODO: the commets above needs verify */
+        if((arg1 & ~TARGET_PAGE_MASK) || (arg2 < 0)) {
+            return -TARGET_EINVAL;
+        }
+        if (!page_check_range(arg1, arg2, PAGE_VALID))
+            return -TARGET_ENOMEM;
+
+        int prot = page_get_flags(arg1);
+        if ((TARGET_PAGE_SIZE < qemu_host_page_size)) {
+            if ((arg3 == MADV_DONTNEED) && (prot & PAGE_ANON)) {
+                abi_ulong addr;
+                abi_ulong start = arg1;
+                abi_ulong end = start + arg2;
+                abi_ulong real_start = arg1 & qemu_host_page_mask;
+                abi_ulong real_end = HOST_PAGE_ALIGN(end);
+                int prot_extra = PAGE_VALID | PAGE_DONTNEED;
+                ret = 0;
+
+                if (start > real_start) {
+                    abi_ulong tmp_end = MIN(end,
+                            real_start + qemu_host_page_size);
+
+                    mmap_lock();
+                    for (addr = start; addr < tmp_end; addr += TARGET_PAGE_SIZE) {
+                        prot = page_get_flags(addr);
+                        if (prot & PAGE_WRITE) {
+                            memset(g2h(cpu, addr), 0, TARGET_PAGE_SIZE);
+                        }
+                        if (prot & PAGE_VALID) {
+                            prot = (prot & (PAGE_BITS | PAGE_WRITE_ORG)) | prot_extra;
+                            page_set_flags(addr, addr + TARGET_PAGE_SIZE, prot);
+                        }
+                    }
+                    mmap_unlock();
+
+                    if (real_end == real_start + qemu_host_page_size) {
+                        return ret;
+                    }
+                    real_start += qemu_host_page_size;
+                }
+                if (end < real_end) {
+                    abi_ulong tmp_start = real_end - qemu_host_page_size;
+                    mmap_lock();
+                    for (addr = tmp_start; addr < end; addr += TARGET_PAGE_SIZE) {
+                        prot = page_get_flags(addr);
+                        if (prot & PAGE_WRITE) {
+                            memset(g2h(cpu, addr), 0, TARGET_PAGE_SIZE);
+                        }
+                        if (prot & PAGE_VALID) {
+                            prot = (prot & (PAGE_BITS | PAGE_WRITE_ORG)) | prot_extra;
+                            page_set_flags(addr, addr + TARGET_PAGE_SIZE, prot);
+                        }
+                    }
+                    mmap_unlock();
+                    real_end -= qemu_host_page_size;
+                }
+                if (real_start < real_end) {
+                    mmap_lock();
+                    pageflags_set_clear(real_start, real_end - 1, prot_extra, 0);
+                    mmap_unlock();
+                    ret = get_errno(syscall(__NR_madvise, g2h_untagged(real_start),
+                                real_end - real_start, arg3));
+                }
+                return ret;
+            }
+
+            if ((arg3 == MADV_FREE) && (prot & PAGE_ANON)) {
+                abi_ulong start = arg1;
+                abi_ulong end = start + arg2;
+                abi_ulong real_start = arg1 & qemu_host_page_mask;
+                abi_ulong real_end = HOST_PAGE_ALIGN(end);
+                int prot_extra = PAGE_VALID | PAGE_DONTNEED;
+                ret = 0;
+
+                mmap_lock();
+                pageflags_set_clear(real_start, real_end - 1, prot_extra, 0);
+                mmap_unlock();
+                if (start > real_start) {
+                    if (real_end == real_start + qemu_host_page_size) {
+                        return ret;
+                    }
+                    real_start += qemu_host_page_size;
+                }
+                if (end < real_end) {
+                    real_end -= qemu_host_page_size;
+                }
+                if (real_start < real_end) {
+                    ret = get_errno(syscall(__NR_madvise, g2h_untagged(real_start),
+                                real_end - real_start, arg3));
+                }
+                return ret;
+            } else {
+                return 0;
+            }
+        }
+
+        return get_errno(syscall(__NR_madvise, g2h_untagged(arg1), arg2, arg3));
+#endif
+#ifdef TARGET_NR_fcntl64
+    case TARGET_NR_fcntl64:
+    {
+        int cmd;
+        struct flock64 fl;
+        from_flock64_fn *copyfrom = copy_from_user_flock64;
+        to_flock64_fn *copyto = copy_to_user_flock64;
+
+#ifdef TARGET_ARM
+        if (!((CPUARMState *)cpu_env)->eabi) {
+            copyfrom = copy_from_user_oabi_flock64;
+            copyto = copy_to_user_oabi_flock64;
+        }
+#endif
+
+        cmd = target_to_host_fcntl_cmd(arg2);
+        if (cmd == -TARGET_EINVAL) {
+            return cmd;
+        }
+
+        switch(arg2) {
+        case TARGET_F_GETLK64:
+            ret = copyfrom(&fl, arg3);
+            if (ret) {
+                break;
+            }
+            ret = get_errno(safe_fcntl(arg1, cmd, &fl));
+            if (ret == 0) {
+                ret = copyto(arg3, &fl);
+            }
+	    break;
+
+        case TARGET_F_SETLK64:
+        case TARGET_F_SETLKW64:
+            ret = copyfrom(&fl, arg3);
+            if (ret) {
+                break;
+            }
+            ret = get_errno(safe_fcntl(arg1, cmd, &fl));
+	    break;
+        default:
+            ret = do_fcntl(cpu_env, arg1, arg2, arg3);
+            break;
+        }
+        return ret;
+    }
+#endif
+#ifdef TARGET_NR_cacheflush
+    case TARGET_NR_cacheflush:
+        /* self-modifying code is handled automatically, so nothing needed */
+        return 0;
+#endif
+#ifdef TARGET_NR_getpagesize
+    case TARGET_NR_getpagesize:
+        return TARGET_PAGE_SIZE;
+#endif
+    case TARGET_NR_gettid:
+        return get_errno(sys_gettid());
+#ifdef TARGET_NR_readahead
+    case TARGET_NR_readahead:
+#if TARGET_ABI_BITS == 32
+        if (regpairs_aligned(cpu_env, num)) {
+            arg2 = arg3;
+            arg3 = arg4;
+            arg4 = arg5;
+        }
+        ret = get_errno(readahead(arg1, target_offset64(arg2, arg3) , arg4));
+#else
+        ret = get_errno(readahead(arg1, arg2, arg3));
+#endif
+        return ret;
+#endif
+#ifdef CONFIG_ATTR
+#ifdef TARGET_NR_setxattr
+    case TARGET_NR_listxattr:
+    case TARGET_NR_llistxattr:
+    {
+        void *p, *b = 0;
+        if (arg2) {
+            b = lock_user(VERIFY_WRITE, arg2, arg3, 0);
+            if (!b) {
+                return -TARGET_EFAULT;
+            }
+        }
+        p = lock_user_string(arg1);
+        if (p) {
+            if (num == TARGET_NR_listxattr) {
+                ret = get_errno(listxattr(p, b, arg3));
+            } else {
+                ret = get_errno(llistxattr(p, b, arg3));
+            }
+        } else {
+            ret = -TARGET_EFAULT;
+        }
+        unlock_user(p, arg1, 0);
+        unlock_user(b, arg2, arg3);
+        return ret;
+    }
+    case TARGET_NR_flistxattr:
+    {
+        void *b = 0;
+        if (arg2) {
+            b = lock_user(VERIFY_WRITE, arg2, arg3, 0);
+            if (!b) {
+                return -TARGET_EFAULT;
+            }
+        }
+        ret = get_errno(flistxattr(arg1, b, arg3));
+        unlock_user(b, arg2, arg3);
+        return ret;
+    }
+    case TARGET_NR_setxattr:
+    case TARGET_NR_lsetxattr:
+        {
+            void *p, *n, *v = 0;
+            if (arg3) {
+                v = lock_user(VERIFY_READ, arg3, arg4, 1);
+                if (!v) {
+                    return -TARGET_EFAULT;
+                }
+            }
+            p = lock_user_string(arg1);
+            n = lock_user_string(arg2);
+            if (p && n) {
+                if (num == TARGET_NR_setxattr) {
+                    ret = get_errno(setxattr(p, n, v, arg4, arg5));
+                } else {
+                    ret = get_errno(lsetxattr(p, n, v, arg4, arg5));
+                }
+            } else {
+                ret = -TARGET_EFAULT;
+            }
+            unlock_user(p, arg1, 0);
+            unlock_user(n, arg2, 0);
+            unlock_user(v, arg3, 0);
+        }
+        return ret;
+    case TARGET_NR_fsetxattr:
+        {
+            void *n, *v = 0;
+            if (arg3) {
+                v = lock_user(VERIFY_READ, arg3, arg4, 1);
+                if (!v) {
+                    return -TARGET_EFAULT;
+                }
+            }
+            n = lock_user_string(arg2);
+            if (n) {
+                ret = get_errno(fsetxattr(arg1, n, v, arg4, arg5));
+            } else {
+                ret = -TARGET_EFAULT;
+            }
+            unlock_user(n, arg2, 0);
+            unlock_user(v, arg3, 0);
+        }
+        return ret;
+    case TARGET_NR_getxattr:
+    case TARGET_NR_lgetxattr:
+        {
+            void *p, *n, *v = 0;
+            if (arg3) {
+                v = lock_user(VERIFY_WRITE, arg3, arg4, 0);
+                if (!v) {
+                    return -TARGET_EFAULT;
+                }
+            }
+            p = lock_user_string(arg1);
+            n = lock_user_string(arg2);
+            if (p && n) {
+                if (num == TARGET_NR_getxattr) {
+                    ret = get_errno(getxattr(p, n, v, arg4));
+                } else {
+                    ret = get_errno(lgetxattr(p, n, v, arg4));
+                }
+            } else {
+                ret = -TARGET_EFAULT;
+            }
+            unlock_user(p, arg1, 0);
+            unlock_user(n, arg2, 0);
+            unlock_user(v, arg3, arg4);
+        }
+        return ret;
+    case TARGET_NR_fgetxattr:
+        {
+            void *n, *v = 0;
+            if (arg3) {
+                v = lock_user(VERIFY_WRITE, arg3, arg4, 0);
+                if (!v) {
+                    return -TARGET_EFAULT;
+                }
+            }
+            n = lock_user_string(arg2);
+            if (n) {
+                ret = get_errno(fgetxattr(arg1, n, v, arg4));
+            } else {
+                ret = -TARGET_EFAULT;
+            }
+            unlock_user(n, arg2, 0);
+            unlock_user(v, arg3, arg4);
+        }
+        return ret;
+    case TARGET_NR_removexattr:
+    case TARGET_NR_lremovexattr:
+        {
+            void *p, *n;
+            p = lock_user_string(arg1);
+            n = lock_user_string(arg2);
+            if (p && n) {
+                if (num == TARGET_NR_removexattr) {
+                    ret = get_errno(removexattr(p, n));
+                } else {
+                    ret = get_errno(lremovexattr(p, n));
+                }
+            } else {
+                ret = -TARGET_EFAULT;
+            }
+            unlock_user(p, arg1, 0);
+            unlock_user(n, arg2, 0);
+        }
+        return ret;
+    case TARGET_NR_fremovexattr:
+        {
+            void *n;
+            n = lock_user_string(arg2);
+            if (n) {
+                ret = get_errno(fremovexattr(arg1, n));
+            } else {
+                ret = -TARGET_EFAULT;
+            }
+            unlock_user(n, arg2, 0);
+        }
+        return ret;
+#endif
+#endif /* CONFIG_ATTR */
+#ifdef TARGET_NR_set_thread_area
+    case TARGET_NR_set_thread_area:
+#if defined(TARGET_MIPS)
+      ((CPUMIPSState *) cpu_env)->active_tc.CP0_UserLocal = arg1;
+      return 0;
+#elif defined(TARGET_I386)
+      return do_set_thread_area(cpu_env, arg1);
+#elif defined(TARGET_CRIS)
+      if (arg1 & 0xff)
+          ret = -TARGET_EINVAL;
+      else {
+          ((CPUCRISState *) cpu_env)->pregs[PR_PID] = arg1;
+          ret = 0;
+      }
+      return ret;
+#elif defined(TARGET_M68K)
+      {
+          TaskState *ts = cpu->opaque;
+          ts->tp_value = arg1;
+          return 0;
+      }
+#else
+      if (!CODEIS64) {
+          return do_set_thread_area(cpu_env, arg1);
+      } else {
+          lsassert(0);
+          return -TARGET_ENOSYS;
+      }
+#endif
+#endif
+#ifdef TARGET_NR_get_thread_area
+    case TARGET_NR_get_thread_area:
+#if defined(TARGET_M68K)
+        {
+            TaskState *ts = cpu->opaque;
+            return ts->tp_value;
+        }
+#else
+        if (!CODEIS64) {
+            return do_get_thread_area(cpu_env, arg1);
+        } else {
+            lsassert(0);
+            return -TARGET_ENOSYS;
+        }
+#endif
+#endif
+#ifdef TARGET_NR_getdomainname
+    case TARGET_NR_getdomainname:
+        return -TARGET_ENOSYS;
+#endif
+
+#ifdef TARGET_NR_clock_settime
+    case TARGET_NR_clock_settime:
+    {
+        struct timespec ts;
+
+        ret = target_to_host_timespec(&ts, arg2);
+        if (!is_error(ret)) {
+            ret = get_errno(clock_settime(arg1, &ts));
+        }
+        return ret;
+    }
+#endif
+#ifdef TARGET_NR_clock_settime64
+    case TARGET_NR_clock_settime64:
+    {
+        struct timespec ts;
+
+        ret = target_to_host_timespec64(&ts, arg2);
+        if (!is_error(ret)) {
+            ret = get_errno(clock_settime(arg1, &ts));
+        }
+        return ret;
+    }
+#endif
+#ifdef TARGET_NR_clock_gettime
+    case TARGET_NR_clock_gettime:
+    {
+        struct timespec ts;
+        ret = get_errno(clock_gettime(arg1, &ts));
+        if (!is_error(ret)) {
+            ret = host_to_target_timespec(arg2, &ts);
+        }
+        return ret;
+    }
+#endif
+#ifdef TARGET_NR_clock_gettime64
+    case TARGET_NR_clock_gettime64:
+    {
+        struct timespec ts;
+        ret = get_errno(clock_gettime(arg1, &ts));
+        if (!is_error(ret)) {
+            ret = host_to_target_timespec64(arg2, &ts);
+        }
+        return ret;
+    }
+#endif
+#ifdef TARGET_NR_clock_getres
+    case TARGET_NR_clock_getres:
+    {
+        struct timespec ts;
+        ret = get_errno(clock_getres(arg1, &ts));
+        if (!is_error(ret)) {
+            host_to_target_timespec(arg2, &ts);
+        }
+        return ret;
+    }
+#endif
+#ifdef TARGET_NR_clock_getres_time64
+    case TARGET_NR_clock_getres_time64:
+    {
+        struct timespec ts;
+        ret = get_errno(clock_getres(arg1, &ts));
+        if (!is_error(ret)) {
+            host_to_target_timespec64(arg2, &ts);
+        }
+        return ret;
+    }
+#endif
+#ifdef TARGET_NR_clock_nanosleep
+    case TARGET_NR_clock_nanosleep:
+    {
+        struct timespec ts;
+        if (target_to_host_timespec(&ts, arg3)) {
+            return -TARGET_EFAULT;
+        }
+        ret = get_errno(safe_clock_nanosleep(arg1, arg2,
+                                             &ts, arg4 ? &ts : NULL));
+        /*
+         * if the call is interrupted by a signal handler, it fails
+         * with error -TARGET_EINTR and if arg4 is not NULL and arg2 is not
+         * TIMER_ABSTIME, it returns the remaining unslept time in arg4.
+         */
+        if (ret == -TARGET_EINTR && arg4 && arg2 != TIMER_ABSTIME &&
+            host_to_target_timespec(arg4, &ts)) {
+              return -TARGET_EFAULT;
+        }
+
+        return ret;
+    }
+#endif
+#ifdef TARGET_NR_clock_nanosleep_time64
+    case TARGET_NR_clock_nanosleep_time64:
+    {
+        struct timespec ts;
+
+        if (target_to_host_timespec64(&ts, arg3)) {
+            return -TARGET_EFAULT;
+        }
+
+        ret = get_errno(safe_clock_nanosleep(arg1, arg2,
+                                             &ts, arg4 ? &ts : NULL));
+
+        if (ret == -TARGET_EINTR && arg4 && arg2 != TIMER_ABSTIME &&
+            host_to_target_timespec64(arg4, &ts)) {
+            return -TARGET_EFAULT;
+        }
+        return ret;
+    }
+#endif
+
+#ifdef TARGET_NR_set_tid_address
+    case TARGET_NR_set_tid_address:
+        ((TaskState *)cpu->opaque)->child_tidptr = arg1;
+        return get_errno(sys_gettid());
+#endif
+
+    case TARGET_NR_tkill:
+        return get_errno(safe_tkill((int)arg1, target_to_host_signal(arg2)));
+
+    case TARGET_NR_tgkill:
+#ifdef CONFIG_LATX_AOT
+        if (arg1 == getpid() && arg2 == syscall(SYS_gettid) &&
+            target_to_host_signal(arg3) == SIGKILL)
+        {
+            aot_exit_entry(cpu, AOT_EXIT_FINAL);
+        }
+#endif
+        return get_errno(safe_tgkill((int)arg1, (int)arg2,
+                         target_to_host_signal(arg3)));
+
+#ifdef TARGET_NR_set_robust_list
+    case TARGET_NR_set_robust_list:
+#if defined(CONFIG_LATX) && defined(TARGET_I386) && !defined(TARGET_X86_64)
+        return i386_latx_set_robust_list(cpu, arg1, arg2);
+#else
+        return get_errno(syscall(__NR_set_robust_list, arg1, arg2));
+#endif
+    case TARGET_NR_get_robust_list:
+#if defined(CONFIG_LATX) && defined(TARGET_I386) && !defined(TARGET_X86_64)
+        return i386_latx_get_robust_list(cpu, arg1, arg2, arg3);
+#else
+        /* The ABI for supporting robust futexes has userspace pass
+         * the kernel a pointer to a linked list which is updated by
+         * userspace after the syscall; the list is walked by the kernel
+         * when the thread exits. Since the linked list in QEMU guest
+         * memory isn't a valid linked list for the host and we have
+         * no way to reliably intercept the thread-death event, we can't
+         * support these. Silently return ENOSYS so that guest userspace
+         * falls back to a non-robust futex implementation (which should
+         * be OK except in the corner case of the guest crashing while
+         * holding a mutex that is shared with another process via
+         * shared memory).
+         */
+        return get_errno(syscall(__NR_get_robust_list, arg1, g2h_untagged(arg2),
+                        g2h_untagged(arg3)));
+#endif
+#endif
+
+#if defined(TARGET_NR_utimensat)
+    case TARGET_NR_utimensat:
+        {
+            struct timespec *tsp, ts[2];
+            if (!arg3) {
+                tsp = NULL;
+            } else {
+                if (target_to_host_timespec(ts, arg3)) {
+                    return -TARGET_EFAULT;
+                }
+                if (target_to_host_timespec(ts + 1, arg3 +
+                                            sizeof(struct target_timespec))) {
+                    return -TARGET_EFAULT;
+                }
+                tsp = ts;
+            }
+            if (!arg2)
+                ret = get_errno(sys_utimensat(arg1, NULL, tsp, arg4));
+            else {
+                if (!(p = lock_user_string(arg2))) {
+                    return -TARGET_EFAULT;
+                }
+                ret = get_errno(sys_utimensat(arg1, path(p), tsp, arg4));
+                unlock_user(p, arg2, 0);
+            }
+        }
+        return ret;
+#endif
+#ifdef TARGET_NR_utimensat_time64
+    case TARGET_NR_utimensat_time64:
+        {
+            struct timespec *tsp, ts[2];
+            if (!arg3) {
+                tsp = NULL;
+            } else {
+                if (target_to_host_timespec64(ts, arg3)) {
+                    return -TARGET_EFAULT;
+                }
+                if (target_to_host_timespec64(ts + 1, arg3 +
+                                     sizeof(struct target__kernel_timespec))) {
+                    return -TARGET_EFAULT;
+                }
+                tsp = ts;
+            }
+            if (!arg2)
+                ret = get_errno(sys_utimensat(arg1, NULL, tsp, arg4));
+            else {
+                p = lock_user_string(arg2);
+                if (!p) {
+                    return -TARGET_EFAULT;
+                }
+                ret = get_errno(sys_utimensat(arg1, path(p), tsp, arg4));
+                unlock_user(p, arg2, 0);
+            }
+        }
+        return ret;
+#endif
+#ifdef TARGET_NR_futex
+    case TARGET_NR_futex:
+        return do_futex(cpu, arg1, arg2, arg3, arg4, arg5, arg6);
+#endif
+#ifdef TARGET_NR_futex_time64
+    case TARGET_NR_futex_time64:
+        return do_futex_time64(cpu, arg1, arg2, arg3, arg4, arg5, arg6);
+#endif
+#if (defined(TARGET_NR_inotify_init) && defined(__NR_inotify_init)) || \
+defined(__loongarch__)
+    case TARGET_NR_inotify_init:
+        ret = get_errno(sys_inotify_init());
+        if (ret >= 0) {
+            fd_trans_register(ret, &target_inotify_trans);
+        }
+        return ret;
+#endif
+#ifdef CONFIG_INOTIFY1
+#if defined(TARGET_NR_inotify_init1) && defined(__NR_inotify_init1)
+    case TARGET_NR_inotify_init1:
+        ret = get_errno(sys_inotify_init1(target_to_host_bitmask(arg1,
+                                          fcntl_flags_tbl)));
+        if (ret >= 0) {
+            fd_trans_register(ret, &target_inotify_trans);
+        }
+        return ret;
+#endif
+#endif
+#if defined(TARGET_NR_inotify_add_watch) && defined(__NR_inotify_add_watch)
+    case TARGET_NR_inotify_add_watch:
+        p = lock_user_string(arg2);
+        ret = get_errno(sys_inotify_add_watch(arg1, path(p), arg3));
+        unlock_user(p, arg2, 0);
+        return ret;
+#endif
+#if defined(TARGET_NR_inotify_rm_watch) && defined(__NR_inotify_rm_watch)
+    case TARGET_NR_inotify_rm_watch:
+        return get_errno(sys_inotify_rm_watch(arg1, arg2));
+#endif
+#if defined(TARGET_NR_fanotify_init) && defined(__NR_fanotify_init)
+    case TARGET_NR_fanotify_init:
+        ret = get_errno(sys_fanotify_init(arg1, target_to_host_bitmask(arg2,
+                                          fcntl_flags_tbl)));
+        if (ret >= 0) {
+            fd_trans_register(ret, &target_fanotify_trans);
+        }
+        return ret;
+#endif
+#if defined(TARGET_NR_fanotify_mark) && defined(__NR_fanotify_mark)
+	case TARGET_NR_fanotify_mark:
+        p = lock_user_string(arg5);
+        ret = get_errno(sys_fanotify_mark(arg1, arg2, arg3, arg4, path(p)));
+        unlock_user(p, arg5, 0);
+        return ret;
+#endif
+#if defined(TARGET_NR_add_key) && defined(__NR_add_key)
+  case TARGET_NR_add_key:
+      {
+          return get_errno(syscall(__NR_add_key, g2h_untagged(arg1),
+                        g2h_untagged(arg2), g2h_untagged(arg3), arg4, arg5));
+      }
+#endif
+#if defined(TARGET_NR_keyctl) && defined(__NR_keyctl)
+  case TARGET_NR_keyctl:
+      {
+          return get_errno(syscall(__NR_keyctl, arg1, g2h_untagged(arg2),
+                                 g2h_untagged(arg3), g2h_untagged(arg4),
+                                 g2h_untagged(arg5), g2h_untagged(arg6)));
+      }
+#endif
+#if defined(TARGET_NR_request_key) && defined(__NR_request_key)
+  case TARGET_NR_request_key:
+      {
+          return get_errno(syscall(__NR_request_key, g2h_untagged(arg1),
+                                 g2h_untagged(arg2), g2h_untagged(arg3),
+                                 arg4));
+      }
+#endif
+#if defined(TARGET_NR_mq_open) && defined(__NR_mq_open)
+    case TARGET_NR_mq_open:
+        {
+            struct mq_attr posix_mq_attr;
+            struct mq_attr *pposix_mq_attr;
+            int host_flags;
+
+            host_flags = target_to_host_bitmask(arg2, fcntl_flags_tbl);
+            pposix_mq_attr = NULL;
+            if (arg4) {
+                if (copy_from_user_mq_attr(&posix_mq_attr, arg4) != 0) {
+                    return -TARGET_EFAULT;
+                }
+                pposix_mq_attr = &posix_mq_attr;
+            }
+            p = lock_user_string(arg1 - 1);
+            if (!p) {
+                return -TARGET_EFAULT;
+            }
+            ret = get_errno(mq_open(p, host_flags, arg3, pposix_mq_attr));
+            unlock_user (p, arg1, 0);
+        }
+        return ret;
+
+    case TARGET_NR_mq_unlink:
+        p = lock_user_string(arg1 - 1);
+        if (!p) {
+            return -TARGET_EFAULT;
+        }
+        ret = get_errno(mq_unlink(p));
+        unlock_user (p, arg1, 0);
+        return ret;
+
+#ifdef TARGET_NR_mq_timedsend
+    case TARGET_NR_mq_timedsend:
+        {
+            struct timespec ts;
+
+            p = lock_user (VERIFY_READ, arg2, arg3, 1);
+            if (arg5 != 0) {
+                if (target_to_host_timespec(&ts, arg5)) {
+                    return -TARGET_EFAULT;
+                }
+                ret = get_errno(safe_mq_timedsend(arg1, p, arg3, arg4, &ts));
+                if (!is_error(ret) && host_to_target_timespec(arg5, &ts)) {
+                    return -TARGET_EFAULT;
+                }
+            } else {
+                ret = get_errno(safe_mq_timedsend(arg1, p, arg3, arg4, NULL));
+            }
+            unlock_user (p, arg2, arg3);
+        }
+        return ret;
+#endif
+#ifdef TARGET_NR_mq_timedsend_time64
+    case TARGET_NR_mq_timedsend_time64:
+        {
+            struct timespec ts;
+
+            p = lock_user(VERIFY_READ, arg2, arg3, 1);
+            if (arg5 != 0) {
+                if (target_to_host_timespec64(&ts, arg5)) {
+                    return -TARGET_EFAULT;
+                }
+                ret = get_errno(safe_mq_timedsend(arg1, p, arg3, arg4, &ts));
+                if (!is_error(ret) && host_to_target_timespec64(arg5, &ts)) {
+                    return -TARGET_EFAULT;
+                }
+            } else {
+                ret = get_errno(safe_mq_timedsend(arg1, p, arg3, arg4, NULL));
+            }
+            unlock_user(p, arg2, arg3);
+        }
+        return ret;
+#endif
+
+#ifdef TARGET_NR_mq_timedreceive
+    case TARGET_NR_mq_timedreceive:
+        {
+            struct timespec ts;
+            unsigned int prio;
+
+            p = lock_user (VERIFY_READ, arg2, arg3, 1);
+            if (arg5 != 0) {
+                if (target_to_host_timespec(&ts, arg5)) {
+                    return -TARGET_EFAULT;
+                }
+                ret = get_errno(safe_mq_timedreceive(arg1, p, arg3,
+                                                     &prio, &ts));
+                if (!is_error(ret) && host_to_target_timespec(arg5, &ts)) {
+                    return -TARGET_EFAULT;
+                }
+            } else {
+                ret = get_errno(safe_mq_timedreceive(arg1, p, arg3,
+                                                     &prio, NULL));
+            }
+            unlock_user (p, arg2, arg3);
+            if (arg4 != 0)
+                put_user_u32(prio, arg4);
+        }
+        return ret;
+#endif
+#ifdef TARGET_NR_mq_timedreceive_time64
+    case TARGET_NR_mq_timedreceive_time64:
+        {
+            struct timespec ts;
+            unsigned int prio;
+
+            p = lock_user(VERIFY_READ, arg2, arg3, 1);
+            if (arg5 != 0) {
+                if (target_to_host_timespec64(&ts, arg5)) {
+                    return -TARGET_EFAULT;
+                }
+                ret = get_errno(safe_mq_timedreceive(arg1, p, arg3,
+                                                     &prio, &ts));
+                if (!is_error(ret) && host_to_target_timespec64(arg5, &ts)) {
+                    return -TARGET_EFAULT;
+                }
+            } else {
+                ret = get_errno(safe_mq_timedreceive(arg1, p, arg3,
+                                                     &prio, NULL));
+            }
+            unlock_user(p, arg2, arg3);
+            if (arg4 != 0) {
+                put_user_u32(prio, arg4);
+            }
+        }
+        return ret;
+#endif
+
+    /* Not implemented for now... */
+/*     case TARGET_NR_mq_notify: */
+/*         break; */
+    case TARGET_NR_mq_notify:
+        {
+            struct sigevent host_sevp = { {0}, }, *phost_sevp = NULL;
+            if (arg2) {
+                phost_sevp = &host_sevp;
+                ret = target_to_host_sigevent(phost_sevp, arg2);
+                if (ret != 0) {
+                    return ret;
+                }
+            }
+
+            ret = get_errno(syscall(__NR_mq_notify, arg1, phost_sevp));
+        }
+        break;
+
+    case TARGET_NR_mq_getsetattr:
+        {
+            struct mq_attr posix_mq_attr_in, posix_mq_attr_out;
+            ret = 0;
+            if (arg2 != 0) {
+                copy_from_user_mq_attr(&posix_mq_attr_in, arg2);
+                ret = get_errno(mq_setattr(arg1, &posix_mq_attr_in,
+                                           &posix_mq_attr_out));
+            } else if (arg3 != 0) {
+                ret = get_errno(mq_getattr(arg1, &posix_mq_attr_out));
+            }
+            if (ret == 0 && arg3 != 0) {
+                copy_to_user_mq_attr(arg3, &posix_mq_attr_out);
+            }
+        }
+        return ret;
+#endif
+
+#ifdef CONFIG_SPLICE
+#ifdef TARGET_NR_tee
+    case TARGET_NR_tee:
+        {
+            ret = get_errno(tee(arg1,arg2,arg3,arg4));
+        }
+        return ret;
+#endif
+#ifdef TARGET_NR_splice
+    case TARGET_NR_splice:
+        {
+            loff_t loff_in, loff_out;
+            loff_t *ploff_in = NULL, *ploff_out = NULL;
+            if (arg2) {
+                if (get_user_u64(loff_in, arg2)) {
+                    return -TARGET_EFAULT;
+                }
+                ploff_in = &loff_in;
+            }
+            if (arg4) {
+                if (get_user_u64(loff_out, arg4)) {
+                    return -TARGET_EFAULT;
+                }
+                ploff_out = &loff_out;
+            }
+            ret = get_errno(splice(arg1, ploff_in, arg3, ploff_out, arg5, arg6));
+            if (arg2) {
+                if (put_user_u64(loff_in, arg2)) {
+                    return -TARGET_EFAULT;
+                }
+            }
+            if (arg4) {
+                if (put_user_u64(loff_out, arg4)) {
+                    return -TARGET_EFAULT;
+                }
+            }
+        }
+        return ret;
+#endif
+#ifdef TARGET_NR_vmsplice
+	case TARGET_NR_vmsplice:
+        {
+            struct iovec *vec = lock_iovec(VERIFY_READ, arg2, arg3, 1);
+            if (vec != NULL) {
+                ret = get_errno(vmsplice(arg1, vec, arg3, arg4));
+                unlock_iovec(vec, arg2, arg3, 0);
+            } else {
+                ret = -host_to_target_errno(errno);
+            }
+        }
+        return ret;
+#endif
+#endif /* CONFIG_SPLICE */
+#ifdef CONFIG_EVENTFD
+#if defined(TARGET_NR_eventfd)
+    case TARGET_NR_eventfd:
+        ret = get_errno(eventfd(arg1, 0));
+        if (ret >= 0) {
+            fd_trans_register(ret, &target_eventfd_trans);
+        }
+        return ret;
+#endif
+#if defined(TARGET_NR_eventfd2)
+    case TARGET_NR_eventfd2:
+    {
+        int host_flags = arg2 & (~(TARGET_O_NONBLOCK_MASK | TARGET_O_CLOEXEC));
+        if (arg2 & TARGET_O_NONBLOCK) {
+            host_flags |= O_NONBLOCK;
+        }
+        if (arg2 & TARGET_O_CLOEXEC) {
+            host_flags |= O_CLOEXEC;
+        }
+        ret = get_errno(eventfd(arg1, host_flags));
+        if (ret >= 0) {
+            fd_trans_register(ret, &target_eventfd_trans);
+        }
+        return ret;
+    }
+#endif
+#endif /* CONFIG_EVENTFD  */
+#if defined(CONFIG_FALLOCATE) && defined(TARGET_NR_fallocate)
+    case TARGET_NR_fallocate:
+#if TARGET_ABI_BITS == 32
+        ret = get_errno(fallocate(arg1, arg2, target_offset64(arg3, arg4),
+                                  target_offset64(arg5, arg6)));
+#else
+        ret = get_errno(fallocate(arg1, arg2, arg3, arg4));
+#endif
+        return ret;
+#endif
+#if defined(CONFIG_SYNC_FILE_RANGE)
+#if defined(TARGET_NR_sync_file_range)
+    case TARGET_NR_sync_file_range:
+#if TARGET_ABI_BITS == 32
+#if defined(TARGET_MIPS)
+        ret = get_errno(sync_file_range(arg1, target_offset64(arg3, arg4),
+                                        target_offset64(arg5, arg6), arg7));
+#else
+        ret = get_errno(sync_file_range(arg1, target_offset64(arg2, arg3),
+                                        target_offset64(arg4, arg5), arg6));
+#endif /* !TARGET_MIPS */
+#else
+        ret = get_errno(sync_file_range(arg1, arg2, arg3, arg4));
+#endif
+        return ret;
+#endif
+#if defined(TARGET_NR_sync_file_range2) || \
+    defined(TARGET_NR_arm_sync_file_range)
+#if defined(TARGET_NR_sync_file_range2)
+    case TARGET_NR_sync_file_range2:
+#endif
+#if defined(TARGET_NR_arm_sync_file_range)
+    case TARGET_NR_arm_sync_file_range:
+#endif
+        /* This is like sync_file_range but the arguments are reordered */
+#if TARGET_ABI_BITS == 32
+        ret = get_errno(sync_file_range(arg1, target_offset64(arg3, arg4),
+                                        target_offset64(arg5, arg6), arg2));
+#else
+        ret = get_errno(sync_file_range(arg1, arg3, arg4, arg2));
+#endif
+        return ret;
+#endif
+#endif
+#if defined(TARGET_NR_signalfd4)
+    case TARGET_NR_signalfd4:
+        return do_signalfd4(arg1, arg2, arg4);
+#endif
+#if defined(TARGET_NR_signalfd)
+    case TARGET_NR_signalfd:
+        return do_signalfd4(arg1, arg2, 0);
+#endif
+#if defined(CONFIG_EPOLL)
+#if defined(TARGET_NR_epoll_create)
+    case TARGET_NR_epoll_create:
+        return get_errno(epoll_create(arg1));
+#endif
+#if defined(TARGET_NR_epoll_create1) && defined(CONFIG_EPOLL_CREATE1)
+    case TARGET_NR_epoll_create1:
+        return get_errno(epoll_create1(target_to_host_bitmask(arg1, fcntl_flags_tbl)));
+#endif
+#if defined(TARGET_NR_epoll_ctl)
+    case TARGET_NR_epoll_ctl:
+    {
+        struct epoll_event ep;
+        struct epoll_event *epp = 0;
+        if (arg4) {
+            if (arg2 != EPOLL_CTL_DEL) {
+                struct target_epoll_event *target_ep;
+                if (!lock_user_struct(VERIFY_READ, target_ep, arg4, 1)) {
+                    return -TARGET_EFAULT;
+                }
+                ep.events = tswap32(target_ep->events);
+                /*
+                 * The epoll_data_t union is just opaque data to the kernel,
+                 * so we transfer all 64 bits across and need not worry what
+                 * actual data type it is.
+                 */
+                ep.data.u64 = tswap64(target_ep->data.u64);
+                unlock_user_struct(target_ep, arg4, 0);
+            }
+            /*
+             * before kernel 2.6.9, EPOLL_CTL_DEL operation required a
+             * non-null pointer, even though this argument is ignored.
+             *
+             */
+            epp = &ep;
+        }
+        return get_errno(epoll_ctl(arg1, arg2, arg3, epp));
+    }
+#endif
+
+#if defined(TARGET_NR_epoll_wait) || defined(TARGET_NR_epoll_pwait) || defined(TARGET_NR_epoll_pwait2)
+#if defined(TARGET_NR_epoll_wait)
+    case TARGET_NR_epoll_wait:
+#endif
+#if defined(TARGET_NR_epoll_pwait)
+    case TARGET_NR_epoll_pwait:
+#endif
+#if defined(TARGET_NR_epoll_pwait2)
+    case TARGET_NR_epoll_pwait2:
+#endif
+    {
+        struct target_epoll_event *target_ep;
+        struct epoll_event *ep;
+        int epfd = arg1;
+        int maxevents = arg3;
+        abi_long timeout = arg4;
+
+        if (maxevents <= 0 || maxevents > TARGET_EP_MAX_EVENTS) {
+            return -TARGET_EINVAL;
+        }
+
+        target_ep = lock_user(VERIFY_WRITE, arg2,
+                              maxevents * sizeof(struct target_epoll_event), 1);
+        if (!target_ep) {
+            return -TARGET_EFAULT;
+        }
+
+        ep = g_try_new(struct epoll_event, maxevents);
+        if (!ep) {
+            unlock_user(target_ep, arg2, 0);
+            return -TARGET_ENOMEM;
+        }
+
+        switch (num) {
+#if defined(TARGET_NR_epoll_pwait)
+        case TARGET_NR_epoll_pwait:
+#if defined(TARGET_NR_epoll_pwait2)
+        case TARGET_NR_epoll_pwait2:
+#endif
+        {
+            sigset_t *set = NULL;
+
+            if (arg5) {
+                ret = process_sigsuspend_mask(&set, arg5, arg6);
+                if (ret != 0) {
+                     break;
+                }
+            }
+            if (num == TARGET_NR_epoll_pwait) {
+                ret = get_errno(safe_epoll_pwait(epfd, ep, maxevents, timeout,
+                                                 set, SIGSET_T_SIZE));
+                if (set) {
+                    finish_sigsuspend_mask(ret);
+                }
+            } else {
+#if defined(TARGET_NR_epoll_pwait2)
+                struct timespec hspec;
+                struct timespec *ts_arg = NULL;
+                if (timeout != 0) {
+                    target_to_host_timespec(&hspec, (abi_ulong)timeout);
+                    ts_arg = &hspec;
+                }
+                ret = get_errno(safe_epoll_pwait2(epfd, ep, maxevents, ts_arg, set, SIGSET_T_SIZE));
+#else
+                return -TARGET_ENOSYS;
+#endif
+            }
+                break;
+        }
+#endif
+#if defined(TARGET_NR_epoll_wait)
+        case TARGET_NR_epoll_wait:
+            ret = get_errno(safe_epoll_pwait(epfd, ep, maxevents, timeout,
+                                             NULL, 0));
+            break;
+#endif
+        default:
+            ret = -TARGET_ENOSYS;
+        }
+        if (!is_error(ret)) {
+            int i;
+            for (i = 0; i < ret; i++) {
+                target_ep[i].events = tswap32(ep[i].events);
+                target_ep[i].data.u64 = tswap64(ep[i].data.u64);
+            }
+            unlock_user(target_ep, arg2,
+                        ret * sizeof(struct target_epoll_event));
+        } else {
+            unlock_user(target_ep, arg2, 0);
+        }
+        g_free(ep);
+        return ret;
+    }
+#endif
+#endif
+#ifdef TARGET_NR_prlimit64
+#ifdef TARGET_HPPA
+#define STACK_GROWS_DOWN 0
+#endif /* TARGET_HPPA */
+#ifndef STACK_GROWS_DOWN
+#define STACK_GROWS_DOWN 1
+#endif
+    case TARGET_NR_prlimit64:
+    {
+        /* args: pid, resource number, ptr to new rlimit, ptr to old rlimit */
+        struct target_rlimit64 *target_rnew, *target_rold;
+        struct host_rlimit64 rnew, rold, *rnewp = 0;
+        int resource = target_to_host_resource(arg2);
+
+        if (arg3 && (resource != RLIMIT_AS &&
+                     resource != RLIMIT_DATA &&
+                     resource != RLIMIT_STACK)) {
+            if (!lock_user_struct(VERIFY_READ, target_rnew, arg3, 1)) {
+                return -TARGET_EFAULT;
+            }
+            rnew.rlim_cur = tswap64(target_rnew->rlim_cur);
+            rnew.rlim_max = tswap64(target_rnew->rlim_max);
+            unlock_user_struct(target_rnew, arg3, 0);
+            rnewp = &rnew;
+        }
+        if (arg3 && resource == RLIMIT_STACK) {
+            if (!lock_user_struct(VERIFY_READ, target_rnew, arg3, 1)) {
+                return -TARGET_EFAULT;
+            }
+            rnew.rlim_cur = tswap64(target_rnew->rlim_cur);
+            rnew.rlim_max = tswap64(target_rnew->rlim_max);
+            if (rnew.rlim_cur > real_guest_stack_size) {
+#if defined(CONFIG_LATX_DEBUG)
+                fprintf(stderr, "WARNING: target stack size exceed 128m\n");
+#endif
+                rnew.rlim_cur = real_guest_stack_size;
+                /*return -TARGET_EFAULT;*/
+            }
+            TaskState *ts = cpu->opaque;
+            if (rnew.rlim_cur < vir_guest_stack_size) {
+                /* stack shrink is not emulated */
+                return 0;
+            }
+            if (STACK_GROWS_DOWN) {
+                target_mprotect(ts->info->stack_limit - (rnew.rlim_cur -
+                    vir_guest_stack_size), rnew.rlim_cur - vir_guest_stack_size,
+                    PROT_READ | PROT_WRITE);
+                ts->info->stack_limit -= rnew.rlim_cur - vir_guest_stack_size;
+            } else {
+                target_mprotect(ts->info->stack_limit + (rnew.rlim_cur -
+                    vir_guest_stack_size), rnew.rlim_cur - vir_guest_stack_size,
+                    PROT_READ | PROT_WRITE);
+                ts->info->stack_limit += rnew.rlim_cur - vir_guest_stack_size;
+            }
+            vir_guest_stack_size = rnew.rlim_cur;
+        }
+        if (option_prlimit && arg3 && (resource == RLIMIT_AS || resource == RLIMIT_DATA)) {
+            if (!lock_user_struct(VERIFY_READ, target_rnew, arg3, 1)) {
+                return -TARGET_EFAULT;
+            }
+            rnew.rlim_cur = tswap64(target_rnew->rlim_cur);
+            vir_rlimit_as_old = vir_rlimit_as;
+            vir_rlimit_as = rnew.rlim_cur;
+            if (vir_rlimit_as != RLIM_INFINITY) {
+                vir_rlimit_as_acc = 0;
+            }
+        }
+
+        ret = get_errno(sys_prlimit64(arg1, resource, rnewp, arg4 ? &rold : 0));
+        if (!is_error(ret) && arg4) {
+            if (!lock_user_struct(VERIFY_WRITE, target_rold, arg4, 1)) {
+                return -TARGET_EFAULT;
+            }
+            target_rold->rlim_cur = tswap64(rold.rlim_cur);
+            target_rold->rlim_max = tswap64(rold.rlim_max);
+            if (option_prlimit && (resource == RLIMIT_AS || resource == RLIMIT_DATA)) {
+                target_rold->rlim_cur = tswap64(vir_rlimit_as_old);
+            } else if (resource == RLIMIT_STACK) {
+                target_rold->rlim_cur = tswap64(vir_guest_stack_size);
+            }
+            unlock_user_struct(target_rold, arg4, 1);
+        }
+        return ret;
+    }
+#endif
+#ifdef TARGET_NR_gethostname
+    case TARGET_NR_gethostname:
+    {
+        char *name = lock_user(VERIFY_WRITE, arg1, arg2, 0);
+        if (name) {
+            ret = get_errno(gethostname(name, arg2));
+            unlock_user(name, arg1, arg2);
+        } else {
+            ret = -TARGET_EFAULT;
+        }
+        return ret;
+    }
+#endif
+#ifdef TARGET_NR_atomic_cmpxchg_32
+    case TARGET_NR_atomic_cmpxchg_32:
+    {
+        /* should use start_exclusive from main.c */
+        abi_ulong mem_value;
+        if (get_user_u32(mem_value, arg6)) {
+            target_siginfo_t info;
+            info.si_signo = SIGSEGV;
+            info.si_errno = 0;
+            info.si_code = TARGET_SEGV_MAPERR;
+            info._sifields._sigfault._addr = arg6;
+            queue_signal((CPUArchState *)cpu_env, info.si_signo,
+                         QEMU_SI_FAULT, &info);
+            ret = 0xdeadbeef;
+
+        }
+        if (mem_value == arg2)
+            put_user_u32(arg1, arg6);
+        return mem_value;
+    }
+#endif
+#ifdef TARGET_NR_atomic_barrier
+    case TARGET_NR_atomic_barrier:
+        /* Like the kernel implementation and the
+           qemu arm barrier, no-op this? */
+        return 0;
+#endif
+
+#ifdef TARGET_NR_timer_create
+    case TARGET_NR_timer_create:
+    {
+        /* args: clockid_t clockid, struct sigevent *sevp, timer_t *timerid */
+
+        struct sigevent host_sevp = { {0}, }, *phost_sevp = NULL;
+        target_timer_t allocated;
+        target_timer_t requested = 0;
+        timer_t host_timer;
+        bool exact = false;
+        int clkid = arg1;
+        int timer_index;
+
+#ifdef TARGET_I386
+        mmap_lock();
+        exact = ((TaskState *)cpu->opaque)->info->prctl_timer_restore_ids;
+        mmap_unlock();
+#endif
+        if (exact && get_user(requested, arg3, target_timer_t)) {
+            return -TARGET_EFAULT;
+        }
+        if (exact && requested < 0) {
+            return -TARGET_EINVAL;
+        }
+        if (arg2) {
+            phost_sevp = &host_sevp;
+            ret = target_to_host_sigevent(phost_sevp, arg2);
+            if (ret != 0) {
+                return ret;
+            }
+        }
+        timer_index = reserve_host_timer(requested, exact, &allocated);
+
+        if (timer_index < 0) {
+            ret = timer_index;
+        } else {
+            ret = get_errno(timer_create(clkid, phost_sevp, &host_timer));
+            if (ret) {
+                release_host_timer(timer_index, allocated);
+            } else if (put_user(allocated, arg3, target_timer_t)) {
+                timer_delete(host_timer);
+                release_host_timer(timer_index, allocated);
+                return -TARGET_EFAULT;
+            } else if (!publish_host_timer(timer_index, allocated,
+                                           host_timer)) {
+                timer_delete(host_timer);
+                return -TARGET_EINVAL;
+            }
+        }
+        return ret;
+    }
+#endif
+
+#ifdef TARGET_NR_timer_settime
+    case TARGET_NR_timer_settime:
+    {
+        /* args: timer_t timerid, int flags, const struct itimerspec *new_value,
+         * struct itimerspec * old_value */
+        target_timer_t timerid = lock_host_timer(arg1);
+
+        if (timerid < 0) {
+            ret = timerid;
+        } else if (arg3 == 0) {
+            ret = -TARGET_EINVAL;
+            pthread_mutex_unlock(&posix_timer_lock);
+        } else {
+            timer_t htimer = g_posix_timers[timerid];
+            struct itimerspec hspec_new = {{0},}, hspec_old = {{0},};
+
+            if (target_to_host_itimerspec(&hspec_new, arg3)) {
+                pthread_mutex_unlock(&posix_timer_lock);
+                return -TARGET_EFAULT;
+            }
+            ret = get_errno(
+                          timer_settime(htimer, arg2, &hspec_new, &hspec_old));
+            if (!ret && arg4 &&
+                host_to_target_itimerspec(arg4, &hspec_old)) {
+                ret = -TARGET_EFAULT;
+            }
+            pthread_mutex_unlock(&posix_timer_lock);
+        }
+        return ret;
+    }
+#endif
+
+#ifdef TARGET_NR_timer_settime64
+    case TARGET_NR_timer_settime64:
+    {
+        target_timer_t timerid = lock_host_timer(arg1);
+
+        if (timerid < 0) {
+            ret = timerid;
+        } else if (arg3 == 0) {
+            ret = -TARGET_EINVAL;
+            pthread_mutex_unlock(&posix_timer_lock);
+        } else {
+            timer_t htimer = g_posix_timers[timerid];
+            struct itimerspec hspec_new = {{0},}, hspec_old = {{0},};
+
+            if (target_to_host_itimerspec64(&hspec_new, arg3)) {
+                pthread_mutex_unlock(&posix_timer_lock);
+                return -TARGET_EFAULT;
+            }
+            ret = get_errno(
+                          timer_settime(htimer, arg2, &hspec_new, &hspec_old));
+            if (!ret && arg4 &&
+                host_to_target_itimerspec64(arg4, &hspec_old)) {
+                ret = -TARGET_EFAULT;
+            }
+            pthread_mutex_unlock(&posix_timer_lock);
+        }
+        return ret;
+    }
+#endif
+
+#ifdef TARGET_NR_timer_gettime
+    case TARGET_NR_timer_gettime:
+    {
+        /* args: timer_t timerid, struct itimerspec *curr_value */
+        target_timer_t timerid = lock_host_timer(arg1);
+
+        if (timerid < 0) {
+            ret = timerid;
+        } else if (!arg2) {
+            ret = -TARGET_EFAULT;
+            pthread_mutex_unlock(&posix_timer_lock);
+        } else {
+            timer_t htimer = g_posix_timers[timerid];
+            struct itimerspec hspec;
+            ret = get_errno(timer_gettime(htimer, &hspec));
+
+            if (!ret && host_to_target_itimerspec(arg2, &hspec)) {
+                ret = -TARGET_EFAULT;
+            }
+            pthread_mutex_unlock(&posix_timer_lock);
+        }
+        return ret;
+    }
+#endif
+
+#ifdef TARGET_NR_timer_gettime64
+    case TARGET_NR_timer_gettime64:
+    {
+        /* args: timer_t timerid, struct itimerspec64 *curr_value */
+        target_timer_t timerid = lock_host_timer(arg1);
+
+        if (timerid < 0) {
+            ret = timerid;
+        } else if (!arg2) {
+            ret = -TARGET_EFAULT;
+            pthread_mutex_unlock(&posix_timer_lock);
+        } else {
+            timer_t htimer = g_posix_timers[timerid];
+            struct itimerspec hspec;
+            ret = get_errno(timer_gettime(htimer, &hspec));
+
+            if (!ret && host_to_target_itimerspec64(arg2, &hspec)) {
+                ret = -TARGET_EFAULT;
+            }
+            pthread_mutex_unlock(&posix_timer_lock);
+        }
+        return ret;
+    }
+#endif
+
+#ifdef TARGET_NR_timer_getoverrun
+    case TARGET_NR_timer_getoverrun:
+    {
+        /* args: timer_t timerid */
+        target_timer_t timerid = lock_host_timer(arg1);
+
+        if (timerid < 0) {
+            ret = timerid;
+        } else {
+            timer_t htimer = g_posix_timers[timerid];
+            ret = get_errno(timer_getoverrun(htimer));
+            pthread_mutex_unlock(&posix_timer_lock);
+        }
+        return ret;
+    }
+#endif
+
+#ifdef TARGET_NR_timer_delete
+    case TARGET_NR_timer_delete:
+    {
+        /* args: timer_t timerid */
+        target_timer_t timerid = lock_host_timer(arg1);
+
+        if (timerid < 0) {
+            ret = timerid;
+        } else {
+            timer_t htimer = g_posix_timers[timerid];
+            ret = get_errno(timer_delete(htimer));
+            if (!ret) {
+                g_posix_timer_state[timerid] = POSIX_TIMER_FREE;
+                g_posix_timer_ids[timerid] = 0;
+                g_posix_timers[timerid] = (timer_t)0;
+            }
+            pthread_mutex_unlock(&posix_timer_lock);
+        }
+        return ret;
+    }
+#endif
+
+#if defined(TARGET_NR_timerfd_create) && defined(CONFIG_TIMERFD)
+    case TARGET_NR_timerfd_create:
+        return get_errno(timerfd_create(arg1,
+                          target_to_host_bitmask(arg2, fcntl_flags_tbl)));
+#endif
+
+#if defined(TARGET_NR_timerfd_gettime) && defined(CONFIG_TIMERFD)
+    case TARGET_NR_timerfd_gettime:
+        {
+            struct itimerspec its_curr;
+
+            ret = get_errno(timerfd_gettime(arg1, &its_curr));
+
+            if (arg2 && host_to_target_itimerspec(arg2, &its_curr)) {
+                return -TARGET_EFAULT;
+            }
+        }
+        return ret;
+#endif
+
+#if defined(TARGET_NR_timerfd_gettime64) && defined(CONFIG_TIMERFD)
+    case TARGET_NR_timerfd_gettime64:
+        {
+            struct itimerspec its_curr;
+
+            ret = get_errno(timerfd_gettime(arg1, &its_curr));
+
+            if (arg2 && host_to_target_itimerspec64(arg2, &its_curr)) {
+                return -TARGET_EFAULT;
+            }
+        }
+        return ret;
+#endif
+
+#if defined(TARGET_NR_timerfd_settime) && defined(CONFIG_TIMERFD)
+    case TARGET_NR_timerfd_settime:
+        {
+            struct itimerspec its_new, its_old, *p_new;
+
+            if (arg3) {
+                if (target_to_host_itimerspec(&its_new, arg3)) {
+                    return -TARGET_EFAULT;
+                }
+                p_new = &its_new;
+            } else {
+                p_new = NULL;
+            }
+
+            ret = get_errno(timerfd_settime(arg1, arg2, p_new, &its_old));
+
+            if (arg4 && host_to_target_itimerspec(arg4, &its_old)) {
+                return -TARGET_EFAULT;
+            }
+        }
+        return ret;
+#endif
+
+#if defined(TARGET_NR_timerfd_settime64) && defined(CONFIG_TIMERFD)
+    case TARGET_NR_timerfd_settime64:
+        {
+            struct itimerspec its_new, its_old, *p_new;
+
+            if (arg3) {
+                if (target_to_host_itimerspec64(&its_new, arg3)) {
+                    return -TARGET_EFAULT;
+                }
+                p_new = &its_new;
+            } else {
+                p_new = NULL;
+            }
+
+            ret = get_errno(timerfd_settime(arg1, arg2, p_new, &its_old));
+
+            if (arg4 && host_to_target_itimerspec64(arg4, &its_old)) {
+                return -TARGET_EFAULT;
+            }
+        }
+        return ret;
+#endif
+
+#if defined(TARGET_NR_ioprio_get) && defined(__NR_ioprio_get)
+    case TARGET_NR_ioprio_get:
+        return get_errno(ioprio_get(arg1, arg2));
+#endif
+
+#if defined(TARGET_NR_ioprio_set) && defined(__NR_ioprio_set)
+    case TARGET_NR_ioprio_set:
+        return get_errno(ioprio_set(arg1, arg2, arg3));
+#endif
+
+#if defined(TARGET_NR_setns) && defined(CONFIG_SETNS)
+    case TARGET_NR_setns:
+        {
+            bool joins_ipc_namespace = (arg2 & CLONE_NEWIPC) != 0;
+
+            if (arg2 == 0) {
+                int namespace_type = ioctl(arg1, NS_GET_NSTYPE);
+
+                if (namespace_type >= 0) {
+                    joins_ipc_namespace = namespace_type == CLONE_NEWIPC;
+                }
+            }
+
+            ret = get_errno(setns(arg1, arg2));
+            if (ret == 0 && joins_ipc_namespace) {
+                ((TaskState *)cpu->opaque)->ipc_namespace_isolated = true;
+            }
+            return ret;
+        }
+#endif
+#ifdef TARGET_NR_seccomp
+    case TARGET_NR_seccomp:
+        return guest_seccomp_syscall(env, arg1, arg2, arg3);
+#endif
+#if defined(TARGET_NR_unshare) && defined(CONFIG_SETNS)
+    case TARGET_NR_unshare:
+        ret = get_errno(unshare(arg1));
+        if (ret == 0 && (arg1 & CLONE_NEWIPC)) {
+            ((TaskState *)cpu->opaque)->ipc_namespace_isolated = true;
+        }
+        if (arg1 & CLONE_NEWUSER) {
+            rcu_start_deferred_thread();
+        }
+        return ret;
+#endif
+#if defined(TARGET_NR_kcmp) && defined(__NR_kcmp)
+    case TARGET_NR_kcmp:
+        return get_errno(kcmp(arg1, arg2, arg3, arg4, arg5));
+#endif
+#ifdef TARGET_NR_swapcontext
+    case TARGET_NR_swapcontext:
+        /* PowerPC specific.  */
+        return do_swapcontext(cpu_env, arg1, arg2, arg3);
+#endif
+#ifdef TARGET_NR_memfd_create
+    case TARGET_NR_memfd_create:
+        p = lock_user_string(arg1);
+        if (!p) {
+            return -TARGET_EFAULT;
+        }
+        ret = get_errno(memfd_create(p, arg2));
+        fd_trans_unregister(ret);
+        unlock_user(p, arg1, 0);
+        return ret;
+#endif
+#if defined TARGET_NR_membarrier && defined __NR_membarrier
+    case TARGET_NR_membarrier:
+        return get_errno(membarrier(arg1, arg2));
+#endif
+#if defined(TARGET_NR_delete_module) && defined(__NR_delete_module)
+    case TARGET_NR_delete_module:
+        return get_errno(syscall(__NR_delete_module, arg1, arg2));
+#endif
+#if defined(TARGET_NR_process_vm_readv) && defined(__NR_process_vm_readv)
+    case TARGET_NR_process_vm_readv:
+        {
+            struct iovec *lvec = lock_iovec(VERIFY_WRITE, arg2, arg3, 0);
+            struct iovec *rvec;
+
+            if (lvec == NULL && arg3 != 0) {
+                return -host_to_target_errno(errno);
+            }
+            rvec = lock_remote_iovec(arg1, arg4, arg5, PAGE_READ);
+            if (rvec == NULL && arg5 != 0) {
+                ret = -host_to_target_errno(errno);
+                if (lvec != NULL) {
+                    unlock_iovec(lvec, arg2, arg3, 0);
+                }
+                return ret;
+            }
+
+            ret = get_errno(safe_process_vm_readv(arg1, lvec, arg3, rvec,
+                            arg5, arg6));
+            if (lvec != NULL) {
+                unlock_iovec(lvec, arg2, arg3, 1);
+            }
+            g_free(rvec);
+        }
+        return ret;
+#endif
+#if defined(TARGET_NR_process_vm_writev) && defined(__NR_process_vm_writev)
+    case TARGET_NR_process_vm_writev:
+        {
+            struct iovec *lvec = lock_iovec(VERIFY_READ, arg2, arg3, 1);
+            struct iovec *rvec;
+
+            if (lvec == NULL && arg3 != 0) {
+                return -host_to_target_errno(errno);
+            }
+            rvec = lock_remote_iovec(arg1, arg4, arg5, PAGE_WRITE);
+            if (rvec == NULL && arg5 != 0) {
+                ret = -host_to_target_errno(errno);
+                if (lvec != NULL) {
+                    unlock_iovec(lvec, arg2, arg3, 0);
+                }
+                return ret;
+            }
+
+            ret = get_errno(safe_process_vm_writev(arg1, lvec, arg3, rvec,
+                            arg5, arg6));
+            if (lvec != NULL) {
+                unlock_iovec(lvec, arg2, arg3, 0);
+            }
+            g_free(rvec);
+        }
+        return ret;
+#endif
+#if defined(TARGET_NR_remap_file_pages) && defined(__NR_remap_file_pages)
+    case TARGET_NR_remap_file_pages:
+        return get_errno(syscall(__NR_remap_file_pages, g2h_untagged(arg1), arg2,
+                    arg3, arg4, arg5));
+#endif
+#if defined(TARGET_NR_sched_getattr) && defined(__NR_sched_getattr)
+    case TARGET_NR_sched_getattr:
+        return get_errno(syscall(__NR_sched_getattr, arg1, g2h_untagged(arg2),
+                            g2h_untagged(arg3), g2h_untagged(arg4)));
+#endif
+#if defined(TARGET_NR_sched_setattr) && defined(__NR_sched_setattr)
+    case TARGET_NR_sched_setattr:
+        return get_errno(syscall(__NR_sched_setattr, arg1, g2h_untagged(arg2),
+                            g2h_untagged(arg3)));
+#endif
+#if defined(TARGET_NR_copy_file_range) && defined(__NR_copy_file_range)
+    case TARGET_NR_copy_file_range:
+        {
+            loff_t inoff, outoff;
+            loff_t *pinoff = NULL, *poutoff = NULL;
+
+            if (arg2) {
+                if (get_user_u64(inoff, arg2)) {
+                    return -TARGET_EFAULT;
+                }
+                pinoff = &inoff;
+            }
+            if (arg4) {
+                if (get_user_u64(outoff, arg4)) {
+                    return -TARGET_EFAULT;
+                }
+                poutoff = &outoff;
+            }
+            ret = get_errno(safe_copy_file_range(arg1, pinoff, arg3, poutoff,
+                                                 arg5, arg6));
+            if (!is_error(ret) && ret > 0) {
+                if (arg2) {
+                    if (put_user_u64(inoff, arg2)) {
+                        return -TARGET_EFAULT;
+                    }
+                }
+                if (arg4) {
+                    if (put_user_u64(outoff, arg4)) {
+                        return -TARGET_EFAULT;
+                    }
+                }
+            }
+        }
+        return ret;
+#endif
+
+#ifdef CONFIG_LATX_TUNNEL_LIB
+    case TUNNEL_VIRTUAL_SYSCALL_ID:
+        p = lock_user_string(arg1);
+        if (!p || !tunnel_method_exists(p)) {
+            if (p) {
+                unlock_user(p, arg1, 0);
+            }
+            return -TARGET_ENOSYS;
+        }
+        reg_priv_plt(p, arg2, arg3);
+        unlock_user(p, arg1, 0);
+        return 0;
+#endif
+#if TARGET_ABI_BITS == 32 && HOST_LONG_BITS == 64
+    case TARGET_NR_io_setup:
+        return do_io_setup(arg1, arg2);
+    case TARGET_NR_io_submit:
+        return do_io_submit(arg1, arg2, arg3);
+    case TARGET_NR_io_cancel:
+        return do_io_cancel(arg1, arg2, arg3);
+    case TARGET_NR_io_getevents:
+        return do_io_getevents(arg1, arg2, arg3, arg4, arg5);
+    case TARGET_NR_io_destroy:
+        return do_io_destroy(arg1);
+#else
+    case TARGET_NR_io_setup:
+        return get_errno(syscall(__NR_io_setup, arg1, arg2));
+    case TARGET_NR_io_submit:
+        return get_errno(syscall(__NR_io_submit, arg1, arg2, arg3));
+    case TARGET_NR_io_cancel:
+        return get_errno(syscall(__NR_io_cancel, arg1, arg2, arg3));
+    case TARGET_NR_io_getevents:
+        return get_errno(syscall(__NR_io_getevents, arg1, arg2, arg3, arg4, arg5));
+    case TARGET_NR_io_destroy:
+        return get_errno(syscall(__NR_io_destroy, arg1));
+#endif
+#if defined TARGET_NR_quotactl && defined __NR_quotactl
+    case TARGET_NR_quotactl:
+    /* only tested for X86_64 */
+#ifdef TARGET_X86_64
+        return get_errno(safe_quotactl(arg1, (const char *)arg2, arg3, (caddr_t)arg4));
+#else
+        return -TARGET_ENOSYS;
+#endif
+#endif
+    default:
+        qemu_log_mask(LOG_UNIMP, "Unsupported syscall: %d\n", num);
+        return -TARGET_ENOSYS;
+    }
+    return ret;
+}
+
+#ifdef TARGET_I386
+static bool syscall_user_dispatch(CPUArchState *env, int num, uint32_t arch)
+{
+    CPUState *cpu = env_cpu(env);
+    TaskState *ts = cpu->opaque;
+    target_siginfo_t info;
+    target_ulong pc;
+    target_ulong cs_base;
+    uint32_t flags;
+
+    if (likely(ts->sys_dispatch_len == (abi_ulong)-1)) {
+        return false;
+    }
+
+    cpu_get_tb_cpu_state(env, &pc, &cs_base, &flags);
+    if (likely((pc - ts->sys_dispatch < ts->sys_dispatch_len) !=
+               ts->sys_dispatch_inclusive)) {
+        return false;
+    }
+    if (unlikely(pc == default_sigreturn || pc == default_rt_sigreturn)) {
+        return false;
+    }
+
+    if (likely(ts->sys_dispatch_selector)) {
+        uint8_t selector;
+
+        if (get_user_u8(selector, ts->sys_dispatch_selector)) {
+            force_sig_abort(TARGET_SIGSEGV);
+        }
+        if (likely(selector == SYSCALL_DISPATCH_FILTER_ALLOW)) {
+            return false;
+        }
+        if (unlikely(selector != SYSCALL_DISPATCH_FILTER_BLOCK)) {
+            force_sig_abort(TARGET_SIGSYS);
+        }
+    }
+
+    info = (target_siginfo_t) {
+        .si_signo = TARGET_SIGSYS,
+        .si_errno = 0,
+        .si_code = TARGET_SYS_USER_DISPATCH,
+        ._sifields._sigsys._call_addr = pc,
+        ._sifields._sigsys._syscall = num,
+        ._sifields._sigsys._arch = arch,
+    };
+
+    queue_signal(env, TARGET_SIGSYS, QEMU_SI_SYS, &info);
+    return true;
+}
+#endif
+
+abi_long do_syscall_with_seccomp(void *cpu_env, int num, int seccomp_num,
+                                uint32_t seccomp_arch, abi_long arg1,
+                                abi_long arg2, abi_long arg3, abi_long arg4,
+                                abi_long arg5, abi_long arg6, abi_long arg7,
+                                abi_long arg8)
+{
+    CPUState *cpu = env_cpu(cpu_env);
+    CPUArchState *env = cpu->env_ptr;
+    TaskState *ts = cpu->opaque;
+    const abi_long seccomp_args[6] = {
+        arg1, arg2, arg3, arg4, arg5, arg6,
+    };
+    GuestSeccompAction seccomp_action = GUEST_SECCOMP_CONTINUE;
+    bool loader_tunnel = false;
+    bool suppress_tunnel = false;
+    abi_long ret;
+
+    ts->seccomp_errno_return = false;
+#if defined(CONFIG_LATX_JRRA) || defined(CONFIG_LATX_JRRA_STACK)
+    /*GR2SCR scr0, zeor; for todo.*/
+    if (0) {
+        asm volatile (
+            ".word (0x77e00000 | (0 << 5) | (0)) \r\n");
+    }
+#endif
+#ifdef DEBUG_ERESTARTSYS
+    /* Debug-only code for exercising the syscall-restart code paths
+     * in the per-architecture cpu main loops: restart every syscall
+     * the guest makes once before letting it through.
+     */
+    {
+        static bool flag;
+        flag = !flag;
+        if (flag) {
+            return -TARGET_ERESTARTSYS;
+        }
+    }
+#endif
+
+#ifdef CONFIG_LATX_TUNNEL_LIB
+    loader_tunnel = num == TUNNEL_VIRTUAL_SYSCALL_ID &&
+                    is_tunnel_loader_notification(env, arg1);
+#endif
+#ifdef TARGET_I386
+    if (!loader_tunnel &&
+        syscall_user_dispatch(env, seccomp_num, seccomp_arch)) {
+        return -TARGET_QEMU_ESIGRETURN;
+    }
+#endif
+
+    record_syscall_start(cpu, num, arg1,
+                         arg2, arg3, arg4, arg5, arg6, arg7, arg8);
+    if (unlikely(qemu_loglevel_mask(LOG_STRACE)) ||
+        unlikely(qemu_loglevel_mask(LOG_STRACE_ERROR))) {
+        print_syscall(cpu_env, num, arg1, arg2, arg3, arg4, arg5, arg6);
+    }
+
+#ifdef CONFIG_LATX_TUNNEL_LIB
+    suppress_tunnel = qatomic_read(&ts->seccomp_filter) && loader_tunnel;
+#endif
+    if (suppress_tunnel) {
+        ret = 0;
+        seccomp_action = GUEST_SECCOMP_RETURN;
+    } else {
+        seccomp_action = guest_seccomp_filter_syscall(
+            env, seccomp_num, seccomp_arch, seccomp_args, &ret);
+    }
+
+    switch (seccomp_action) {
+    case GUEST_SECCOMP_CONTINUE:
+        ret = do_syscall1(cpu_env, num, arg1, arg2, arg3, arg4,
+                          arg5, arg6, arg7, arg8);
+        break;
+    case GUEST_SECCOMP_RETURN:
+        break;
+    case GUEST_SECCOMP_RETURN_ERRNO:
+        ts->seccomp_errno_return = true;
+        break;
+    case GUEST_SECCOMP_TRACE:
+#ifdef TARGET_X86_64
+        memcpy(env->regs, ts->seccomp_trace.regs,
+               sizeof(ts->seccomp_trace.regs));
+        env->eip = ts->seccomp_trace.eip;
+        env->eflags = ts->seccomp_trace.eflags;
+        if (ts->seccomp_trace.syscall_nr < 0) {
+            ret = ts->seccomp_trace.result;
+        } else {
+            ret = do_syscall1(cpu_env, ts->seccomp_trace.syscall_nr,
+                              ts->seccomp_trace.regs[R_EDI],
+                              ts->seccomp_trace.regs[R_ESI],
+                              ts->seccomp_trace.regs[R_EDX],
+                              ts->seccomp_trace.regs[10],
+                              ts->seccomp_trace.regs[8],
+                              ts->seccomp_trace.regs[9], 0, 0);
+        }
+        ts->seccomp_trace.pending = false;
+        break;
+#else
+        g_assert_not_reached();
+#endif
+    case GUEST_SECCOMP_KILL_THREAD:
+        seccomp_kill_thread(env);
+    case GUEST_SECCOMP_KILL_PROCESS:
+        force_sig_abort(TARGET_SIGSYS);
+    default:
+        g_assert_not_reached();
+    }
+
+    if (unlikely(qemu_loglevel_mask(LOG_STRACE)) ||
+        unlikely(qemu_loglevel_mask(LOG_STRACE_ERROR))) {
+        print_syscall_ret(cpu_env, num, ret, arg1, arg2,
+                          arg3, arg4, arg5, arg6);
+    }
+
+    record_syscall_return(cpu, num, ret);
+    return ret;
+}
+
+abi_long do_syscall(void *cpu_env, int num, abi_long arg1,
+                    abi_long arg2, abi_long arg3, abi_long arg4,
+                    abi_long arg5, abi_long arg6, abi_long arg7,
+                    abi_long arg8)
+{
+    return do_syscall_with_seccomp(cpu_env, num, num,
+                                   guest_seccomp_target_arch(),
+                                   arg1, arg2, arg3, arg4,
+                                   arg5, arg6, arg7, arg8);
+}

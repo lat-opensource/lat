@@ -27,6 +27,9 @@ int aot_tb_insert(TranslationBlock *tb);
 target_ulong get_curr_seg_end(target_ulong curr_pc);
 void get_dynamic_message(TranslationBlock **tb_list, int tb_num,
         seg_info **seg_info_vector, int *seg_info_num);
+tb_tmp_message *aot_dynamic_tb_messages(void);
+int aot_set_dynamic_tb_messages(const tb_tmp_message *messages, int count,
+        seg_info **segments, int segment_count);
 char is_pe(char *file_name);
 uint8_t is_pe_file(const char *filename);
 uint8_t is_elf_file(const char *filename);
@@ -41,4 +44,5 @@ uint64 translate_lib(seg_info **seg_info_vector, int begin_id,
         int end_id, CPUState *cpu, tb_tmp_message *tb_message_vector);
 extern __thread TranslationBlock **ts_vector;
 extern __thread int in_pre_translate;
+extern __thread bool aot_parallel_translate;
 #endif

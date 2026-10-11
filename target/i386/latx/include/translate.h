@@ -1509,6 +1509,10 @@ void tr_disasm(struct TranslationBlock *tb, int max_insns);
 void etb_add_succ(void* etb,int depth);
 int tr_translate_tb(struct TranslationBlock *tb);
 int tr_ir2_generate(struct TranslationBlock *tb);
+#ifdef CONFIG_LATX_OPT_PUSH_POP_TRANS
+bool latx_sp_merge_can_delay(IR1_INST *pir1);
+void latx_sp_merge_flush(void);
+#endif
 int label_dispose(TranslationBlock *tb, TRANSLATION_DATA *lat_ctx);
 int tr_ir2_assemble(const void *code_start_addr, const IR2_INST *pir2);
 #if defined(CONFIG_LATX_FLAG_REDUCTION) && \

@@ -1,6 +1,7 @@
 i386_ss.add(when: 'CONFIG_LATX', if_true: files(
   'segment.c',
   'aot.c',
+  'latc_native_export.c',
   'aot_reader.c',
   'file_ctx.c',
   'aot_link_seg.c',

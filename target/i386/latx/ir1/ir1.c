@@ -14,6 +14,9 @@
 #include "latx-disassemble-trace.h"
 #include "insts-pattern.h"
 #include "lsenv.h"
+#ifdef CONFIG_LATX_AOT
+#include "ts.h"
+#endif
 
 #if defined(CONFIG_LATX_KZT)
 #include "bridge.h"
@@ -112,7 +115,7 @@ extern int GPR_USEDEF_TO_SAVE;
 extern int FPR_USEDEF_TO_SAVE;
 extern int XMM_USEDEF_TO_SAVE;
 #endif
-csh handle[2];
+__thread csh handle[2];
 
 #ifdef CONFIG_LATX_CAPSTONE_GIT
 int (*la_disa_v1)(const uint8_t *code, size_t code_size,
@@ -386,6 +389,22 @@ ADDRX ir1_disasm(IR1_INST *ir1, uint8_t *addr, ADDRX t_pc, int ir1_num,
         exit(-1);
     }
 
+#ifdef CONFIG_LATX_AOT
+    if (aot_parallel_translate && getenv("LATC_EMIT_AOT") &&
+        getenv("LATC_NATIVE_STATIC_CHECK")) {
+        const char *reason = ir1_static_vector_rejection(info, CODEIS64);
+        if (reason) {
+            fprintf(stderr, "latc: unsupported static instruction pc=0x%"
+                    PRIx64 " reason=%s bytes=", (uint64_t)t_pc, reason);
+            for (unsigned int i = 0; i < info->size; i++) {
+                fprintf(stderr, "%02x", info->bytes[i]);
+            }
+            fprintf(stderr, "\n");
+            exit(EXIT_FAILURE);
+        }
+    }
+#endif
+
     disassemble_trace_cmp(addr, 15, (uint64_t)t_pc, 1, info, CODEIS64);
 
     ir1->_eflag = 0;
@@ -531,6 +550,16 @@ int ir1_index_reg_is_ymm(IR1_OPND *opnd)
     dt_x86_reg index = opnd->mem.index;
 
     return dt_X86_REG_YMM0 <= index && index <= dt_X86_REG_YMM15;
+}
+
+int ir1_opnd_index_is_gpr(const IR1_OPND *opnd)
+{
+    IR1_OPND index = {
+        .type = dt_X86_OP_REG,
+        .reg = opnd->mem.index,
+    };
+
+    return ir1_opnd_is_gpr(&index);
 }
 
 
@@ -1437,7 +1466,7 @@ int ir1_opnd_is_gpr_used(IR1_OPND *opnd, uint8_t gpr_index)
 #endif
             return ir1_opnd_base_reg_num(opnd) == gpr_index;
         }
-        if (ir1_opnd_has_index(opnd)) {
+        if (ir1_opnd_has_index(opnd) && ir1_opnd_index_is_gpr(opnd)) {
             return ir1_opnd_index_reg_num(opnd) == gpr_index;
         }
     }

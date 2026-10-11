@@ -1,0 +1,6 @@
+LATC_1.0 {
+    global: semantic_version;
+};
+LATC_2.0 {
+    global: semantic_version;
+} LATC_1.0;

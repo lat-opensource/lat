@@ -33,6 +33,7 @@
 #endif
 #ifdef CONFIG_LATX
 #include "jrra.h"
+#include "latc-aot-v2-runner.h"
 #include "latx-signal.h"
 #include "reg-map.h"
 #include "latx-options.h"
@@ -1160,6 +1161,24 @@ static void host_signal_handler(int host_signum, siginfo_t *info,
         }
     }
 #endif
+
+#ifdef CONFIG_LATX
+    /*
+     * AOT v2: 非法指令落在 AOT 模块代码里（既不是 TB 代码，也不是 JRRA /
+     * FAST_JMPCACHE 哨兵）时，说明该处的 AOT 代码已经失效（模块被替换或区间
+     * 被作废）。信号处理器只登记恢复请求并回到调度器；失效和动态状态修正必须
+     * 在普通执行上下文中完成，避免在异步信号栈上获取运行时锁或分配内存。
+     */
+    if (host_signum == SIGILL && info->si_code > 0) {
+        target_ulong guest_pc;
+        if (latc_aot_v2_defer_signal_recovery(cpu, UC_PC(uc), &guest_pc)) {
+            UC_GR(uc)[reg_statics_map[S_UD1]] = guest_pc;
+            UC_PC(uc) = context_switch_native_to_bt_ret_0;
+            return;
+        }
+    }
+#endif
+
 #ifdef CONFIG_LATX
     /* An asynchronous SIGILL can interrupt valid translated instructions. */
     if (host_signum == SIGILL && info->si_code > 0 &&
@@ -1270,7 +1289,11 @@ static void host_signal_handler(int host_signum, siginfo_t *info,
     unsigned long address = (unsigned long)info->si_addr;
     CPUClass *cc;
     greg_t pc = UC_PC(uc);
-    if (host_signum == SIGFPE && tcg_tb_lookup(pc)) {
+    bool translated_pc = tcg_tb_lookup(pc);
+#ifdef CONFIG_LATX
+    translated_pc |= latc_aot_v2_contains_host_pc(pc);
+#endif
+    if (host_signum == SIGFPE && translated_pc) {
         pc += GETPC_ADJ;
 #ifdef CONFIG_LATX
         env->puc = uc;
@@ -1279,7 +1302,7 @@ static void host_signal_handler(int host_signum, siginfo_t *info,
         cc->tcg_ops->tlb_fill(cpu, address, 0, MMU_DATA_LOAD,
                               MMU_USER_IDX, false, pc, info);
         g_assert_not_reached();
-    } else if (host_signum == SIGTRAP && tcg_tb_lookup(pc)) {
+    } else if (host_signum == SIGTRAP && translated_pc) {
         /* next instruction */
         pc += GETPC_ADJ + 4;
 #ifndef CONFIG_LOONGARCH_NEW_WORLD

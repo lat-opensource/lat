@@ -29,6 +29,10 @@
 #include "tcg/tcg.h"
 #if defined(CONFIG_USER_ONLY)
 #include "qemu.h"
+#if defined(CONFIG_LATX) && defined(TARGET_X86_64)
+#include "latc-aot-v2-runner.h"
+#include "auto-config.h"
+#endif
 #if defined(__FreeBSD__) || defined(__FreeBSD_kernel__)
 #include <sys/param.h>
 #if __FreeBSD_version >= 700104
@@ -63,6 +67,10 @@
 #include "hw/core/tcg-cpu-ops.h"
 #include "internal.h"
 #include "loongarch-extcontext.h"
+#ifdef CONFIG_LATX
+#include "latc-bundle-loader.h"
+#include "latc-aot-v2-runner.h"
+#endif
 
 #ifdef CONFIG_LATX_PERF
 #include "latx-perf.h"
@@ -483,6 +491,18 @@ static int cpu_restore_state_from_tb(CPUState *cpu, TranslationBlock *tb,
         cpu_neg(cpu)->icount_decr.u16.low += num_insns - i;
     }
     restore_state_to_opc(env, tb, data);
+#ifdef CONFIG_LATX_OPT_PUSH_POP_TRANS
+    target_long sp_delta = (target_long)data[1];
+#ifdef TARGET_X86_64
+    if (tb->bool_flags & IS_CODE64) {
+        env->regs[R_ESP] += sp_delta;
+    } else {
+        env->regs[R_ESP] = (uint32_t)(env->regs[R_ESP] + sp_delta);
+    }
+#else
+    env->regs[R_ESP] += sp_delta;
+#endif
+#endif
 #ifdef CONFIG_LATX_OPT_PUSH_POP
     uint32_t parallel = cpu->tcg_cflags & CF_PARALLEL;
     if (!parallel) {
@@ -523,6 +543,11 @@ bool cpu_restore_state(CPUState *cpu, uintptr_t host_pc, bool will_exit)
      *
      * Either way we need return early as we can't resolve it here.
      */
+#ifdef CONFIG_LATX
+    if (latc_aot_v2_restore_state(cpu, host_pc)) {
+        return true;
+    }
+#endif
     if (in_code_gen_buffer((const void *)(host_pc - tcg_splitwx_diff))) {
         TranslationBlock *tb = tcg_tb_lookup(host_pc);
         if (tb) {
@@ -987,7 +1012,9 @@ static void page_lock_pair(PageDesc **ret_p1, tb_page_addr_t phys1,
     tb_page_addr_t page1;
     tb_page_addr_t page2;
 
-    assert_memory_lock();
+    if (!aot_parallel_translate) {
+        assert_memory_lock();
+    }
     g_assert(phys1 != -1);
 
     page1 = phys1 >> TARGET_PAGE_BITS;
@@ -1923,6 +1950,12 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
 
     assert_memory_lock();
     qemu_thread_jit_write();
+#ifdef CONFIG_LATX
+    latc_bundle_note_tb_attempt(pc, cflags);
+#if defined(CONFIG_USER_ONLY) && defined(TARGET_X86_64)
+    latc_aot_v2_note_jit_key(pc, cflags);
+#endif
+#endif
 
     phys_pc = get_page_addr_code_hostp(env, pc, &host_pc);
 
@@ -2200,7 +2233,8 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
      * but the paired page cross 16K boundary is still not protected.
      */
     int p_flags = page_get_flags(pc);
-    if ((p_flags & PAGE_WRITE) && !page_is_shadow_not_shmm(pc)) {
+    if (!aot_parallel_translate && (p_flags & PAGE_WRITE) &&
+        !page_is_shadow_not_shmm(pc)) {
         mprotect((void*)(pc & qemu_host_page_mask), qemu_host_page_size, PROT_READ);
     }
 
@@ -2345,11 +2379,44 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
         tcg_tb_remove(tb);
         return existing_tb;
     }
+#ifdef CONFIG_LATX
+    latc_bundle_note_tb_generated(tb->pc, tb_cflags(tb));
+#endif
 #ifdef CONFIG_LATX_AOT
     aot_mark_dynamic_tb(tb);
 #endif
     return tb;
 }
+
+#if defined(CONFIG_LATX) && defined(CONFIG_USER_ONLY) && \
+    defined(TARGET_X86_64)
+typedef struct LatcExistingTbRange {
+    target_ulong begin;
+    target_ulong end;
+} LatcExistingTbRange;
+
+static void latc_collect_existing_tb(void *opaque, uint32_t hash, void *userp)
+{
+    TranslationBlock *tb = opaque;
+    const LatcExistingTbRange *range = userp;
+    (void)hash;
+    if (tb->pc >= range->begin && tb->pc < range->end) {
+        latc_aot_v2_note_jit_key(tb->pc, tb_cflags(tb));
+    }
+}
+
+void latc_aot_v2_collect_existing_jit_tbs(target_ulong guest_begin,
+                                          target_ulong guest_end)
+{
+    const char *socket = lat_aot_socket_path();
+    const char *cache = lat_aot_cache_path();
+    if (!socket || !*socket || (cache && *cache)) {
+        return;
+    }
+    LatcExistingTbRange range = { guest_begin, guest_end };
+    qht_iter(&tb_ctx.htable, latc_collect_existing_tb, &range);
+}
+#endif
 
 #ifdef CONFIG_LATX_AOT
 void aot_tb_register(TranslationBlock *tb, AOTTBOrigin origin)
@@ -4515,6 +4582,7 @@ int page_unprotect(target_ulong address, uintptr_t pc, int *emu)
     int inv_one_tb = 0;
     int size = 1;
     int force_inv_host_page= 0;
+    bool current_aot_invalidated = false;
 
     /* Technically this isn't safe inside a signal handler.  However we
        know this only ever happens in a synchronous SEGV handler, so in
@@ -4567,6 +4635,11 @@ int page_unprotect(target_ulong address, uintptr_t pc, int *emu)
             return 0;
         }
     }
+
+    current_aot_invalidated = latc_aot_v2_invalidate_range(
+        current_cpu, address & TARGET_PAGE_MASK,
+        is_cross ? 2 * TARGET_PAGE_SIZE : TARGET_PAGE_SIZE,
+        LATC_AOT_V2_INVALIDATE_CODE_WRITE);
 
     current_tb_invalidated = false;
     if (!force_inv_host_page &&
@@ -4766,7 +4839,7 @@ out:
     mmap_unlock();
 
     /* If current TB was invalidated return to main loop */
-    return current_tb_invalidated ? 2 : 1;
+    return current_tb_invalidated || current_aot_invalidated ? 2 : 1;
 }
 
 #ifdef CONFIG_LATX_AOT

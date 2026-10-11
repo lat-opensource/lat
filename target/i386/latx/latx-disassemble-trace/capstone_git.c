@@ -16,9 +16,9 @@ la_name_enum_t git_x86_insn_bcast[5];
 la_name_enum_t git_x86_insn_op_type[4];
 la_name_enum_t git_x86_insn_avx_cc[X86_AVX_CC_TRUE_US + 1];
 
-csh git_handle[2];
+static __thread csh git_handle[2];
 uint8_t dt_gitcatstone_mode[2];
-char git_cap_tmp[IR1_INST_SIZE];
+static __thread char git_cap_tmp[IR1_INST_SIZE];
 struct la_dt_insn *gitcapstone_get_from_insn(cs_insn *inputinfo,
     int ir1_num, void *pir1_base)
 {
@@ -54,7 +54,7 @@ struct la_dt_insn *gitcapstone_get_from_insn(cs_insn *inputinfo,
     ret->x86.rex = inputinfo->detail->x86.rex;
     ret->x86.modrm = inputinfo->detail->x86.modrm;
     ret->x86.op_count = inputinfo->detail->x86.op_count;
-    for (int i = 0; i < 8; i++) {
+    for (int i = 0; i < ret->x86.op_count; i++) {
         int otype = inputinfo->detail->x86.operands[i].type; 
         ret->x86.operands[i].type = git_x86_insn_op_type[otype].id;
         if (otype == X86_OP_IMM) {
@@ -122,6 +122,9 @@ int gitcapstone_get(const uint8_t *code, size_t code_size,
 {
     cs_insn *inputinfo;
     struct la_dt_insn *ret;
+    if (unlikely(git_handle[mode] == 0)) {
+        gitcapstone_thread_init();
+    }
     dtassert(git_handle[mode]);
     int git_count = latx_cs_disasm(git_handle[mode], code, code_size,
         address, count, &inputinfo, 0, git_cap_tmp);
@@ -169,6 +172,13 @@ void gitcapstone_init(int abi_bits)
     init_insn_bcast();
     init_insn_op_type();
     init_insn_avx_cc();
+}
+
+void gitcapstone_thread_init(void)
+{
+    xtm_capstone_init(64);
+    handle[0] = git_handle[0];
+    handle[1] = git_handle[1];
 }
 static void init_insn_avx_cc()
 {

@@ -9,6 +9,33 @@
 
 #define IR1_DECODE_TEMPLATE_CACHE_SIZE 16384
 
+/* Static compilation can discover CPU variants that execution never selects. */
+static inline const char *ir1_static_vector_rejection(
+        const struct la_dt_insn *info, int code64)
+{
+    unsigned int register_limit = code64 ? 16 : 8;
+    for (unsigned int i = 0; i < info->x86.op_count; i++) {
+        const dt_cs_x86_op *opnd = &info->x86.operands[i];
+        if (opnd->type != dt_X86_OP_REG) {
+            continue;
+        }
+        dt_x86_reg reg = opnd->reg;
+        if (reg >= dt_X86_REG_K0 && reg <= dt_X86_REG_K7) {
+            return "opmask register";
+        }
+        if (reg >= dt_X86_REG_ZMM0 && reg <= dt_X86_REG_ZMM31) {
+            return "ZMM register";
+        }
+        if ((reg >= dt_X86_REG_XMM0 + register_limit &&
+             reg <= dt_X86_REG_XMM31) ||
+            (reg >= dt_X86_REG_YMM0 + register_limit &&
+             reg <= dt_X86_REG_YMM31)) {
+            return "extended vector register";
+        }
+    }
+    return NULL;
+}
+
 /*
  * Translation decodes repeated position-independent instruction encodings.
  * Keep exact decoded instructions as templates after the hot decoder declines

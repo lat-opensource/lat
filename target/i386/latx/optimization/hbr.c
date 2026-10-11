@@ -2261,6 +2261,114 @@ static void do_shbr_opt64(TranslationBlock **tb_list, int tb_num_in_tu)
     over_tb_shbr_opt(tb_list, tb_num_in_tu, SHBR_CAN_OPT64, xmm);
 }
 
+static bool shbr_is_adjacent_64bit_mem_pair(IR1_INST *low,
+        IR1_OPND *low_mem, IR1_INST *high, IR1_OPND *high_mem)
+{
+    if (ir1_addr_next(low) != ir1_addr(high) ||
+        !ir1_opnd_is_mem(low_mem) || !ir1_opnd_is_mem(high_mem) ||
+        ir1_opnd_size(low_mem) != 64 || ir1_opnd_size(high_mem) != 64 ||
+        ir1_addr_size(low) != ir1_addr_size(high) ||
+        ir1_opnd_has_seg(low_mem) || ir1_opnd_has_seg(high_mem) ||
+        !ir1_opnd_has_base(low_mem) || !ir1_opnd_has_index(low_mem) ||
+        !ir1_opnd_has_base(high_mem) || !ir1_opnd_has_index(high_mem)) {
+        return false;
+    }
+    if (ir1_opnd_base_reg(low_mem) == dt_X86_REG_RIP ||
+        ir1_opnd_base_reg(high_mem) == dt_X86_REG_RIP) {
+        return false;
+    }
+    return ir1_opnd_base_reg(low_mem) == ir1_opnd_base_reg(high_mem) &&
+           ir1_opnd_index_reg(low_mem) == ir1_opnd_index_reg(high_mem) &&
+           ir1_opnd_scale(low_mem) == ir1_opnd_scale(high_mem) &&
+           (uint64_t)ir1_opnd_simm(high_mem) ==
+               (uint64_t)ir1_opnd_simm(low_mem) + 8;
+}
+
+static bool shbr_is_adjacent_movsd_movhpd_load(IR1_INST *low,
+        IR1_INST *high)
+{
+    if (ir1_opcode(low) != WRAP(MOVSD) ||
+        low->info->x86.opcode[0] != 0x0f ||
+        ir1_opcode(high) != WRAP(MOVHPD) ||
+        ir1_get_opnd_num(low) != 2 || ir1_get_opnd_num(high) != 2) {
+        return false;
+    }
+
+    IR1_OPND *low_dest = ir1_get_opnd(low, 0);
+    IR1_OPND *high_dest = ir1_get_opnd(high, 0);
+    return ir1_opnd_is_xmm(low_dest) && ir1_opnd_is_xmm(high_dest) &&
+           ir1_opnd_is_same_reg(low_dest, high_dest) &&
+           shbr_is_adjacent_64bit_mem_pair(low, ir1_get_opnd(low, 1),
+                                           high, ir1_get_opnd(high, 1));
+}
+
+static bool shbr_is_adjacent_movlpd_movhpd_store(IR1_INST *low,
+        IR1_INST *high)
+{
+    if (ir1_opcode(low) != WRAP(MOVLPD) ||
+        ir1_opcode(high) != WRAP(MOVHPD) ||
+        ir1_get_opnd_num(low) != 2 || ir1_get_opnd_num(high) != 2) {
+        return false;
+    }
+
+    IR1_OPND *low_src = ir1_get_opnd(low, 1);
+    IR1_OPND *high_src = ir1_get_opnd(high, 1);
+    return ir1_opnd_is_xmm(low_src) && ir1_opnd_is_xmm(high_src) &&
+           ir1_opnd_is_same_reg(low_src, high_src) &&
+           shbr_is_adjacent_64bit_mem_pair(low, ir1_get_opnd(low, 0),
+                                           high, ir1_get_opnd(high, 0));
+}
+
+static bool shbr_is_adjacent_scalar_mem64_pair(IR1_INST *first,
+        IR1_INST *second)
+{
+    if (ir1_opcode(first) != ir1_opcode(second) ||
+        ir1_get_opnd_num(first) != 2 || ir1_get_opnd_num(second) != 2 ||
+        !ir1_opnd_is_xmm(ir1_get_opnd(first, 0)) ||
+        !ir1_opnd_is_xmm(ir1_get_opnd(second, 0))) {
+        return false;
+    }
+
+    switch (ir1_opcode(first)) {
+    case WRAP(MOVSD):
+        if (first->info->x86.opcode[0] != 0x0f ||
+            second->info->x86.opcode[0] != 0x0f) {
+            return false;
+        }
+        break;
+    case WRAP(MULSD):
+        break;
+    default:
+        return false;
+    }
+
+    return shbr_is_adjacent_64bit_mem_pair(
+        first, ir1_get_opnd(first, 1), second, ir1_get_opnd(second, 1));
+}
+
+static void shbr_mark_mem64_pairs(TranslationBlock **tb_list,
+        int tb_num_in_tu)
+{
+    for (int i = 0; i < tb_num_in_tu; i++) {
+        TranslationBlock *tb = tb_list[i];
+        for (int j = 0; j + 1 < tb_ir1_num(tb); j++) {
+            IR1_INST *low = tb_ir1_inst(tb, j);
+            IR1_INST *high = tb_ir1_inst(tb, j + 1);
+            bool load_pair = (low->hbr_flag & SHBR_CAN_OPT64) &&
+                             shbr_is_adjacent_movsd_movhpd_load(low, high);
+            bool store_pair =
+                shbr_is_adjacent_movlpd_movhpd_store(low, high);
+            bool scalar_pair =
+                shbr_is_adjacent_scalar_mem64_pair(low, high);
+            if (load_pair || store_pair || scalar_pair) {
+                low->hbr_flag |= SHBR_FLAG_FUSE_MEM64_PAIR;
+                high->hbr_flag |= SHBR_FLAG_FUSED_MEM64_PAIR;
+                j++;
+            }
+        }
+    }
+}
+
 static void clear_ir1_flag(TranslationBlock **tb_list, int tb_num_in_tu)
 {
     for (int i = 0; i < tb_num_in_tu; i++) {
@@ -2595,7 +2703,7 @@ static void use_h32(TranslationBlock *tb, IR1_INST *ir1)
                 int base_num = ir1_opnd_base_reg_num(opnd);
                 set_use_reg(tb, ir1, base_num);
             }
-            if (ir1_opnd_has_index(opnd)) {
+            if (ir1_opnd_has_index(opnd) && ir1_opnd_index_is_gpr(opnd)) {
                 int index_num = ir1_opnd_index_reg_num(opnd);
                 set_use_reg(tb, ir1, index_num);
             }
@@ -2637,6 +2745,7 @@ void hbr_opt(TranslationBlock **tb_list, int tb_num_in_tu)
     clear_ir1_flag(tb_list, tb_num_in_tu);
     do_shbr_opt32(tb_list, tb_num_in_tu);
     do_shbr_opt64(tb_list, tb_num_in_tu);
+    shbr_mark_mem64_pairs(tb_list, tb_num_in_tu);
 #ifdef TARGET_X86_64
     do_gpr_opt(tb_list, tb_num_in_tu);
 #endif
@@ -2657,6 +2766,18 @@ bool need_shbr_restore_zero64(IR1_INST *ir1)
 {
     return in_pre_translate &&
            (ir1->hbr_flag & SHBR_RESTORE_ZERO64);
+}
+
+bool can_shbr_fuse_mem64_pair(IR1_INST *ir1)
+{
+    return in_pre_translate &&
+           (ir1->hbr_flag & SHBR_FLAG_FUSE_MEM64_PAIR);
+}
+
+bool is_shbr_fused_mem64_pair(IR1_INST *ir1)
+{
+    return in_pre_translate &&
+           (ir1->hbr_flag & SHBR_FLAG_FUSED_MEM64_PAIR);
 }
 
 bool can_shbr_opt32(IR1_INST *ir1)

@@ -1,0 +1,2063 @@
+/*
+ *  qemu user main
+ *
+ *  Copyright (c) 2003-2008 Fabrice Bellard
+ *
+ *  This program is free software; you can redistribute it and/or modify
+ *  it under the terms of the GNU General Public License as published by
+ *  the Free Software Foundation; either version 2 of the License, or
+ *  (at your option) any later version.
+ *
+ *  This program is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *  GNU General Public License for more details.
+ *
+ *  You should have received a copy of the GNU General Public License
+ *  along with this program; if not, see <http://www.gnu.org/licenses/>.
+ */
+
+#include "library_private.h"
+#include "qemu/osdep.h"
+#include "auto-config.h"
+#include "latx-version.h"
+#include "qemu-common.h"
+#include "qemu/units.h"
+#include "qemu/accel.h"
+#include "sysemu/tcg.h"
+#include <sys/syscall.h>
+#include <sys/resource.h>
+#include <sys/shm.h>
+#include <linux/binfmts.h>
+#include <stdlib.h>
+
+#include "qapi/error.h"
+#include "qemu.h"
+#include "guest-seccomp.h"
+#include "qemu/path.h"
+#include "qemu/queue.h"
+#include "qemu/config-file.h"
+#include "qemu/cutils.h"
+#include "qemu/error-report.h"
+#include "qemu/help_option.h"
+#include "qapi/qmp/qdict.h"
+#include "qapi/qmp/qjson.h"
+#include "qemu/module.h"
+#include "qemu/plugin.h"
+#include "exec/exec-all.h"
+#include "tcg/tcg.h"
+#include "qemu/timer.h"
+#include "qemu/envlist.h"
+#include "qemu/guest-random.h"
+#include "elf.h"
+#include "trace/control.h"
+#include "target_elf.h"
+#include "cpu_loop-common.h"
+#include "crypto/init.h"
+#ifdef CONFIG_LATX
+#include "pressure-vessel.h"
+#endif
+int mydebug = 1;
+
+#ifdef CONFIG_LATX
+#include "latx-config.h"
+#include "latx-options.h"
+#include "latx-runtime.h"
+#include "aot.h"
+#endif
+#ifdef CONFIG_LATX_PERF
+#include "latx-perf.h"
+#endif
+#ifdef CONFIG_LATX
+#include "debug.h"
+#include "fileutils.h"
+#include "box64context.h"
+#include "elfloader.h"
+#include "elfloader_private.h"
+#include "khash.h"
+#include "elfload_dump.h"
+#include "latc-bundle-loader.h"
+#include "latc-build-id.h"
+#include "latc-aot-v2-runner.h"
+#include "librarian.h"
+#include "wrapper.h"
+#if defined(CONFIG_LATX_KZT)
+#include "kzt-groups.h"
+#include "wrappertbbridge.h"
+box64context_t* my_context = NULL;
+elfheader_t* elf_header = NULL;
+int relocation_log = 0; //LOG_NONE;
+int relocation_dump = 0;
+int box64_pagesize;
+uintptr_t box64_load_addr = 0;
+int dlsym_error = 0;
+int kzt_call_log = 0;
+int cycle_log = 0;
+int allow_missing_libs = 1;
+int box64_nogtk = 0;
+int box64_prefer_emulated = 0;
+int box64_prefer_wrapped = 0;
+int fix_64bit_inodes = 0;
+int box64_nopulse = 0;
+int box64_novulkan = 0;
+char* libGL = NULL;
+int kzt_init(char** argv, int argc,char** target_argv, int  target_argc,
+    struct linux_binprm* bprm);
+void kzt_bridge_init(void);
+int is_user_map = 0;
+#endif
+uintptr_t fmod_smc_start = 0;
+uintptr_t fmod_smc_end = 0;
+int jit_gdb = 0;
+int box64_tcmalloc_minimal = 0;
+#endif
+
+#ifndef AT_FLAGS_PRESERVE_ARGV0
+#define AT_FLAGS_PRESERVE_ARGV0_BIT 0
+#define AT_FLAGS_PRESERVE_ARGV0 (1 << AT_FLAGS_PRESERVE_ARGV0_BIT)
+#endif
+
+char *exec_path;
+static bool explicit_legacy_aot;
+static int requested_legacy_aot;
+char *real_path;
+#ifdef CONFIG_LATX_AOT
+char *aot_file_path;
+char *aot_file_lock;
+#endif
+
+#ifdef TARGET_X86_64
+int latx_wine;
+#endif
+int singlestep;
+static const char *argv0;
+static const char *gdbstub;
+static envlist_t *envlist;
+static const char *cpu_model;
+static const char *cpu_type;
+static const char *seed_optarg;
+#ifdef CONFIG_LATX_AOT
+const char *aot_file_size_optarg;
+const char *aot_left_file_minsize_optarg;
+char ** latx_aot_wine_pefiles_cache = NULL;
+#endif
+unsigned long mmap_min_addr;
+#ifdef CONFIG_GUEST_BASE_ZERO
+uintptr_t guest_base = 0;
+bool have_guest_base = 1;
+#else
+uintptr_t guest_base;
+bool have_guest_base;
+#endif
+struct image_info info1, *info = &info1;
+
+/*
+ * Used to implement backwards-compatibility for the `-strace`, and
+ * QEMU_STRACE options. Without this, the QEMU_LOG can be overwritten by
+ * -strace, or vice versa.
+ */
+static bool enable_strace;
+static bool enable_strace_error;
+
+/*
+ * The last log mask given by the user in an environment variable or argument.
+ * Used to support command line arguments overriding environment variables.
+ */
+static int last_log_mask;
+
+/*
+ * When running 32-on-64 we should make sure we can fit all of the possible
+ * guest address space into a contiguous chunk of virtual host memory.
+ *
+ * This way we will never overlap with our own libraries or binaries or stack
+ * or anything else that QEMU maps.
+ *
+ * Many cpus reserve the high bit (or more than one for some 64-bit cpus)
+ * of the address for the kernel.  Some cpus rely on this and user space
+ * uses the high bit(s) for pointer tagging and the like.  For them, we
+ * must preserve the expected address space.
+ */
+#ifndef MAX_RESERVED_VA
+# if HOST_LONG_BITS > TARGET_VIRT_ADDR_SPACE_BITS
+#  if TARGET_VIRT_ADDR_SPACE_BITS == 32 && \
+      (TARGET_LONG_BITS == 32 || defined(TARGET_ABI32))
+/* There are a number of places where we assign reserved_va to a variable
+   of type abi_ulong and expect it to fit.  Avoid the last page.  */
+#   define MAX_RESERVED_VA(CPU)  (0xfffffffful & TARGET_PAGE_MASK)
+#  else
+#   define MAX_RESERVED_VA(CPU)  (1ul << TARGET_VIRT_ADDR_SPACE_BITS)
+#  endif
+# else
+#  define MAX_RESERVED_VA(CPU)  0
+# endif
+#endif
+
+unsigned long reserved_va;
+
+static void usage(int exitcode);
+
+const char *interp_prefix = CONFIG_QEMU_INTERP_PREFIX;
+const char *qemu_uname_release;
+static bool runtime_info_requested;
+
+/* XXX: on x86 MAP_GROWSDOWN only works if ESP <= address + 32, so
+   we allocate a bigger stack. Need a better solution, for example
+   by remapping the process stack directly at the right place */
+unsigned long real_guest_stack_size = 128 * 1024 * 1024UL;
+unsigned long vir_guest_stack_size = 8 * 1024 * 1024UL;
+unsigned long vir_rlimit_as = RLIM_INFINITY;
+unsigned long vir_rlimit_as_old = RLIM_INFINITY;
+unsigned long vir_rlimit_as_acc = 0;
+
+#if defined(TARGET_I386)
+int cpu_get_pic_interrupt(CPUX86State *env)
+{
+    return -1;
+}
+#endif
+
+/***********************************************************/
+/* Helper routines for implementing atomic operations.  */
+
+/* Make sure everything is in a consistent state for calling fork().  */
+void fork_start(void)
+{
+    start_exclusive();
+    latc_aot_v2_fork_start();
+    mmap_fork_start();
+    sigact_fork_start();
+    path_fork_start();
+    fd_trans_fork_start();
+    cpu_list_lock();
+}
+
+void fork_end(int child)
+{
+    mmap_fork_end(child);
+    sigact_fork_end(child);
+    path_fork_end(child);
+    fd_trans_fork_end();
+    latc_aot_v2_fork_end(thread_cpu, child != 0);
+    if (child) {
+        CPUState *cpu, *next_cpu;
+        /* Child processes created by fork() only have a single thread.
+           Discard information about the parent threads.  */
+        CPU_FOREACH_SAFE(cpu, next_cpu) {
+            if (cpu != thread_cpu) {
+                TaskState *task = cpu->opaque;
+
+                if (task) {
+                    guest_seccomp_filter_unref(task->seccomp_filter);
+                    task->seccomp_filter = NULL;
+                }
+                QTAILQ_REMOVE_RCU(&cpus, cpu, node);
+            }
+        }
+        qemu_init_cpu_list();
+        gdbserver_fork(thread_cpu);
+    } else {
+        cpu_list_unlock();
+    }
+    /*
+     * qemu_init_cpu_list() reinitialized the child exclusive state, but we
+     * also need to keep current_cpu consistent, so call end_exclusive() for
+     * both child and parent.
+     */
+    end_exclusive();
+}
+
+__thread CPUState *thread_cpu;
+
+bool qemu_cpu_is_self(CPUState *cpu)
+{
+    return thread_cpu == cpu;
+}
+
+void qemu_cpu_kick(CPUState *cpu)
+{
+#ifdef CONFIG_LATX
+    /* start_exclusive() has already counted this vCPU as a waiter. */
+    if (option_fork_unlink && cpu->has_waiter) {
+        TaskState *ts = cpu->opaque;
+
+        if (ts && ts->ts_tid > 0) {
+            siginfo_t info = {
+                .si_signo = SIGRTMIN + 1,
+                .si_code = SI_QUEUE,
+                .si_pid = getpid(),
+                .si_uid = getuid(),
+                .si_int = FORK_UNLINK_MAGIC,
+            };
+
+            syscall(SYS_rt_tgsigqueueinfo, getpid(), ts->ts_tid,
+                    SIGRTMIN + 1, &info);
+        }
+    }
+#endif
+    cpu_exit(cpu);
+}
+
+void task_settid(TaskState *ts)
+{
+    if (ts->ts_tid == 0) {
+        ts->ts_tid = (pid_t)syscall(SYS_gettid);
+    }
+}
+
+void stop_all_tasks(void)
+{
+    /*
+     * We trust that when using NPTL, start_exclusive()
+     * handles thread stopping correctly.
+     */
+    start_exclusive();
+}
+
+/* Assumes contents are already zeroed.  */
+void init_task_state(TaskState *ts)
+{
+    ts->used = 1;
+    ts->sigaltstack_used = (struct target_sigaltstack) {
+        .ss_sp = 0,
+        .ss_size = 0,
+        .ss_flags = TARGET_SS_DISABLE,
+    };
+#ifdef TARGET_I386
+    ts->sys_dispatch_len = -1;
+    ts->sys_dispatch_inclusive = false;
+#endif
+}
+
+CPUArchState *cpu_copy(CPUArchState *env)
+{
+    CPUState *cpu = env_cpu(env);
+    CPUState *new_cpu = cpu_create(cpu_type);
+    CPUArchState *new_env = new_cpu->env_ptr;
+    CPUBreakpoint *bp;
+    CPUWatchpoint *wp;
+
+    /* Reset non arch specific state */
+    cpu_reset(new_cpu);
+
+    new_cpu->tcg_cflags = cpu->tcg_cflags;
+    memcpy(new_env, env, sizeof(CPUArchState));
+
+    /*
+     * NOTE: Current QEMU only has one and only one gdt_table ptr.
+     * On the other hand, Wine leverage fs reg for TEB storage, detail information
+     * please refer to link: https://wiki.winehq.org/Wine_Developer%27s_Guide/Kernel_modules
+     * Current QEMU has one and only one gdt for all threads, that will lead to wine cannot get
+     * correct ldt in gdt table. The new thread ldt will overwrite the previous thread ldt addr.
+     * To solve this issue, create a per-thread gdt for each thread to make sure ldt entry safe.
+     */
+    new_env->gdt.base = target_mmap(0, sizeof(uint64_t) * TARGET_GDT_ENTRIES,
+                                    PROT_READ|PROT_WRITE,
+                                    MAP_ANONYMOUS|MAP_PRIVATE, -1, 0, 0);
+    assert(new_env->gdt.base > 0);
+    memcpy(g2h(cpu, new_env->gdt.base), g2h(cpu, env->gdt.base),
+                                    sizeof(uint64_t) * TARGET_GDT_ENTRIES);
+    /* Clone all break/watchpoints.
+       Note: Once we support ptrace with hw-debug register access, make sure
+       BP_CPU break/watchpoints are handled correctly on clone. */
+    QTAILQ_INIT(&new_cpu->breakpoints);
+    QTAILQ_INIT(&new_cpu->watchpoints);
+    QTAILQ_FOREACH(bp, &cpu->breakpoints, entry) {
+        cpu_breakpoint_insert(new_cpu, bp->pc, bp->flags, NULL);
+    }
+    QTAILQ_FOREACH(wp, &cpu->watchpoints, entry) {
+        cpu_watchpoint_insert(new_cpu, wp->vaddr, wp->len, wp->flags, NULL);
+    }
+
+#if defined(CONFIG_LATX) && !defined(CONFIG_LATX_FAST_JMPCACHE)
+    new_env->tb_jmp_cache_ptr = new_cpu->tb_jmp_cache;
+#endif
+    return new_env;
+}
+
+#if defined(CONFIG_LATX_DEBUG) || defined(CONFIG_DEBUG_TCG)
+#ifdef CONFIG_LATX
+#include "latx-options.h"
+
+static void handle_range_trace_begin(const char *arg)
+{
+    qemu_strtol(arg, NULL, 16, (long *)&option_begin_trace_addr);
+}
+
+static void handle_range_trace_end(const char *arg)
+{
+    qemu_strtol(arg, NULL, 16, (long *)&option_end_trace_addr);
+}
+
+static void handle_arg_latx_print(const char *arg)
+{
+    options_parse_dump(arg);
+    qemu_set_log(0);
+}
+
+static void handle_arg_latx_show_tb(const char *arg)
+{
+    options_parse_show_tb(arg);
+    qemu_set_log(0);
+}
+
+static void handle_arg_latx_trace_mem(const char *arg)
+{
+    options_parse_trace_mem(arg);
+}
+
+static void handle_arg_latx_break_insn(const char *arg)
+{
+    options_parse_break_insn(arg);
+}
+
+static void handle_arg_debug_lative(const char *arg)
+{
+    options_parse_debug_lative();
+    qemu_set_log(0);
+}
+
+static void handle_arg_enable_fcsr_exc(const char *arg)
+{
+    option_enable_fcsr_exc = 1;
+    if (!option_save_xmm) {
+        option_save_xmm = 0xff;
+    }
+}
+
+static void handle_arg_latx_unlink(const char *arg)
+{
+    options_parse_latx_unlink(arg);
+}
+
+static void handle_arg_latx_trace(const char *arg)
+{
+    options_parse_trace(arg);
+}
+
+static void handle_arg_latx_disassemble_trace_cmp(const char *arg)
+{
+    options_parse_latx_disassemble_trace_cmp(arg);
+}
+
+#endif
+
+static void handle_arg_imm_skip_pc(const char *arg) {
+  imm_skip_pc = strtol(arg, NULL, 16);
+}
+
+static void handle_arg_log(const char *arg)
+{
+    last_log_mask = qemu_str_to_log_mask(arg);
+    if (!last_log_mask) {
+        qemu_print_log_usage(stdout);
+        exit(EXIT_FAILURE);
+    }
+}
+
+static void handle_arg_dfilter(const char *arg)
+{
+    qemu_set_dfilter_ranges(arg, &error_fatal);
+}
+
+
+static void handle_arg_log_filename(const char *arg)
+{
+    qemu_set_log_filename(arg, &error_fatal);
+}
+
+static void handle_arg_set_env(const char *arg)
+{
+    char *r, *p, *token;
+    r = p = strdup(arg);
+    while ((token = strsep(&p, ",")) != NULL) {
+        if (envlist_setenv(envlist, token) != 0) {
+            usage(EXIT_FAILURE);
+        }
+    }
+    free(r);
+}
+
+static void handle_arg_unset_env(const char *arg)
+{
+    char *r, *p, *token;
+    r = p = strdup(arg);
+    while ((token = strsep(&p, ",")) != NULL) {
+        if (envlist_unsetenv(envlist, token) != 0) {
+            usage(EXIT_FAILURE);
+        }
+    }
+    free(r);
+}
+
+static void handle_arg_argv0(const char *arg)
+{
+    argv0 = strdup(arg);
+}
+
+static void handle_arg_stack_size(const char *arg)
+{
+    const char *p;
+    unsigned long lv;
+    real_guest_stack_size = qemu_strtoul(arg, &p, 0, &lv);
+    vir_guest_stack_size = real_guest_stack_size;
+    if (vir_guest_stack_size == 0) {
+        usage(EXIT_FAILURE);
+    }
+
+    if (*p == 'M') {
+        real_guest_stack_size *= MiB;
+        vir_guest_stack_size *= MiB;
+    } else if (*p == 'k' || *p == 'K') {
+        real_guest_stack_size *= KiB;
+        vir_guest_stack_size *= KiB;
+    }
+}
+
+static void handle_arg_pagesize(const char *arg)
+{
+    qemu_host_page_size = atoi(arg);
+    if (qemu_host_page_size == 0 ||
+        (qemu_host_page_size & (qemu_host_page_size - 1)) != 0) {
+        fprintf(stderr, "page size must be a power of two\n");
+        exit(EXIT_FAILURE);
+    }
+}
+
+static void handle_arg_seed(const char *arg)
+{
+    seed_optarg = arg;
+}
+
+static void handle_arg_gdb(const char *arg)
+{
+    gdbstub = g_strdup(arg);
+}
+
+static void handle_arg_uname(const char *arg)
+{
+    qemu_uname_release = strdup(arg);
+}
+
+static void handle_arg_cpu(const char *arg)
+{
+    cpu_model = strdup(arg);
+    if (cpu_model == NULL || is_help_option(cpu_model)) {
+        /* XXX: implement xxx_cpu_list for targets that still miss it */
+#if defined(cpu_list)
+        cpu_list();
+#endif
+        exit(EXIT_FAILURE);
+    }
+}
+
+static void handle_arg_guest_base(const char *arg)
+{
+    guest_base = strtol(arg, NULL, 0);
+    have_guest_base = true;
+}
+
+static void handle_arg_reserved_va(const char *arg)
+{
+    char *p;
+    int shift = 0;
+    reserved_va = strtoul(arg, &p, 0);
+    switch (*p) {
+    case 'k':
+    case 'K':
+        shift = 10;
+        break;
+    case 'M':
+        shift = 20;
+        break;
+    case 'G':
+        shift = 30;
+        break;
+    }
+    if (shift) {
+        unsigned long unshifted = reserved_va;
+        p++;
+        reserved_va <<= shift;
+        if (reserved_va >> shift != unshifted) {
+            fprintf(stderr, "Reserved virtual address too big\n");
+            exit(EXIT_FAILURE);
+        }
+    }
+    if (*p) {
+        fprintf(stderr, "Unrecognised -R size suffix '%s'\n", p);
+        exit(EXIT_FAILURE);
+    }
+}
+
+static void handle_arg_singlestep(const char *arg)
+{
+    singlestep = 1;
+}
+
+static void handle_arg_strace(const char *arg)
+{
+    enable_strace = true;
+}
+
+static void handle_arg_strace_error(const char *arg)
+{
+    enable_strace_error = true;
+}
+
+static void handle_arg_trace(const char *arg)
+{
+    trace_opt_parse(arg);
+}
+
+static QemuPluginList plugins = QTAILQ_HEAD_INITIALIZER(plugins);
+
+#ifdef CONFIG_PLUGIN
+static void handle_arg_plugin(const char *arg)
+{
+    qemu_plugin_opt_parse(arg, &plugins);
+}
+#endif
+#endif
+
+static void handle_arg_help(const char *arg)
+{
+    (void)arg;
+    usage(EXIT_SUCCESS);
+}
+
+#ifdef CONFIG_LATX
+static void handle_arg_version(const char *arg)
+{
+    printf("lat-" TARGET_NAME " " LATX_VERSION
+           "\n");
+    exit(EXIT_SUCCESS);
+}
+
+static void handle_arg_runtime_info(const char *arg)
+{
+    runtime_info_requested = true;
+}
+
+static void handle_arg_ld_prefix(const char *arg)
+{
+    interp_prefix = strdup(arg);
+    latx_runtime_prefix_selected();
+}
+
+static void handle_arg_optimize(const char *arg)
+{
+    options_parse_opt(arg);
+}
+
+static void handle_arg_latx_vpaes(const char *arg)
+{
+    option_vpaes = strtol(arg, NULL, 0);
+}
+
+static void handle_arg_latx_parallel(const char *arg)
+{
+    close_latx_parallel = strtol(arg, NULL, 0);
+}
+
+static void handle_arg_latx_softfpu(const char *arg)
+{
+    option_softfpu = strtol(arg, NULL, 0);
+    if (option_softfpu) {
+        option_aot = 0;
+        option_set_rounding_opt = 0;
+    }
+}
+
+static void handle_arg_latx_softfpu_fast(const char *arg)
+{
+    option_softfpu_fast = strtol(arg, NULL, 0);
+}
+
+static void handle_arg_latx_prlimit(const char *arg)
+{
+    option_prlimit = strtol(arg, NULL, 0);
+}
+
+#ifdef CONFIG_LATX_AVX_OPT
+static void handle_arg_latx_avx_cpuid(const char *arg)
+{
+    printf("handle_arg_latx_avx_cpuid:arg=%s\n",arg);
+    option_avx_cpuid = strtol(arg, NULL, 0);
+}
+#endif
+
+#if defined(CONFIG_LATX_KZT)
+static void handle_arg_latx_kzt(const char *arg)
+{
+    int value;
+
+    g_clear_pointer(&option_kzt_error, g_free);
+    if (qemu_strtoi(arg, NULL, 0, &value) || value < 0 || value > 2) {
+        option_kzt = 0;
+        option_kzt_error = g_strdup_printf(
+            "LATX_KZT must be exactly 0, 1, or 2 (got '%s')", arg);
+        return;
+    }
+    option_kzt = value;
+}
+
+static void handle_arg_latx_kzt_libs(const char *arg)
+{
+    g_free(option_kzt_libs);
+    option_kzt_libs = g_strdup(arg);
+}
+
+static void handle_arg_latx_kzt_log(const char *arg)
+{
+    int value;
+
+    g_clear_pointer(&option_kzt_log_error, g_free);
+    if (qemu_strtoi(arg, NULL, 0, &value) || value < 0 || value > 1) {
+        option_kzt_log = 1;
+        option_kzt_log_error = g_strdup_printf(
+            "LATX_KZT_LOG must be exactly 0 or 1 (got '%s')", arg);
+        return;
+    }
+    option_kzt_log = value;
+}
+
+static void handle_arg_kzt_libs_info(const char *arg)
+{
+    (void)arg;
+    kzt_groups_print_available();
+    exit(EXIT_SUCCESS);
+}
+#endif
+
+static void handle_arg_latx_fputag(const char *arg)
+{
+    option_fputag = strtol(arg, NULL, 0);
+}
+
+static void handle_arg_latx_imm_reg(const char *arg)
+{
+    options_parse_imm_reg(arg);
+}
+
+static void handle_arg_save_xmm(const char *arg)
+{
+    if (strtol(arg, NULL, 0)) {
+        option_save_xmm = 0xff;
+    }
+}
+
+static void handle_arg_latx_jrra(const char *arg)
+{
+    option_jr_ra = strtol(arg, NULL, 0);
+    if (option_jr_ra) {
+        option_aot = 0;
+    }
+}
+
+static void handle_arg_latx_smc(const char *arg)
+{
+    option_smc_opt = strtol(arg, NULL, 0);
+}
+
+static void handle_arg_latx_rounding(const char *arg)
+{
+    option_set_rounding_opt = strtol(arg, NULL, 0);
+}
+
+static void handle_arg_latx_cvt_opt(const char *arg)
+{
+    option_cvt_opt = strtol(arg, NULL, 0);
+}
+
+static void handle_arg_latx_anonym(const char *arg)
+{
+    option_anonym = strtol(arg, NULL, 0);
+#ifdef CONFIG_LATX_AOT
+    option_aot = 0;
+#endif
+}
+
+static void handle_arg_mmap_start(const char *arg)
+{
+    mmap_next_start = strtol(arg, NULL, 0);
+}
+
+static void handle_arg_mmap_fixed(const char *arg)
+{
+    option_mmap_fixed = strtol(arg, NULL, 0);
+}
+
+static void handle_arg_latx_unimp_dump(const char *arg)
+{
+    last_log_mask = LOG_UNIMP;
+    qemu_set_log_filename(arg, &error_fatal);
+}
+
+static void handle_arg_latx_mem_test(const char *arg)
+{
+    long value;
+
+    if (qemu_strtol(arg, NULL, 0, &value) || value < 0 || value > 2) {
+        option_mem_test = 0;
+    } else {
+        option_mem_test = value;
+    }
+    if (option_mem_test) {
+        if (qemu_real_host_page_size != LATX_HOST_16K_PAGE_SIZE) {
+            option_mem_test = 0;
+        } else {
+            option_aot = 0;
+        }
+    }
+}
+
+#define LATX_MINKE_PROGRAM_NAME "Minke.MI.Organ.exe"
+
+static void handle_arg_latx_minke_16k_page_check(const char *arg)
+{
+    long value;
+
+    if (qemu_strtol(arg, NULL, 0, &value)) {
+        value = 0;
+    }
+    option_minke_16k_page_check = value != 0;
+    if (option_minke_16k_page_check) {
+#if TARGET_ABI_BITS == 32
+        if (qemu_real_host_page_size != LATX_HOST_16K_PAGE_SIZE) {
+            option_minke_16k_page_check = 0;
+        }
+#else
+        option_minke_16k_page_check = 0;
+#endif
+    }
+}
+
+static void handle_arg_latx_real_maps(const char *arg)
+{
+    option_real_maps = strtol(arg, NULL, 0);
+    if (option_real_maps) {
+        option_aot = 0;
+    }
+}
+
+static void handle_arg_latx_monitor_shared_mem(const char *arg)
+{
+    option_monitor_shared_mem = strtol(arg, NULL, 0);
+}
+
+static void handle_arg_latx_private_mmap_shadow(const char *arg)
+{
+    option_private_mmap_shadow = strtol(arg, NULL, 0);
+}
+
+static void handle_arg_smc_reload(const char *arg)
+{
+    long value = 0;
+
+    qemu_strtol(arg, NULL, 0, &value);
+    option_smc_reload = value;
+    if (option_smc_reload) {
+        option_jr_ra = 0;
+    }
+}
+
+static void handle_arg_latx_wine_pe_fixed_base(const char *arg)
+{
+    option_wine_pe_fixed_base = g_strdup(arg);
+}
+
+static void handle_arg_latx_wine_pe_fixed_address(const char *arg)
+{
+    option_wine_pe_fixed_address = g_strdup(arg);
+}
+
+static void handle_arg_latx_fork_unlink(const char *arg)
+{
+    option_fork_unlink = strtol(arg, NULL, 0);
+}
+
+#ifdef CONFIG_LATX_AOT
+static void handle_arg_latx_aot(const char *arg)
+{
+    explicit_legacy_aot = true;
+    option_aot = strtol(arg, NULL, 0);
+    requested_legacy_aot = option_aot;
+    if (option_softfpu || option_mem_test) {
+        option_aot = 0;
+    }
+}
+
+static void handle_arg_latx_aot_v2(const char *arg)
+{
+    lat_aot_config_option("LATX_AOT_V2", arg);
+}
+
+static void handle_arg_latx_aot_generate(const char *arg)
+{
+    long value;
+
+    if (qemu_strtol(arg, NULL, 0, &value) < 0 || value < -1 || value > 1) {
+        fprintf(stderr, "LATX_AOT_GENERATE must be -1, 0, or 1\n");
+        exit(EXIT_FAILURE);
+    }
+    option_aot_generate = value;
+}
+
+static void handle_arg_latx_aot_pe_profile(const char *arg)
+{
+    option_aot_pe_profile = strtol(arg, NULL, 0);
+}
+
+static void handle_arg_latx_aot_wine_pefiles_cache(const char *arg)
+{
+    if (!arg || !strlen(arg)) {
+        return;
+    }
+    char * tmp[100] = {0};
+    int index;
+    char *s1 = NULL;
+    char * tmp_str = malloc(strlen(arg) + 1);
+    strcpy(tmp_str, arg);
+    s1 = strtok(tmp_str, ",");
+    if (!s1) {
+       latx_aot_wine_pefiles_cache = malloc (2 * sizeof(char *));
+       latx_aot_wine_pefiles_cache[0] = tmp_str;
+       latx_aot_wine_pefiles_cache[1] = NULL;
+       return;
+    }
+    for (index = 0; index < 100 && s1; index++,s1 = strtok(NULL, ",")) {
+        tmp[index] = s1;
+    }
+    tmp[index] = NULL;
+    latx_aot_wine_pefiles_cache = malloc ((index + 1) * sizeof(char *));
+    memcpy(latx_aot_wine_pefiles_cache, tmp, (index + 1) * sizeof(char *));
+    lsassert(!latx_aot_wine_pefiles_cache[index]);
+}
+
+#endif
+
+#ifdef CONFIG_LATX_AOT
+static void handle_arg_lat_aot_file_size(const char *arg)
+{
+    aot_file_size_optarg = arg;
+}
+static void handle_arg_lat_aot_left_file_size(const char *arg)
+{
+    aot_left_file_minsize_optarg = arg;
+}
+#endif
+#else
+static void handle_arg_version(const char *arg)
+{
+    printf("lat-" TARGET_NAME " " QEMU_FULL_VERSION
+           "\n");
+    exit(EXIT_SUCCESS);
+}
+#endif
+
+struct qemu_argument {
+    const char *argv;
+    const char *env;
+    bool has_arg;
+    void (*handle_opt)(const char *arg);
+    const char *example;
+    const char *help;
+};
+
+static const struct qemu_argument arg_table[] = {
+#ifdef CONFIG_LATX
+    {"latx-optimize",   "LATX_OPTIMIZE",      false, handle_arg_optimize,
+    "",           "specify enabled optimize type"},
+    {"latx-vpaes",      "LATX_VPAES",         true,  handle_arg_latx_vpaes,
+    "",           "enable vpaes AES translation"},
+    {"latx-smc",        "LATX_SMC",         true,   handle_arg_latx_smc,
+    "",           "smc strategy: 0 (page) 1 (tb) 2(+shmm) 6(+helper,default)"},
+    {"latx-close-parallel",    "LATX_CLOSE_PARALLEL",     true,  handle_arg_latx_parallel,
+    "",           "disable latx parallel"},
+    {"latx-softfpu",    "LATX_SOFTFPU",     true,  handle_arg_latx_softfpu,
+    "",           "enable softfpu"},
+    {"latx-softfpu-fast",    "LATX_SOFTFPU_FAST",     true,  handle_arg_latx_softfpu_fast,
+    "",           "enable softfpu fast"},
+    {"latx-prlimit",    "LATX_PRLIMIT",     true,  handle_arg_latx_prlimit,
+    "",           "enable prlimit"},
+    {"latx-rounding",    "LATX_ROUNDING_OPT",     true,  handle_arg_latx_rounding,
+    "",           "enable rounding opt"},
+    {"latx-cvt-opt",    "LATX_CVT_OPT",     true,  handle_arg_latx_cvt_opt,
+    "",           "enable cvt opt"},
+#if defined(CONFIG_LATX_AVX_OPT)
+    {"latx-avx-cpuid",    "LATX_AVX_CPUID",     true,  handle_arg_latx_avx_cpuid,
+    "",           "enable avx cpuid"},
+#endif
+#if defined(CONFIG_LATX_KZT)
+    {"latx-kzt",    "LATX_KZT",     true,  handle_arg_latx_kzt,
+    "",           "enable kuzhitong"},
+    {"latx-kzt-libs", "LATX_KZT_LIBS", true, handle_arg_latx_kzt_libs,
+    "group,...",  "select KZT library groups"},
+    {"latx-kzt-log", "LATX_KZT_LOG", true, handle_arg_latx_kzt_log,
+    "0|1",        "log important KZT binding and fallback decisions"},
+    {"kzt-libs", NULL, false, handle_arg_kzt_libs_info,
+    "",           "list available KZT library groups and exit"},
+#endif
+    {"latx-fputag",    "LATX_FPUTAG",     true,  handle_arg_latx_fputag,
+    "",           "enable fputag"},
+    {"save-xmm",    "SAVE_XMM",     true,  handle_arg_save_xmm,
+    "",           ""},
+    {"latx-jrra",    "LATX_JRRA",     true,  handle_arg_latx_jrra,
+    "",           "enable jrra"},
+    {"latx-imm-reg",    "LATX_IMM_REG",     true,  handle_arg_latx_imm_reg,
+    "",           "enable imm reg optimization"},
+    {"latx-mem-test",    "LATX_MT",     true,  handle_arg_latx_mem_test,
+    "0|1|2",      "16K checks: sparse fast or strict fast"},
+    {"latx-minke-16k-page-check", "LATX_MINKE_16K_PAGE_CHECK", true,
+    handle_arg_latx_minke_16k_page_check, "0|1",
+    "enable Minke-specific mixed 16K write checks"},
+    {"latx-real-maps",    "LATX_REAL_MAPS",     true,  handle_arg_latx_real_maps,
+    "",           "enable get real self maps"},
+    {"latx-monitor-shared-mem",    "LATX_MONITOR_SHARED_MEM",     true,  handle_arg_latx_monitor_shared_mem,
+    "",           "monitor shared memory, retranslate self modifying page"},
+    {"latx-private-mmap-shadow", "LATX_PRIVATE_MMAP_SHADOW", true,
+    handle_arg_latx_private_mmap_shadow, "",
+    "shadow writable private SQLite file mapping fragments"},
+    {"smc_reload",    "LATX_SMC_RELOAD",     true,  handle_arg_smc_reload,
+    "",           "reload SMC TB"},
+    {"latx-wine-pe-fixed-base", "LATX_WINE_PE_FIXED_BASE", true,
+    handle_arg_latx_wine_pe_fixed_base, "basename",
+    "prefer one relocatable Wine PE image's preferred base"},
+    {"latx-wine-pe-fixed-address", "LATX_WINE_PE_FIXED_ADDRESS", true,
+    handle_arg_latx_wine_pe_fixed_address, "basename@address",
+    "load one relocatable Wine PE image at a specified address"},
+    {"latx-fork-unlink",    "LATX_FORK_UNLINK",     true,  handle_arg_latx_fork_unlink,
+    "",           "unlink running vcpu tb chains before fork"},
+#ifdef CONFIG_LATX_AOT
+    {"latx-aot",    "LATX_AOT",     true,  handle_arg_latx_aot,
+    "",           "enable aot"},
+    {"latx-aot-v2", NULL, true, handle_arg_latx_aot_v2,
+    "0|1", "select AOT v2"},
+    {"latx-aot-generate", "LATX_AOT_GENERATE", true,
+    handle_arg_latx_aot_generate, "",
+    "AOT generation: auto (-1), off (0), or force (1)"},
+    {"latx-aot-pe-profile", "LATX_AOT_PE_PROFILE", true,
+    handle_arg_latx_aot_pe_profile, "", "split libcef PE AOT by process role"},
+    {"latx-aot-file-size", "LAT_AOT_FILE_SIZE", false,
+    handle_arg_lat_aot_file_size, "", "set max aot file size by MB."},
+    {"latx-aot-left-file-size",   "LAT_AOT_LEFT_FILE_SIZE", false,
+    handle_arg_lat_aot_left_file_size, "", "set left aot file size  by MB."},
+    {"latx-aot-wine-pefiles-cache",    "LATX_AOT_WINE_PEFILES_CACHE",     true,
+    handle_arg_latx_aot_wine_pefiles_cache, "", "aot load pe files"
+    "e.g. .dll, .exe, .sys or .drv"},
+#endif
+    {"latx-anonym",    "LATX_ANONYM",     true,  handle_arg_latx_anonym,
+    "",           "anonymize latx for guest"},
+    {"latx-mmap_start",    "LATX_MMAP_START",     true,  handle_arg_mmap_start,
+    "",           "adjust the initial address of mmap"},
+    {"latx-mmap_fixed",    "LATX_MMAP_FIXED",     true,  handle_arg_mmap_fixed,
+    "",           "force mmap with address to be MAP_FIXED"},
+    {"latx-unimp-dump",     "LATX_UNIMP_DUMP", false, handle_arg_latx_unimp_dump,
+    "",                 "LATX dump unsupport syscall"},
+#endif
+#if defined(CONFIG_LATX_DEBUG) || defined(CONFIG_DEBUG_TCG)
+#ifdef CONFIG_LATX
+    {"latx-runtime-trace-begin", "LATX_BEGIN_TRACE",
+     false, handle_range_trace_begin,
+    "", "runtime begin trace per instruction"},
+    {"latx-runtime-trace-end", "LATX_END_TRACE", false, handle_range_trace_end,
+    "", "runtime end trace per instruction"},
+    {"latx-dump",       "LATX_DUMP",         true,  handle_arg_latx_print,
+    "bitmap",           "LATX-dump-transalte-info: 5 bits each for func,ir1,ir2,host,profile"},
+    {"latx-show-tb",    "LATX_SHOW_TB",      true,  handle_arg_latx_show_tb,
+    "",           "show the func,ir1,ir2 and host of tb based on the PC"},
+    {"latx-trace-mem",  "LATX_TRACE_MEM",    true,  handle_arg_latx_trace_mem,
+    "",           "show the ir1 pc that last written to the addr"},
+    {"latx-break-insn", "LATX_BREAK_INSN",   true,  handle_arg_latx_break_insn,
+    "",           "triggering a SEGV at the given PC of ir1"},
+    {"latx-debug-lative", "LATX_DEBUG_LATIVE", false,  handle_arg_debug_lative,
+    "",           "triggering a SEGV at the given PC of ir1"},
+    {"latx-enable_fcsr_exc", "LATX_ENABLE_FCSR_EXC", false,  handle_arg_enable_fcsr_exc,
+    "",           "enable all exception bit in fcsr"},
+    {"latx-unlink",     "LATX_UNLINK",       true,  handle_arg_latx_unlink,
+    "",           "unlink_count[,cpu_index]"},
+    {"latx-trace",       "LATX_TRACE",                 true,  handle_arg_latx_trace,
+    "bitmap",           "LATX-trace-TB-execution: 2 bits each for TB,ir1,ir2"},
+    {"latx-disassemble-trace-cmp",     "LATX_DISASSEMBLE_TRACE_CMP",
+        true, handle_arg_latx_disassemble_trace_cmp,
+        "", "LATX Compare different disassemble."},
+#endif
+    {"g",          "LAT_GDB",         true,  handle_arg_gdb,
+     "port",       "wait gdb connection to 'port'"},
+    {"s",          "LAT_STACK_SIZE",  true,  handle_arg_stack_size,
+     "size",       "set the stack size to 'size' bytes"},
+    {"cpu",        "LAT_CPU",         true,  handle_arg_cpu,
+     "model",      "select CPU (-cpu help for list)"},
+    {"E",          "LAT_SET_ENV",     true,  handle_arg_set_env,
+     "var=value",  "sets targets environment variable (see below)"},
+    {"U",          "LAT_UNSET_ENV",   true,  handle_arg_unset_env,
+     "var",        "unsets targets environment variable (see below)"},
+    {"0",          "LAT_ARGV0",       true,  handle_arg_argv0,
+     "argv0",      "forces target process argv[0] to be 'argv0'"},
+    {"r",          "LAT_UNAME",       true,  handle_arg_uname,
+     "uname",      "set lat uname release string to 'uname'"},
+    {"B",          "LAT_GUEST_BASE",  true,  handle_arg_guest_base,
+     "address",    "set guest_base address to 'address'"},
+    {"R",          "LAT_RESERVED_VA", true,  handle_arg_reserved_va,
+     "size",       "reserve 'size' bytes for guest virtual address space"},
+    {"d",          "LAT_LOG",         true,  handle_arg_log,
+     "item[,...]", "enable logging of specified items "
+     "(use '-d help' for a list of items)"},
+    {"imm-skip",   "LAT_IMM_SKIP_PC", true,  handle_arg_imm_skip_pc,
+     "address",    "latx imm reg opt skip pc"},
+    {"dfilter",    "LAT_DFILTER",     true,  handle_arg_dfilter,
+     "range[,...]","filter logging based on address range"},
+    {"D",          "LAT_LOG_FILENAME", true, handle_arg_log_filename,
+     "logfile",     "write logs to 'logfile' (default stderr)"},
+    {"p",          "LAT_PAGESIZE",    true,  handle_arg_pagesize,
+     "pagesize",   "set the host page size to 'pagesize'"},
+    {"singlestep", "LAT_SINGLESTEP",  false, handle_arg_singlestep,
+     "",           "run in singlestep mode"},
+    {"strace",     "LAT_STRACE",      false, handle_arg_strace,
+     "",           "log system calls"},
+    {"strace-error",     "LAT_STRACE_ERROR",      false, handle_arg_strace_error,
+     "",           "log system calls"},
+    {"seed",       "LAT_RAND_SEED",   true,  handle_arg_seed,
+     "",           "Seed for pseudo-random number generator"},
+    {"trace",      "LAT_TRACE",       true,  handle_arg_trace,
+     "",           "[[enable=]<pattern>][,events=<file>][,file=<file>]"},
+#ifdef CONFIG_PLUGIN
+    {"plugin",     "LAT_PLUGIN",      true,  handle_arg_plugin,
+     "",           "[file=]<file>[,arg=<string>]"},
+#endif
+#endif
+    {"h",          NULL,               false, handle_arg_help,
+     "",           "print this help"},
+    {"help",       NULL,               false, handle_arg_help,
+     "",           "print this help"},
+    {"L",          "LAT_LD_PREFIX",   true,  handle_arg_ld_prefix,
+     "path",       "set the elf interpreter prefix to 'path'"},
+    {"runtime-info", NULL,             false, handle_arg_runtime_info,
+     "",           "display selected guest runtime information and exit"},
+    {"version",    "LAT_VERSION",     false, handle_arg_version,
+     "",           "display version information and exit"},
+    {NULL, NULL, false, NULL, NULL, NULL}
+};
+
+static void usage(int exitcode)
+{
+    const struct qemu_argument *arginfo;
+    int maxarglen;
+    int maxenvlen;
+
+    printf("usage: lat-" TARGET_NAME " [options] program [arguments...]\n"
+           "Linux CPU emulator (compiled for " TARGET_NAME " emulation)\n"
+           "\n"
+           "Options and associated environment variables:\n"
+           "\n");
+
+    /* Calculate column widths. We must always have at least enough space
+     * for the column header.
+     */
+    maxarglen = strlen("Argument");
+    maxenvlen = strlen("Env-variable");
+
+    for (arginfo = arg_table; arginfo->handle_opt != NULL; arginfo++) {
+        int arglen = strlen(arginfo->argv);
+        if (arginfo->has_arg) {
+            arglen += strlen(arginfo->example) + 1;
+        }
+        const char *env = arginfo->env ? arginfo->env : "";
+
+        if (strlen(env) > maxenvlen) {
+            maxenvlen = strlen(env);
+        }
+        if (arglen > maxarglen) {
+            maxarglen = arglen;
+        }
+    }
+
+    printf("%-*s %-*s Description\n", maxarglen+1, "Argument",
+            maxenvlen, "Env-variable");
+
+    for (arginfo = arg_table; arginfo->handle_opt != NULL; arginfo++) {
+        const char *env = arginfo->env ? arginfo->env : "";
+
+        if (arginfo->has_arg) {
+            printf("-%s %-*s %-*s %s\n", arginfo->argv,
+                   (int)(maxarglen - strlen(arginfo->argv) - 1),
+                   arginfo->example, maxenvlen, env, arginfo->help);
+        } else {
+            printf("-%-*s %-*s %s\n", maxarglen, arginfo->argv,
+                    maxenvlen, env,
+                    arginfo->help);
+        }
+    }
+
+    printf("\n"
+           "Defaults:\n"
+           "LAT_LD_PREFIX  = %s\n"
+           "LAT_STACK_SIZE = %ld byte\n",
+           interp_prefix,
+           vir_guest_stack_size);
+
+    printf("\n"
+           "You can use -E and -U options or the LAT_SET_ENV and\n"
+           "LAT_UNSET_ENV environment variables to set and unset\n"
+           "environment variables for the target process.\n"
+           "It is possible to provide several variables by separating them\n"
+           "by commas in getsubopt(3) style. Additionally it is possible to\n"
+           "provide the -E and -U options multiple times.\n"
+           "The following lines are equivalent:\n"
+           "    -E var1=val2 -E var2=val2 -U LD_PRELOAD -U LD_DEBUG\n"
+           "    -E var1=val2,var2=val2 -U LD_PRELOAD,LD_DEBUG\n"
+           "    LAT_SET_ENV=var1=val2,var2=val2 LAT_UNSET_ENV=LD_PRELOAD,LD_DEBUG\n"
+           "Note that if you provide several changes to a single variable\n"
+           "the last change will stay in effect.\n"
+           "Both -option and --option spellings are accepted.\n"
+           "\n");
+
+    exit(exitcode);
+}
+
+struct ParseOption {
+    const char *opt_name;
+    const char *opt_arg;
+};
+
+static struct ParseOption parse_options[128];
+static int arg_count = 0;
+
+void find_option(const char* key, const char* val)
+{
+    if (runtime_info_requested && strcmp(key, "LAT_LD_PREFIX")) {
+        return;
+    }
+    if (lat_aot_config_option(key, val)) return;
+
+#define ENVFUN(NAME, name) \
+    else if (!strcmp(key, #NAME)) { \
+        name(val); \
+    }
+    if (0);
+    ENVS
+#undef ENVFUN
+    else {
+        error_report("no option %s", key);
+    }
+}
+
+static bool runtime_info_option_applies(const struct qemu_argument *arginfo)
+{
+    /* A runtime query must not execute unrelated option side effects. */
+    return arginfo->handle_opt == handle_arg_runtime_info ||
+           arginfo->handle_opt == handle_arg_ld_prefix;
+}
+
+static void options_set(char **target_argv)
+{
+    /* set latx.conf */
+    conf_init(target_argv);
+    if (!runtime_info_requested) lat_aot_config_environment();
+
+    const char *r;
+    const struct qemu_argument *arginfo;
+
+    /* set env */
+    latx_runtime_option_source_set(LATX_RUNTIME_SOURCE_ENVIRONMENT);
+    for (arginfo = arg_table; arginfo->handle_opt != NULL; arginfo++) {
+        if (arginfo->env == NULL) {
+            continue;
+        }
+
+        if (runtime_info_requested &&
+            !runtime_info_option_applies(arginfo)) {
+            continue;
+        }
+
+        r = getenv(arginfo->env);
+        if (r != NULL) {
+            arginfo->handle_opt(r);
+        }
+    }
+
+    /* set argv */
+    latx_runtime_option_source_set(LATX_RUNTIME_SOURCE_COMMAND_LINE);
+    for (int i = 0; i < arg_count; i++) {
+        for (arginfo = arg_table; arginfo->handle_opt != NULL; arginfo++) {
+            if (!strcmp(parse_options[i].opt_name, arginfo->argv)) {
+                if (!runtime_info_requested ||
+                    runtime_info_option_applies(arginfo)) {
+                    if (arginfo->has_arg) {
+                        arginfo->handle_opt(parse_options[i].opt_arg);
+                    } else {
+                        arginfo->handle_opt(NULL);
+                    }
+                }
+                break;
+            }
+        }
+    }
+}
+
+static void print_runtime_info(void)
+{
+    QDict *info = qdict_new();
+    g_autoptr(GString) json = NULL;
+
+    qdict_put_int(info, "schema_version", 1);
+    qdict_put_str(info, "guest_abi", latx_runtime_guest_abi());
+    qdict_put_str(info, "runtime_root", interp_prefix);
+    qdict_put_str(info, "runtime_source",
+                  latx_runtime_prefix_source_name());
+
+    json = qobject_to_json(QOBJECT(info));
+    printf("%s\n", json->str);
+    qobject_unref(info);
+}
+
+static int parse_args(int argc, char **argv)
+{
+    const char *r;
+    int optind;
+    const struct qemu_argument *arginfo;
+
+    optind = 1;
+    for (;;) {
+        if (optind >= argc) {
+            break;
+        }
+        r = argv[optind];
+        if (r[0] != '-') {
+            break;
+        }
+        optind++;
+        r++;
+        if (!strcmp(r, "-")) {
+            break;
+        }
+        /* Treat --foo the same as -foo.  */
+        if (r[0] == '-') {
+            r++;
+        }
+
+        for (arginfo = arg_table; arginfo->handle_opt != NULL; arginfo++) {
+            if (!strcmp(r, arginfo->argv)) {
+                if (arginfo->has_arg) {
+                    if (optind >= argc) {
+                        (void) fprintf(stderr,
+                            "missing argument for option '%s'\n", r);
+                        exit(EXIT_FAILURE);
+                    }
+                    parse_options[arg_count].opt_name = arginfo->argv;
+                    parse_options[arg_count].opt_arg = argv[optind];
+                    optind++;
+                } else {
+                    if (!strcmp(r, "version") || !strcmp(r, "h")
+                        || !strcmp(r, "help")
+                        || !strcmp(r, "runtime-info")
+                        || !strcmp(r, "kzt-libs")) {
+                        /*
+                         * Query options must take effect here so they can be
+                         * used without a guest. options_set() intentionally
+                         * replays the idempotent runtime-info handler with the
+                         * other command-line options.
+                         */
+                        arginfo->handle_opt(NULL);
+                    }
+                    parse_options[arg_count].opt_name = arginfo->argv;
+                    parse_options[arg_count].opt_arg = NULL;
+                }
+                arg_count++;
+                break;
+            }
+        }
+
+        /* no option matched the current argv */
+        if (arginfo->handle_opt == NULL) {
+            (void) fprintf(stderr, "unknown option '%s'\n", r);
+            exit(EXIT_FAILURE);
+        }
+    }
+
+    if (optind >= argc && !runtime_info_requested) {
+        (void) fprintf(stderr, "no user program specified\n");
+        exit(EXIT_FAILURE);
+    }
+
+    if (optind < argc) {
+        exec_path = argv[optind];
+        real_path = realpath(exec_path, (char *)malloc(MAX_PATH));
+    }
+
+    return optind;
+}
+
+int main(int argc, char **argv, char **envp)
+{
+    struct target_pt_regs regs1, *regs = &regs1;
+    struct linux_binprm bprm;
+    TaskState *ts;
+    CPUArchState *env;
+    CPUState *cpu;
+    int optind;
+    char **target_environ, **wrk;
+    char **target_argv;
+    int target_argc;
+    int i;
+    int ret;
+    int execfd;
+    int log_mask;
+    unsigned long max_reserved_va;
+    bool preserve_argv0;
+
+    if (argc == 2 && !strcmp(argv[1], "--latc-build-id")) {
+        puts(LATC_BUILD_ID);
+        return 0;
+    }
+    if (argc == 2 && !strcmp(argv[1], "--latc-print-x86-env-offsets")) {
+#define LATC_ENV_OFFSET(name, member) \
+        printf("#define LATC_X86_ENV_%s_OFFSET %zu\n", name, \
+               offsetof(CPUX86State, member))
+        puts("#ifndef LATC_X86_ENV_OFFSETS_H");
+        puts("#define LATC_X86_ENV_OFFSETS_H");
+        printf("#define LATC_X86_ENV_BUILD_ID \"%s\"\n", LATC_BUILD_ID);
+        LATC_ENV_OFFSET("EXCEPTION_NEXT_EIP", exception_next_eip);
+        LATC_ENV_OFFSET("RAX", regs[R_EAX]);
+        LATC_ENV_OFFSET("RCX", regs[R_ECX]);
+        LATC_ENV_OFFSET("RDX", regs[R_EDX]);
+        LATC_ENV_OFFSET("RBX", regs[R_EBX]);
+        LATC_ENV_OFFSET("RSP", regs[R_ESP]);
+        LATC_ENV_OFFSET("RBP", regs[R_EBP]);
+        LATC_ENV_OFFSET("RSI", regs[R_ESI]);
+        LATC_ENV_OFFSET("RDI", regs[R_EDI]);
+        LATC_ENV_OFFSET("R8", regs[R_R8]);
+        LATC_ENV_OFFSET("R9", regs[R_R9]);
+        LATC_ENV_OFFSET("R10", regs[R_R10]);
+        LATC_ENV_OFFSET("R11", regs[R_R11]);
+        LATC_ENV_OFFSET("R12", regs[R_R12]);
+        LATC_ENV_OFFSET("R13", regs[R_R13]);
+        LATC_ENV_OFFSET("R14", regs[R_R14]);
+        LATC_ENV_OFFSET("R15", regs[R_R15]);
+        LATC_ENV_OFFSET("EFLAGS", eflags);
+        LATC_ENV_OFFSET("FS_BASE", segs[R_FS].base);
+        LATC_ENV_OFFSET("GS_BASE", segs[R_GS].base);
+        LATC_ENV_OFFSET("TB_JMP_CACHE_PTR", tb_jmp_cache_ptr);
+        LATC_ENV_OFFSET("FPREG0", fpregs[0]);
+        LATC_ENV_OFFSET("FPREG1", fpregs[1]);
+        LATC_ENV_OFFSET("FPREG2", fpregs[2]);
+        LATC_ENV_OFFSET("FPREG3", fpregs[3]);
+        LATC_ENV_OFFSET("FPREG4", fpregs[4]);
+        LATC_ENV_OFFSET("FPREG5", fpregs[5]);
+        LATC_ENV_OFFSET("FPREG6", fpregs[6]);
+        LATC_ENV_OFFSET("FPREG7", fpregs[7]);
+        LATC_ENV_OFFSET("XMM0", xmm_regs[0]);
+        LATC_ENV_OFFSET("XMM1", xmm_regs[1]);
+        LATC_ENV_OFFSET("XMM2", xmm_regs[2]);
+        LATC_ENV_OFFSET("XMM3", xmm_regs[3]);
+        LATC_ENV_OFFSET("XMM4", xmm_regs[4]);
+        LATC_ENV_OFFSET("XMM5", xmm_regs[5]);
+        LATC_ENV_OFFSET("XMM6", xmm_regs[6]);
+        LATC_ENV_OFFSET("XMM7", xmm_regs[7]);
+        LATC_ENV_OFFSET("XMM8", xmm_regs[8]);
+        LATC_ENV_OFFSET("XMM9", xmm_regs[9]);
+        LATC_ENV_OFFSET("XMM10", xmm_regs[10]);
+        LATC_ENV_OFFSET("XMM11", xmm_regs[11]);
+        LATC_ENV_OFFSET("XMM12", xmm_regs[12]);
+        LATC_ENV_OFFSET("XMM13", xmm_regs[13]);
+        LATC_ENV_OFFSET("XMM14", xmm_regs[14]);
+        LATC_ENV_OFFSET("XMM15", xmm_regs[15]);
+        puts("#endif");
+#undef LATC_ENV_OFFSET
+        return 0;
+    }
+
+#ifdef CONFIG_LATX
+    latc_aot_v2_consume_environment();
+#endif
+    int latc_bundle = latc_bundle_inject_argv(&argc, &argv);
+    if (latc_bundle < 0) {
+        fprintf(stderr, "latc: invalid embedded guest: %s\n", strerror(errno));
+        return EXIT_FAILURE;
+    }
+    if (latc_bundle > 0) {
+        argv0 = strdup(argv[0]);
+        if (!argv0) {
+            fprintf(stderr, "latc: cannot preserve guest argv[0]\n");
+            return EXIT_FAILURE;
+        }
+    }
+#ifdef TARGET_I386
+    int initial_guest_exe_fd = -1;
+    unsigned int inherited_guest_mdwe = 0;
+    bool inherited_guest_tsc_disabled = false;
+#endif
+
+#if defined(CONFIG_LATX) && defined(__loongarch__)
+    /* Lets check hwcap */
+    #include <asm/hwcap.h>
+    int need_cap, hwcap;
+    need_cap = HWCAP_LOONGARCH_LSX | HWCAP_LOONGARCH_LBT_X86;
+    hwcap = qemu_getauxval(AT_HWCAP);
+    if (need_cap != (hwcap & need_cap)) {
+        fprintf(stderr, "LAT needs LSX/LASX and LBT extension support.\n");
+        fprintf(stderr, "Extension not found:");
+        if (!(hwcap & HWCAP_LOONGARCH_LSX))
+            fprintf(stderr, " LSX");
+        if (!(hwcap & HWCAP_LOONGARCH_LBT_X86))
+            fprintf(stderr, " LBT_X86");
+        fprintf(stderr, ". Please check KERNEL and HARDWARE.\n");
+    }
+    if (!(hwcap & HWCAP_LOONGARCH_LASX)) {
+        option_enable_lasx = 0;
+#ifdef CONFIG_LATX_AVX_OPT
+        option_avx_cpuid = 0;
+#endif
+    }
+#endif
+
+    envlist = envlist_create();
+
+    /* add current environment into the list */
+    for (wrk = environ; *wrk != NULL; wrk++) {
+        (void) envlist_setenv(envlist, *wrk);
+    }
+
+#ifdef CONFIG_LATX
+    static const char *const lat_internal_environment[] = {
+        "LATC_COMPILE_TIMING", "LATC_DEBUG_CFG",
+        "LATC_DISABLE_PRETRANSLATE", "LATC_EMIT_AOT",
+        "LATC_NAMED_GUEST", "LATC_PROFILE_OUT", "LATC_STATS_OUT",
+        "LATX_AOT_V2_SOURCE", "LATX_AOT_V2_TEST_HWCAP",
+        "LATX_AOT_V2_TEST_LIFECYCLE_ROUNDS",
+        "LATX_AOT_V2_TEST_SIGNAL_INVALIDATION_RACE",
+        "LATX_AOT_V2_TRACE_MISSES", "LATX_AOT_V2_PRECOMPILE", NULL,
+    };
+    for (i = 0; lat_internal_environment[i]; i++) {
+        (void)envlist_unsetenv(envlist, lat_internal_environment[i]);
+    }
+#endif
+
+#ifdef TARGET_I386
+    {
+        const char *value = getenv(LATX_GUEST_MDWE_ENV);
+        char *end = NULL;
+        unsigned long parsed = value ? g_ascii_strtoull(value, &end, 10) : 0;
+        unsigned int valid = TARGET_PR_MDWE_REFUSE_EXEC_GAIN |
+                             TARGET_PR_MDWE_NO_INHERIT;
+
+        if (value && end != value && *end == '\0' &&
+            (parsed & ~valid) == 0 &&
+            (!(parsed & TARGET_PR_MDWE_NO_INHERIT) ||
+             (parsed & TARGET_PR_MDWE_REFUSE_EXEC_GAIN))) {
+            inherited_guest_mdwe = parsed;
+        }
+    }
+    inherited_guest_tsc_disabled =
+        g_strcmp0(getenv(LATX_GUEST_TSC_ENV), "1") == 0;
+    (void)envlist_unsetenv(envlist, LATX_GUEST_MDWE_ENV);
+    (void)envlist_unsetenv(envlist, LATX_GUEST_TSC_ENV);
+#endif
+
+    /* extracting environment variables */
+    optind = parse_args(argc, argv);
+
+    if (argc >= 5 && !strcmp(argv[1], argv[2])) {
+        long long hash = 0;
+        for (int i = 4; i < argc; ++i) {
+            for (int j = 0; argv[i][j] != '\0'; ++j) {
+                hash += argv[i][j];
+            }
+        }
+        if (hash == atoll(argv[3])) {
+            for (int i = 4; i < argc; ++i) {
+                argv[i - 3] = argv[i];
+            }
+            argv[argc - 1] = argv[argc - 2] = argv[argc - 3] = NULL;
+            argc = argc - 3;
+        }
+    }
+
+    /*
+     * get binfmt_misc flags
+     */
+    preserve_argv0 = !!(qemu_getauxval(AT_FLAGS) & AT_FLAGS_PRESERVE_ARGV0);
+
+    /*
+     * Manage binfmt-misc preserve-arg[0] flag
+     *    argv[optind]     full path to the binary
+     *    argv[optind + 1] original argv[0]
+     */
+    if (optind + 1 < argc && preserve_argv0) {
+        optind++;
+    }
+
+    /*
+     * Prepare copy of argv vector for target.
+     */
+    target_argc = argc - optind;
+    target_argv = calloc(target_argc + 1, sizeof (char *));
+    if (target_argv == NULL) {
+        (void) fprintf(stderr, "Unable to allocate memory for target_argv\n");
+        exit(EXIT_FAILURE);
+    }
+
+    /*
+     * If argv0 is specified (using '-0' switch) we replace
+     * argv[0] pointer with the given one.
+     */
+    i = 0;
+    if (argv0 != NULL) {
+        target_argv[i++] = strdup(argv0);
+    }
+
+    for (; i < target_argc; i++) {
+        target_argv[i] = strdup(argv[optind + i]);
+    }
+    target_argv[target_argc] = NULL;
+
+    /* set environment variables */
+    options_set(target_argv);
+
+#if defined(CONFIG_LATX) && defined(TARGET_I386) && TARGET_ABI_BITS == 32
+    if (option_mem_test) {
+        latx_init_16k_page_checks();
+    }
+    if (option_minke_16k_page_check) {
+        const char *program = guest_program(target_argv);
+        bool enable_minke_checks = program &&
+            !strcasecmp(program, LATX_MINKE_PROGRAM_NAME);
+
+        option_minke_16k_page_check = enable_minke_checks;
+        if (enable_minke_checks) {
+#ifdef CONFIG_LATX_AOT
+            option_aot = 0;
+#endif
+            latx_enable_minke_16k_write_checks();
+        }
+    }
+#endif
+
+    if (!latx_options_finalize()) {
+#if defined(CONFIG_LATX_KZT)
+        error_report("invalid KZT configuration: %s; KZT disabled",
+                     kzt_groups_last_error());
+#endif
+    }
+
+    if (runtime_info_requested) {
+        print_runtime_info();
+        return EXIT_SUCCESS;
+    }
+    char aot_config_error[256];
+    int aot_selection = explicit_legacy_aot ? requested_legacy_aot : option_aot;
+    if (lat_aot_config_init(&aot_selection, explicit_legacy_aot,
+                            CONFIG_BINDIR, CONFIG_LATC_LIBDIR,
+                            aot_config_error, sizeof(aot_config_error))) {
+        error_report("%s", aot_config_error);
+        return EXIT_FAILURE;
+    }
+    if (!aot_selection) option_aot = 0;
+
+    /* Scan interp_prefix dir for replacement files. */
+    init_paths(interp_prefix);
+
+#ifdef CONFIG_LATX
+    latx_pressure_vessel_prepare(exec_path, target_argv, envlist);
+#endif
+
+    error_init(argv[0]);
+    module_call_init(MODULE_INIT_TRACE);
+    qemu_init_cpu_list();
+    module_call_init(MODULE_INIT_QOM);
+
+    /* Read the stack limit from the kernel.  If it's "unlimited",
+       then we can do little else besides use the default.  */
+    {
+        struct rlimit lim;
+        if (getrlimit(RLIMIT_STACK, &lim) == 0
+            && lim.rlim_cur != RLIM_INFINITY
+            && lim.rlim_cur == (target_long)lim.rlim_cur) {
+            vir_guest_stack_size = lim.rlim_cur;
+        }
+    }
+
+    cpu_model = NULL;
+
+    qemu_add_opts(&qemu_trace_opts);
+    qemu_plugin_add_opts();
+
+    log_mask = last_log_mask | (enable_strace ? LOG_STRACE : 0)
+                             | (enable_strace_error ? LOG_STRACE_ERROR : 0);
+    if (log_mask) {
+        qemu_log_needs_buffers();
+        qemu_set_log(log_mask);
+    }
+
+    if (!trace_init_backends()) {
+        exit(1);
+    }
+    trace_init_file();
+#ifdef CONFIG_LATX_DEBUG
+    qemu_plugin_load_list(&plugins, &error_fatal);
+#endif
+
+    /* Zero out regs */
+    memset(regs, 0, sizeof(struct target_pt_regs));
+
+    /* Zero out image_info */
+    memset(info, 0, sizeof(struct image_info));
+
+    memset(&bprm, 0, sizeof (bprm));
+
+    init_qemu_uname_release();
+
+    /*
+     * Manage binfmt-misc open-binary flag
+     */
+    execfd = qemu_getauxval(AT_EXECFD);
+    if (execfd == 0) {
+        execfd = open(exec_path, O_RDONLY);
+        if (execfd < 0) {
+            printf("Error while loading %s: %s\n", exec_path, strerror(errno));
+            _exit(EXIT_FAILURE);
+        }
+    }
+
+    if (cpu_model == NULL) {
+        cpu_model = cpu_get_model(get_elf_eflags(execfd));
+    }
+    cpu_type = parse_cpu_option(cpu_model);
+
+    /* init tcg before creating CPUs and to get qemu_host_page_size */
+    {
+        AccelClass *ac = ACCEL_GET_CLASS(current_accel());
+
+        ac->init_machine(NULL);
+        accel_init_interfaces(ac);
+    }
+    cpu = cpu_create(cpu_type);
+    env = cpu->env_ptr;
+    cpu_reset(cpu);
+
+#ifdef CONFIG_LATX
+    /* AOT v2 stores only the thread-safe CF_PARALLEL translation.  Keep JIT
+     * fallback and AOT execution on that same CPU mode from process start. */
+    if (latc_aot_v2_mapping_enabled()) {
+        cpu->tcg_cflags |= CF_PARALLEL;
+    }
+#endif
+
+#ifdef TARGET_I386
+    if (inherited_guest_tsc_disabled) {
+        env->cr[4] |= CR4_TSD_MASK;
+    }
+#endif
+
+
+#ifdef CONFIG_LATX
+    latx_init_fpu_regs(env);
+    latx_lsenv_init(env);
+    tcg_prologue_init(tcg_ctx);
+    tcg_region_init();
+    latx_dt_init();
+    latx_handle_args(exec_path);
+#endif
+    thread_cpu = cpu;
+
+    /*
+     * Reserving too much vm space via mmap can run into problems
+     * with rlimits, oom due to page table creation, etc.  We will
+     * still try it, if directed by the command-line option, but
+     * not by default.
+     */
+    max_reserved_va = MAX_RESERVED_VA(cpu);
+    if (reserved_va != 0) {
+        if (max_reserved_va && reserved_va > max_reserved_va) {
+            fprintf(stderr, "Reserved virtual address too big\n");
+            exit(EXIT_FAILURE);
+        }
+    } else if (HOST_LONG_BITS == 64 && TARGET_VIRT_ADDR_SPACE_BITS <= 32) {
+        /*
+         * reserved_va must be aligned with the host page size
+         * as it is used with mmap()
+         */
+        reserved_va = max_reserved_va & qemu_host_page_mask;
+    } else if (HOST_LONG_BITS == 64 && TARGET_VIRT_ADDR_SPACE_BITS == 47) {
+        /*
+         * For now, the maximum address space bit we support is 39, so set the
+         * max_reserved_va to 512G - 64G in x86-64 mode.
+         */
+        struct rlimit limit;
+        getrlimit(RLIMIT_STACK, &limit);
+        if((unsigned long)limit.rlim_cur==RLIM_INFINITY) {
+            /* rlimit stack to inf cause annoymous mmap to TASK_SIZE/3,
+             * so we shrink reserved_va to avoid conflict.
+             */
+            reserved_va = 0x4000000000;
+        } else {
+            reserved_va = ((max_reserved_va >> 8) & qemu_host_page_mask) - ((max_reserved_va >> 11) & qemu_host_page_mask);
+        }
+    }
+
+    {
+        Error *err = NULL;
+        if (seed_optarg != NULL) {
+            qemu_guest_random_seed_main(seed_optarg, &err);
+        } else {
+            qcrypto_init(&err);
+        }
+        if (err) {
+            error_reportf_err(err, "cannot initialize crypto: ");
+            exit(1);
+        }
+    }
+
+    target_environ = envlist_to_environ(envlist, NULL);
+    envlist_free(envlist);
+
+#ifdef CONFIG_LATX
+    latx_pressure_vessel_exec_payload(target_environ);
+#endif
+
+#define KERNEL_CONFIG_LSM_MMAP_MIN_ADDR 65536
+    /*
+     * Read in mmap_min_addr kernel parameter.  This value is used
+     * When loading the ELF image to determine whether guest_base
+     * is needed.  It is also used in mmap_find_vma.
+     */
+    {
+        FILE *fp;
+
+        if ((fp = fopen("/proc/sys/vm/mmap_min_addr", "r")) != NULL) {
+            unsigned long tmp;
+            if (fscanf(fp, "%lu", &tmp) == 1) {
+                mmap_min_addr = tmp;
+                /*
+                 * We prefer to not make NULL pointers accessible to QEMU.
+                 * If we're in a chroot with no /proc, fall back to 1 page.
+                 */
+                if (mmap_min_addr < qemu_host_page_size) {
+                    mmap_min_addr = qemu_host_page_size;
+                }
+
+                /* get the mmap_min_addr from kernel */
+                void *addr = mmap(
+                    (void *)mmap_min_addr, qemu_host_page_size,
+                    PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+                if (addr != MAP_FAILED) {
+                    munmap(addr, qemu_host_page_size);
+                    assert(!((unsigned long)addr > KERNEL_CONFIG_LSM_MMAP_MIN_ADDR &&
+                            (unsigned long)addr > mmap_min_addr));
+                    mmap_min_addr = (unsigned long)addr;
+                    qemu_log_mask(CPU_LOG_PAGE, "host mmap_min_addr=0x%lx\n",
+                                  mmap_min_addr);
+                } else {
+                    /* error */
+                    qemu_log_mask(CPU_LOG_PAGE, "get mmap_min_addr error\n");
+                }
+            }
+            fclose(fp);
+        }
+    }
+
+#ifdef CONFIG_LATX_AOT
+    GChecksum *ctx = g_checksum_new(G_CHECKSUM_SHA1);
+    char *buf;
+    char real[PATH_MAX], *temp;
+    char *aot_dir;
+
+    /* mkdir ~/.cache/latx/ */
+    aot_dir = malloc(PATH_MAX * sizeof(char));
+    char *home = getenv("HOME");
+    if (likely(home)) {
+        snprintf(aot_dir, PATH_MAX, "%s%s", home, "/.cache/latx/");
+    } else {
+        snprintf(aot_dir, PATH_MAX, "%s", "/.cache/latx/");
+    }
+    aot_dir[PATH_MAX - 1] = 0;
+    mk_aot_dir(aot_dir);
+
+    /* sha1 and fill aot_file_path */
+    aot_file_path = calloc(PATH_MAX * sizeof(char), 1);
+    buf = aot_file_path;
+    strcat(buf, aot_dir);
+    buf += strlen(aot_dir);
+    free(aot_dir);
+    temp = realpath(exec_path, real);
+    if (temp == NULL) {
+        lsassertm(0, "%s error!", __func__);
+    }
+    g_checksum_update(ctx, (const guchar *)real, strlen(real));
+    int aotac = 4;
+    for (i = 0; i < target_argc; i++) {
+        if (option_aot_wine == 0 && strstr(target_argv[i], "wine")) {
+            option_aot_wine = 1;
+        }
+        int arglen = strlen(target_argv[i]);
+        if (i < aotac) {
+            if ((i == 1) && (arglen > strlen("/bin/wine")) &&
+                (!strstr(target_argv[i] +
+                    (arglen - strlen("/bin/wine")),
+                    "/bin/wine"))) {
+                aotac = 2;
+                continue;
+            }
+            g_checksum_update(ctx, (const guchar *)target_argv[i], arglen);
+        }
+    }
+    const char *hash = g_checksum_get_string(ctx);
+    strcpy(buf, hash);
+    buf += strlen(hash);
+    g_checksum_free(ctx);
+    aot_file_lock = malloc(PATH_MAX);
+    strcpy(aot_file_lock, aot_file_path);
+    strcat(aot_file_lock, ".lock");
+    strcat(aot_file_path, ".aot");
+#endif
+
+#ifdef TARGET_X86_64
+    {
+        const char* prog = target_argv[0];
+        if(strstr(prog, "wine-preloader")==(prog+strlen(prog)-strlen("wine-preloader"))
+         || strstr(prog, "wine64-preloader")==(prog+strlen(prog)-strlen("wine64-preloader"))) {
+            prog = target_argv[1];
+        }
+        //printf("prog %s\n", prog);
+        if(strstr(prog, "wine")) {
+            latx_wine = 1;
+        }
+    }
+#endif
+
+    ts = g_new0(TaskState, 1);
+    init_task_state(ts);
+    /* build Task State */
+    ts->info = info;
+    ts->bprm = &bprm;
+#ifdef TARGET_I386
+    info->prctl_mdwe = inherited_guest_mdwe;
+#endif
+    cpu->opaque = ts;
+    task_settid(ts);
+#ifdef CONFIG_LATX_AOT
+    aot_set_process_profile(target_argc, target_argv);
+    aot_init();
+#endif
+#ifdef TARGET_I386
+    initial_guest_exe_fd = fcntl(execfd, F_DUPFD_CLOEXEC, 0);
+    if (initial_guest_exe_fd < 0) {
+        error_report("Unable to preserve guest executable: %s",
+                     strerror(errno));
+        _exit(EXIT_FAILURE);
+    }
+#endif
+    ret = loader_exec(execfd, exec_path, target_argv, target_environ, regs,
+        info, &bprm);
+    if (ret != 0) {
+        printf("Error while loading %s: %s\n", exec_path, strerror(-ret));
+        _exit(EXIT_FAILURE);
+    }
+#ifdef TARGET_I386
+    {
+        size_t auxv_size = MIN((size_t)info->auxv_len,
+                               sizeof(info->prctl_auxv));
+
+        memset(info->prctl_auxv, 0, sizeof(info->prctl_auxv));
+        if (auxv_size && copy_from_user(info->prctl_auxv,
+                                        info->saved_auxv, auxv_size)) {
+            error_report("Unable to save guest auxiliary vector");
+            _exit(EXIT_FAILURE);
+        }
+        info->prctl_auxv_initialized = true;
+        info->prctl_mm_start_code = info->start_code;
+        info->prctl_mm_end_code = info->end_code;
+        info->prctl_mm_start_data = info->start_data;
+        info->prctl_mm_end_data = info->end_data;
+        info->prctl_mm_start_brk = info->start_brk;
+        info->prctl_mm_brk = info->brk;
+        info->prctl_mm_start_stack = info->start_stack;
+        info->prctl_mm_arg_start = info->arg_strings;
+        info->prctl_mm_arg_end = info->env_strings;
+        info->prctl_mm_env_start = info->env_strings;
+        info->prctl_mm_env_end = info->file_string;
+        info->prctl_mm_exe_fd = initial_guest_exe_fd;
+    }
+#endif
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+        if(!latx_fast_jmp_cache_init(env)) {
+            fprintf(stderr, "[LATX-ERR] latx_fast_jmp_cache_init error!\n");
+        }
+#endif
+#if defined(CONFIG_LATX_KZT) && defined(TARGET_X86_64)
+    kzt_init(argv, argc, target_argv, target_argc, &bprm);
+#endif
+    for (wrk = target_environ; *wrk; wrk++) {
+        g_free(*wrk);
+    }
+
+    g_free(target_environ);
+
+    if (qemu_loglevel_mask(CPU_LOG_PAGE)) {
+        qemu_log("guest_base  %p\n", (void *)guest_base);
+        log_page_dump("binary load");
+
+        qemu_log("start_brk   0x" TARGET_ABI_FMT_lx "\n", info->start_brk);
+        qemu_log("end_code    0x" TARGET_ABI_FMT_lx "\n", info->end_code);
+        qemu_log("start_code  0x" TARGET_ABI_FMT_lx "\n", info->start_code);
+        qemu_log("start_data  0x" TARGET_ABI_FMT_lx "\n", info->start_data);
+        qemu_log("end_data    0x" TARGET_ABI_FMT_lx "\n", info->end_data);
+        qemu_log("start_stack 0x" TARGET_ABI_FMT_lx "\n", info->start_stack);
+        qemu_log("brk         0x" TARGET_ABI_FMT_lx "\n", info->brk);
+        qemu_log("entry       0x" TARGET_ABI_FMT_lx "\n", info->entry);
+        qemu_log("argv_start  0x" TARGET_ABI_FMT_lx "\n", info->arg_start);
+        qemu_log("env_start   0x" TARGET_ABI_FMT_lx "\n",
+                 info->arg_end + (abi_ulong)sizeof(abi_ulong));
+        qemu_log("auxv_start  0x" TARGET_ABI_FMT_lx "\n", info->saved_auxv);
+    }
+
+    target_set_brk(info->brk);
+    syscall_init();
+    signal_init();
+
+#ifndef CONFIG_LATX
+    /* Now that we've loaded the binary, GUEST_BASE is fixed.  Delay
+       generating the prologue until now so that the prologue can take
+       the real value of GUEST_BASE into account.  */
+    tcg_prologue_init(tcg_ctx);
+    tcg_region_init();
+#endif
+
+    target_cpu_copy_regs(env, regs);
+
+#ifdef CONFIG_LATX
+    if (latc_aot_v2_prepare(env) && latc_aot_v2_strict_enabled()) {
+        exit(EXIT_FAILURE);
+    }
+#endif
+
+    /* Prewarm every statically discovered TB before entering the CPU loop. */
+    latc_bundle_pretranslate(cpu, info->exec_entry);
+
+#ifdef CONFIG_LATX_AOT
+    if (getenv("LATC_EMIT_AOT")) {
+        aot_generate(cpu);
+        _exit(EXIT_SUCCESS);
+    }
+#endif
+
+    if (gdbstub) {
+        if (gdbserver_start(gdbstub) < 0) {
+            fprintf(stderr, "could not open gdbserver on %s\n",
+                    gdbstub);
+            exit(EXIT_FAILURE);
+        }
+        gdb_handlesig(cpu, 0);
+    }
+
+#if defined(CONFIG_LATX_KZT) && defined(TARGET_X86_64)
+    kzt_bridge_init();
+    is_user_map = 1;
+#endif
+
+#ifdef CONFIG_LATX_PERF
+    latx_timer_start(TIMER_PROCESS);
+#endif
+    cpu_loop(env);
+    /* never exits */
+    return 0;
+}

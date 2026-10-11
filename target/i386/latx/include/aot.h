@@ -284,7 +284,7 @@ typedef struct aot_rel {
 
 } aot_rel;
 
-extern aot_rel *rel_table;
+extern __thread aot_rel *rel_table;
 extern seg_info **seg_info_vector;
 typedef enum AOTTBOrigin {
     AOT_TB_DYNAMIC,
@@ -308,6 +308,11 @@ int aot_get_file_name(char *aot_file, char *buff, int index);
 int add_rel_entry(aot_rel_kind kind, uint32_t **tc_offset,
                   uint32_t **rel_slots_num, uint32_t x86_rip_offset,
                   target_ulong extra_addent);
+int aot_rel_table_checkpoint(void);
+void aot_rel_table_rollback(int checkpoint);
+aot_rel *aot_rel_table_release(int *count);
+void aot_rel_table_merge(aot_rel *entries, int count,
+                         TranslationBlock **tbs, int tb_count);
 typedef enum AOTExitReason {
     AOT_EXIT_THREAD,
     AOT_EXIT_FINAL,
@@ -317,6 +322,8 @@ void aot_exit_entry(CPUState *cpu, AOTExitReason reason);
 void aot_init(void);
 target_ulong aot_get_call_offset(ADDRX addr);
 void aot_generate(CPUState *cpu);
+void aot_compile_key_add(target_ulong pc, uint32_t cflags,
+                         uint16_t bool_flags);
 int aot_get_file_init(char *aot_file);
 void clear_rel_table(void);
 void recover_aot_tb(char *lib_name, uint64_t aot_offset,

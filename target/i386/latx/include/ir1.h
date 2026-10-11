@@ -31,7 +31,7 @@
 #else
 #define CS_MODE CS_MODE_64
 #endif
-extern csh handle[2];
+extern __thread csh handle[2];
 
 
 typedef enum {
@@ -143,6 +143,8 @@ typedef struct IR1_INST {
 #define GHBR_CAN_OPT      0x08
 #define SHBR_KNOWN_ZERO64 0x10
 #define SHBR_RESTORE_ZERO64 0x20
+#define SHBR_FLAG_FUSE_MEM64_PAIR 0x40
+#define SHBR_FLAG_FUSED_MEM64_PAIR 0x80
     uint8_t hbr_flag;
 #endif
 #ifdef CONFIG_LATX_INSTS_PATTERN
@@ -358,6 +360,7 @@ void ir1_make_ins_NOP(IR1_INST *ir1, ADDRX addr);
 void ir1_make_ins_RET(IR1_INST *ir1, ADDRX addr);
 void ir1_make_ins_LIBFUNC(IR1_INST *ir1, ADDRX addr);
 int ir1_opnd_index_reg_num(IR1_OPND *opnd);
+int ir1_opnd_index_is_gpr(const IR1_OPND *opnd);
 int ir1_opnd_base_reg_num(const IR1_OPND *opnd);
 int ir1_opnd_vsib_index_reg_num(IR1_OPND *opnd);
 

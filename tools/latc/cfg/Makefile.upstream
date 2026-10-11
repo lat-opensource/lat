@@ -1,0 +1,27 @@
+CC ?= gcc
+CFLAGS ?= -O2 -g -Wall -Wextra -std=c11
+CPPFLAGS ?= -Iinclude
+CAPSTONE_CFLAGS ?= $(shell pkg-config --cflags capstone 2>/dev/null)
+CAPSTONE_LIBS ?= $(shell pkg-config --libs capstone 2>/dev/null || echo -lcapstone)
+
+BIN := cfg_dump
+SRC := src/cfg_dump.c src/common.c src/elf_image.c src/function_symbols.c \
+       src/cfg_graph.c src/ijmp_resolve.c src/got_plt.c src/cfg_check.c \
+       src/cfg_decoder.c src/capstone_shadow.c src/app_ownership.c
+OBJ := $(SRC:src/%.c=build/%.o)
+
+.PHONY: all clean
+
+all: $(BIN)
+
+$(BIN): $(OBJ)
+	$(CC) $(CFLAGS) -o $@ $(OBJ) $(CAPSTONE_LIBS)
+
+build/%.o: src/%.c include/common.h include/elf_image.h include/function_symbols.h include/cfg_graph.h include/ijmp_resolve.h include/got_plt.h include/cfg_check.h include/cfg_decoder.h include/capstone_shadow.h include/app_ownership.h | build
+	$(CC) $(CPPFLAGS) $(CAPSTONE_CFLAGS) $(CFLAGS) -c -o $@ $<
+
+build:
+	mkdir -p $@
+
+clean:
+	rm -rf build $(BIN)

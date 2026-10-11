@@ -66,6 +66,12 @@ typedef struct {
 typedef TranslationBlock *PageForEachNext;
 typedef struct { unsigned cflags_next_tb; } CPUState;
 static CPUState cpu_state, *current_cpu = &cpu_state;
+#define LATC_AOT_V2_INVALIDATE_CODE_WRITE 0
+static bool latc_aot_v2_invalidate_range(CPUState *cpu, uint64_t start,
+                                        uint64_t size, int reason) {
+    (void)cpu; (void)start; (void)size; (void)reason;
+    return false;
+}
 static size_t qemu_host_page_size;
 static uintptr_t qemu_host_page_mask, guest_base;
 static PageFlagsNode pages[32];

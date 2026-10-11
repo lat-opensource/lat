@@ -1,0 +1,48 @@
+/*
+ * SPDX-FileCopyrightText: 2021-2026 LAT Project Authors
+ *
+ * SPDX-License-Identifier: GPL-2.0-only
+ */
+
+/**
+ * @file ts.h
+ * @author wwq <weiwenqiang@mail.ustc.edu.cn>
+ * @brief TU optimization header file
+ */
+#ifndef __TS_H_
+#define __TS_H_
+#include "aot.h"
+#include "segment.h"
+struct tb_tmp_message{
+    target_ulong pc;
+    uint32_t cflags;
+    uint16_t bool_flags;
+    TranslationBlock *tb;
+};
+typedef struct tb_tmp_message tb_tmp_message;
+void pre_translate(int begin_id, int end_id, CPUState *cpu,
+		tb_tmp_message *tb_pc_vector);
+TranslationBlock *aot_tb_lookup(target_ulong pc, int cflags);
+int aot_tb_insert(TranslationBlock *tb);
+target_ulong get_curr_seg_end(target_ulong curr_pc);
+void get_dynamic_message(TranslationBlock **tb_list, int tb_num,
+        seg_info **seg_info_vector, int *seg_info_num);
+tb_tmp_message *aot_dynamic_tb_messages(void);
+int aot_set_dynamic_tb_messages(const tb_tmp_message *messages, int count,
+        seg_info **segments, int segment_count);
+char is_pe(char *file_name);
+uint8_t is_pe_file(const char *filename);
+uint8_t is_elf_file(const char *filename);
+uint8_t is_deepinwine_cache(const char *file_name);
+uint8_t get_file_type(const char *file_name);
+void ts_push_back(TranslationBlock *tb);
+void pop_back(void);
+char is_bad_tb(TranslationBlock *tb);
+void my_debug_ts1(TranslationBlock *tb);
+void dump_ir1(TranslationBlock *tb);
+uint64 translate_lib(seg_info **seg_info_vector, int begin_id,
+        int end_id, CPUState *cpu, tb_tmp_message *tb_message_vector);
+extern __thread TranslationBlock **ts_vector;
+extern __thread int in_pre_translate;
+extern __thread bool aot_parallel_translate;
+#endif

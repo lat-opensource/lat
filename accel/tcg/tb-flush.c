@@ -18,6 +18,9 @@
 
 #ifdef CONFIG_USER_ONLY
 #include "qemu.h"
+#if defined(CONFIG_LATX) && defined(TARGET_X86_64)
+#include "latc-aot-v2-runner.h"
+#endif
 #endif
 
 #ifdef CONFIG_LATX
@@ -90,6 +93,9 @@ void do_tb_flush(CPUState *cpu, run_on_cpu_data tb_flush_count)
         cpu_tb_jmp_cache_clear(cpu);
     }
 
+#if defined(CONFIG_USER_ONLY) && defined(CONFIG_LATX) && \
+    defined(TARGET_X86_64)
+#endif
     qht_reset_size(&tb_ctx.htable, CODE_GEN_HTABLE_SIZE);
     tb_flush_remove_all();
 #ifdef CONFIG_LATX_AOT
