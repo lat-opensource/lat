@@ -1,4 +1,4 @@
-/* Steam pressure-vessel linux-user launch helpers. */
+/* Steam linux-user launch helpers. */
 
 #include "qemu/osdep.h"
 #include "qemu/envlist.h"
@@ -10,7 +10,7 @@
 
 #ifdef CONFIG_LATX
 
-static char **pressure_vessel_payload;
+static char **steam_payload;
 
 /*
  * This is a lineage marker, not a Runtime discovery input.  It is written
@@ -18,25 +18,25 @@ static char **pressure_vessel_payload;
  * pressure-vessel wrapper, then checked against the canonical Runtime path
  * in children that the wrapper launches.
  */
-#define LATX_PRESSURE_VESSEL_RUNTIME_FILES_ENV \
-    "LATX_PRESSURE_VESSEL_RUNTIME_FILES"
+#define LATX_STEAM_RUNTIME_FILES_ENV \
+    "LATX_STEAM_RUNTIME_FILES"
 
-static bool latx_pressure_vessel_runtime_mark(envlist_t *envlist)
+static bool latx_steam_runtime_mark(envlist_t *envlist)
 {
-    const char *files = latx_pressure_vessel_runtime_files();
+    const char *files = latx_steam_runtime_files();
     g_autofree char *assignment = NULL;
 
     if (!files) {
         return false;
     }
     assignment = g_strdup_printf("%s=%s",
-                                 LATX_PRESSURE_VESSEL_RUNTIME_FILES_ENV,
+                                 LATX_STEAM_RUNTIME_FILES_ENV,
                                  files);
     return envlist_setenv(envlist, assignment) == 0;
 }
 
 #if defined(TARGET_X86_64)
-static bool latx_pressure_vessel_webhelper(const char *pathname)
+static bool latx_steam_webhelper(const char *pathname)
 {
     const char *basename = strrchr(pathname, '/');
 
@@ -44,7 +44,7 @@ static bool latx_pressure_vessel_webhelper(const char *pathname)
     return !strcmp(basename, "steamwebhelper_sniper_wrap.sh");
 }
 
-static bool latx_pressure_vessel_non_direct_mode(const char *arg)
+static bool latx_steam_non_direct_mode(const char *arg)
 {
     return !strcmp(arg, "--launcher") ||
            g_str_has_prefix(arg, "--launcher=") ||
@@ -68,7 +68,7 @@ static bool latx_pressure_vessel_non_direct_mode(const char *arg)
            g_str_has_prefix(arg, "--shell-instead=");
 }
 
-static bool latx_pressure_vessel_option_value(char ***arg)
+static bool latx_steam_option_value(char ***arg)
 {
     if (!(*arg)[1] || !strcmp((*arg)[1], "--")) {
         return false;
@@ -78,11 +78,11 @@ static bool latx_pressure_vessel_option_value(char ***arg)
     return true;
 }
 
-static void latx_pressure_vessel_apply_runtime_paths(
+static void latx_steam_apply_runtime_paths(
     envlist_t *envlist, const char *app_library_path,
     const char *old_xdg_data_dirs)
 {
-    const char *files = latx_pressure_vessel_runtime_files();
+    const char *files = latx_steam_runtime_files();
     g_autofree char *library_path = NULL;
     g_autofree char *assignment = NULL;
 
@@ -90,7 +90,7 @@ static void latx_pressure_vessel_apply_runtime_paths(
         return;
     }
 
-    library_path = latx_pressure_vessel_runtime_make_library_path(
+    library_path = latx_steam_runtime_make_library_path(
         app_library_path);
     if (library_path) {
         assignment = g_strdup_printf("LD_LIBRARY_PATH=%s", library_path);
@@ -105,9 +105,9 @@ static void latx_pressure_vessel_apply_runtime_paths(
     (void)envlist_setenv(envlist, assignment);
 }
 
-static char **latx_pressure_vessel_direct_payload(const char *program,
-                                                   char **target_argv,
-                                                   envlist_t *envlist)
+static char **latx_steam_direct_payload(const char *program,
+                                        char **target_argv,
+                                        envlist_t *envlist)
 {
     static const char env_if_host_prefix[] = "--env-if-host=";
     static const char app_ld_prefix[] =
@@ -125,7 +125,7 @@ static char **latx_pressure_vessel_direct_payload(const char *program,
     char **payload = NULL;
     bool steam_webhelper;
 
-    if (!latx_pressure_vessel_runtime_is_wrapper(program)) {
+    if (!latx_steam_runtime_is_wrapper(program)) {
         return NULL;
     }
 
@@ -136,17 +136,17 @@ static char **latx_pressure_vessel_direct_payload(const char *program,
         const char *preload = NULL;
 
         if (!strcmp(*arg, "--env-if-host")) {
-            if (!latx_pressure_vessel_option_value(&arg)) {
+            if (!latx_steam_option_value(&arg)) {
                 goto out;
             }
             assignment = *arg;
         } else if (g_str_has_prefix(*arg, env_if_host_prefix)) {
             assignment = *arg + strlen(env_if_host_prefix);
-        } else if (latx_pressure_vessel_non_direct_mode(*arg)) {
+        } else if (latx_steam_non_direct_mode(*arg)) {
             goto out;
         } else if (!strcmp(*arg, "--ld-preload") ||
                    !strcmp(*arg, "--ld-preloads")) {
-            if (!latx_pressure_vessel_option_value(&arg)) {
+            if (!latx_steam_option_value(&arg)) {
                 goto out;
             }
             preload = *arg;
@@ -157,7 +157,7 @@ static char **latx_pressure_vessel_direct_payload(const char *program,
         } else if (!strcmp(*arg, "--variable-dir") ||
                    !strcmp(*arg, "--ld-audit") ||
                    !strcmp(*arg, "--ld-audits")) {
-            if (!latx_pressure_vessel_option_value(&arg)) {
+            if (!latx_steam_option_value(&arg)) {
                 goto out;
             }
         } else if (g_str_has_prefix(*arg, "--variable-dir=") ||
@@ -202,7 +202,7 @@ static char **latx_pressure_vessel_direct_payload(const char *program,
 
     payload = arg + 1;
     /* Runtime entry points can be host scripts as well as guest ELFs. */
-    steam_webhelper = latx_pressure_vessel_webhelper(payload[0]);
+    steam_webhelper = latx_steam_webhelper(payload[0]);
 
     if (!steam_webhelper) {
         for (size_t i = 0; i < environment->len; i++) {
@@ -219,7 +219,7 @@ static char **latx_pressure_vessel_direct_payload(const char *program,
 
             (void)envlist_setenv(envlist, assignment);
         }
-        latx_pressure_vessel_apply_runtime_paths(envlist, app_library_path,
+        latx_steam_apply_runtime_paths(envlist, app_library_path,
                                                  old_xdg_data_dirs);
     }
 
@@ -234,7 +234,7 @@ out:
 #endif
 
 #if defined(TARGET_I386) && !defined(TARGET_X86_64)
-static bool latx_pressure_vessel_elf_is_i386(const char *path)
+static bool latx_steam_elf_is_i386(const char *path)
 {
     unsigned char ident[EI_NIDENT];
     ssize_t count;
@@ -253,7 +253,7 @@ static bool latx_pressure_vessel_elf_is_i386(const char *path)
            ident[EI_CLASS] == ELFCLASS32;
 }
 
-static bool latx_pressure_vessel_i386_library_dir(const char *guest_dir)
+static bool latx_steam_i386_library_dir(const char *guest_dir)
 {
     g_autofree char *prefixed = NULL;
     GDir *entries;
@@ -276,7 +276,7 @@ static bool latx_pressure_vessel_i386_library_dir(const char *guest_dir)
             continue;
         }
         file = g_build_filename(prefixed, entry, NULL);
-        if (latx_pressure_vessel_elf_is_i386(file)) {
+        if (latx_steam_elf_is_i386(file)) {
             found = true;
             break;
         }
@@ -285,7 +285,7 @@ static bool latx_pressure_vessel_i386_library_dir(const char *guest_dir)
     return found;
 }
 
-static bool latx_pressure_vessel_guest_path_present(const char *library_path,
+static bool latx_steam_guest_path_present(const char *library_path,
                                                     const char *guest_path)
 {
     g_auto(GStrv) directories = NULL;
@@ -318,8 +318,8 @@ static bool latx_pressure_vessel_guest_path_present(const char *library_path,
     return false;
 }
 
-static bool latx_pressure_vessel_path_is_within(const char *parent,
-                                                const char *path)
+static bool latx_steam_path_is_within(const char *parent,
+                                      const char *path)
 {
     size_t length;
 
@@ -331,7 +331,7 @@ static bool latx_pressure_vessel_path_is_within(const char *parent,
            (path[length] == '\0' || path[length] == '/');
 }
 
-static char *latx_pressure_vessel_find_i386_sysroot(
+static char *latx_steam_find_i386_sysroot(
     const envlist_t *envlist, const char *library_path)
 {
     const char *const environment_paths[] = {
@@ -353,7 +353,7 @@ static char *latx_pressure_vessel_find_i386_sysroot(
         }
         directories = g_strsplit(environment_paths[i], ":", -1);
         for (char **directory = directories; *directory; directory++) {
-            if (latx_pressure_vessel_i386_library_dir(*directory)) {
+            if (latx_steam_i386_library_dir(*directory)) {
                 return g_strdup(*directory);
             }
         }
@@ -368,22 +368,22 @@ static char *latx_pressure_vessel_find_i386_sysroot(
         const char *relative;
         g_autofree char *guest_dir = NULL;
 
-        if (!resolved || !latx_pressure_vessel_elf_is_i386(resolved) ||
-            !latx_pressure_vessel_path_is_within(prefix, resolved)) {
+        if (!resolved || !latx_steam_elf_is_i386(resolved) ||
+            !latx_steam_path_is_within(prefix, resolved)) {
             continue;
         }
         relative = resolved + strlen(prefix);
         guest_dir = g_path_get_dirname(relative);
-        if (latx_pressure_vessel_i386_library_dir(guest_dir)) {
+        if (latx_steam_i386_library_dir(guest_dir)) {
             return g_steal_pointer(&guest_dir);
         }
     }
     return NULL;
 }
 
-static void latx_pressure_vessel_append_i386_sysroot(envlist_t *envlist)
+static void latx_steam_append_i386_sysroot(envlist_t *envlist)
 {
-    const char *library_path = latx_pressure_vessel_runtime_library_path();
+    const char *library_path = latx_steam_runtime_library_path();
     g_auto(GStrv) directories = NULL;
     g_autofree char *sysroot = NULL;
     g_autofree char *assignment = NULL;
@@ -398,16 +398,15 @@ static void latx_pressure_vessel_append_i386_sysroot(envlist_t *envlist)
         if (!(*directory)[0]) {
             continue;
         }
-        runtime_seen |= latx_pressure_vessel_runtime_is_i386_library_path(
+        runtime_seen |= latx_steam_runtime_is_i386_library_path(
             *directory);
     }
     if (!runtime_seen) {
         return;
     }
 
-    sysroot = latx_pressure_vessel_find_i386_sysroot(envlist, library_path);
-    if (!sysroot || latx_pressure_vessel_guest_path_present(library_path,
-                                                              sysroot)) {
+    sysroot = latx_steam_find_i386_sysroot(envlist, library_path);
+    if (!sysroot || latx_steam_guest_path_present(library_path, sysroot)) {
         return;
     }
     assignment = g_strdup_printf("LD_LIBRARY_PATH=%s:%s", library_path,
@@ -416,17 +415,17 @@ static void latx_pressure_vessel_append_i386_sysroot(envlist_t *envlist)
 }
 #endif
 
-void latx_pressure_vessel_prepare(const char *program, char **target_argv,
-                                  envlist_t *envlist)
+void latx_steam_prepare(const char *program, char **target_argv,
+                        envlist_t *envlist)
 {
     const char *basename = program ? strrchr(program, '/') : NULL;
     const char *expected_files;
     bool wrapper_name;
 
-    pressure_vessel_payload = NULL;
+    steam_payload = NULL;
 
     expected_files = envlist_getenv(envlist,
-                                    LATX_PRESSURE_VESSEL_RUNTIME_FILES_ENV);
+                                    LATX_STEAM_RUNTIME_FILES_ENV);
     wrapper_name = !g_strcmp0(basename ? basename + 1 : program,
                               "pressure-vessel-wrap");
 
@@ -436,9 +435,9 @@ void latx_pressure_vessel_prepare(const char *program, char **target_argv,
     }
 
     /* Discovery alone must not override generic guest path resolution. */
-    latx_pressure_vessel_runtime_configure(envlist, NULL);
-    if (latx_pressure_vessel_runtime_is_wrapper(program)) {
-        if (!latx_pressure_vessel_runtime_mark(envlist)) {
+    latx_steam_runtime_configure(envlist, NULL);
+    if (latx_steam_runtime_is_wrapper(program)) {
+        if (!latx_steam_runtime_mark(envlist)) {
             return;
         }
     } else if (!expected_files) {
@@ -446,31 +445,31 @@ void latx_pressure_vessel_prepare(const char *program, char **target_argv,
     }
 
 #if defined(TARGET_X86_64)
-    pressure_vessel_payload = latx_pressure_vessel_direct_payload(
+    steam_payload = latx_steam_direct_payload(
         program, target_argv, envlist);
 #endif
 
     expected_files = envlist_getenv(envlist,
-                                    LATX_PRESSURE_VESSEL_RUNTIME_FILES_ENV);
-    if (!latx_pressure_vessel_runtime_configure(envlist, expected_files)) {
+                                    LATX_STEAM_RUNTIME_FILES_ENV);
+    if (!latx_steam_runtime_configure(envlist, expected_files)) {
         return;
     }
 
 #if defined(TARGET_I386) && !defined(TARGET_X86_64)
-    latx_pressure_vessel_append_i386_sysroot(envlist);
-    (void)latx_pressure_vessel_runtime_configure(envlist, expected_files);
+    latx_steam_append_i386_sysroot(envlist);
+    (void)latx_steam_runtime_configure(envlist, expected_files);
 #endif
 }
 
-void latx_pressure_vessel_exec_payload(char **target_environ)
+void latx_steam_exec_payload(char **target_environ)
 {
-    if (!pressure_vessel_payload) {
+    if (!steam_payload) {
         return;
     }
-    execve(pressure_vessel_payload[0], pressure_vessel_payload,
+    execve(steam_payload[0], steam_payload,
            target_environ);
     fprintf(stderr, "cannot launch pressure-vessel payload %s: %s\n",
-            pressure_vessel_payload[0], strerror(errno));
+            steam_payload[0], strerror(errno));
 }
 
 #endif

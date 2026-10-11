@@ -591,7 +591,7 @@ static void for_needed_check(elfheader_t* h, int needlibcnt,
                 }
                 if (!not_found) {
                     AddPath(tmp_path.paths[i], lib_path, 1);
-                    if (!latx_pressure_vessel_runtime_is_library_path(
+                    if (!latx_steam_runtime_is_library_path(
                             tmp_path.paths[i])) {
                         AddPath(tmp_path.paths[i], private_lib_path, 1);
                     }
@@ -686,7 +686,7 @@ static void kzt_append_application_library_paths(path_collection_t *paths,
     directories = g_strsplit(library_path, ":", -1);
     for (char **directory = directories; *directory; directory++) {
         if (!(*directory)[0] ||
-            latx_pressure_vessel_runtime_is_library_path(*directory)) {
+            latx_steam_runtime_is_library_path(*directory)) {
             continue;
         }
         AppendListExistAndNotSys(paths, *directory, 1);
@@ -724,7 +724,7 @@ void CheckEnableKZT(elfheader_t *h, char **target_argv, int target_argc)
                 break;
         }
     }
-    library_path = latx_pressure_vessel_runtime_library_path();
+    library_path = latx_steam_runtime_library_path();
     if (!library_path) {
         library_path = getenv("LD_LIBRARY_PATH");
     }

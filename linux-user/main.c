@@ -1545,7 +1545,7 @@ int main(int argc, char **argv, char **envp)
     init_paths(interp_prefix);
 
 #ifdef CONFIG_LATX
-    latx_pressure_vessel_prepare(exec_path, target_argv, envlist);
+    latx_steam_prepare(exec_path, target_argv, envlist);
 #endif
 
     error_init(argv[0]);
@@ -1691,7 +1691,7 @@ int main(int argc, char **argv, char **envp)
     envlist_free(envlist);
 
 #ifdef CONFIG_LATX
-    latx_pressure_vessel_exec_payload(target_environ);
+    latx_steam_exec_payload(target_environ);
 #endif
 
 #define KERNEL_CONFIG_LSM_MMAP_MIN_ADDR 65536

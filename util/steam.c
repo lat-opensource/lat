@@ -1,4 +1,4 @@
-/* Steam pressure-vessel Runtime path helpers. */
+/* Steam Runtime path helpers. */
 
 #include "qemu/osdep.h"
 #include "qemu/envlist.h"
@@ -195,7 +195,7 @@ static char *pressure_vessel_runtime_base_from_files(const char *files)
     return pressure_vessel_canonical_path(base);
 }
 
-bool latx_pressure_vessel_runtime_configure(const envlist_t *envlist,
+bool latx_steam_runtime_configure(const envlist_t *envlist,
                                             const char *expected_files)
 {
     const char *base;
@@ -236,17 +236,17 @@ bool latx_pressure_vessel_runtime_configure(const envlist_t *envlist,
     return runtime_active;
 }
 
-const char *latx_pressure_vessel_runtime_files(void)
+const char *latx_steam_runtime_files(void)
 {
     return runtime_files;
 }
 
-const char *latx_pressure_vessel_runtime_library_path(void)
+const char *latx_steam_runtime_library_path(void)
 {
     return runtime_active ? runtime_library_path : NULL;
 }
 
-char *latx_pressure_vessel_runtime_make_library_path(const char *suffix)
+char *latx_steam_runtime_make_library_path(const char *suffix)
 {
     GString *library_path;
     size_t i;
@@ -282,7 +282,7 @@ char *latx_pressure_vessel_runtime_make_library_path(const char *suffix)
     return g_string_free(library_path, false);
 }
 
-bool latx_pressure_vessel_runtime_is_library_path(const char *path)
+bool latx_steam_runtime_is_library_path(const char *path)
 {
     g_autofree char *normalized = NULL;
 
@@ -296,7 +296,7 @@ bool latx_pressure_vessel_runtime_is_library_path(const char *path)
     return pressure_vessel_path_is_within(runtime_files, normalized);
 }
 
-bool latx_pressure_vessel_runtime_is_i386_library_path(const char *path)
+bool latx_steam_runtime_is_i386_library_path(const char *path)
 {
     g_autofree char *normalized = NULL;
     size_t i;
@@ -320,7 +320,7 @@ bool latx_pressure_vessel_runtime_is_i386_library_path(const char *path)
     return false;
 }
 
-bool latx_pressure_vessel_runtime_is_wrapper(const char *program)
+bool latx_steam_runtime_is_wrapper(const char *program)
 {
     g_autofree char *resolved = NULL;
     g_autofree char *wrapper_dir = NULL;
@@ -488,7 +488,7 @@ static char *pressure_vessel_prefix_graphics_library(
     return NULL;
 }
 
-char *latx_pressure_vessel_runtime_resolve_path(const char *name)
+char *latx_steam_runtime_resolve_path(const char *name)
 {
     static const struct {
         const char *guest_dir;

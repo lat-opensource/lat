@@ -104,7 +104,7 @@ const char *path(const char *name)
         char *save = g_strdup(name);
 
 #ifdef CONFIG_LATX
-        char *runtime_file = latx_pressure_vessel_runtime_resolve_path(name);
+        char *runtime_file = latx_steam_runtime_resolve_path(name);
 
         if (runtime_file) {
             g_hash_table_insert(hash, save, runtime_file);
