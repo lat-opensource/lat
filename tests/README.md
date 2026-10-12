@@ -114,6 +114,25 @@ that source from the tested checkout on an x86 Linux host with
 `async-sigill-x86_64` and `async-sigill-i386`, and set
 `LATX_SIGILL_GUEST_DIR` to their directory when running the tests.
 
+The `test-futex-private-leader-exit-i386` integration test waits for the
+process leader to exit, then exercises private WAIT and WAIT_BITSET through
+both futex syscall ABIs. An unaligned guest CMPXCHG8B triggers the production
+page-relocation path; a host preload shim briefly delays restoration of that
+tagged page to expose the real kernel EFAULT. Every case must observe the
+translator's EAGAIN recovery before the test can pass. This requires a dynamic
+translator, a host C compiler, and Clang/LLD for the guest. Alternatively,
+compile the same source on an x86 Linux host and supply the resulting fixture:
+
+```sh
+gcc -m32 -nostdlib -static -no-pie -O2 -ffreestanding -fno-builtin \
+  -fno-pie -fno-stack-protector -Wl,--build-id=none \
+  tests/integration/futex-private-leader-exit-i386.c \
+  -o futex-private-leader-exit-i386
+LATX_FUTEX_LEADER_FIXTURE=/absolute/path/to/futex-private-leader-exit-i386 \
+  meson test -C build64-tests --suite latx-integration \
+  test-futex-private-leader-exit-i386 --print-errorlogs
+```
+
 The `test-x87-signal-mode` integration test builds five static x86-64 guests
 with Clang/LLD only when explicitly run. On a target without that compiler,
 build the same source on an x86-64 Linux host:

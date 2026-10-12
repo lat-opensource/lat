@@ -11158,8 +11158,11 @@ static int sanitize_private_futex_fault(int ret, int *uaddr, int op)
         struct iovec local = { .iov_base = &word, .iov_len = sizeof(word) };
         struct iovec remote = { .iov_base = uaddr, .iov_len = sizeof(word) };
 
-        /* Let the kernel report inaccessible backing memory as an error. */
-        if (process_vm_readv(getpid(), &local, 1, &remote, 1, 0) ==
+        /*
+         * Let the kernel check the backing memory through this live thread.
+         * An exited thread-group leader no longer has an address space.
+         */
+        if (process_vm_readv(sys_gettid(), &local, 1, &remote, 1, 0) ==
             sizeof(word)) {
             ret = -TARGET_EAGAIN;
         }

@@ -164,6 +164,16 @@ endif
 
 if 'i386-linux-user' in target_dirs
   latx_integration_tests += [{
+    'name': 'test-futex-private-leader-exit-i386',
+    'runner': find_program('../../test-futex-private-leader-exit.py'),
+    'args': [
+      emulators['latx-i386'],
+      files('../../futex-private-leader-exit-i386.c'),
+      files('../../futex-private-leader-exit-shim.c'),
+    ],
+    'timeout': 45,
+  }]
+  latx_integration_tests += [{
     'name': 'test-async-sigill-i386',
     'runner': find_program('../../test-async-sigill.py'),
     'args': [
