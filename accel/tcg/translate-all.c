@@ -185,7 +185,6 @@ static bool smc_retrans_insert(TranslationBlock *tb)
     }
     return false;
 }
-#ifdef CONFIG_LATX_AOT
 static void smc_retrans_destory(void)
 {
     if (smc_retrans_tree) {
@@ -200,8 +199,6 @@ void latx_smc_thread_cleanup(void)
      * translation cache and must remain alive for other guest threads. */
     smc_retrans_destory();
 }
-
-#endif
 
 #endif
 /**
