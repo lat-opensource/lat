@@ -300,7 +300,7 @@ void qemu_cpu_kick(CPUState *cpu)
 void task_settid(TaskState *ts)
 {
     if (ts->ts_tid == 0) {
-        ts->ts_tid = (pid_t)syscall(SYS_gettid);
+        qatomic_set(&ts->ts_tid, (pid_t)syscall(SYS_gettid));
     }
 }
 

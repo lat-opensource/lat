@@ -10011,6 +10011,7 @@ static int do_fork(CPUArchState *env, unsigned int flags, abi_ulong newsp,
             if (flags & CLONE_CHILD_SETTID)
                 put_user_u32(sys_gettid(), child_tidptr);
             ts = (TaskState *)cpu->opaque;
+            qatomic_set(&ts->ts_tid, sys_gettid());
 #if defined(CONFIG_LATX) && defined(TARGET_I386) && !defined(TARGET_X86_64)
             qatomic_set(&ts->robust_list_head, 0);
 #endif
