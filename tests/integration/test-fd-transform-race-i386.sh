@@ -39,11 +39,11 @@ case $ret in
 0) echo "PASS: i386 fd-transform table synchronization" ;;
 77) echo "SKIP: RLIMIT_NOFILE cannot cross a table boundary"; exit 77 ;;
 10) echo "FAIL: getrlimit(RLIMIT_NOFILE) failed" >&2 ;;
-11) echo "FAIL: eventfd2 failed" >&2 ;;
+11) echo "FAIL: signalfd4 or signal mask setup failed" >&2 ;;
 13) echo "FAIL: reader clone failed" >&2 ;;
 14) echo "FAIL: transform-table churner clone failed" >&2 ;;
 15) echo "FAIL: concurrent transform-table growth failed" >&2 ;;
-16) echo "FAIL: eventfd reader failed during transform-table growth" >&2 ;;
+16) echo "FAIL: signalfd reader failed during transform-table growth" >&2 ;;
 17) echo "FAIL: guest fork failed during fd-transform activity" >&2 ;;
 18) echo "FAIL: waitpid failed for fd-transform fork child" >&2 ;;
 19) echo "FAIL: fd-transform fork child did not complete table access" >&2 ;;

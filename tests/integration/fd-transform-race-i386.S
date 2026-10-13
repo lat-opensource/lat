@@ -6,11 +6,16 @@
 .equ __NR_dup2, 63
 .equ __NR_getrlimit, 76
 .equ __NR_clone, 120
-.equ __NR_eventfd2, 328
+.equ __NR_getpid, 20
+.equ __NR_gettid, 224
+.equ __NR_tgkill, 270
+.equ __NR_rt_sigprocmask, 175
+.equ __NR_signalfd4, 327
 .equ __NR_sched_yield, 158
 
 .equ RLIMIT_NOFILE, 7
-.equ EFD_SEMAPHORE, 1
+.equ SFD_NONBLOCK, 04000
+.equ TARGET_SIGRTMIN, 32
 
 .equ CLONE_VM, 0x00000100
 .equ CLONE_FS, 0x00000200
@@ -35,13 +40,29 @@ _start:
     test %eax, %eax
     js fail_limit
 
-    mov $__NR_eventfd2, %eax
-    mov $0x7fffffff, %ebx
-    mov $EFD_SEMAPHORE, %ecx
+    mov $__NR_getpid, %eax
+    int $0x80
+    mov %eax, tgid
+
+    /* Block the guest realtime signal before creating the readers. */
+    mov $__NR_rt_sigprocmask, %eax
+    xor %ebx, %ebx
+    mov $signal_mask, %ecx
+    xor %edx, %edx
+    mov $8, %esi
     int $0x80
     test %eax, %eax
-    js fail_eventfd
-    mov %eax, eventfd
+    js fail_signalfd
+
+    mov $__NR_signalfd4, %eax
+    mov $-1, %ebx
+    mov $signal_mask, %ecx
+    mov $8, %edx
+    mov $SFD_NONBLOCK, %esi
+    int $0x80
+    test %eax, %eax
+    js fail_signalfd
+    mov %eax, signal_fd
 
     /* Cross the next 64-descriptor table boundary. */
     mov %eax, %ecx
@@ -118,7 +139,7 @@ wait_churner_started:
 
 fork_child:
     mov $__NR_dup2, %eax
-    mov eventfd, %ebx
+    mov signal_fd, %ebx
     mov grow_fd, %ecx
     int $0x80
     cmp grow_fd, %eax
@@ -150,18 +171,31 @@ wait_readers_done:
     jmp exit_now
 
 reader:
-    sub $16, %esp
+    sub $128, %esp
     lock incl reader_ready
 wait_reader_start:
     cmpl $1, start_workers
     jne wait_reader_start
 reader_loop:
-    mov $__NR_read, %eax
-    mov eventfd, %ebx
-    mov %esp, %ecx
-    mov $8, %edx
+    mov $__NR_gettid, %eax
     int $0x80
-    cmp $8, %eax
+    mov %eax, %ecx
+    mov tgid, %ebx
+    mov $TARGET_SIGRTMIN, %edx
+    mov $__NR_tgkill, %eax
+    int $0x80
+    test %eax, %eax
+    js reader_read_failed
+
+    mov $__NR_read, %eax
+    mov signal_fd, %ebx
+    mov %esp, %ecx
+    mov $128, %edx
+    int $0x80
+    cmp $128, %eax
+    jne reader_read_failed
+    /* The host realtime signal must be mapped back to the guest number. */
+    cmpl $TARGET_SIGRTMIN, (%esp)
     jne reader_read_failed
     cmpl $1, churner_done
     jne reader_loop
@@ -184,7 +218,7 @@ wait_churner_start:
 
     /* Grow the table while the readers are in read(2). */
     mov $__NR_dup2, %eax
-    mov eventfd, %ebx
+    mov signal_fd, %ebx
     mov grow_fd, %ecx
     int $0x80
     cmp grow_fd, %eax
@@ -205,7 +239,7 @@ skip_limit:
 fail_limit:
     mov $10, %ebx
     jmp exit_now
-fail_eventfd:
+fail_signalfd:
     mov $11, %ebx
     jmp exit_now
 fail_reader_clone:
@@ -234,11 +268,19 @@ exit_now:
     int $0x80
 .size _start, .-_start
 
+.section .data
+.balign 8
+signal_mask:
+    .long 0x80000000, 0
+
 .section .bss
+.balign 4
+tgid:
+    .space 4
 .balign 4
 fd_limit:
     .space 8
-eventfd:
+signal_fd:
     .space 4
 grow_fd:
     .space 4

@@ -373,6 +373,12 @@ TargetFdAddrFunc fd_trans_target_to_host_addr(int fd)
 
 void fd_trans_register(int fd, TargetFdTrans *trans)
 {
+    if (trans->byte_order_only && tswap32(1) == 1) {
+        /* The number may have been reused since its last registration. */
+        fd_trans_unregister(fd);
+        return;
+    }
+
     pthread_mutex_lock(&target_fd_trans_mutex);
     fd_trans_register_locked(fd, trans);
     pthread_mutex_unlock(&target_fd_trans_mutex);
@@ -1782,6 +1788,7 @@ static abi_long swap_data_eventfd(void *buf, size_t len)
 }
 
 TargetFdTrans target_eventfd_trans = {
+    .byte_order_only = true,
     .host_to_target_data = swap_data_eventfd,
     .target_to_host_data = swap_data_eventfd,
 };
@@ -1809,6 +1816,7 @@ static abi_long host_to_target_data_inotify(void *buf, size_t len)
 }
 
 TargetFdTrans target_inotify_trans = {
+    .byte_order_only = true,
     .host_to_target_data = host_to_target_data_inotify,
 };
 #endif
@@ -1836,6 +1844,7 @@ static abi_long host_to_target_data_fanotify(void *buf, size_t len)
 }
 
 TargetFdTrans target_fanotify_trans = {
+    .byte_order_only = true,
     .host_to_target_data = host_to_target_data_fanotify,
 };
 #endif

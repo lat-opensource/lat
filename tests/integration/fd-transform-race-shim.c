@@ -6,16 +6,17 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/eventfd.h>
+#include <signal.h>
+#include <sys/signalfd.h>
 #include <sys/mman.h>
 #include <time.h>
 #include <unistd.h>
 
 typedef void *(*GReallocNFunc)(void *, size_t, size_t);
-typedef int (*EventfdFunc)(unsigned int, int);
+typedef int (*SignalfdFunc)(int, const sigset_t *, int);
 
 static GReallocNFunc real_g_realloc_n;
-static EventfdFunc real_eventfd;
+static SignalfdFunc real_signalfd;
 static pthread_once_t init_once = PTHREAD_ONCE_INIT;
 static void *fd_table;
 static size_t fd_table_blocks;
@@ -27,10 +28,10 @@ static __thread int expect_fd_table;
 static void init_symbols(void)
 {
     real_g_realloc_n = dlsym(RTLD_NEXT, "g_realloc_n");
-    real_eventfd = dlsym(RTLD_NEXT, "eventfd");
+    real_signalfd = dlsym(RTLD_NEXT, "signalfd");
     marker = getenv("LATX_TEST_FD_TRANS_RACE_MARKER");
     enabled = getenv("LATX_TEST_FD_TRANS_RACE") != NULL && marker;
-    if (!real_g_realloc_n || !real_eventfd) {
+    if (!real_g_realloc_n || !real_signalfd) {
         abort();
     }
 }
@@ -60,14 +61,14 @@ static void mark_injected(void)
     }
 }
 
-int eventfd(unsigned int initval, int flags)
+int signalfd(int fd, const sigset_t *mask, int flags)
 {
     int ret;
 
     pthread_once(&init_once, init_symbols);
-    ret = real_eventfd(initval, flags);
-    if (enabled && initval == 0x7fffffff && flags == EFD_SEMAPHORE &&
-        ret >= 0) {
+    ret = real_signalfd(fd, mask, flags);
+    if (enabled && fd == -1 && flags == SFD_NONBLOCK &&
+        sigismember(mask, SIGRTMIN) && ret >= 0) {
         expect_fd_table = 1;
     }
     return ret;
