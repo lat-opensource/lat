@@ -10368,6 +10368,11 @@ static inline abi_long copy_to_user_flock64(abi_ulong target_flock_addr,
     return 0;
 }
 
+#ifdef CONFIG_LATX
+static void latx_syscall_fd_begin(void);
+static void latx_syscall_fd_end(void);
+#endif
+
 #ifdef TARGET_I386
 /*
  * The executable identity fd belongs to the translator, not to the guest fd
@@ -10416,7 +10421,13 @@ static abi_long do_fcntl(CPUArchState *env, int fd, int cmd, abi_ulong arg)
     /* The identity copy is already close-on-exec.  Setting that same bit is
      * harmless; only clearing it would mutate the translator's reference. */
     if (cmd == TARGET_F_SETFD && !(arg & FD_CLOEXEC)) {
+#ifdef CONFIG_LATX
+        latx_syscall_fd_begin();
+#endif
         ret = guest_exe_identity_relocate(env, fd);
+#ifdef CONFIG_LATX
+        latx_syscall_fd_end();
+#endif
         if (ret) {
             return ret;
         }
@@ -12738,7 +12749,27 @@ static int open_self_auxv(void *cpu_env, int fd, const char *oldpath)
 }
 
 #if defined(TARGET_I386) && defined(__NR_getdents64)
-static bool guest_exe_identity_fd_directory(int fd)
+static bool guest_proc_view_snapshot(CPUArchState *env, uint64_t *epoch,
+                                        int *identity_fd);
+static bool guest_proc_task_directory(int fd);
+
+/* The caller holds cpu_list_lock while comparing the registered guest tasks. */
+static bool guest_proc_tid_visible(unsigned long tid)
+{
+    CPUState *cpu;
+
+    CPU_FOREACH(cpu) {
+        TaskState *ts = cpu->opaque;
+
+        if (ts && qatomic_read(&ts->ts_tid) == tid) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* Keep the original aliases usable when mount-ID queries are unavailable. */
+static bool guest_exe_identity_fd_directory_fstat(int fd)
 {
     struct stat st, expected, task, self_task;
     struct statfs fs;
@@ -12768,41 +12799,171 @@ static bool guest_exe_identity_fd_directory(int fd)
            task.st_dev == self_task.st_dev && task.st_ino == self_task.st_ino;
 }
 
+#if defined(__NR_statx) && defined(STATX_MNT_ID)
+static bool guest_proc_dir_stat(int fd, const char *path, struct statx *st)
+{
+    unsigned int mask = STATX_TYPE | STATX_INO | STATX_MNT_ID;
+
+    return syscall(__NR_statx, fd, path, AT_EMPTY_PATH, mask, st) == 0 &&
+           (st->stx_mask & mask) == mask && S_ISDIR(st->stx_mode);
+}
+
+static bool guest_proc_same_mount(const struct statx *a, const struct statx *b)
+{
+    return a->stx_mnt_id == b->stx_mnt_id &&
+           a->stx_dev_major == b->stx_dev_major &&
+           a->stx_dev_minor == b->stx_dev_minor;
+}
+
+static bool guest_proc_same_dir(const struct statx *a, const struct statx *b)
+{
+    return guest_proc_same_mount(a, b) && a->stx_ino == b->stx_ino;
+}
+
+/*
+ * Only metadata lookups: no temporary descriptor in the guest's fd table.
+ * The caller validates the epoch after this proof, including fd-number ABA.
+ */
+static bool guest_exe_identity_fd_directory(int fd)
+{
+    struct statx st, root, expected, task;
+    struct statfs fs;
+    char path[PATH_MAX + 1];
+    char relative[80], *slash, *tid;
+    const char *end;
+    unsigned long owner;
+    ssize_t len;
+
+    if (fstatfs(fd, &fs) || fs.f_type != PROC_SUPER_MAGIC) {
+        return false;
+    }
+    if (!guest_proc_dir_stat(fd, "", &st)) {
+        return guest_exe_identity_fd_directory_fstat(fd);
+    }
+    if (!guest_proc_dir_stat(fd, "../fd", &expected) ||
+        !guest_proc_same_dir(&st, &expected) ||
+        !guest_proc_dir_stat(fd, "../..", &root) ||
+        !guest_proc_same_mount(&st, &root)) {
+        return false;
+    }
+    if (guest_proc_dir_stat(fd, "../../self/fd", &expected) &&
+        guest_proc_same_dir(&st, &expected)) {
+        return true;
+    }
+    if (guest_proc_dir_stat(fd, "../../../..", &expected) &&
+        guest_proc_same_mount(&st, &expected) &&
+        guest_proc_dir_stat(fd, "../../../../self/task", &task) &&
+        guest_proc_same_dir(&root, &task)) {
+        return true;
+    }
+
+    /* Direct /proc/<tid>/fd: use IDs from this procfs mount's namespace. */
+    snprintf(relative, sizeof(relative), "../../thread-self/fd/%d", fd);
+    len = readlinkat(fd, relative, path, PATH_MAX);
+    if (len <= 3 || len == PATH_MAX) {
+        return false;
+    }
+    path[len] = '\0';
+    slash = strrchr(path, '/');
+    if (!slash || strcmp(slash, "/fd")) {
+        return false;
+    }
+    *slash = '\0';
+    tid = strrchr(path, '/');
+    if (!tid || tid[1] < '1' || tid[1] > '9') {
+        return false;
+    }
+    tid++;
+    if (qemu_strtoul(tid, &end, 10, &owner) || *end ||
+        owner > INT_MAX) {
+        return false;
+    }
+    snprintf(relative, sizeof(relative), "../../self/task/%lu", owner);
+    if (!guest_proc_dir_stat(fd, relative, &task) ||
+        !guest_proc_same_mount(&st, &task)) {
+        return false;
+    }
+    /* A reused TID must still name the original, live directory inode. */
+    snprintf(relative, sizeof(relative), "../../%lu/fd", owner);
+    return guest_proc_dir_stat(fd, relative, &expected) &&
+           guest_proc_same_dir(&st, &expected);
+}
+#else
+static bool guest_exe_identity_fd_directory(int fd)
+{
+    return guest_exe_identity_fd_directory_fstat(fd);
+}
+#endif
+
 static abi_long guest_getdents64(CPUArchState *env, int fd, void *buf,
                                 unsigned int count)
 {
-    TaskState *ts = env_cpu(env)->opaque;
-    abi_long ret, bytes, raw_bytes;
-    char identity[32];
-
-    if (!guest_exe_identity_fd_directory(fd)) {
-        return get_errno(sys_getdents64(fd, buf, count));
-    }
-
-    /*
-     * Keep the private descriptor stable while taking and filtering this
-     * snapshot.  Explicit guest close/dup operations still relocate it.
-     */
-    mmap_lock();
-    snprintf(identity, sizeof(identity), "%d", ts->info->prctl_mm_exe_fd);
-    do {
+    for (;;) {
+        uint64_t before = 0, after = 0;
+        int identity_fd = -1, after_fd = -1;
+        abi_long ret, bytes;
+        char identity[32], *cursor = buf;
         struct linux_dirent64 *previous = NULL;
-        char *cursor = buf;
+        bool numeric = false, identity_present = false, task_view = false;
+        bool stable = guest_proc_view_snapshot(env, &before, &identity_fd);
 
         ret = get_errno(sys_getdents64(fd, buf, count));
-        raw_bytes = bytes = ret;
+        if (ret <= 0 || !stable) {
+            return ret;
+        }
+        snprintf(identity, sizeof(identity), "%d", identity_fd);
+        bytes = ret;
         while (bytes > 0) {
             struct linux_dirent64 *de = (void *)cursor;
             unsigned int reclen = de->d_reclen;
+            size_t name_offset = offsetof(struct linux_dirent64, d_name);
 
-            if (reclen <= offsetof(struct linux_dirent64, d_name) ||
-                reclen > bytes) {
-                ret = -TARGET_EIO;
-                break;
+            if (reclen <= name_offset || reclen > bytes ||
+                !memchr(de->d_name, '\0', reclen - name_offset)) {
+                return -TARGET_EIO;
+            }
+            numeric |= de->d_name[0] >= '0' && de->d_name[0] <= '9';
+            identity_present |= identity_fd >= 0 &&
+                                !strcmp(de->d_name, identity);
+            bytes -= reclen;
+            cursor += reclen;
+        }
+        /* Only numeric candidates can need either procfs view correction. */
+        if (!numeric) {
+            return ret;
+        }
+        if (!identity_present || !guest_exe_identity_fd_directory(fd)) {
+            task_view = guest_proc_task_directory(fd);
+            if (!task_view) {
+                return ret;
+            }
+        }
+        if (!guest_proc_view_snapshot(env, &after, &after_fd) ||
+            before != after || identity_fd != after_fd) {
+            return ret;
+        }
+        if (task_view) {
+            cpu_list_lock();
+        }
+        bytes = ret;
+        cursor = buf;
+        while (bytes > 0) {
+            struct linux_dirent64 *de = (void *)cursor;
+            unsigned int reclen = de->d_reclen;
+            bool hide;
+
+            if (task_view) {
+                const char *end;
+                unsigned long tid;
+
+                hide = !qemu_strtoul(de->d_name, &end, 10, &tid) &&
+                       !*end && tid <= INT_MAX &&
+                       !guest_proc_tid_visible(tid);
+            } else {
+                hide = !strcmp(de->d_name, identity);
             }
             bytes -= reclen;
-            if (!strcmp(de->d_name, identity)) {
-                /* Preserve the next directory cookie for seekdir users. */
+            if (hide) {
                 if (previous) {
                     previous->d_off = de->d_off;
                 }
@@ -12813,18 +12974,61 @@ static abi_long guest_getdents64(CPUArchState *env, int fd, void *buf,
                 cursor += reclen;
             }
         }
-        /*
-         * A batch containing only the private fd is not end-of-directory.
-         * glibc closefrom rewinds after closing any fd; exposing this fd
-         * would make it chase our relocation indefinitely.
-         */
-    } while (ret == 0 && raw_bytes > 0);
-    mmap_unlock();
-    return ret;
+        if (task_view) {
+            cpu_list_unlock();
+        }
+        if (ret) {
+            return ret;
+        }
+        /* Hidden-only batches are not EOF; do not retain their padding. */
+        memset(buf, 0, count);
+    }
 }
+
 #else
 #define guest_getdents64(env, fd, buf, count) \
     get_errno(sys_getdents64(fd, buf, count))
+#endif
+
+#if defined(__NR_getdents64)
+static abi_long guest_dirent_buffer(abi_ulong addr, abi_long *count,
+                                    void **buffer)
+{
+    void *guest;
+    unsigned int native_count = *count;
+    size_t size;
+
+    mmap_lock();
+    guest = lock_user(VERIFY_WRITE, addr, *count, 0);
+    unlock_user(guest, addr, 0);
+    mmap_unlock();
+    if (!guest) {
+        return -TARGET_EFAULT;
+    }
+    if (native_count > INT_MAX) {
+        /* Keep the kernel's fd/type/error ordering; no record can fit. */
+        *count = native_count;
+        size = 1;
+    } else {
+        *count = MIN(native_count, 64 * 1024);
+        size = MAX(*count, 1);
+    }
+    /* The kernel leaves dirent alignment padding untouched. */
+    *buffer = g_try_malloc0(size);
+    return *buffer ? 0 : -TARGET_ENOMEM;
+}
+
+static abi_long guest_dirent_copyout(abi_ulong addr, void *buffer, abi_long len)
+{
+    if (len > 0) {
+        mmap_lock();
+        if (copy_to_user(addr, buffer, len)) {
+            len = -TARGET_EFAULT;
+        }
+        mmap_unlock();
+    }
+    return len;
+}
 #endif
 
 static int is_proc_myself(const char *filename, const char *entry)
@@ -12922,11 +13126,20 @@ static bool latx_stat_same_object(const struct stat *a, const struct stat *b)
 static pthread_mutex_t latx_syscall_fs_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t latx_syscall_fs_idle = PTHREAD_COND_INITIALIZER;
 static unsigned int latx_syscall_fd_active;
+static uint64_t latx_syscall_fs_epoch;
+
+static void latx_syscall_fs_changed(void)
+{
+    if (latx_syscall_fs_epoch != UINT64_MAX) {
+        latx_syscall_fs_epoch++;
+    }
+}
 
 static void latx_syscall_fd_begin(void)
 {
     pthread_mutex_lock(&latx_syscall_fs_mutex);
     latx_syscall_fd_active++;
+    latx_syscall_fs_changed();
     pthread_mutex_unlock(&latx_syscall_fs_mutex);
 }
 
@@ -12934,6 +13147,7 @@ static void latx_syscall_fd_end(void)
 {
     pthread_mutex_lock(&latx_syscall_fs_mutex);
     assert(latx_syscall_fd_active);
+    latx_syscall_fs_changed();
     if (--latx_syscall_fd_active == 0) {
         pthread_cond_broadcast(&latx_syscall_fs_idle);
     }
@@ -12950,6 +13164,7 @@ static void latx_syscall_fs_lock(void)
 
 static void latx_syscall_fs_unlock(void)
 {
+    latx_syscall_fs_changed();
     pthread_mutex_unlock(&latx_syscall_fs_mutex);
 }
 
@@ -13161,6 +13376,44 @@ static void latx_adjust_proc_self_task_stat_at(int dirfd, const char *pathname,
         st->st_nlink = latx_guest_thread_count() + 2;
     }
 }
+#endif
+
+#if defined(TARGET_I386) && defined(__NR_getdents64)
+static bool guest_proc_view_snapshot(CPUArchState *env, uint64_t *epoch,
+                                        int *identity_fd)
+{
+#ifdef CONFIG_LATX
+    TaskState *ts = env_cpu(env)->opaque;
+    bool stable;
+
+    if (pthread_mutex_trylock(&latx_syscall_fs_mutex)) {
+        return false;
+    }
+    stable = !latx_syscall_fd_active &&
+             latx_syscall_fs_epoch != UINT64_MAX;
+    if (stable) {
+        *epoch = latx_syscall_fs_epoch;
+        *identity_fd = ts->info->prctl_mm_exe_fd;
+    }
+    pthread_mutex_unlock(&latx_syscall_fs_mutex);
+    return stable;
+#else
+    return false;
+#endif
+}
+
+static bool guest_proc_task_directory(int fd)
+{
+#ifdef CONFIG_LATX
+    struct stat st;
+
+    return fstat(fd, &st) == 0 && S_ISDIR(st.st_mode) &&
+           latx_stat_is_proc_self_task_fd(fd, &st);
+#else
+    return false;
+#endif
+}
+
 #endif
 
 /* Complete descriptor replacement, including protection and metadata updates. */
@@ -14343,9 +14596,15 @@ static abi_long guest_prctl_set_exe_file(struct image_info *info,
     if (ret) {
         return ret;
     }
+#ifdef CONFIG_LATX
+    latx_syscall_fd_begin();
+#endif
     mmap_lock();
     guest_prctl_commit_exe_file(info, &file);
     mmap_unlock();
+#ifdef CONFIG_LATX
+    latx_syscall_fd_end();
+#endif
     return 0;
 }
 
@@ -14455,6 +14714,11 @@ static abi_long do_prctl_set_mm(CPUArchState *env, abi_ulong option,
             }
             replace_exe = true;
         }
+#ifdef CONFIG_LATX
+        if (replace_exe) {
+            latx_syscall_fd_begin();
+        }
+#endif
         mmap_lock();
         if (auxv_size) {
             memcpy(info->prctl_auxv, new_auxv, sizeof(new_auxv));
@@ -14464,6 +14728,11 @@ static abi_long do_prctl_set_mm(CPUArchState *env, abi_ulong option,
         }
         guest_prctl_mm_write(info, &map);
         mmap_unlock();
+#ifdef CONFIG_LATX
+        if (replace_exe) {
+            latx_syscall_fd_end();
+        }
+#endif
         return 0;
     }
 
@@ -17968,12 +18237,12 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
 #else
         /* Implement getdents in terms of getdents64 */
         {
-            struct linux_dirent64 *dirp;
+            g_autofree struct linux_dirent64 *dirp = NULL;
             abi_long count = arg3;
 
-            dirp = lock_user(VERIFY_WRITE, arg2, count, 0);
-            if (!dirp) {
-                return -TARGET_EFAULT;
+            ret = guest_dirent_buffer(arg2, &count, (void **)&dirp);
+            if (ret) {
+                return ret;
             }
             ret = guest_getdents64(cpu_env, arg1, dirp, count);
             if (!is_error(ret)) {
@@ -18017,7 +18286,7 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
                 }
                 ret = tlen;
             }
-            unlock_user(dirp, arg2, ret);
+            ret = guest_dirent_copyout(arg2, dirp, ret);
         }
 #endif
         return ret;
@@ -18025,100 +18294,17 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
 #if defined(TARGET_NR_getdents64) && defined(__NR_getdents64)
     case TARGET_NR_getdents64:
     {
-        char proc_path[PATH_MAX];
-        char real_path[PATH_MAX];
-        int fd = arg1;
-        bool is_task_dir = false;
-
-        snprintf(proc_path, sizeof(proc_path), "/proc/self/fd/%d", fd);
-
-        ssize_t path_len = readlink(proc_path, real_path, sizeof(real_path) - 1);
-
-        if (path_len > 0) {
-            real_path[path_len] = '\0';
-            char *endptr;
-
-            if (!strncmp(real_path, "/proc/", 6)
-                && strtol(real_path + 6, &endptr, 10) > 0
-                && !strcmp(endptr, "/task")) {
-#ifdef CONFIG_LATX_DEBUG
-                fprintf(stderr, "latx: Detected task directory: %s\n", real_path);
-#endif
-                is_task_dir = true;
-            }
-        }
-
-        struct linux_dirent64 *dirp;
+        g_autofree struct linux_dirent64 *dirp = NULL;
         abi_long count = arg3;
 
-        if (!(dirp = lock_user(VERIFY_WRITE, arg2, count, 0)))
-            return -TARGET_EFAULT;
+        ret = guest_dirent_buffer(arg2, &count, (void **)&dirp);
+        if (ret) {
+            return ret;
+        }
         ret = guest_getdents64(cpu_env, arg1, dirp, count);
         if (!is_error(ret)) {
             struct linux_dirent64 *de;
             int len = ret;
-            /*
-            * Filter ghost threads only for /proc/<pid>/task
-            */
-            if (is_task_dir) {
-
-                int valid_tids[512];
-                int valid_count = 0;
-                CPUState *cpu_iter;
-
-                CPU_FOREACH(cpu_iter) {
-                    TaskState *ts = (TaskState *)cpu_iter->opaque;
-                    if (ts && valid_count < 512) {
-                        valid_tids[valid_count++] = ts->ts_tid;
-                    }
-                }
-
-                de = dirp;
-
-                while (len > 0) {
-                    int reclen = tswap16(de->d_reclen);
-                    if (reclen <= 0 || reclen > len)
-                        break;
-                    bool should_hide = true;
-
-                    if (!strcmp(de->d_name, ".") ||
-                        !strcmp(de->d_name, "..")) {
-                        should_hide = false;
-                    } else {
-                        char *endptr;
-                        long curr_tid = strtol(de->d_name, &endptr, 10);
-
-                        if (*endptr == '\0') {
-                            for (int i = 0; i < valid_count; i++) {
-                                if (curr_tid == valid_tids[i]) {
-                                    should_hide = false;
-                                    break;
-                                }
-                            }
-                        } else {
-                            should_hide = false;
-                        }
-                    }
-
-                    if (should_hide) {
-#ifdef CONFIG_LATX_DEBUG
-                        fprintf(stderr, "latx: Hiding ghost thread " "TID: %s\n", de->d_name);
-#endif
-                        int remaining_len = len - reclen;
-
-                        if (remaining_len > 0) {
-                            memmove(de, (char *)de + reclen, remaining_len);
-                        }
-                        ret -= reclen;
-                        len -= reclen;
-                        continue;
-                    }
-
-                    de = (struct linux_dirent64 *) ((char *)de + reclen);
-                    len -= reclen;
-                }
-            }
-
             /*
             * Common endian conversion
             */
@@ -18141,7 +18327,7 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
             }
         }
 
-        unlock_user(dirp, arg2, ret);
+        ret = guest_dirent_copyout(arg2, dirp, ret);
     }
     return ret;
 #endif /* TARGET_NR_getdents64 */
@@ -21456,7 +21642,13 @@ defined(__loongarch__)
                 }
             }
 
+#ifdef CONFIG_LATX
+            latx_syscall_fd_begin();
+#endif
             ret = get_errno(setns(arg1, arg2));
+#ifdef CONFIG_LATX
+            latx_syscall_fd_end();
+#endif
             if (ret == 0 && joins_ipc_namespace) {
                 ((TaskState *)cpu->opaque)->ipc_namespace_isolated = true;
             }
@@ -21469,7 +21661,13 @@ defined(__loongarch__)
 #endif
 #if defined(TARGET_NR_unshare) && defined(CONFIG_SETNS)
     case TARGET_NR_unshare:
+#ifdef CONFIG_LATX
+        latx_syscall_fd_begin();
+#endif
         ret = get_errno(unshare(arg1));
+#ifdef CONFIG_LATX
+        latx_syscall_fd_end();
+#endif
         if (ret == 0 && (arg1 & CLONE_NEWIPC)) {
             ((TaskState *)cpu->opaque)->ipc_namespace_isolated = true;
         }

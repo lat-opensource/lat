@@ -25,6 +25,15 @@ endif
 foreach arch : ['x86_64', 'i386']
   if arch + '-linux-user' in target_dirs
     latx_integration_tests += [{
+      'name': 'test-proc-fd-thread-race-' + arch,
+      'runner': find_program('../../test-proc-fd-thread-race.sh'),
+      'args': [
+        emulators['latx-' + arch],
+        files('../../proc-fd-thread-race.c'),
+        arch,
+      ],
+      'timeout': 120,
+    }, {
       'name': 'test-fd-conversion-scope-' + arch,
       'runner': find_program('../../test-fd-conversion-scope.sh'),
       'args': [
