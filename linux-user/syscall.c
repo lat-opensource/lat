@@ -11666,6 +11666,21 @@ static int open_self_environ(void *cpu_env, int fd, const char *oldpath)
     mmap_unlock();
     return write_guest_proc_range(fd, start, end);
 }
+
+/* Return whether an identity exists; a failed duplicate remains in owned_fd. */
+static bool guest_exe_identity_acquire(CPUArchState *env, int *owned_fd)
+{
+    TaskState *ts = env_cpu(env)->opaque;
+    bool present;
+
+    mmap_lock();
+    present = ts->info->prctl_mm_exe_fd >= 0;
+    if (present) {
+        *owned_fd = fcntl(ts->info->prctl_mm_exe_fd, F_DUPFD_CLOEXEC, 0);
+    }
+    mmap_unlock();
+    return present;
+}
 #endif
 
 static const char *guest_self_exe_open_path(CPUArchState *env, char *buffer,
@@ -11673,16 +11688,7 @@ static const char *guest_self_exe_open_path(CPUArchState *env, char *buffer,
 {
     *owned_fd = -1;
 #ifdef TARGET_I386
-    TaskState *ts = env_cpu(env)->opaque;
-    bool overridden;
-
-    mmap_lock();
-    overridden = ts->info->prctl_mm_exe_fd >= 0;
-    if (overridden) {
-        *owned_fd = fcntl(ts->info->prctl_mm_exe_fd, F_DUPFD_CLOEXEC, 0);
-    }
-    mmap_unlock();
-    if (overridden) {
+    if (guest_exe_identity_acquire(env, owned_fd)) {
         if (*owned_fd < 0) {
             return NULL;
         }
@@ -11697,19 +11703,11 @@ static const char *guest_self_exe_link_path(CPUArchState *env,
                                             char *buffer, size_t size)
 {
 #ifdef TARGET_I386
-    TaskState *ts = env_cpu(env)->opaque;
     char fd_path[64];
-    bool overridden;
     ssize_t len;
     int fd = -1;
 
-    mmap_lock();
-    overridden = ts->info->prctl_mm_exe_fd >= 0;
-    if (overridden) {
-        fd = fcntl(ts->info->prctl_mm_exe_fd, F_DUPFD_CLOEXEC, 0);
-    }
-    mmap_unlock();
-    if (overridden) {
+    if (guest_exe_identity_acquire(env, &fd)) {
         if (fd < 0) {
             return NULL;
         }
@@ -11734,17 +11732,9 @@ static bool guest_self_exe_exec_paths(CPUArchState *env, char *link_buffer,
 {
     *owned_fd = -1;
 #ifdef TARGET_I386
-    TaskState *ts = env_cpu(env)->opaque;
-    bool overridden;
     ssize_t len;
 
-    mmap_lock();
-    overridden = ts->info->prctl_mm_exe_fd >= 0;
-    if (overridden) {
-        *owned_fd = fcntl(ts->info->prctl_mm_exe_fd, F_DUPFD_CLOEXEC, 0);
-    }
-    mmap_unlock();
-    if (overridden) {
+    if (guest_exe_identity_acquire(env, owned_fd)) {
         if (*owned_fd < 0) {
             return false;
         }
@@ -13171,6 +13161,43 @@ static void latx_adjust_proc_self_task_stat_at(int dirfd, const char *pathname,
     }
 }
 #endif
+
+/* Complete descriptor replacement, including protection and metadata updates. */
+static abi_long guest_fd_dup_replace(CPUArchState *env, abi_long oldfd,
+                                    abi_long newfd,
+                                    int host_flags, bool use_dup3)
+{
+    abi_long ret;
+
+#ifdef CONFIG_LATX
+    latx_syscall_fd_begin();
+#endif
+#ifdef TARGET_I386
+    if (oldfd != newfd) {
+        ret = guest_exe_identity_relocate(env, newfd);
+        if (ret) {
+            goto out;
+        }
+    }
+#endif
+#ifdef CONFIG_DUP3
+    if (use_dup3) {
+        ret = get_errno(dup3(oldfd, newfd, host_flags));
+    } else
+#endif
+    {
+        ret = get_errno(dup2(oldfd, newfd));
+    }
+    if (ret >= 0) {
+        fd_trans_dup(oldfd, newfd);
+    }
+out:
+#ifdef CONFIG_LATX
+    latx_syscall_fd_end();
+#endif
+    return ret;
+}
+
 static int is_proc_other(const char *filename, const char *entry)
 {
     if (!strncmp(filename, "/proc/", strlen("/proc/"))) {
@@ -16243,28 +16270,7 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
         return ret;
 #ifdef TARGET_NR_dup2
     case TARGET_NR_dup2:
-#ifdef CONFIG_LATX
-        latx_syscall_fd_begin();
-#endif
-#ifdef TARGET_I386
-        if (arg1 != arg2) {
-            ret = guest_exe_identity_relocate(cpu_env, arg2);
-            if (ret) {
-#ifdef CONFIG_LATX
-                latx_syscall_fd_end();
-#endif
-                return ret;
-            }
-        }
-#endif
-        ret = get_errno(dup2(arg1, arg2));
-        if (ret >= 0) {
-            fd_trans_dup(arg1, arg2);
-        }
-#ifdef CONFIG_LATX
-        latx_syscall_fd_end();
-#endif
-        return ret;
+        return guest_fd_dup_replace(cpu_env, arg1, arg2, 0, false);
 #endif
 #if defined(CONFIG_DUP3) && defined(TARGET_NR_dup3)
     case TARGET_NR_dup3:
@@ -16275,28 +16281,7 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
             return -EINVAL;
         }
         host_flags = target_to_host_bitmask(arg3, fcntl_flags_tbl);
-#ifdef CONFIG_LATX
-        latx_syscall_fd_begin();
-#endif
-#ifdef TARGET_I386
-        if (arg1 != arg2) {
-            ret = guest_exe_identity_relocate(cpu_env, arg2);
-            if (ret) {
-#ifdef CONFIG_LATX
-                latx_syscall_fd_end();
-#endif
-                return ret;
-            }
-        }
-#endif
-        ret = get_errno(dup3(arg1, arg2, host_flags));
-        if (ret >= 0) {
-            fd_trans_dup(arg1, arg2);
-        }
-#ifdef CONFIG_LATX
-        latx_syscall_fd_end();
-#endif
-        return ret;
+        return guest_fd_dup_replace(cpu_env, arg1, arg2, host_flags, true);
     }
 #endif
 #ifdef TARGET_NR_getppid /* not on alpha */
