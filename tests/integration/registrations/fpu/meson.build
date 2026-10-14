@@ -56,3 +56,17 @@ if 'x86_64-linux-user' in target_dirs
     'timeout': 120,
   }]
 endif
+
+foreach arch : ['x86_64', 'i386']
+  if arch + '-linux-user' in target_dirs
+    latx_integration_tests += [{
+      'name': 'test-fpu-mode-boundary-' + arch,
+      'runner': find_program('../../test-fpu-mode-boundary.sh'),
+      'args': [
+        emulators['latx-' + arch],
+        files('../../fpu-mode-boundary-guest.S'),
+        arch,
+      ],
+    }]
+  endif
+endforeach
