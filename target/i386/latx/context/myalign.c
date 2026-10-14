@@ -3412,6 +3412,13 @@ elfheader_t* loadElfFromFile(const char* name)
             return NULL;
         }
         h = LoadAndCheckElfHeader(f, tmp, 0);
+        fclose(f);
+        if (!h) {
+            printf_log(LOG_NONE, "Error: Cannot parse %s\n", tmp);
+            return NULL;
+        }
+        h->file = NULL;
+        h->fileno = -1;
         ElfHeadReFix(h, loadSoaddrFromMap(tmp));
         if ((uintptr_t)h->VerSym > (uintptr_t)h->delta) {
             h->delta = 0;
