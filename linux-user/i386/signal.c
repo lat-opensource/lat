@@ -813,12 +813,6 @@ static int xrstor_sigcontext(CPUX86State *env, struct target_fpstate_fxsave *fxs
             }
             if (tswapl(*(uint32_t *) &fxsave->xfeatures[xfeatures_size]) == TARGET_FP_XSTATE_MAGIC2) {
                 cpu_x86_xrstor(env, fxsave_addr);
-#ifdef CONFIG_LATX
-                if (latx_softfpu_sse_sync_enabled()) {
-                    /* Discard stale flags after restoring guest state. */
-                    latx_clear_saved_fcsr_flags(env);
-                }
-#endif
 #ifdef CONFIG_LATX_AVX_OPT
                 sync_ymm_high_from_xmm(env);
 #endif
@@ -829,12 +823,6 @@ static int xrstor_sigcontext(CPUX86State *env, struct target_fpstate_fxsave *fxs
     }
 
     cpu_x86_fxrstor(env, fxsave_addr);
-#ifdef CONFIG_LATX
-    if (latx_softfpu_sse_sync_enabled()) {
-        /* Discard stale flags after restoring guest state. */
-        latx_clear_saved_fcsr_flags(env);
-    }
-#endif
     return 0;
 }
 
@@ -913,6 +901,11 @@ restore_sigcontext(CPUX86State *env, struct target_sigcontext *sc)
         if (!err) {
             cpu_x86_sync_latx_fcsr(env);
             cpu_x86_sync_latx_fpu_mode(env);
+            if (latx_softfpu_sse_sync_enabled()) {
+                /* The restored x87 flags belong to env->fpus.  Clear the
+                 * native SSE accumulator after the common FCSR rebuild. */
+                latx_clear_saved_fcsr_flags(env);
+            }
         }
         load_xmm_from_env(env);
         if (option_softfpu) {

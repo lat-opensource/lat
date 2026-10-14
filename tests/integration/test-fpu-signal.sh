@@ -69,6 +69,7 @@ run_case()
 run_case 1 signal-frame-sees-sse-invalid 0100000001000000
 run_case 2 sigreturn-restores-edited-mxcsr-flags 0100000004000000
 run_case 3 sigreturn-restores-edited-mxcsr-round-up 010000000100803f
+run_case 4 sigreturn-keeps-x87-flags-out-of-mxcsr 0100000000000000
 
 if [ "$failures" -ne 0 ]; then
     echo "FAIL: $failures signal FPU cases failed" >&2

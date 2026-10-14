@@ -9,7 +9,7 @@
 #ifndef TEST_CASE
 #error TEST_CASE must select a signal FPU test
 #endif
-#if TEST_CASE < 1 || TEST_CASE > 3
+#if TEST_CASE < 1 || TEST_CASE > 4
 #error unsupported TEST_CASE
 #endif
 
@@ -54,9 +54,16 @@ _start:
     testq %rax, %rax
     js syscall_failed
 
+#if TEST_CASE == 4
+    /* Restore x87 IE while keeping the independent MXCSR flags clean. */
+    fldz
+    fldz
+    fdivp %st, %st(1)
+#else
     /* Masked SSE 0/0: sets IE sticky in the native FCSR, no trap. */
     xorps %xmm0, %xmm0
     divss %xmm0, %xmm0
+#endif
 
     /* kill(getpid(), SIGUSR1).  The syscall forces a TB exit, saving the
      * native FCSR into env->fcsr, but env->mxcsr is still clean. */
@@ -71,7 +78,14 @@ _start:
     testq %rax, %rax
     js syscall_failed
 
-#if TEST_CASE == 2
+#if TEST_CASE == 4
+    fnstsw %ax
+    and $0x3f, %eax
+    cmp $1, %eax
+    jne syscall_failed
+    stmxcsr report_value(%rip)
+    andl $MXCSR_STATUS_MASK, report_value(%rip)
+#elif TEST_CASE == 2
     /* The frame requests ZE only; handler-generated IE must not survive. */
     stmxcsr report_value(%rip)
     andl $MXCSR_STATUS_MASK, report_value(%rip)
@@ -124,11 +138,13 @@ sig_handler:
     ldmxcsr clean_mxcsr(%rip)
     xorps %xmm0, %xmm0
     divss %xmm0, %xmm0
-#else
+#elif TEST_CASE == 3
     movl $0x00005f80, FPSTATE_MXCSR_OFF(%rax)
     ldmxcsr down_mxcsr(%rip)
     movss one(%rip), %xmm0
     addss half_ulp(%rip), %xmm0
+#else
+    fninit
 #endif
     ret
 .size sig_handler, .-sig_handler
