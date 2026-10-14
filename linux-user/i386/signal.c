@@ -453,7 +453,7 @@ static void xsave_sigcontext(CPUX86State *env, struct target_fpstate_fxsave *fxs
                               abi_ulong fxsave_addr)
 {
 #ifdef CONFIG_LATX
-    if (option_softfpu) {
+    if (latx_softfpu_sse_sync_enabled()) {
         /*
          * Merge pending native SSE exceptions before saving the guest
          * signal frame.  Use the saved FCSR, not the live host register.
@@ -814,7 +814,7 @@ static int xrstor_sigcontext(CPUX86State *env, struct target_fpstate_fxsave *fxs
             if (tswapl(*(uint32_t *) &fxsave->xfeatures[xfeatures_size]) == TARGET_FP_XSTATE_MAGIC2) {
                 cpu_x86_xrstor(env, fxsave_addr);
 #ifdef CONFIG_LATX
-                if (option_softfpu) {
+                if (latx_softfpu_sse_sync_enabled()) {
                     /* Discard stale flags after restoring guest state. */
                     latx_clear_saved_fcsr_flags(env);
                 }
@@ -830,7 +830,7 @@ static int xrstor_sigcontext(CPUX86State *env, struct target_fpstate_fxsave *fxs
 
     cpu_x86_fxrstor(env, fxsave_addr);
 #ifdef CONFIG_LATX
-    if (option_softfpu) {
+    if (latx_softfpu_sse_sync_enabled()) {
         /* Discard stale flags after restoring guest state. */
         latx_clear_saved_fcsr_flags(env);
     }

@@ -90,7 +90,7 @@ void prepare_sse_rounding_mode(void)
     IR2_OPND fcsr;
     IR2_OPND no_toggle;
 
-    if (!option_softfpu) {
+    if (!latx_softfpu_sse_sync_enabled()) {
         return;
     }
 
@@ -340,7 +340,7 @@ bool translate_stmxcsr(IR1_INST *pir1)
     /* 1. load the value of the mxcsr register state from env */
     IR2_OPND mxcsr_opnd = ra_alloc_itemp();
 
-    if (option_softfpu) {
+    if (latx_softfpu_sse_sync_enabled()) {
         /* Merge the pending SSE native FCSR flags into env->mxcsr, then
          * clear the native sticky flags so they are not re-merged. */
         submit_sse_flags_to_mxcsr(mxcsr_opnd);
@@ -370,7 +370,7 @@ bool translate_ldmxcsr(IR1_INST *pir1)
     lsassert(offset <= 0x7ff);
     la_st_w(new_mxcsr, env_ir2_opnd, offset);
 
-    if (option_softfpu) {
+    if (latx_softfpu_sse_sync_enabled()) {
         /* LDMXCSR replaces the architectural MXCSR, discarding the pending
          * native FCSR flags and possibly changing MXCSR.RC.  The next SSE
          * instruction re-syncs FCSR0.RM from the new value. */

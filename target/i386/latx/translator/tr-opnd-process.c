@@ -1274,7 +1274,7 @@ IR2_OPND set_fpu_fcsr_rounding_field_by_x86(void)
      * Softfpu modes use native FCSR0 for SSE/AVX.  Use the TB-local
      * synchronization path instead of the legacy save/restore sequence.
      */
-    if (option_softfpu) {
+    if (latx_softfpu_sse_sync_enabled()) {
         prepare_sse_rounding_mode();
         return zero_ir2_opnd;
     }
@@ -1309,7 +1309,7 @@ IR2_OPND set_fpu_fcsr_rounding_field_by_x86(void)
 void set_fpu_rounding_mode(IR2_OPND rm)
 {
     /* Softfpu paths keep the SSE RM and sticky flags live in FCSR0. */
-    if (option_softfpu) return;
+    if (latx_softfpu_sse_sync_enabled()) return;
     if (option_set_rounding_opt) return;
     la_movgr2fcsr(fcsr3_ir2_opnd, rm);
 }

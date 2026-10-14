@@ -1327,7 +1327,7 @@ void helper_fptan(CPUX86State *env)
 {
 #ifdef CONFIG_LATX
     fenv_t saved_host_env;
-    if (option_softfpu) {
+    if (latx_softfpu_sse_sync_enabled()) {
         fegetenv(&saved_host_env);
     }
     long double fptemp = floatx80_to_longdouble(env, ST0);
@@ -1342,7 +1342,7 @@ void helper_fptan(CPUX86State *env)
         env->fpus &= ~0x400; /* C2 <-- 0 */
         /* the above code is for |arg| < 2**52 only */
     }
-    if (option_softfpu) {
+    if (latx_softfpu_sse_sync_enabled()) {
         fesetenv(&saved_host_env);
     }
 #else
@@ -2358,7 +2358,7 @@ void helper_fsincos(CPUX86State *env)
 {
 #ifdef CONFIG_LATX
     fenv_t saved_host_env;
-    if (option_softfpu) {
+    if (latx_softfpu_sse_sync_enabled()) {
         fegetenv(&saved_host_env);
     }
     long double fptemp = floatx80_to_longdouble(env, ST0);
@@ -2372,7 +2372,7 @@ void helper_fsincos(CPUX86State *env)
         env->fpus &= ~0x400;  /* C2 <-- 0 */
         /* the above code is for |arg| < 2**63 only */
     }
-    if (option_softfpu) {
+    if (latx_softfpu_sse_sync_enabled()) {
         fesetenv(&saved_host_env);
     }
 #else
@@ -2458,7 +2458,7 @@ void helper_fsin(CPUX86State *env)
 {
 #ifdef CONFIG_LATX
     fenv_t saved_host_env;
-    if (option_softfpu) {
+    if (latx_softfpu_sse_sync_enabled()) {
         fegetenv(&saved_host_env);
     }
     long double fptemp = floatx80_to_longdouble(env, ST0);
@@ -2470,7 +2470,7 @@ void helper_fsin(CPUX86State *env)
         env->fpus &= ~0x400;  /* C2 <-- 0 */
         /* the above code is for |arg| < 2**53 only */
     }
-    if (option_softfpu) {
+    if (latx_softfpu_sse_sync_enabled()) {
         fesetenv(&saved_host_env);
     }
 #else
@@ -2490,7 +2490,7 @@ void helper_fcos(CPUX86State *env)
 {
 #ifdef CONFIG_LATX
     fenv_t saved_host_env;
-    if (option_softfpu) {
+    if (latx_softfpu_sse_sync_enabled()) {
         fegetenv(&saved_host_env);
     }
     long double fptemp = floatx80_to_longdouble(env, ST0);
@@ -2502,7 +2502,7 @@ void helper_fcos(CPUX86State *env)
         env->fpus &= ~0x400;  /* C2 <-- 0 */
         /* the above code is for |arg| < 2**63 only */
     }
-    if (option_softfpu) {
+    if (latx_softfpu_sse_sync_enabled()) {
         fesetenv(&saved_host_env);
     }
 #else

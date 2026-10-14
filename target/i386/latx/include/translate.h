@@ -1694,7 +1694,8 @@ void set_fpu_rounding_mode(IR2_OPND rm);
  * Lightweight SSE/AVX FCSR synchronization for SoftFPU modes without native
  * x87 fast paths.  x87 exceptions are maintained by SoftFloat in env->fpus,
  * so native FCSR0 carries only pending SSE/AVX state.  This is not a complete
- * cross-domain scheme when LATX_SOFTFPU_FAST enables native x87 operations.
+ * cross-domain scheme when LATX_SOFTFPU_FAST enables native x87 operations;
+ * latx_softfpu_sse_sync_enabled() keeps those modes on their prior paths.
  */
 void prepare_sse_rounding_mode(void);
 void submit_sse_flags_to_mxcsr(IR2_OPND mxcsr_opnd);

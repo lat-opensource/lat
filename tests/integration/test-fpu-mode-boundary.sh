@@ -26,15 +26,32 @@ if [ -z "${LATX_FPU_BOUNDARY_GUEST_DIR:-}" ]; then
     fi
 fi
 
-guest="$guest_dir/fpu-mode-boundary-$arch-1"
-if [ -z "${LATX_FPU_BOUNDARY_GUEST_DIR:-}" ]; then
-    "$clang" --target="$arch-linux-gnu" -fuse-ld=lld -nostdlib -static \
-        -Wl,--build-id=none "$source_file" -o "$guest"
-fi
-if [ ! -x "$guest" ]; then
-    echo "FAIL: guest executable missing: $guest" >&2
-    exit 1
-fi
-LATX_AOT=0 LATX_MT=0 LATX_KZT=0 LATX_SOFTFPU=0 LATX_SOFTFPU_FAST=0 \
-    timeout -s KILL 10 "$emulator" "$guest"
-echo "PASS: $arch hard-float FPTAN preserves precision status"
+for case_id in 1 2; do
+    guest="$guest_dir/fpu-mode-boundary-$arch-$case_id"
+    if [ -z "${LATX_FPU_BOUNDARY_GUEST_DIR:-}" ]; then
+        "$clang" --target="$arch-linux-gnu" -fuse-ld=lld -nostdlib -static \
+            -Wl,--build-id=none -DTEST_CASE=$case_id "$source_file" -o "$guest"
+    fi
+    if [ ! -x "$guest" ]; then
+        echo "FAIL: guest executable missing: $guest" >&2
+        exit 1
+    fi
+done
+
+run_case()
+{
+    case_id=$1
+    softfpu=$2
+    fast=$3
+    LATX_AOT=0 LATX_MT=0 LATX_KZT=0 LATX_SOFTFPU=$softfpu \
+        LATX_SOFTFPU_FAST=$fast timeout -s KILL 10 "$emulator" \
+        "$guest_dir/fpu-mode-boundary-$arch-$case_id"
+    echo "PASS: $arch case=$case_id softfpu=$softfpu fast=$fast"
+}
+
+run_case 1 0 0
+run_case 2 1 0
+run_case 2 1 -1
+run_case 2 2 0
+run_case 2 2 32
+run_case 2 2 -1
