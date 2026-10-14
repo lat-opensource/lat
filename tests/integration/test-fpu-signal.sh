@@ -9,13 +9,16 @@ workdir=$(mktemp -d)
 trap 'rm -rf "$workdir"' EXIT HUP INT TERM
 failures=0
 
-if command -v clang-19 >/dev/null 2>&1; then
-    clang=clang-19
-elif command -v clang >/dev/null 2>&1; then
-    clang=clang
-else
-    echo "SKIP: clang is required to build the x86_64 guest"
-    exit 77
+guest_dir=${LATX_FPU_GUEST_DIR:-$workdir}
+if [ -z "${LATX_FPU_GUEST_DIR:-}" ]; then
+    if command -v clang-19 >/dev/null 2>&1; then
+        clang=clang-19
+    elif command -v clang >/dev/null 2>&1; then
+        clang=clang
+    else
+        echo "SKIP: clang is required to build the x86_64 guest"
+        exit 77
+    fi
 fi
 
 if ! command -v od >/dev/null 2>&1; then
@@ -28,12 +31,18 @@ run_case()
     case_id=$1
     case_name=$2
     expected=$3
-    guest="$workdir/fpu-signal-$case_id"
+    guest="$guest_dir/fpu-signal-$case_id"
     report="$workdir/report-$case_id.bin"
 
-    "$clang" --target=x86_64-linux-gnu -fuse-ld=lld -nostdlib -static \
-        -Wl,--build-id=none -DTEST_CASE="$case_id" \
-        "$source_file" -o "$guest"
+    if [ -z "${LATX_FPU_GUEST_DIR:-}" ]; then
+        "$clang" --target=x86_64-linux-gnu -fuse-ld=lld -nostdlib -static \
+            -Wl,--build-id=none -DTEST_CASE="$case_id" \
+            "$source_file" -o "$guest"
+    fi
+    if [ ! -x "$guest" ]; then
+        echo "FAIL: guest executable missing: $guest" >&2
+        exit 1
+    fi
 
     set +e
     timeout -s KILL 10 env LATX_AOT=0 LATX_KZT=0 \

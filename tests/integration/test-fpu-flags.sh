@@ -8,13 +8,16 @@ workdir=$(mktemp -d)
 failures=0
 trap 'rm -rf "$workdir"' EXIT HUP INT TERM
 
-if command -v clang-19 >/dev/null 2>&1; then
-    clang=clang-19
-elif command -v clang >/dev/null 2>&1; then
-    clang=clang
-else
-    echo "SKIP: clang is required to build the x86_64 guest"
-    exit 77
+guest_dir=${LATX_FPU_GUEST_DIR:-$workdir}
+if [ -z "${LATX_FPU_GUEST_DIR:-}" ]; then
+    if command -v clang-19 >/dev/null 2>&1; then
+        clang=clang-19
+    elif command -v clang >/dev/null 2>&1; then
+        clang=clang
+    else
+        echo "SKIP: clang is required to build the x86_64 guest"
+        exit 77
+    fi
 fi
 
 if ! command -v od >/dev/null 2>&1; then
@@ -27,11 +30,17 @@ run_case()
     case_id=$1
     case_name=$2
     expected_report=$3
-    guest="$workdir/fpu-flags-$case_id"
+    guest="$guest_dir/fpu-flags-$case_id"
 
-    "$clang" --target=x86_64-linux-gnu -fuse-ld=lld -nostdlib -static \
-        -Wl,--build-id=none -DTEST_CASE="$case_id" \
-        "$source_file" -o "$guest"
+    if [ -z "${LATX_FPU_GUEST_DIR:-}" ]; then
+        "$clang" --target=x86_64-linux-gnu -fuse-ld=lld -nostdlib -static \
+            -Wl,--build-id=none -DTEST_CASE="$case_id" \
+            "$source_file" -o "$guest"
+    fi
+    if [ ! -x "$guest" ]; then
+        echo "FAIL: guest executable missing: $guest" >&2
+        exit 1
+    fi
 
     report="$workdir/report-$case_id.bin"
 
@@ -203,16 +212,14 @@ if [ "${LATX_TEST_XSAVE:-0}" = 1 ]; then
         2000000000000000
     run_case 55 sse-invalid-xsaveopt \
         0000000001000000
-    if [ "$softfpu" -eq 1 ]; then
-        run_case 69 xrstor-x87-only-preserves-sse-invalid \
-            0000000001000000
-        run_case 70 xrstor-sse-only-clears-sse-invalid \
-            0000000000000000
-        run_case 71 xrstor-both-clears-sse-invalid \
-            0000000000000000
-        run_case 72 xrstor-empty-mask-preserves-sse-invalid \
-            0000000001000000
-    fi
+    run_case 69 xrstor-x87-only-preserves-sse-invalid \
+        0000000001000000
+    run_case 70 xrstor-sse-only-clears-sse-invalid \
+        0000000000000000
+    run_case 71 xrstor-both-clears-sse-invalid \
+        0000000000000000
+    run_case 72 xrstor-empty-mask-preserves-sse-invalid \
+        0000000001000000
 else
     echo "SKIP: XSAVE flag cases require a CONFIG_LATX_AVX_OPT build"
 fi
