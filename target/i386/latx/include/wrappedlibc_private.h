@@ -152,7 +152,7 @@
 ////GO(__clone,
 //GOWM(clone, iFEppipppp)
 //GO(__close, iFi)
-//GOW(close, iFi)
+GOW(close, iFi)
 //GOW(closedir, iFp)
 //GO(closelog, vFv)
 ////GO(__close_nocancel,
