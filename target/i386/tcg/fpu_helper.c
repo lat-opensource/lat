@@ -838,6 +838,9 @@ void helper_fldcw(CPUX86State *env, uint32_t val)
 void helper_fclex(CPUX86State *env)
 {
     env->fpus &= 0x7f00;
+#ifdef CONFIG_LATX
+    set_float_exception_flags(0, &env->fp_status);
+#endif
 }
 
 void helper_fwait(CPUX86State *env)
@@ -849,6 +852,9 @@ void helper_fwait(CPUX86State *env)
 
 static void do_fninit(CPUX86State *env)
 {
+#ifdef CONFIG_LATX
+    set_float_exception_flags(0, &env->fp_status);
+#endif
     env->fpus = 0;
     env->fpstt = 0;
     cpu_set_fpuc(env, 0x37f);
@@ -2690,6 +2696,10 @@ void helper_fstenv(CPUX86State *env, target_ulong ptr, int data32)
 
 static void cpu_set_fpus(CPUX86State *env, uint16_t fpus)
 {
+#ifdef CONFIG_LATX
+    /* The restored FSW replaces exceptions pending in the old state. */
+    set_float_exception_flags(0, &env->fp_status);
+#endif
     env->fpstt = (fpus >> 11) & 7;
     env->fpus = fpus & ~0x3800 & ~FPUS_B;
     env->fpus |= env->fpus & FPUS_SE ? FPUS_B : 0;

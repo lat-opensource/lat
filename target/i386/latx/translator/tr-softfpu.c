@@ -2029,6 +2029,7 @@ static bool translate_fldenv_softfpu(IR1_INST *pir1)
 
         la_label(label_exit);
         la_st_h(sw_opnd, env_ir2_opnd, lsenv_offset_of_status_word(lsenv));
+        clear_softfpu_exception_flags();
 
         li_wu(tag_save, 0);
         li_wu(itemp2, 0x3);
@@ -2329,6 +2330,7 @@ static bool translate_fnclex_softfpu(IR1_INST *pir1)
         la_bstrpick_d(sw_value, sw_value, 14, 8);
         la_slli_d(sw_value, sw_value, 8);
         la_st_h(sw_value, env_ir2_opnd, lsenv_offset_of_status_word(lsenv));
+        clear_softfpu_exception_flags();
 
         ra_free_temp(sw_value);
 
@@ -2349,6 +2351,7 @@ static bool translate_fninit_softfpu(IR1_INST *pir1)
 
         li_wu(temp, 0x37f0000ULL);
         la_st_w(temp, env_ir2_opnd, offset);
+        clear_softfpu_exception_flags();
         la_srli_d(temp, temp, 16);
         la_update_fp_status(temp);
 

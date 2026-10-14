@@ -109,6 +109,11 @@ run_case()
     111) reason="signal frame mixed x87 and SSE exception flags" ;;
     112) reason="mixed exception flags leaked into the handler" ;;
     113) reason="sigreturn mixed x87 and SSE exception flags" ;;
+    121) reason="first sigreturn did not restore the injected x87 flags" ;;
+    122) reason="FNSAVE lost the saved x87 exception flags" ;;
+    123) reason="x87 clear/init left incorrect exception flags" ;;
+    125) reason="second signal frame resurrected or lost x87 exception flags" ;;
+    126) reason="second sigreturn resurrected or lost x87 exception flags" ;;
     124) reason="test timed out" ;;
     *) reason="unexpected exit status $ret" ;;
     esac
@@ -128,6 +133,13 @@ if [ "$signal_flags" != -DTEST_LEGACY_SIGNAL ]; then
     compile_case handler-flag-leak 9
     compile_case sse-exception-flags 10
     compile_case mixed-exception-flags 11
+    compile_case x87-fnclex-flags 12
+    compile_case x87-fninit-flags 13
+    compile_case x87-fnsave-flags 14
+    compile_case x87-retain-flags 15
+    compile_case x87-fldenv-flags 16
+    compile_case x87-frstor-flags 17
+    compile_case x87-fxrstor-flags 18
 fi
 
 for mode in 0 1 2; do
@@ -143,5 +155,12 @@ for mode in 0 1 2; do
         run_case handler-flag-leak "$mode"
         run_case sse-exception-flags "$mode"
         run_case mixed-exception-flags "$mode"
+        run_case x87-fnclex-flags "$mode"
+        run_case x87-fninit-flags "$mode"
+        run_case x87-fnsave-flags "$mode"
+        run_case x87-retain-flags "$mode"
+        run_case x87-fldenv-flags "$mode"
+        run_case x87-frstor-flags "$mode"
+        run_case x87-fxrstor-flags "$mode"
     fi
 done

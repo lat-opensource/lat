@@ -122,6 +122,16 @@ void prepare_sse_rounding_mode(void)
     tr_data->sse_rounding_prepared = true;
 }
 
+void clear_softfpu_exception_flags(void)
+{
+    int offset = lsenv_offset_of_fp_status(lsenv) +
+                 offsetof(float_status, float_exception_flags);
+
+    /* Signal capture must not merge exceptions from a replaced x87 state. */
+    QEMU_BUILD_BUG_ON(sizeof(((float_status *)0)->float_exception_flags) != 2);
+    la_st_h(zero_ir2_opnd, env_ir2_opnd, offset);
+}
+
 static void update_fcsr_flag(IR2_OPND status_word, IR2_OPND fcsr)
 {
     IR2_OPND temp = ra_alloc_itemp();
@@ -940,6 +950,7 @@ bool translate_fldenv(IR1_INST *pir1)
     lsassert(status_offset <= 0x7ff);
     la_st_h(value, env_ir2_opnd, status_offset);
     update_fcsr_by_sw(value);
+    clear_softfpu_exception_flags();
 
     /* get top value */
     la_srli_w(value, value, 11);
@@ -1080,6 +1091,8 @@ bool translate_fnclex(IR1_INST *pir1) {
     IR2_OPND sw_value = ra_alloc_itemp();
     IR2_OPND fcsr0 = ra_alloc_itemp();
     int offset = lsenv_offset_of_status_word(lsenv);
+
+    clear_softfpu_exception_flags();
     la_ld_hu(sw_value, env_ir2_opnd, offset);
     la_movfcsr2gr(fcsr0, fcsr_ir2_opnd);
     la_bstrins_d(sw_value, zero_ir2_opnd, X87_SR_OFF_ES, X87_SR_OFF_IE);
@@ -1098,6 +1111,7 @@ bool translate_fninit(IR1_INST *pir1) {
     IR2_OPND fcsr0 = ra_alloc_itemp();
     int offset;
 
+    clear_softfpu_exception_flags();
     /* clear status and set control*/
     offset = lsenv_offset_of_status_word(lsenv);
     lsassert(offset <= 0x7ff);
