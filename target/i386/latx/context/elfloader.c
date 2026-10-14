@@ -494,17 +494,22 @@ static char* find_elf_rpath(char* rfilename, bool* elf_err)
     struct stat statbuf;
 
     if(!f) {
+        if (fd >= 0) {
+            close(fd);
+        }
         printf_log(LOG_INFO, "%s Error: Cannot open \"%s\"\n", __func__, rfilename);
         return NULL;
     }
     if (stat(rfilename, &statbuf)) {
         printf_log(LOG_INFO, "%s: Error stat %s failed\n", __func__, rfilename);
+        fclose(f);
         return NULL;
     }
     lsassert(statbuf.st_size);
     elfheader_t* h = LoadAndCheckElfHeader(f, rfilename, 0);
     if (h == NULL) {
         *elf_err = true;
+        fclose(f);
         return NULL;
     }
     for (size_t i=0; i<h->numDynamic; ++i) {
