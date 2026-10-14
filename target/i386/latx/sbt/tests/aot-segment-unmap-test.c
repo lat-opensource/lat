@@ -45,6 +45,15 @@ unsigned long rcu_gp_ctr;
 QemuEvent rcu_gp_event;
 __thread struct rcu_reader_data rcu_reader;
 
+/* This test exercises AOT segment ownership, not KZT mmap bridging. */
+#if defined(CONFIG_LATX_KZT) && defined(TARGET_X86_64)
+void kzt_wine_bridge(abi_ulong start, int fd)
+{
+    (void)start;
+    (void)fd;
+}
+#endif
+
 void qemu_event_set(QemuEvent *ev)
 {
     g_assert_not_reached();
