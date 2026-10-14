@@ -272,7 +272,9 @@ void ResetSpecialCaseElf(elfheader_t* h, const char ** names, int nnames, void *
         sym = h->DynSym+i;
         const char * symname = h->DynStr+sym->st_name;
         for (int ii = 0; ii < nnames; ii++) {
-            if(!rsymbol[ii] && strlen(symname) && !strcmp(symname, names[ii]) && ((void*)sym->st_value+h->delta)) {
+            if(!rsymbol[ii] && sym->st_shndx != SHN_UNDEF &&
+               strlen(symname) && !strcmp(symname, names[ii]) &&
+               ((void*)sym->st_value+h->delta)) {
                 rsymbol[ii] = (void*)sym->st_value+h->delta;
                 (*nrsymbol)++;
                 printf_dlsym(LOG_DEBUG, "BOX64: Set @%s to %p %d\n", names[ii], rsymbol[ii], h->DynSym[i].st_info);
