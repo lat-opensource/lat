@@ -193,6 +193,15 @@ kzt_public_loader_result_t kzt_public_loader_find_symbol_in_object(
     const char *symbol_name,
     uintptr_t *symbol_addr);
 
+/* Resolve a symbol set in one pass over objects matching object_name. */
+kzt_public_loader_result_t kzt_public_loader_find_symbols_in_object(
+    const kzt_public_loader_observer_t *observer,
+    const kzt_public_loader_reader_t *reader,
+    const char *object_name,
+    const char *const *symbol_names,
+    size_t symbol_count,
+    uintptr_t *symbol_addrs);
+
 const char *kzt_public_loader_result_name(
     kzt_public_loader_result_t result);
 

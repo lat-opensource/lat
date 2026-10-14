@@ -28,6 +28,11 @@
 #define SYMBOL_HASH_ADDR (SYMBOL_ELF_BASE + 0x200)
 #define SYMBOL_TABLE_ADDR (SYMBOL_ELF_BASE + 0x300)
 #define SYMBOL_STRING_ADDR (SYMBOL_ELF_BASE + 0x400)
+#define SYMBOL2_ELF_BASE (FIXTURE_BASE + 0xc000)
+#define SYMBOL2_DYNAMIC_ADDR (SYMBOL2_ELF_BASE + 0x100)
+#define SYMBOL2_HASH_ADDR (SYMBOL2_ELF_BASE + 0x200)
+#define SYMBOL2_TABLE_ADDR (SYMBOL2_ELF_BASE + 0x300)
+#define SYMBOL2_STRING_ADDR (SYMBOL2_ELF_BASE + 0x400)
 #define TEST_PAGE_SIZE 0x1000
 #define KZT_TEST_PT_GNU_RELRO UINT32_C(0x6474e552)
 
@@ -231,13 +236,19 @@ static void write_elf_without_relro(fixture_t *fixture,
     fixture_write(fixture, load_bias + header.phoff, &phdr, sizeof(phdr));
 }
 
-static void write_gnu_hash_dlopen_object(fixture_t *fixture)
+static void write_gnu_hash_dlopen_object_at(fixture_t *fixture,
+                                             uintptr_t elf_base,
+                                             uintptr_t dynamic_addr,
+                                             uintptr_t hash_addr,
+                                             uintptr_t table_addr,
+                                             uintptr_t string_addr,
+                                             uint64_t symbol_value)
 {
     const kzt_x86_64_dynamic_entry_t dynamic[] = {
         { .tag = INT64_C(0x6ffffef5),
-          .value = SYMBOL_HASH_ADDR - SYMBOL_ELF_BASE },
-        { .tag = 5, .value = SYMBOL_STRING_ADDR - SYMBOL_ELF_BASE },
-        { .tag = 6, .value = SYMBOL_TABLE_ADDR - SYMBOL_ELF_BASE },
+          .value = hash_addr - elf_base },
+        { .tag = 5, .value = string_addr - elf_base },
+        { .tag = 6, .value = table_addr - elf_base },
         { .tag = 10, .value = sizeof("\0dlopen") },
         { .tag = 11, .value = sizeof(test_x86_64_symbol_t) },
         { .tag = KZT_X86_64_DT_NULL, .value = 0 },
@@ -263,18 +274,26 @@ static void write_gnu_hash_dlopen_object(fixture_t *fixture)
             .name = 1,
             .info = 0x12,
             .section_index = 1,
-            .value = 0x905d0,
+            .value = symbol_value,
         },
     };
     static const char strings[] = "\0dlopen";
 
-    fixture_write(fixture, SYMBOL_DYNAMIC_ADDR,
+    fixture_write(fixture, dynamic_addr,
                   dynamic, sizeof(dynamic));
-    fixture_write(fixture, SYMBOL_HASH_ADDR, &hash, sizeof(hash));
-    fixture_write(fixture, SYMBOL_TABLE_ADDR,
+    fixture_write(fixture, hash_addr, &hash, sizeof(hash));
+    fixture_write(fixture, table_addr,
                   symbols, sizeof(symbols));
-    fixture_write(fixture, SYMBOL_STRING_ADDR,
+    fixture_write(fixture, string_addr,
                   strings, sizeof(strings));
+}
+
+static void write_gnu_hash_dlopen_object(fixture_t *fixture)
+{
+    write_gnu_hash_dlopen_object_at(
+        fixture, SYMBOL_ELF_BASE, SYMBOL_DYNAMIC_ADDR,
+        SYMBOL_HASH_ADDR, SYMBOL_TABLE_ADDR, SYMBOL_STRING_ADDR,
+        0x905d0);
 }
 
 static void write_sysv_hash_dlopen_object(fixture_t *fixture)
@@ -657,6 +676,7 @@ static void test_object_relro_classification_uses_guest_memory(void)
 static void test_symbol_lookup_uses_live_gnu_hash_object(void)
 {
     static const char object_name[] = "/usr/lib/libc.so.6";
+    static const char *const batch_names[] = { "dlopen", "missing" };
     fixture_t fixture;
     visit_log_t log = { 0 };
     kzt_public_loader_observer_t observer;
@@ -664,6 +684,7 @@ static void test_symbol_lookup_uses_live_gnu_hash_object(void)
         .read_memory = fixture_read,
         .opaque = &fixture,
     };
+    uintptr_t batch_addrs[2] = { 0, 0 };
     uintptr_t symbol_addr = 0;
 
     memset(&fixture, 0, sizeof(fixture));
@@ -692,6 +713,11 @@ static void test_symbol_lookup_uses_live_gnu_hash_object(void)
     CHECK(kzt_public_loader_find_symbol(
               &observer, &reader, "missing", &symbol_addr) ==
           KZT_PUBLIC_LOADER_NOT_FOUND);
+    CHECK(kzt_public_loader_find_symbols_in_object(
+              &observer, &reader, "libc.so.6", batch_names, 2,
+              batch_addrs) == KZT_PUBLIC_LOADER_OK);
+    CHECK(batch_addrs[0] == SYMBOL_ELF_BASE + 0x905d0);
+    CHECK(batch_addrs[1] == 0);
 }
 
 static void test_symbol_lookup_walks_sysv_hash_chain(void)
@@ -724,6 +750,42 @@ static void test_symbol_lookup_walks_sysv_hash_chain(void)
     CHECK(symbol_addr == SYMBOL_ELF_BASE + 0x905d0);
 }
 
+static void test_symbol_lookup_rejects_conflicting_objects(void)
+{
+    static const char object_name[] = "/usr/lib/libc.so.6";
+    fixture_t fixture;
+    visit_log_t log = { 0 };
+    kzt_public_loader_observer_t observer;
+    const kzt_public_loader_reader_t reader = {
+        .read_memory = fixture_read,
+        .opaque = &fixture,
+    };
+    uintptr_t symbol_addr = 0;
+
+    memset(&fixture, 0, sizeof(fixture));
+    write_dynamic(&fixture, R_DEBUG_ADDR);
+    write_debug(&fixture, KZT_LOADER_DEBUG_CONSISTENT, MAP1_ADDR);
+    write_map(&fixture, MAP1_ADDR, SYMBOL_ELF_BASE, NAME1_ADDR,
+              SYMBOL_DYNAMIC_ADDR, MAP2_ADDR, 0);
+    write_map(&fixture, MAP2_ADDR, SYMBOL2_ELF_BASE, NAME2_ADDR,
+              SYMBOL2_DYNAMIC_ADDR, 0, MAP1_ADDR);
+    fixture_write(&fixture, NAME1_ADDR, object_name, sizeof(object_name));
+    fixture_write(&fixture, NAME2_ADDR, object_name, sizeof(object_name));
+    write_gnu_hash_dlopen_object(&fixture);
+    write_gnu_hash_dlopen_object_at(
+        &fixture, SYMBOL2_ELF_BASE, SYMBOL2_DYNAMIC_ADDR,
+        SYMBOL2_HASH_ADDR, SYMBOL2_TABLE_ADDR, SYMBOL2_STRING_ADDR,
+        0x905e0);
+    kzt_public_loader_observer_reset(&observer);
+    CHECK(kzt_public_loader_observer_activate(
+              &observer, DYNAMIC_ADDR, 16, &reader,
+              record_visit, &log) == KZT_PUBLIC_LOADER_OK);
+
+    CHECK(kzt_public_loader_find_symbol_in_object(
+              &observer, &reader, "libc.so.6", "dlopen", &symbol_addr) ==
+          KZT_PUBLIC_LOADER_INVALID_STATE);
+}
+
 int main(void)
 {
     test_activate_reads_public_loader_state();
@@ -737,6 +799,7 @@ int main(void)
     test_object_relro_classification_uses_guest_memory();
     test_symbol_lookup_uses_live_gnu_hash_object();
     test_symbol_lookup_walks_sysv_hash_chain();
+    test_symbol_lookup_rejects_conflicting_objects();
     puts("kzt public loader observer tests: PASS");
     return 0;
 }

@@ -1151,8 +1151,95 @@ kzt_public_loader_result_t kzt_public_loader_find_symbol_in_object(
     if (!object_name || !object_name[0]) {
         return KZT_PUBLIC_LOADER_INVALID_INPUT;
     }
-    return kzt_public_loader_find_symbol_filtered(
-        observer, reader, object_name, symbol_name, symbol_addr);
+    return kzt_public_loader_find_symbols_in_object(
+        observer, reader, object_name, &symbol_name, 1, symbol_addr);
+}
+
+kzt_public_loader_result_t kzt_public_loader_find_symbols_in_object(
+    const kzt_public_loader_observer_t *observer,
+    const kzt_public_loader_reader_t *reader,
+    const char *object_name,
+    const char *const *symbol_names,
+    size_t symbol_count,
+    uintptr_t *symbol_addrs)
+{
+    kzt_public_loader_result_t first_error = KZT_PUBLIC_LOADER_OK;
+    size_t found_count = 0;
+    size_t index;
+
+    if (!observer || !observer->active || !reader ||
+        !reader->read_memory || !object_name || !object_name[0] ||
+        !symbol_names || !symbol_count || !symbol_addrs) {
+        return KZT_PUBLIC_LOADER_INVALID_INPUT;
+    }
+    for (index = 0; index < symbol_count; ++index) {
+        size_t name_size;
+
+        symbol_addrs[index] = 0;
+        if (!symbol_names[index]) {
+            return KZT_PUBLIC_LOADER_INVALID_INPUT;
+        }
+        name_size = strlen(symbol_names[index]);
+        if (!name_size ||
+            name_size > KZT_PUBLIC_LOADER_MAX_SYMBOL_NAME) {
+            return KZT_PUBLIC_LOADER_INVALID_INPUT;
+        }
+    }
+
+    for (index = 0; index < observer->live_map_count; ++index) {
+        kzt_x86_64_link_map_prefix_t map;
+        kzt_public_loader_object_t object;
+        size_t symbol_index;
+
+        if (kzt_public_loader_read(reader, observer->live_maps[index],
+                                   &map, sizeof(map)) != 0) {
+            return KZT_PUBLIC_LOADER_READ_ERROR;
+        }
+        if (!kzt_public_loader_object_name_matches(
+                reader, (uintptr_t)map.name, object_name)) {
+            continue;
+        }
+        object = (kzt_public_loader_object_t) {
+            .link_map_addr = observer->live_maps[index],
+            .load_bias = (uintptr_t)map.load_bias,
+            .name_addr = (uintptr_t)map.name,
+            .dynamic_addr = (uintptr_t)map.dynamic_addr,
+            .next_addr = (uintptr_t)map.next,
+            .previous_addr = (uintptr_t)map.previous,
+        };
+        for (symbol_index = 0; symbol_index < symbol_count;
+             ++symbol_index) {
+            uintptr_t candidate = 0;
+            kzt_public_loader_result_t result;
+
+            result = kzt_public_loader_find_object_symbol(
+                &object, reader, symbol_names[symbol_index],
+                strlen(symbol_names[symbol_index]), &candidate);
+            if (result == KZT_PUBLIC_LOADER_NOT_FOUND) {
+                continue;
+            }
+            if (result != KZT_PUBLIC_LOADER_OK) {
+                if (first_error == KZT_PUBLIC_LOADER_OK) {
+                    first_error = result;
+                }
+                continue;
+            }
+            if (symbol_addrs[symbol_index] &&
+                symbol_addrs[symbol_index] != candidate) {
+                return KZT_PUBLIC_LOADER_INVALID_STATE;
+            }
+            if (!symbol_addrs[symbol_index]) {
+                ++found_count;
+            }
+            symbol_addrs[symbol_index] = candidate;
+        }
+    }
+
+    if (!found_count) {
+        return first_error != KZT_PUBLIC_LOADER_OK ?
+                   first_error : KZT_PUBLIC_LOADER_NOT_FOUND;
+    }
+    return KZT_PUBLIC_LOADER_OK;
 }
 
 const char *kzt_public_loader_result_name(
