@@ -672,6 +672,13 @@ inline void tb_add_jump(TranslationBlock *tb, int n,
 
     qemu_thread_jit_write();
     assert(n < ARRAY_SIZE(tb->jmp_list_next));
+#ifdef CONFIG_LATX_KZT
+    /* The KZT callback owns this entry slot; never relink over its patch. */
+    if (!tb->canlink[n] && tb->jmp_target_arg[n] == 0 &&
+        tb->jmp_reset_offset[n] == TB_JMP_RESET_OFFSET_INVALID) {
+        return;
+    }
+#endif
     qemu_spin_lock(&tb_next->jmp_lock);
 
     /* make sure the destination TB is valid */
@@ -864,7 +871,14 @@ TranslationBlock * kzt_tb_find_exp(
             TranslationBlock *last_tb,
             int tb_exit, uint32_t cflags)
 {
-    return tb_find(cpu, last_tb, tb_exit, cflags);
+    CPUArchState *env = cpu->env_ptr;
+    target_ulong pc, cs_base;
+    uint32_t flags;
+
+    /* The callback installer owns mmap_lock and explicitly generates a fresh
+     * JIT TB when necessary; do not load AOT or publish unpatched code here. */
+    cpu_get_tb_cpu_state(env, &pc, &cs_base, &flags);
+    return tb_lookup(cpu, pc, cs_base, flags, cflags);
 }
 
 #endif

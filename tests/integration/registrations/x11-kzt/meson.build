@@ -23,4 +23,14 @@ if 'x86_64-linux-user' in target_dirs and \
     ],
     'timeout': 120,
   }]
+
+  latx_integration_tests += [{
+    'name': 'test-kzt-callback-link',
+    'runner': find_program('../../test-kzt-callback-link.py'),
+    'args': [
+      emulators['latx-x86_64'],
+      files('../../kzt-callback-link.S'),
+    ],
+    'timeout': 150,
+  }]
 endif

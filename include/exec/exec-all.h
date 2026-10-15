@@ -600,6 +600,10 @@ struct TranslationBlock {
 #define CF_USE_ICOUNT  0x00020000
 #define CF_INVALID     0x00040000 /* TB is stale. Set with @jmp_lock held */
 #define CF_PARALLEL    0x00080000 /* Generate code for a parallel context */
+#ifdef CONFIG_LATX_KZT
+/* KZT installation request only; consumed before assigning TB identity. */
+#define CF_KZT_PRIVATE 0x00100000 /* Return an unpublished TB to the installer */
+#endif
 #define CF_CLUSTER_MASK 0xff000000 /* Top 8 bits are cluster ID */
 #define CF_CLUSTER_SHIFT 24
 

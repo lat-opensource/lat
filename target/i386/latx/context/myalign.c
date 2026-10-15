@@ -13,6 +13,8 @@
 #include "qemu/cacheflush.h"
 #include "qemu/path.h"
 #include "lsenv.h"
+#include "accel/tcg/internal.h"
+#include "aot.h"
 #include "myalign.h"
 #include "elfloader.h"
 #include "elfloader_private.h"
@@ -51,6 +53,7 @@ typedef struct KztGuestPcCallbackState {
     uint32_t flush_count;
     unsigned int pos;
     bool fixed_branch;
+    uint32_t entry_patch;
 } KztGuestPcCallbackState;
 
 static TranslationBlock *kzt_install_guest_pc_callback(
@@ -3037,7 +3040,7 @@ static void test_x86free(CPUX86State *env)
     static int cnt;
     static uintptr_t ptr;
     static int has_found;
-    if (has_found) {
+    if (has_found || !test_tb) {
         return;
     }
     if (!ptr) {
@@ -3206,17 +3209,26 @@ static void kzt_guest_main_entry_callback(CPUX86State *env)
         CPUState *cpu = env_cpu(env);
         target_ulong eip = env->eip;
 
-        kzt_install_guest_pc_callback(
+        TranslationBlock *observer_tb = kzt_install_guest_pc_callback(
             &kzt_public_r_brk_inst, cpu,
             kzt_public_loader_observer.r_brk_addr,
             kzt_dynamic_library_change_callback);
         env->eip = eip;
-        printf_log(LOG_INFO,
-                   "KZT public loader observer active: "
-                   "r_debug=%p r_brk=%p objects=%zu\n",
-                   (void *)kzt_public_loader_observer.r_debug_addr,
-                   (void *)kzt_public_loader_observer.r_brk_addr,
-                   kzt_public_loader_observer.live_map_count);
+        if (observer_tb) {
+            printf_log(LOG_INFO,
+                       "KZT public loader observer active: "
+                       "r_debug=%p r_brk=%p objects=%zu\n",
+                       (void *)kzt_public_loader_observer.r_debug_addr,
+                       (void *)kzt_public_loader_observer.r_brk_addr,
+                       kzt_public_loader_observer.live_map_count);
+        } else {
+            mmap_lock();
+            kzt_public_loader_observer_reset(&kzt_public_loader_observer);
+            mmap_unlock();
+            printf_log(LOG_INFO,
+                       "KZT public loader observer unavailable: "
+                       "r_brk callback was not installed\n");
+        }
     } else {
         kzt_report_observer_failure_once("activation", observer_result);
         printf_log(LOG_INFO,
@@ -3231,180 +3243,143 @@ static void kzt_guest_main_entry_callback(CPUX86State *env)
     AddDebugInfo(LIB_EMULATED, elf_header->name, info1.start_code, info1.end_code);
 }
 
-static void kzt_patch_callback_branch(uint32_t *pinsn,
-                                      const uint32_t jmpinst[2])
+/* Called only for the private TB returned to the KZT installer. */
+static bool kzt_prepare_guest_pc_callback(TranslationBlock *tb, void *opaque)
 {
-    if (jmpinst[1]) {
-        uint64_t pair = ((uint64_t)jmpinst[1] << 32) | jmpinst[0];
+    KztGuestPcCallbackState *state = opaque;
+    uint32_t *pinsn = (uint32_t *)tb->tc.ptr;
+    void *callback_context = tcg_ctx->code_gen_ptr;
+    KztFixedBranch branch;
+    intptr_t distance = (uintptr_t)callback_context - (uintptr_t)pinsn;
+    int backlen;
 
-        qatomic_mb_set((uint64_t *)pinsn, pair);
-        flush_idcache_range((uintptr_t)pinsn, (uintptr_t)pinsn, 8);
-    } else {
-        qatomic_mb_set(pinsn, jmpinst[0]);
-        flush_idcache_range((uintptr_t)pinsn, (uintptr_t)pinsn, 4);
+    /* The bridge follows this fresh TB in the same code cache. */
+    if (distance < 0 || distance > (1 << 27) - 4) {
+        return false;
     }
+    state->inst_old[0] = pinsn[0];
+    state->inst_old[1] = pinsn[1];
+    state->pos = 0;
+    state->fixed_branch = kzt_fixed_branch_target(
+        state->inst_old, (uintptr_t)pinsn, &branch);
+
+    if (state->fixed_branch) {
+        uintptr_t return_addr = branch.link_reg
+                                    ? (uintptr_t)(pinsn + branch.insn_count)
+                                    : 0;
+        backlen = target_latx_emit_fixed_callback_bridge(
+            callback_context, state->callback, branch.base_reg, branch.base,
+            branch.link_reg, return_addr, branch.target);
+    } else {
+        backlen = target_latx_emit_callback_bridge(callback_context,
+                                                  state->callback);
+    }
+    if (backlen < 0) {
+        return false;
+    }
+    if (!state->fixed_branch) {
+        uint32_t *resume = (uint32_t *)callback_context + backlen - 4;
+
+        resume[0] = state->inst_old[0];
+        b_to_addr((uintptr_t)(resume + 1), (uintptr_t)(resume + 1),
+                  (uintptr_t)(pinsn + 1));
+    }
+    tcg_ctx->code_gen_ptr = (char *)callback_context + backlen * 4;
+
+    /* A direct-link slot at entry must not overwrite or bypass the hook.
+     * Only this slot loses chaining; all other TB exits are unchanged.
+     * The freshly generated slot is still in its original unlinked state.
+     */
+    for (unsigned int n = 0; n < 2; n++) {
+        if (tb->jmp_reset_offset[n] != TB_JMP_RESET_OFFSET_INVALID &&
+            tb->jmp_target_arg[n] == 0) {
+            tb->canlink[n] = 0;
+            tb->jmp_reset_offset[n] = TB_JMP_RESET_OFFSET_INVALID;
+        }
+    }
+    b_to_addr((uintptr_t)pinsn, (uintptr_t)pinsn,
+              (uintptr_t)callback_context);
+    state->entry_patch = pinsn[0];
+    state->tb = tb;
+    state->code_ptr = (uintptr_t)pinsn;
+    state->flush_count = qatomic_read(&tb_ctx.tb_flush_count);
+    return true;
+}
+
+static bool kzt_publish_guest_pc_callback(CPUArchState *env,
+                                           TranslationBlock *tb)
+{
+    tb_page_addr_t phys_pc = get_page_addr_code(env, tb->pc);
+    target_ulong last_page = (tb->pc + tb->size - 1) & TARGET_PAGE_MASK;
+    tb_page_addr_t phys_page2 = -1;
+
+    if (phys_pc == (tb_page_addr_t)-1) {
+        return false;
+    }
+    if ((tb->pc & TARGET_PAGE_MASK) != last_page) {
+        phys_page2 = get_page_addr_code(env, last_page);
+        if (phys_page2 == (tb_page_addr_t)-1) {
+            return false;
+        }
+    }
+    tcg_tb_insert(tb);
+    if (tb_link_page(tb, phys_pc, phys_page2) != tb) {
+        tcg_tb_remove(tb);
+        return false;
+    }
+#ifdef CONFIG_LATX_AOT
+    aot_mark_dynamic_tb(tb);
+#endif
+    return true;
 }
 
 static TranslationBlock *kzt_install_guest_pc_callback(
     KztGuestPcCallbackState *state, CPUState *cpu, uintptr_t addr,
     void (*callback)(CPUX86State *))
 {
-    uint32_t jmpinst[2] = {0};
-    uint32_t *pinsn;
-    uint32_t *tmp;
     CPUArchState *env = cpu->env_ptr;
     TranslationBlock *tb;
-    KztFixedBranch branch;
-    void *callback_context;
-    uintptr_t code_ptr;
-    uint32_t flush_count;
-    ptrdiff_t bridge_offset;
-    int backlen;
-    bool same_source;
-    bool one_word_patch;
+    target_ulong pc, cs_base;
+    uint32_t flags;
     bool locked = !have_mmap_lock();
 
     env->eip = addr - env->segs[R_CS].base;
-    tb = kzt_tb_find_exp(cpu, NULL, 0, cpu->tcg_cflags);
-    if (!tb) {
-        return NULL;
-    }
-
     if (locked) {
         mmap_lock();
     }
-
-    code_ptr = (uintptr_t)tb->tc.ptr;
-    flush_count = qatomic_read(&tb_ctx.tb_flush_count);
-    same_source = state->tb == tb && state->code_ptr == code_ptr &&
-                  state->flush_count == flush_count;
-    if (same_source && state->callback == callback && state->addr == addr) {
+    tb = kzt_tb_find_exp(cpu, NULL, 0, cpu->tcg_cflags);
+    if (tb && state->tb == tb && state->code_ptr == (uintptr_t)tb->tc.ptr &&
+        state->flush_count == qatomic_read(&tb_ctx.tb_flush_count) &&
+        state->callback == callback && state->addr == addr &&
+        qatomic_read((uint32_t *)tb->tc.ptr) == state->entry_patch) {
         if (locked) {
             mmap_unlock();
         }
         return tb;
     }
 
-    if (!same_source) {
-        state->tb = tb;
-        state->flush_count = flush_count;
-        state->code_ptr = code_ptr;
-        state->inst_old[0] = 0;
-        state->inst_old[1] = 0;
-        state->pos = 0;
-        state->fixed_branch = false;
-
-        pinsn = (uint32_t *)tb->tc.ptr;
-        if (pinsn[0] == 0x50000800 && pinsn[1] == 0x03400000) {
-            state->pos = 2;
-            pinsn += state->pos;
-        }
-        state->inst_old[0] = pinsn[0];
-        state->inst_old[1] = pinsn[1];
+    /* Re-read guest code rather than a previous hook or linked host branch.
+     * This also handles A -> B -> A without keeping a second TB registry. */
+    if (tb) {
+        tb_phys_invalidate(tb, -1);
     }
-
+    state->tb = NULL;
     state->callback = callback;
     state->addr = addr;
-    pinsn = (uint32_t *)code_ptr + state->pos;
-    state->fixed_branch = kzt_fixed_branch_target(
-        state->inst_old, (uintptr_t)pinsn, &branch);
-
-    callback_context = tcg_ctx->code_gen_ptr;
-    /*
-     * A one-word source branch reads pinsn[1] as its link or branch target,
-     * but a two-word entry patch overwrites that word.  Keep the one-word
-     * entry patch while the bridge stays in b range, and otherwise replay the
-     * covered word from a continuation in front of the bridge.
-     */
-    bridge_offset = (char *)callback_context - (char *)pinsn;
-    one_word_patch = state->fixed_branch && branch.insn_count == 1 &&
-                     bridge_offset >= -(1 << 27) &&
-                     bridge_offset <= (1 << 27) - 4;
-
-    if (state->fixed_branch) {
-        uintptr_t target = branch.target;
-        uintptr_t return_addr = branch.link_reg
-                                    ? (uintptr_t)(pinsn + branch.insn_count)
-                                    : 0;
-        uint32_t *resume = NULL;
-
-        if (!one_word_patch && branch.insn_count == 1 &&
-            (branch.link_reg || target == (uintptr_t)(pinsn + 1))) {
-            resume = callback_context;
-            callback_context = resume + 4;
-            if (branch.link_reg) {
-                return_addr = (uintptr_t)resume;
-            }
-            if (target == (uintptr_t)(pinsn + 1)) {
-                target = (uintptr_t)resume;
-            }
-        }
-
-        backlen = target_latx_emit_fixed_callback_bridge(
-            callback_context, callback, branch.base_reg, branch.base,
-            branch.link_reg, return_addr, target);
-        backlen *= 4;
-        if (resume) {
-            memset(&jmpinst, 0, sizeof(jmpinst));
-            light_tb_target_set_jmp_target(0, (uintptr_t)(resume + 1),
-                                           (uintptr_t)&jmpinst,
-                                           (uintptr_t)(pinsn + 2));
-            resume[0] = state->inst_old[1];
-            resume[1] = jmpinst[0];
-            resume[2] = jmpinst[1];
-        }
-    } else {
-        backlen = target_latx_emit_callback_bridge(callback_context, callback);
-        backlen *= 4;
+    cpu_get_tb_cpu_state(env, &pc, &cs_base, &flags);
+    tb = tb_gen_code(cpu, pc, cs_base, flags,
+                     cpu->tcg_cflags | CF_KZT_PRIVATE);
+    if (tb && (!kzt_prepare_guest_pc_callback(tb, state) ||
+               !kzt_publish_guest_pc_callback(env, tb))) {
+        tb_destroy(tb);
+        tb = NULL;
     }
-    tcg_ctx->code_gen_ptr = (char *)callback_context + backlen;
-
-    printf_log(LOG_DEBUG,
-               "KZT install guest callback cpu=%p pid=%d bridge=%p to %p "
-               "tb=%p fixed=%d\n",
-               cpu, getpid(), callback_context, tcg_ctx->code_gen_ptr, tb,
-               state->fixed_branch);
-
-    if (one_word_patch) {
-        b_to_addr((uintptr_t)pinsn, (uintptr_t)pinsn,
-                  (uintptr_t)callback_context);
-    } else {
-        light_tb_target_set_jmp_target(0, (uintptr_t)pinsn,
-                                       (uintptr_t)&jmpinst,
-                                       (uintptr_t)callback_context);
+    if (!tb) {
+        state->tb = NULL;
+        state->callback = NULL;
+        printf_log(LOG_INFO, "KZT could not install guest callback at %p\n",
+                   (void *)addr);
     }
-
-    if (!state->fixed_branch) {
-        uint32_t head_jmp[2] = { jmpinst[0], jmpinst[1] };
-
-        if (head_jmp[1]) {
-            /* The bridge has two copied original instructions and a long jump. */
-            tmp = (uint32_t *)((uintptr_t)callback_context + backlen - 4 * 4);
-            tmp[0] = state->inst_old[0];
-            tmp[1] = state->inst_old[1];
-
-            memset(&jmpinst, 0, sizeof(jmpinst));
-            light_tb_target_set_jmp_target(0, (uintptr_t)(tmp + 2),
-                                           (uintptr_t)&jmpinst,
-                                           (uintptr_t)(pinsn + 2));
-            tmp[2] = jmpinst[0];
-            tmp[3] = jmpinst[1];
-        } else {
-            tmp = (uint32_t *)((uintptr_t)callback_context + backlen - 4 * 4);
-            tmp[0] = state->inst_old[0];
-
-            memset(&jmpinst, 0, sizeof(jmpinst));
-            light_tb_target_set_jmp_target(0, (uintptr_t)(tmp + 1),
-                                           (uintptr_t)&jmpinst,
-                                           (uintptr_t)(pinsn + 1));
-            tmp[1] = jmpinst[0];
-        }
-
-        kzt_patch_callback_branch(pinsn, head_jmp);
-    } else if (!one_word_patch) {
-        kzt_patch_callback_branch(pinsn, jmpinst);
-    }
-
     if (locked) {
         mmap_unlock();
     }
@@ -3434,9 +3409,11 @@ void kzt_install_runtime_callbacks(CPUState *cpu, void *info)
      * The program-entry hook is version independent.  It installs the
      * public r_debug/r_brk observer after guest ld.so finishes startup.
      */
-    kzt_install_guest_pc_callback(&jmpinst_exec, cpu,
-                                  execinfo->exec_entry,
-                                  kzt_guest_main_entry_callback);
+    if (!kzt_install_guest_pc_callback(&jmpinst_exec, cpu,
+                                       execinfo->exec_entry,
+                                       kzt_guest_main_entry_callback)) {
+        kzt_report_main_fallback_once("program-entry callback installation failed");
+    }
     env->eip = eip;
 }
 void kzt_bridge_init(void)

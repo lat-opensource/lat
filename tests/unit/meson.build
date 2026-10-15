@@ -236,6 +236,14 @@ test(
   suite: 'lat-pr-fast',
 )
 
+test(
+  'test-kzt-callback-branch',
+  python,
+  args: [files('kzt/test-kzt-callback-branch.py'), project_source_root,
+         '--cc', ' '.join(cc.cmd_array())],
+  suite: 'lat-pr-fast',
+)
+
 test_kzt_public_loader_observer = executable(
   'test-kzt-public-loader-observer',
   files(

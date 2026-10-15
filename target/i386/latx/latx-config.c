@@ -264,7 +264,15 @@ int target_latx_emit_callback_bridge(
 
     tr_init(NULL);
     generate_kzt_callback_context(code_buf_addr, callback);
-    label_dispose(NULL, lat_ctx);
+    code_nr = label_dispose(NULL, lat_ctx);
+    if ((uintptr_t)code_buf_addr >
+            (uintptr_t)tcg_ctx->code_gen_buffer + tcg_ctx->code_gen_buffer_size ||
+        (size_t)code_nr >
+            ((uintptr_t)tcg_ctx->code_gen_buffer + tcg_ctx->code_gen_buffer_size -
+             (uintptr_t)code_buf_addr) / 4) {
+        tr_fini(false);
+        return -1;
+    }
     code_nr = tr_ir2_assemble((void *)code_buf_addr,
                               lat_ctx->first_ir2);
     tr_fini(false);
@@ -287,7 +295,15 @@ int target_latx_emit_fixed_callback_bridge(
     generate_kzt_fixed_callback_context(code_buf_addr, callback, base_reg,
                                         base_addr, link_reg, return_addr,
                                         target);
-    label_dispose(NULL, lat_ctx);
+    code_nr = label_dispose(NULL, lat_ctx);
+    if ((uintptr_t)code_buf_addr >
+            (uintptr_t)tcg_ctx->code_gen_buffer + tcg_ctx->code_gen_buffer_size ||
+        (size_t)code_nr >
+            ((uintptr_t)tcg_ctx->code_gen_buffer + tcg_ctx->code_gen_buffer_size -
+             (uintptr_t)code_buf_addr) / 4) {
+        tr_fini(false);
+        return -1;
+    }
     code_nr = tr_ir2_assemble((void *)code_buf_addr, lat_ctx->first_ir2);
     tr_fini(false);
     return code_nr;

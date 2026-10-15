@@ -1921,6 +1921,12 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
 #endif
     void *host_pc;
 
+#ifdef CONFIG_LATX_KZT
+    bool kzt_private = cflags & CF_KZT_PRIVATE;
+
+    cflags &= ~CF_KZT_PRIVATE;
+#endif
+
     assert_memory_lock();
     qemu_thread_jit_write();
 
@@ -2317,6 +2323,13 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
 
 #ifdef CONFIG_LATX_AOT
     if (in_pre_translate) {
+        return tb;
+    }
+#endif
+
+#ifdef CONFIG_LATX_KZT
+    /* KZT patches this fresh TB and publishes it from its own installer. */
+    if (kzt_private) {
         return tb;
     }
 #endif
