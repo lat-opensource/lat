@@ -3258,8 +3258,10 @@ static TranslationBlock *kzt_install_guest_pc_callback(
     void *callback_context;
     uintptr_t code_ptr;
     uint32_t flush_count;
+    ptrdiff_t bridge_offset;
     int backlen;
     bool same_source;
+    bool one_word_patch;
     bool locked = !have_mmap_lock();
 
     env->eip = addr - env->segs[R_CS].base;
@@ -3308,19 +3310,54 @@ static TranslationBlock *kzt_install_guest_pc_callback(
         state->inst_old, (uintptr_t)pinsn, &branch);
 
     callback_context = tcg_ctx->code_gen_ptr;
+    /*
+     * A one-word source branch reads pinsn[1] as its link or branch target,
+     * but a two-word entry patch overwrites that word.  Keep the one-word
+     * entry patch while the bridge stays in b range, and otherwise replay the
+     * covered word from a continuation in front of the bridge.
+     */
+    bridge_offset = (char *)callback_context - (char *)pinsn;
+    one_word_patch = state->fixed_branch && branch.insn_count == 1 &&
+                     bridge_offset >= -(1 << 27) &&
+                     bridge_offset <= (1 << 27) - 4;
+
     if (state->fixed_branch) {
+        uintptr_t target = branch.target;
         uintptr_t return_addr = branch.link_reg
                                     ? (uintptr_t)(pinsn + branch.insn_count)
                                     : 0;
+        uint32_t *resume = NULL;
+
+        if (!one_word_patch && branch.insn_count == 1 &&
+            (branch.link_reg || target == (uintptr_t)(pinsn + 1))) {
+            resume = callback_context;
+            callback_context = resume + 4;
+            if (branch.link_reg) {
+                return_addr = (uintptr_t)resume;
+            }
+            if (target == (uintptr_t)(pinsn + 1)) {
+                target = (uintptr_t)resume;
+            }
+        }
 
         backlen = target_latx_emit_fixed_callback_bridge(
             callback_context, callback, branch.base_reg, branch.base,
-            branch.link_reg, return_addr, branch.target);
+            branch.link_reg, return_addr, target);
+        backlen *= 4;
+        if (resume) {
+            memset(&jmpinst, 0, sizeof(jmpinst));
+            light_tb_target_set_jmp_target(0, (uintptr_t)(resume + 1),
+                                           (uintptr_t)&jmpinst,
+                                           (uintptr_t)(pinsn + 2));
+            resume[0] = state->inst_old[1];
+            resume[1] = jmpinst[0];
+            resume[2] = jmpinst[1];
+        }
     } else {
         backlen = target_latx_emit_callback_bridge(callback_context, callback);
+        backlen *= 4;
     }
-    backlen *= 4;
-    tcg_ctx->code_gen_ptr += backlen;
+    tcg_ctx->code_gen_ptr = (char *)callback_context + backlen;
 
     printf_log(LOG_DEBUG,
                "KZT install guest callback cpu=%p pid=%d bridge=%p to %p "
@@ -3328,9 +3365,14 @@ static TranslationBlock *kzt_install_guest_pc_callback(
                cpu, getpid(), callback_context, tcg_ctx->code_gen_ptr, tb,
                state->fixed_branch);
 
-    light_tb_target_set_jmp_target(0, (uintptr_t)pinsn,
-                                   (uintptr_t)&jmpinst,
-                                   (uintptr_t)callback_context);
+    if (one_word_patch) {
+        b_to_addr((uintptr_t)pinsn, (uintptr_t)pinsn,
+                  (uintptr_t)callback_context);
+    } else {
+        light_tb_target_set_jmp_target(0, (uintptr_t)pinsn,
+                                       (uintptr_t)&jmpinst,
+                                       (uintptr_t)callback_context);
+    }
 
     if (!state->fixed_branch) {
         uint32_t head_jmp[2] = { jmpinst[0], jmpinst[1] };
@@ -3359,7 +3401,7 @@ static TranslationBlock *kzt_install_guest_pc_callback(
         }
 
         kzt_patch_callback_branch(pinsn, head_jmp);
-    } else {
+    } else if (!one_word_patch) {
         kzt_patch_callback_branch(pinsn, jmpinst);
     }
 

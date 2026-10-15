@@ -29,14 +29,17 @@ def source_function(source, signature):
 
 COMMON_PRELUDE = r'''
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <unistd.h>
 
 #define CHECK(x) do { if (!(x)) { fprintf(stderr, "%d: %s\n", \
     __LINE__, #x); exit(1); } } while (0)
+#define lsassert(x) CHECK(x)
 #define R_CS 1
 #define LOG_DEBUG 0
 #define qatomic_read(p) (*(p))
@@ -97,6 +100,7 @@ static TranslationBlock *kzt_tb_find_exp(CPUState *cpu, TranslationBlock *tb,
 static void light_tb_target_set_jmp_target(uintptr_t tc_ptr,
                                            uintptr_t jmp_rx,
                                            uintptr_t jmp_rw, uintptr_t addr);
+static void b_to_addr(uintptr_t jmp_rx, uintptr_t jmp_rw, uintptr_t addr);
 static int target_latx_emit_callback_bridge(void *code_buf_addr,
                                             void (*callback)(CPUX86State *));
 static int target_latx_emit_fixed_callback_bridge(
@@ -121,12 +125,25 @@ static int mmap_depth;
 static int fixed_emit_count;
 static int normal_emit_count;
 static int patch_count;
+static int one_word_patch_count;
+static int far_patch_count;
 static uintptr_t emitted_target;
 static uintptr_t emitted_base;
 static uintptr_t emitted_link;
 static unsigned int emitted_base_reg;
 static unsigned int emitted_link_reg;
+static void *emitted_bridge;
 static void (*emitted_callback)(CPUX86State *);
+static uintptr_t jump_targets[8];
+static unsigned int jump_target_count;
+
+#define REPLAY_INSN UINT32_C(0x02800000)
+#define NEAR_B      UINT32_C(0x60000000)
+#define NOP_WORD    UINT32_C(0x03400000)
+#define PCADDU18I   UINT32_C(0x1e000000)
+#define JIRL_WORD   UINT32_C(0x4c000000)
+#define FAR_OFFSET  (160 << 20)
+#define FAR_MAP_SIZE (FAR_OFFSET + (1 << 20))
 
 static bool have_mmap_lock(void)
 {
@@ -150,14 +167,37 @@ static TranslationBlock *kzt_tb_find_exp(CPUState *cpu, TranslationBlock *tb,
     return mock_tb;
 }
 
+static bool entry_patch_in_range(uintptr_t from, uintptr_t to)
+{
+    ptrdiff_t offset = to - from;
+
+    return offset >= -(1 << 27) && offset <= (1 << 27) - 4;
+}
+
 static void light_tb_target_set_jmp_target(uintptr_t tc_ptr,
                                            uintptr_t jmp_rx,
                                            uintptr_t jmp_rw, uintptr_t addr)
 {
     uint32_t *insn = (uint32_t *)jmp_rw;
 
-    insn[0] = 0x60000000;
-    insn[1] = 0x03400000;
+    CHECK(jump_target_count < sizeof(jump_targets) / sizeof(jump_targets[0]));
+    jump_targets[jump_target_count++] = addr;
+    if (entry_patch_in_range(jmp_rx, addr)) {
+        insn[0] = NEAR_B;
+        insn[1] = NOP_WORD;
+    } else {
+        insn[0] = PCADDU18I;
+        insn[1] = JIRL_WORD;
+        far_patch_count++;
+    }
+}
+
+static void b_to_addr(uintptr_t jmp_rx, uintptr_t jmp_rw, uintptr_t addr)
+{
+    CHECK(jmp_rx == jmp_rw);
+    CHECK(entry_patch_in_range(jmp_rx, addr));
+    *(uint32_t *)jmp_rw = NEAR_B;
+    one_word_patch_count++;
 }
 
 static int target_latx_emit_callback_bridge(void *code_buf_addr,
@@ -173,6 +213,7 @@ static int target_latx_emit_fixed_callback_bridge(
     uintptr_t return_addr, uintptr_t target)
 {
     fixed_emit_count++;
+    emitted_bridge = code_buf_addr;
     emitted_callback = callback;
     emitted_base_reg = base_reg;
     emitted_base = base_addr;
@@ -187,10 +228,8 @@ static void flush_idcache_range(uintptr_t rx, uintptr_t rw, size_t len)
     const uint32_t *insn = (const uint32_t *)rw;
 
     CHECK(len == 4 || len == 8);
-    CHECK(insn[0] == 0x60000000);
-    if (len == 8) {
-        CHECK(insn[1] == 0x03400000);
-    }
+    CHECK(insn[0] == NEAR_B || insn[0] == PCADDU18I);
+    CHECK(len != 8 || insn[1] != 0);
     patch_count++;
 }
 
@@ -236,6 +275,18 @@ static void callback_b(CPUX86State *env)
 {
 }
 
+static TranslationBlock *install_one(CPUState *cpu, TranslationBlock *tb,
+                                     KztGuestPcCallbackState *state,
+                                     uint32_t *bridge, uint32_t *code,
+                                     void (*callback)(CPUX86State *))
+{
+    tb->tc.ptr = code;
+    tcg_ctx->code_gen_ptr = bridge;
+    tb_ctx.tb_flush_count++;
+    memset(state, 0, sizeof(*state));
+    return kzt_install_guest_pc_callback(state, cpu, 0x1000, callback);
+}
+
 static void test_decoder(void)
 {
     uint32_t insn[2] = { 0 };
@@ -272,75 +323,125 @@ static void test_installer(void)
     CPUState cpu = { .env_ptr = &arch, .tcg_cflags = 0 };
     TranslationBlock tb = { 0 };
     KztGuestPcCallbackState state = { 0 };
-    uint32_t code_a[32] = { 0 };
-    uint32_t code_b[32] = { 0 };
-    uint32_t bridge[64];
-    uintptr_t target_a = (uintptr_t)&code_a[16];
-    uintptr_t target_b = (uintptr_t)&code_b[20];
-    uintptr_t target_a2 = (uintptr_t)&code_a[24];
-    int count;
+    uint32_t code_stack[32] = { 0 };
+    uint32_t bridge_stack[64] = { 0 };
+    uint32_t *code = code_stack;
+    uint32_t *bridge = bridge_stack;
+    uintptr_t target = (uintptr_t)&code_stack[16];
+    uint32_t *far;
+    int normal_count;
+    int fixed_count;
 
     mock_tb = &tb;
-    tb.tc.ptr = code_a;
-    encode_b(code_a, (uintptr_t)code_a, target_a, false);
-    code_a[1] = 0x03400000;
     tb_ctx.tb_flush_count = 3;
-    tcg_ctx->code_gen_ptr = bridge;
 
-    CHECK(kzt_install_guest_pc_callback(&state, &cpu, 0x1000,
-                                        callback_a) == &tb);
-    CHECK(fixed_emit_count == 1);
+    /* A plain first instruction keeps the existing normal bridge. */
+    code[0] = 0x12345678;
+    code[1] = REPLAY_INSN;
+    normal_count = normal_emit_count;
+    fixed_count = fixed_emit_count;
+    CHECK(install_one(&cpu, &tb, &state, bridge, code, callback_a) == &tb);
+    CHECK(normal_emit_count == normal_count + 1);
+    CHECK(fixed_emit_count == fixed_count);
+    CHECK(code[0] == NEAR_B && code[1] == NOP_WORD);
+    CHECK(bridge[4] == 0x12345678);
+    CHECK(bridge[5] == REPLAY_INSN);
+    CHECK(bridge[6] == NEAR_B && bridge[7] == NOP_WORD);
+    CHECK(mmap_depth == 0);
+
+    /*
+     * A one-word BL keeps the one-word entry patch, so its link still
+     * returns to the untouched second source instruction.
+     */
+    encode_b(code, (uintptr_t)code, target, true);
+    code[1] = REPLAY_INSN;
+    fixed_count = fixed_emit_count;
+    CHECK(install_one(&cpu, &tb, &state, bridge, code, callback_a) == &tb);
+    CHECK(fixed_emit_count == fixed_count + 1);
     CHECK(emitted_callback == callback_a);
-    CHECK(emitted_target == target_a);
-    CHECK(patch_count == 1);
+    CHECK(emitted_bridge == bridge);
+    CHECK(emitted_target == target);
+    CHECK(emitted_link == (uintptr_t)(code + 1));
+    CHECK(code[0] == NEAR_B);
+    CHECK(code[1] == REPLAY_INSN);
+    CHECK(bridge[0] == 0);
+    CHECK(tcg_ctx->code_gen_ptr == (char *)bridge + 8 * 4);
     CHECK(mmap_depth == 0);
 
-    count = fixed_emit_count;
-    CHECK(kzt_install_guest_pc_callback(&state, &cpu, 0x1000,
-                                        callback_a) == &tb);
-    CHECK(fixed_emit_count == count);
-    CHECK(mmap_depth == 0);
-
-    code_a[0] = 0x60000000;
-    code_a[1] = 0x03400000;
-    CHECK(kzt_install_guest_pc_callback(&state, &cpu, 0x1000,
-                                        callback_b) == &tb);
-    CHECK(fixed_emit_count == count + 1);
+    /* A one-word b +4 targets pinsn[1], which the one-word patch preserves. */
+    encode_b(code, (uintptr_t)code, (uintptr_t)(code + 1), false);
+    code[1] = REPLAY_INSN;
+    CHECK(install_one(&cpu, &tb, &state, bridge, code, callback_b) == &tb);
     CHECK(emitted_callback == callback_b);
-    CHECK(emitted_target == target_a);
+    CHECK(emitted_target == (uintptr_t)(code + 1));
+    CHECK(emitted_link == 0);
+    CHECK(code[0] == NEAR_B);
+    CHECK(code[1] == REPLAY_INSN);
+    CHECK(bridge[0] == 0);
     CHECK(mmap_depth == 0);
 
-    encode_b(code_a, (uintptr_t)code_a, target_a2, false);
-    tb_ctx.tb_flush_count++;
+    /*
+     * Out of b range the entry patch needs two words and covers pinsn[1].
+     * BL then returns to a bridge continuation that replays that word.
+     */
+    far = mmap(NULL, FAR_MAP_SIZE, PROT_READ | PROT_WRITE,
+               MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    CHECK(far != MAP_FAILED);
+    code = far;
+    bridge = (uint32_t *)((char *)far + FAR_OFFSET);
+    target = (uintptr_t)(far + 16);
+
+    encode_b(code, (uintptr_t)code, target, true);
+    code[1] = REPLAY_INSN;
+    CHECK(install_one(&cpu, &tb, &state, bridge, code, callback_a) == &tb);
+    CHECK(code[0] == PCADDU18I && code[1] == JIRL_WORD);
+    CHECK(emitted_bridge == bridge + 4);
+    CHECK(emitted_target == target);
+    CHECK(emitted_link == (uintptr_t)bridge);
+    CHECK(bridge[0] == REPLAY_INSN);
+    CHECK(bridge[1] == PCADDU18I && bridge[2] == JIRL_WORD);
+    CHECK(jump_targets[jump_target_count - 2] == (uintptr_t)(code + 2));
+    CHECK(jump_targets[jump_target_count - 1] == (uintptr_t)emitted_bridge);
+    CHECK(tcg_ctx->code_gen_ptr == (char *)(bridge + 4) + 8 * 4);
+    CHECK(mmap_depth == 0);
+
+    /* The same continuation serves a one-word b +4 covered by the patch. */
+    encode_b(code, (uintptr_t)code, (uintptr_t)(code + 1), false);
+    code[1] = REPLAY_INSN;
+    CHECK(install_one(&cpu, &tb, &state, bridge, code, callback_b) == &tb);
+    CHECK(code[0] == PCADDU18I && code[1] == JIRL_WORD);
+    CHECK(emitted_target == (uintptr_t)bridge);
+    CHECK(emitted_link == 0);
+    CHECK(bridge[0] == REPLAY_INSN);
+    CHECK(bridge[1] == PCADDU18I && bridge[2] == JIRL_WORD);
+    CHECK(jump_targets[jump_target_count - 2] == (uintptr_t)(code + 2));
+    CHECK(mmap_depth == 0);
+    CHECK(munmap(far, FAR_MAP_SIZE) == 0);
+
+    /* A two-word source pair still uses the fixed branch with link pinsn + 2. */
+    code = code_stack;
+    bridge = bridge_stack;
+    encode_pair(code, (uintptr_t)code, (uintptr_t)code + (1 << 18),
+                (uintptr_t)code + (1 << 18) + 4, 5, 6);
+    fixed_count = fixed_emit_count;
+    normal_count = normal_emit_count;
+    CHECK(install_one(&cpu, &tb, &state, bridge, code, callback_b) == &tb);
+    CHECK(fixed_emit_count == fixed_count + 1);
+    CHECK(normal_emit_count == normal_count);
+    CHECK(emitted_base_reg == 5);
+    CHECK(emitted_base == (uintptr_t)code + (1 << 18));
+    CHECK(emitted_link_reg == 6);
+    CHECK(emitted_link == (uintptr_t)(code + 2));
+    CHECK(emitted_target == (uintptr_t)code + (1 << 18) + 4);
+    CHECK(mmap_depth == 0);
+
+    /* Re-installing the same source and callback keeps the existing patch. */
+    fixed_count = fixed_emit_count;
+    normal_count = normal_emit_count;
     CHECK(kzt_install_guest_pc_callback(&state, &cpu, 0x1000,
                                         callback_b) == &tb);
-    CHECK(emitted_target == target_a2);
-    CHECK(mmap_depth == 0);
-
-    tb.tc.ptr = code_b;
-    encode_b(code_b, (uintptr_t)code_b, target_b, false);
-    CHECK(kzt_install_guest_pc_callback(&state, &cpu, 0x1000,
-                                        callback_b) == &tb);
-    CHECK(emitted_target == target_b);
-    CHECK(mmap_depth == 0);
-
-    code_a[0] = 0x12345678;
-    tb.tc.ptr = code_a;
-    tb_ctx.tb_flush_count++;
-    tcg_ctx->code_gen_ptr = bridge;
-    CHECK(kzt_install_guest_pc_callback(&state, &cpu, 0x1000,
-                                        callback_b) == &tb);
-    CHECK(normal_emit_count == 1);
-    CHECK(mmap_depth == 0);
-
-    encode_b(code_a, (uintptr_t)code_a, target_a2, true);
-    tb.tc.ptr = code_a;
-    tb_ctx.tb_flush_count++;
-    tcg_ctx->code_gen_ptr = bridge;
-    CHECK(kzt_install_guest_pc_callback(&state, &cpu, 0x1000,
-                                        callback_a) == &tb);
-    CHECK(emitted_link_reg == 1);
-    CHECK(emitted_link == (uintptr_t)(code_a + 1));
+    CHECK(fixed_emit_count == fixed_count);
+    CHECK(normal_emit_count == normal_count);
     CHECK(mmap_depth == 0);
 
     mock_tb = NULL;
@@ -418,14 +519,12 @@ static void kzt_wrapper_to_native(void)
 {
 }
 
-static void reset_bridge_test(unsigned int first_temp,
-                              unsigned int second_temp)
+static void reset_bridge_test(const unsigned int *temps, unsigned int count)
 {
     memset(writes, 0, sizeof(writes));
     write_count = 0;
-    temp_sequence[0] = first_temp;
-    temp_sequence[1] = second_temp;
-    temp_count = 2;
+    memcpy(temp_sequence, temps, count * sizeof(temp_sequence[0]));
+    temp_count = count;
     temp_index = 0;
     jump_reg = 0;
     jump_target = 0;
@@ -446,7 +545,7 @@ static void test_separate_registers(void)
 {
     uintptr_t regs[32] = { 0 };
 
-    reset_bridge_test(31, 30);
+    reset_bridge_test((const unsigned int[]){ 31, 30 }, 2);
     generate_kzt_fixed_callback_context(NULL, callback, 5, 0x1234, 6,
                                         0x5678, 0x9abc);
     CHECK(write_count == 3);
@@ -462,7 +561,7 @@ static void test_alias_registers(void)
 {
     uintptr_t regs[32] = { 0 };
 
-    reset_bridge_test(31, 30);
+    reset_bridge_test((const unsigned int[]){ 31, 30 }, 2);
     generate_kzt_fixed_callback_context(NULL, callback, 5, 0x1234, 5,
                                         0x5678, 0x9abc);
     CHECK(write_count == 2);
@@ -477,7 +576,7 @@ static void test_temp_collision(void)
 {
     uintptr_t regs[32] = { 0 };
 
-    reset_bridge_test(5, 7);
+    reset_bridge_test((const unsigned int[]){ 5, 7 }, 2);
     generate_kzt_fixed_callback_context(NULL, callback, 5, 0x1234, 6,
                                         0x5678, 0x9abc);
     CHECK(write_count == 3);
