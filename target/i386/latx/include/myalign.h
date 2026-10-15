@@ -42,7 +42,6 @@ typedef struct x64_va_list_s {
 
 #if defined(__loongarch64) || defined(__powerpc64__) || defined(__riscv)
 #define __MY_CPU CPUX86State *cpu = (CPUX86State *)lsenv->cpu_state
-#define __MY_R_RSP cpu->regs[R_ESP]
 
 #define CREATE_SYSV_VALIST(A) \
   va_list sysv_varargs = (va_list)A
@@ -75,7 +74,7 @@ typedef struct x64_va_list_s {
 #endif
 
 #define VARARGS sysv_varargs
-#define PREPARE_VALIST CREATE_SYSV_VALIST(__MY_R_RSP)
+#define PREPARE_VALIST CREATE_SYSV_VALIST(cpu->scratch)
 #define VARARGS_(A) sysv_varargs
 #define PREPARE_VALIST_(A) CREATE_SYSV_VALIST(A)
 uintptr_t getVArgs(int pos, uintptr_t* b, int N);
