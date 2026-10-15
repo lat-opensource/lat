@@ -588,11 +588,29 @@ static void test_temp_collision(void)
     CHECK(regs[5] == 0x1234 && regs[6] == 0x5678);
 }
 
+static void test_two_temp_collisions(void)
+{
+    uintptr_t regs[32] = { 0 };
+
+    reset_bridge_test((const unsigned int[]){ 5, 6, 7 }, 3);
+    generate_kzt_fixed_callback_context(NULL, callback, 5, 0x1234, 6,
+                                        0x5678, 0x9abc);
+    CHECK(write_count == 3);
+    CHECK(writes[0].reg == 5 && writes[0].value == 0x1234);
+    CHECK(writes[1].reg == 6 && writes[1].value == 0x5678);
+    CHECK(writes[2].reg == 7 && writes[2].value == 0x9abc);
+    CHECK(jump_reg == 7);
+    CHECK(temp_index == 3);
+    apply_writes(regs);
+    CHECK(regs[5] == 0x1234 && regs[6] == 0x5678);
+}
+
 int main(void)
 {
     test_separate_registers();
     test_alias_registers();
     test_temp_collision();
+    test_two_temp_collisions();
     puts("KZT fixed callback bridge: base, link, and temporary registers passed");
     return 0;
 }

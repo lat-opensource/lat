@@ -220,7 +220,9 @@ static void generate_kzt_fixed_callback_context(
     uintptr_t base_addr, unsigned int link_reg, uintptr_t return_addr,
     uintptr_t target)
 {
+    IR2_OPND rejected[2];
     IR2_OPND target_opnd;
+    unsigned int rejected_count = 0;
 
     kzt_native_to_wrapper();
     kzt_helper1((ADDR)callback);
@@ -234,12 +236,16 @@ static void generate_kzt_fixed_callback_context(
     }
 
     target_opnd = ra_alloc_itemp();
-    if (target_opnd._reg_num == base_reg ||
-        target_opnd._reg_num == link_reg) {
-        IR2_OPND alternate = ra_alloc_itemp();
-
-        ra_free_temp(target_opnd);
-        target_opnd = alternate;
+    /* Hold each conflict so the next allocation cannot return it again. */
+    while (target_opnd._reg_num == base_reg ||
+           target_opnd._reg_num == link_reg) {
+        lsassert(rejected_count <
+                 sizeof(rejected) / sizeof(rejected[0]));
+        rejected[rejected_count++] = target_opnd;
+        target_opnd = ra_alloc_itemp();
+    }
+    for (unsigned int index = 0; index < rejected_count; ++index) {
+        ra_free_temp(rejected[index]);
     }
     li_d(target_opnd, target);
     la_jirl(zero_ir2_opnd, target_opnd, 0);
