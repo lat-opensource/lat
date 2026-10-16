@@ -999,6 +999,15 @@ abi_long target_mmap(abi_ulong start, abi_ulong len, int target_prot,
             if (retaddr == -1)
                 goto fail;
 
+            /*
+             * The guest mapping is file-backed even though the host mapping
+             * had to be anonymous because the file offset is not host-page
+             * aligned.  Clear the sticky PAGE_ANON bit so that MADV_DONTNEED
+             * is not treated as discarding anonymous memory: the copied file
+             * contents must not be lost.
+             */
+            pageflags_set_clear(start, start + len - 1, 0, PAGE_ANON);
+
             abi_ulong tmp_start = start;
             abi_ulong tmp_end = end;
 
