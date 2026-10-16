@@ -89,6 +89,9 @@ void do_tb_flush(CPUState *cpu, run_on_cpu_data tb_flush_count)
 #endif
         cpu_tb_jmp_cache_clear(cpu);
     }
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+    latx_shadow_jmp_cache_clear_all();
+#endif
 
     qht_reset_size(&tb_ctx.htable, CODE_GEN_HTABLE_SIZE);
     tb_flush_remove_all();
