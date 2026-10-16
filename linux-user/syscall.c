@@ -11793,6 +11793,28 @@ static char * get_key_value_from_file(const char * key, char * real_path)
     return NULL;
 }
 
+/*
+ * The kernel launches every translated process through the binfmt_misc
+ * interpreter and passes its registered path as argv[0].  Keep that path
+ * available even when the registration file system is not visible, for
+ * example in a container that does not mount it.
+ */
+static char *get_latx_self_interpreter(void)
+{
+    char path[PATH_MAX];
+    ssize_t len;
+
+    if (latx_host_argv0 && latx_host_argv0[0]) {
+        return g_strdup(latx_host_argv0);
+    }
+    len = readlink("/proc/self/exe", path, sizeof(path) - 1);
+    if (len <= 0) {
+        return NULL;
+    }
+    path[len] = '\0';
+    return g_strdup(path);
+}
+
 static char* get_latx_binfmtinterpreter(void)
 {
     char *is_indocker = getenv("LATX_DOCKER");
@@ -11841,10 +11863,14 @@ static int open_other_cmdline(void *cpu_env, int fd, const char *oldpath)
     char **argv = malloc(argc_max*sizeof(void *));
     int argc = 0;
     static char* latx_binfmtinterpreter = NULL;
+    static char *latx_self_interpreter;
     int ret = 0;
     int cpy_offset = 0;
     if (!latx_binfmtinterpreter) {
         latx_binfmtinterpreter = get_latx_binfmtinterpreter();
+    }
+    if (!latx_self_interpreter) {
+        latx_self_interpreter = get_latx_self_interpreter();
     }
     FILE *f = fopen(oldpath, "r");
     lsassertm(f, "can open %s", oldpath);
@@ -11901,7 +11927,10 @@ static int open_other_cmdline(void *cpu_env, int fd, const char *oldpath)
             goto out;
         }
     }
-    if (!strcmp(argv[0], latx_binfmtinterpreter)) {
+    if ((latx_binfmtinterpreter &&
+         !strcmp(argv[0], latx_binfmtinterpreter)) ||
+        (latx_self_interpreter &&
+         !strcmp(argv[0], latx_self_interpreter))) {
         cpy_offset = 1;
     }
     for (int i = cpy_offset; i < argc; i++) {

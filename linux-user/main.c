@@ -115,6 +115,7 @@ int box64_tcmalloc_minimal = 0;
 #endif
 
 char *exec_path;
+char *latx_host_argv0;
 char *real_path;
 #ifdef CONFIG_LATX_AOT
 char *aot_file_path;
@@ -1398,6 +1399,16 @@ int main(int argc, char **argv, char **envp)
     unsigned int inherited_guest_mdwe = 0;
     bool inherited_guest_tsc_disabled = false;
 #endif
+
+    /*
+     * The kernel launches translated programs through the binfmt_misc
+     * interpreter and passes its registered path as argv[0].  Keep a copy
+     * so the syscall layer can filter that path out of other tasks'
+     * command lines even when binfmt_misc is not visible.
+     */
+    if (argv[0] && argv[0][0]) {
+        latx_host_argv0 = g_strdup(argv[0]);
+    }
 
 #if defined(CONFIG_LATX) && defined(__loongarch__)
     /* Lets check hwcap */

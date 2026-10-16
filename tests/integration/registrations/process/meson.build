@@ -92,6 +92,15 @@ if 'x86_64-linux-user' in target_dirs
     'timeout': 90,
   }]
   latx_integration_tests += [{
+    'name': 'test-cmdline-other-task',
+    'runner': find_program('../../test-cmdline-other-task.sh'),
+    'args': [
+      emulators['latx-x86_64'],
+      files('../../cmdline-other-task.c'),
+    ],
+    'timeout': 60,
+  }]
+  latx_integration_tests += [{
     'name': 'test-signal-return-bridge',
     'runner': find_program('../../test-signal-return-bridge.sh'),
     'args': [

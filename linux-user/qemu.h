@@ -245,6 +245,7 @@ typedef struct TaskState {
 } __attribute__((aligned(16))) TaskState;
 
 extern char *exec_path;
+extern char *latx_host_argv0;
 extern char *real_path;
 extern const char *interp_prefix;
 void init_task_state(TaskState *ts);
