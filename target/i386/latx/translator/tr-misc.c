@@ -1922,6 +1922,7 @@ bool translate_frstor(IR1_INST *pir1)
     la_mov32_zx(value, value);
     la_st_h(value, env_ir2_opnd,
                       lsenv_offset_of_status_word(lsenv)); /* status_word */
+    clear_softfpu_exception_flags();
 
     /* tag word */
     if (option_fputag) {

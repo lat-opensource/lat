@@ -1,5 +1,14 @@
 if 'x86_64-linux-user' in target_dirs
   latx_integration_tests += [{
+    'name': 'test-signal-x87-state-x86_64',
+    'runner': find_program('../../test-signal-x87-state.sh'),
+    'args': [
+      emulators['latx-x86_64'],
+      files('../../signal-x87-state.c'),
+      'x86_64',
+    ],
+  }]
+  latx_integration_tests += [{
     'name': 'test-proc-fd-closefrom-x86_64',
     'runner': find_program('../../test-proc-fd-closefrom.sh'),
     'args': [
@@ -11,6 +20,24 @@ if 'x86_64-linux-user' in target_dirs
 endif
 
 if 'i386-linux-user' in target_dirs
+  latx_integration_tests += [{
+    'name': 'test-signal-x87-state-i386-legacy',
+    'runner': find_program('../../test-signal-x87-state.sh'),
+    'args': [
+      emulators['latx-i386'],
+      files('../../signal-x87-state.c'),
+      'i386-legacy',
+    ],
+  }]
+  latx_integration_tests += [{
+    'name': 'test-signal-x87-state-i386',
+    'runner': find_program('../../test-signal-x87-state.sh'),
+    'args': [
+      emulators['latx-i386'],
+      files('../../signal-x87-state.c'),
+      'i386',
+    ],
+  }]
   latx_integration_tests += [{
     'name': 'test-proc-fd-closefrom-i386',
     'runner': find_program('../../test-proc-fd-closefrom.sh'),
