@@ -11821,13 +11821,16 @@ static char* get_latx_binfmtinterpreter(void)
         char * value = get_key_value_from_file("magic", tmpstr);
         if (value) {
             if(!strncmp(value, magic, strlen(magic))) {
+                free(value);
                 value = get_key_value_from_file("interpreter", tmpstr);
                 lsassert(value);
+                closedir(dir);
                 return value;
             }
             free(value);
         }
     }
+    closedir(dir);
     fprintf(stderr, "fixme:%s:latx cannot find %sXX\n", binfmt_path, __func__);
     return NULL;
 }
