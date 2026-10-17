@@ -1,5 +1,29 @@
 if 'x86_64-linux-user' in target_dirs and \
    'CONFIG_LATX_KZT' in config_host
+  foreach mode : ['late-tsync', 'late-private', 'live-tsync', 'divergent', 'fork']
+    latx_integration_tests += [{
+      'name': 'test-kzt-seccomp-attach-' + mode,
+      'runner': find_program('../../test-kzt-seccomp-attach.sh'),
+      'args': [
+        emulators['latx-x86_64'], mode,
+        files('../../kzt-seccomp-attach-guest.c'),
+        files('../../kzt-seccomp-attach-probe.c'),
+        files('../../x11-async-bridge-dummy.c'),
+      ],
+      'timeout': 60,
+    }]
+  endforeach
+  latx_integration_tests += [{
+    'name': 'test-kzt-dlsym',
+    'runner': find_program('../../test-kzt-dlsym.sh'),
+    'args': [
+      emulators['latx-x86_64'],
+      files('../../kzt-dlsym-guest.c'),
+      files('../../kzt-dlsym-plugin.c'),
+      files('../../kzt-dlsym-probe.c'),
+    ],
+    'timeout': 120,
+  }]
   latx_integration_tests += [{
     'name': 'test-x11-xcb-wrapper-abi',
     'runner': find_program('../../test-x11-xcb-wrapper-abi.sh'),
@@ -33,4 +57,96 @@ if 'x86_64-linux-user' in target_dirs and \
     ],
     'timeout': 150,
   }]
+
+  latx_integration_tests += [{
+    'name': 'test-kzt-guest-tls-opt-in',
+    'runner': find_program('../../test-kzt-guest-tls-opt-in.sh'),
+    'args': [
+      emulators['latx-x86_64'],
+      files('../../kzt-guest-tls-opt-in.c'),
+      files('../../x11-async-bridge-dummy.c'),
+      files('../../kzt-guest-tls-opt-in-plugin.c'),
+    ],
+    'timeout': 120,
+  }]
+
+  latx_integration_tests += [{
+    'name': 'test-kzt-pthread-tsd-alias',
+    'runner': find_program('../../test-kzt-pthread-tsd-alias.sh'),
+    'args': [
+      emulators['latx-x86_64'],
+      files('../../kzt-pthread-tsd-alias-guest.c'),
+    ],
+    'timeout': 120,
+  }]
+
+  latx_integration_tests += [{
+    'name': 'test-kzt-attached-robust',
+    'runner': find_program('../../test-kzt-attached-robust.sh'),
+    'args': [
+      emulators['latx-x86_64'],
+      files('../../kzt-attached-robust-guest.c'),
+      files('../../kzt-attached-robust-probe.c'),
+      files('../../x11-async-bridge-dummy.c'),
+    ],
+    'timeout': 120,
+  }]
+
+  latx_integration_tests += [{
+    'name': 'test-kzt-cxx-tls-lifetime',
+    'runner': find_program('../../test-kzt-cxx-tls-lifetime.sh'),
+    'args': [
+      emulators['latx-x86_64'],
+      files('../../kzt-cxx-tls-lifetime-guest.c'),
+      files('../../kzt-cxx-tls-lifetime-plugin.cpp'),
+      files('../../kzt-cxx-tls-lifetime-destructor.cpp'),
+      files('../../kzt-cxx-tls-lifetime-probe.c'),
+      files('../../x11-async-bridge-dummy.c'),
+    ],
+    'timeout': 120,
+  }]
+
+  latx_integration_tests += [{
+    'name': 'test-kzt-tls-dlopen-stress',
+    'runner': find_program('../../test-kzt-tls-dlopen-stress.sh'),
+    'args': [
+      emulators['latx-x86_64'],
+      files('../../kzt-tls-dlopen-stress-guest.c'),
+      files('../../kzt-host-thread-tls-guest-plugin.c'),
+      files('../../kzt-host-thread-tls-guest-plugin-b.c'),
+      files('../../kzt-tls-dlopen-stress-ie-plugin.c'),
+      files('../../kzt-tls-dlopen-stress-probe.c'),
+      files('../../x11-async-bridge-dummy.c'),
+    ],
+    'timeout': 180,
+  }]
+
+  latx_integration_tests += [{
+    'name': 'test-kzt-libc-boundary',
+    'runner': find_program('../../test-kzt-libc-boundary.sh'),
+    'args': [
+      emulators['latx-x86_64'],
+      files('../../kzt-libc-boundary.c'),
+      files('../../x11-async-bridge-dummy.c'),
+    ],
+    'timeout': 120,
+  }]
+
+
+    foreach mode : ['dtv', 'read', 'futex', 'seccomp', 'seccomp-restart-code',
+                  'attached-seccomp',
+                  'attached-seccomp-restart-code', 'flush']
+    latx_integration_tests += [{
+      'name': 'test-kzt-tls-fork-' + mode,
+      'runner': find_program('../../test-kzt-tls-fork-lifecycle.sh'),
+      'args': [
+        emulators['latx-x86_64'], mode,
+        files('../../kzt-tls-fork-lifecycle-guest.c'),
+        files('../../kzt-tls-fork-lifecycle-probe.c'),
+        files('../../kzt-tls-fork-lifecycle-plugin.c'),
+        files('../../x11-async-bridge-dummy.c'),
+      ],
+      'timeout': 60,
+    }]
+  endforeach
 endif

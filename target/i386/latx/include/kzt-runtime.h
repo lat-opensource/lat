@@ -21,12 +21,19 @@
  * cached "active" flag.
  */
 extern int option_kzt;
+extern int option_kzt_guest_tls;
 extern uint32_t kzt_effective_groups;
 void kzt_reclaim_unloaded_headers(void);
 
 static inline bool latx_kzt_runtime_enabled(void)
 {
     return option_kzt != 0 && kzt_effective_groups != 0;
+}
+
+/* Resolved at startup; never toggle ownership after threads are attached. */
+static inline bool latx_kzt_guest_tls_enabled(void)
+{
+    return option_kzt_guest_tls != 0 && latx_kzt_runtime_enabled();
 }
 
 #endif /* LATX_KZT_RUNTIME_H */

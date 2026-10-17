@@ -18,3 +18,19 @@ int XFlush(Display *display)
     fputs("ASYNC_GUEST_DUMMY_CALLED:XFlush\n", stderr);
     return -1;
 }
+
+int (*XSetAfterFunction(Display *display,
+                        int (*callback)(Display *)))(Display *)
+{
+    (void)display;
+    (void)callback;
+    fputs("ASYNC_GUEST_DUMMY_CALLED:XSetAfterFunction\n", stderr);
+    return NULL;
+}
+
+int XNoOp(Display *display)
+{
+    (void)display;
+    fputs("ASYNC_GUEST_DUMMY_CALLED:XNoOp\n", stderr);
+    return -1;
+}
