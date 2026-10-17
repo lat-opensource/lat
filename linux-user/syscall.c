@@ -145,6 +145,7 @@
 #include "linux_loop.h"
 #include "uname.h"
 #include "ioctl/mpt3sas_ctl.h"
+#include "ioctl/ntsync.h"
 
 #include "qemu.h"
 #include "exec/translate-all.h"
@@ -8907,6 +8908,26 @@ static abi_long handle_hidfeature(int fd, abi_ulong cmd, abi_ulong arg,
 
 #include "ioctl/ioctl_syscall/syscall_amdgpu_drm.c"
 #include <linux/hidraw.h>
+
+#if defined(TARGET_I386) && !defined(TARGET_X86_64) && \
+    defined(CONFIG_GUEST_BASE_ZERO)
+
+static abi_long do_ioctl_ntsync(const IOCTLEntry *ie, uint8_t *buf_temp,
+                                int fd, int cmd, abi_long arg)
+{
+    /*
+     * The ntsync wait commands contain a nested guest pointer, so the
+     * arguments can only be passed through while the guest is identity
+     * mapped.  Non-zero guest bases previously reached the unknown-ioctl
+     * fallback and must keep returning ENOSYS until they are translated.
+     */
+    if (guest_base != 0) {
+        return -TARGET_ENOSYS;
+    }
+    return get_errno(safe_ioctl(fd, ie->host_cmd,
+                               g2h_untagged((abi_ulong)arg)));
+}
+#endif
 
 typedef __u32 u32;
 typedef __u64 u64;
