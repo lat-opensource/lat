@@ -741,10 +741,6 @@ EXPORT void* my_dlsym(void *handle, void *symbol){
         if (!known_handle) {
             uint64_t ret = RunFunctionWithStateInternal(
                 (uintptr_t)dl->x86dlsym, 2, handle, symbol);
-            if (!ret) {
-                ret = kzt_resolve_guest_link_map_symbol(
-                    (uintptr_t)handle, rsymbol);
-            }
             if (!ret)
                 set_dl_errorf(dl, "Symbol \"%s\" not found in %p\n",
                               rsymbol, handle);
@@ -902,13 +898,6 @@ EXPORT void* my_dlsym(void *handle, void *symbol){
                 "call x86dlsym filename is %s %s ret=0x%lx\n",
                 handle_snapshot.library->x86linkmap->l_name,
                 (char *)symbol, ret);
-            if (ret) {
-                return (void *)ret;
-            }
-            ret = latx_kzt_guest_tls_enabled()
-                ? kzt_resolve_guest_link_map_symbol(
-                    (uintptr_t)handle_snapshot.library->x86linkmap,
-                    rsymbol) : 0;
             if (ret) {
                 return (void *)ret;
             }

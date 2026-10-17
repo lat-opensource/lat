@@ -107,6 +107,29 @@ and then run tests with the bundled `meson/meson.py`, or vice versa.
 To run the integration suite, replace `lat-pr-fast` with
 `latx-integration`.
 
+`test-kzt-dlsym` checks raw Guest handles and registered wrapper handles with
+KZT off, Guest TLS off, and Guest TLS on. It requires a matching x86-64 Guest
+runtime (`LATX_X86_64_SYSROOT`) and compiler (`LATX_X86_64_CC`). A native X11
+probe provides an execution sentinel; the test does not need an X server.
+Alternatively, set `LATX_DLSYM_GUEST_ARTIFACT_DIR` to verified prebuilt fixtures.
+Build them from the tested checkout on an x86-64 Linux host:
+
+```sh
+mkdir dlsym-fixtures
+cd dlsym-fixtures
+cc -O2 /path/to/checkout/tests/integration/kzt-dlsym-guest.c \
+    -ldl -pthread -o guest
+cc -shared -fPIC -O2 /path/to/checkout/tests/integration/kzt-dlsym-plugin.c \
+    -o plugin.so
+cc -shared -fPIC -O2 /path/to/checkout/tests/integration/kzt-dlsym-plugin.c \
+    -Wl,-soname,libX11.so.6 -o libX11.so.6
+sha256sum guest plugin.so libX11.so.6 > artifacts.sha256
+(cd /path/to/checkout/tests/integration && \
+    sha256sum kzt-dlsym-guest.c kzt-dlsym-plugin.c) > sources.sha256
+```
+
+The runner verifies both source and binary hashes before using these fixtures.
+
 The `test-async-sigill-x86_64` and `test-async-sigill-i386` integration tests
 build `tests/integration/async-sigill.S` with Clang/LLD. Alternatively, compile
 that source from the tested checkout on an x86 Linux host with

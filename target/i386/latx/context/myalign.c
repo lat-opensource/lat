@@ -2607,28 +2607,6 @@ out:
     return address;
 }
 
-uintptr_t kzt_resolve_guest_link_map_symbol(
-    uintptr_t link_map_addr,
-    const char *symbol_name)
-{
-    kzt_public_loader_object_t object;
-    kzt_public_loader_result_t result;
-    uintptr_t address = 0;
-
-    if (!link_map_addr || !symbol_name) {
-        return 0;
-    }
-    mmap_lock();
-    result = kzt_read_guest_loader_object(link_map_addr, &object);
-    if (result == KZT_PUBLIC_LOADER_OK) {
-        result = kzt_public_loader_find_symbol_in_map(
-            &object, &kzt_public_loader_reader,
-            symbol_name, &address);
-    }
-    mmap_unlock();
-    return result == KZT_PUBLIC_LOADER_OK ? address : 0;
-}
-
 static int kzt_main_elf_contains_address(uintptr_t guest_addr)
 {
     uintptr_t load_bias;

@@ -168,9 +168,6 @@ uintptr_t kzt_resolve_guest_symbol(const char *name);
 uintptr_t kzt_resolve_guest_object_symbol(
     const char *object_name,
     const char *symbol_name);
-uintptr_t kzt_resolve_guest_link_map_symbol(
-    uintptr_t link_map_addr,
-    const char *symbol_name);
 uintptr_t kzt_find_guest_link_map_by_address(uintptr_t guest_addr);
 int kzt_guest_loader_state_is_consistent(void);
 uintptr_t kzt_find_guest_link_map_by_address_ex(
