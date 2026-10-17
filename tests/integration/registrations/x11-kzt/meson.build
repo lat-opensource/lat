@@ -1,5 +1,18 @@
 if 'x86_64-linux-user' in target_dirs and \
    'CONFIG_LATX_KZT' in config_host
+  foreach mode : ['late-tsync', 'late-private', 'live-tsync', 'divergent', 'fork']
+    latx_integration_tests += [{
+      'name': 'test-kzt-seccomp-attach-' + mode,
+      'runner': find_program('../../test-kzt-seccomp-attach.sh'),
+      'args': [
+        emulators['latx-x86_64'], mode,
+        files('../../kzt-seccomp-attach-guest.c'),
+        files('../../kzt-seccomp-attach-probe.c'),
+        files('../../x11-async-bridge-dummy.c'),
+      ],
+      'timeout': 60,
+    }]
+  endforeach
   latx_integration_tests += [{
     'name': 'test-kzt-dlsym',
     'runner': find_program('../../test-kzt-dlsym.sh'),

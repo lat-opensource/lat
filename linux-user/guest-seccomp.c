@@ -46,6 +46,46 @@ void guest_seccomp_filter_unref(GuestSeccompFilter *filter)
     }
 }
 
+bool guest_seccomp_attach_task(CPUState *new_cpu, TaskState *new_task)
+{
+    CPUState *cpu;
+    GuestSeccompFilter *shared = NULL;
+    bool found = false;
+    bool published = false;
+
+    g_assert(new_cpu->opaque == NULL);
+    g_assert(new_task->seccomp_filter == NULL);
+
+    /*
+     * A foreign pthread has no known Guest creator. Adopt the current common
+     * root, including NULL, rather than a root saved in the startup template.
+     * Divergent policies need explicit provenance and cannot be guessed here.
+     * TSYNC and private installation use this same lock, so either they see
+     * this fully initialized task or we inherit their completed update.
+     */
+    cpu_list_lock();
+    CPU_FOREACH(cpu) {
+        TaskState *task = cpu->opaque;
+
+        if (!task || task->seccomp_exiting) {
+            continue;
+        }
+        if (found && shared != task->seccomp_filter) {
+            goto out;
+        }
+        shared = task->seccomp_filter;
+        found = true;
+    }
+    if (found) {
+        new_task->seccomp_filter = guest_seccomp_filter_ref(shared);
+        new_cpu->opaque = new_task;
+        published = true;
+    }
+out:
+    cpu_list_unlock();
+    return published;
+}
+
 static bool seccomp_jump_valid(unsigned int pc, uint32_t offset,
                                unsigned int len)
 {

@@ -15,6 +15,8 @@ import tempfile
 
 def function(source, signature):
     start = source.index(signature)
+    while source.find(";", start, source.index("{", start)) >= 0:
+        start = source.index(signature, start + len(signature))
     return source[start:source.index("\n}", start) + 2] + "\n"
 
 
@@ -38,6 +40,10 @@ typedef CPUState CPUArchState;
 static CPUState *cpus, *thread_cpu;
 static unsigned allocations;
 static unsigned root_publications;
+static bool list_locked;
+static GMutex list_mutex;
+static CPUState *publication_watch;
+static TaskState *publication_expected;
 #define qatomic_store_release(p, v) do { \
     root_publications++; __atomic_store_n(p, v, __ATOMIC_RELEASE); \
 } while (0)
@@ -71,8 +77,17 @@ static void remove_cpu(CPUState **head, CPUState *cpu) {
 #define prctl(...) 1
 #define start_exclusive() ((void)0)
 #define end_exclusive() ((void)0)
-#define cpu_list_lock() ((void)0)
-#define cpu_list_unlock() ((void)0)
+static void cpu_list_lock(void) {
+    g_mutex_lock(&list_mutex); CHECK(!list_locked); list_locked = true;
+}
+static void cpu_list_unlock(void) {
+    CHECK(list_locked);
+    if (publication_watch) {
+        CHECK(publication_watch->opaque == publication_expected);
+    }
+    list_locked = false;
+    g_mutex_unlock(&list_mutex);
+}
 #define mmap_fork_end(child) ((void)0)
 #define sigact_fork_end(child) ((void)0)
 #define path_fork_end(child) ((void)0)
@@ -96,9 +111,126 @@ static void install(CPUState *cpu, unsigned flags) {
 static void release(TaskState *task) {
     guest_seccomp_filter_unref(task->seccomp_filter); task->seccomp_filter = NULL;
 }
+
+#ifdef HAVE_SECCOMP_ATTACH
+typedef struct AttachRace {
+    CPUState *cpu;
+    TaskState *task;
+    gint *started;
+    bool published;
+} AttachRace;
+static gpointer race_attach(gpointer opaque) {
+    AttachRace *race = opaque;
+    g_atomic_int_inc(race->started);
+    race->published = guest_seccomp_attach_task(race->cpu, race->task);
+    return NULL;
+}
+static gpointer race_tsync(gpointer opaque) {
+    AttachRace *race = opaque;
+    g_atomic_int_inc(race->started);
+    install(race->cpu, SECCOMP_FILTER_FLAG_TSYNC);
+    return NULL;
+}
+
+static void test_attach_tsync_race(void) {
+    for (unsigned i = 0; i < 32; i++) {
+        TaskState owner = { .ts_tid = 1 }, attached = { .ts_tid = 2 };
+        CPUState newcomer = { 0 }, source = { .opaque = &owner, .next = &newcomer };
+        gint started = 0;
+        AttachRace attach = { .cpu = &newcomer, .task = &attached, .started = &started };
+        AttachRace sync = { .cpu = &source, .started = &started };
+        GThread *a, *b;
+
+        cpus = &source;
+        install(&source, 0);
+        /* Both operations queue on the real lock before either can publish. */
+        cpu_list_lock();
+        a = g_thread_new("attach", race_attach, &attach);
+        b = g_thread_new("tsync", race_tsync, &sync);
+        while (g_atomic_int_get(&started) != 2) { g_thread_yield(); }
+        cpu_list_unlock();
+        g_thread_join(a); g_thread_join(b);
+        CHECK(attach.published && newcomer.opaque == &attached);
+        CHECK(owner.seccomp_filter == attached.seccomp_filter);
+        CHECK(owner.seccomp_filter->references == 2);
+        CHECK(owner.seccomp_filter->previous->references == 1);
+        CHECK(allocations == 2);
+        cleanup_guest_seccomp(&attached);
+        cleanup_guest_seccomp(&owner);
+        CHECK(allocations == 0);
+    }
+    puts("seccomp attach: concurrent publication and TSYNC PASS");
+}
+#endif
+
+static void test_attached_tasks(void) {
+#ifdef HAVE_SECCOMP_ATTACH
+    TaskState owner = { .ts_tid = 1 }, attached = { .ts_tid = 2 };
+    TaskState divergent = { .ts_tid = 3 };
+    CPUState source = { .opaque = &owner }, newcomer = { 0 };
+    CPUState other = { .opaque = &divergent };
+
+    cpus = &newcomer;
+    CHECK(!guest_seccomp_attach_task(&newcomer, &attached));
+    CHECK(!newcomer.opaque && !attached.seccomp_filter && allocations == 0);
+
+    cpus = &source; source.next = &newcomer;
+    publication_watch = &newcomer; publication_expected = &attached;
+    CHECK(guest_seccomp_attach_task(&newcomer, &attached));
+    publication_watch = NULL;
+    CHECK(!attached.seccomp_filter); /* No policy is also a shared policy. */
+    cleanup_guest_seccomp(&attached);
+    CHECK(attached.seccomp_exiting);
+
+    /* TSYNC before attach skips the unpublished task; attach takes its result. */
+    newcomer.opaque = NULL; attached.seccomp_exiting = false;
+    install(&source, SECCOMP_FILTER_FLAG_TSYNC);
+    CHECK(allocations == 1 && owner.seccomp_filter->references == 1);
+    publication_watch = &newcomer; publication_expected = &attached;
+    CHECK(guest_seccomp_attach_task(&newcomer, &attached));
+    publication_watch = NULL;
+    CHECK(attached.seccomp_filter == owner.seccomp_filter);
+    CHECK(owner.seccomp_filter->references == 2);
+
+    /* TSYNC after attach sees its owning root and preserves the previous edge. */
+    install(&source, SECCOMP_FILTER_FLAG_TSYNC);
+    CHECK(allocations == 2 && owner.seccomp_filter == attached.seccomp_filter);
+    CHECK(owner.seccomp_filter->references == 2);
+    CHECK(owner.seccomp_filter->previous->references == 1);
+    cleanup_guest_seccomp(&attached);
+    CHECK(attached.seccomp_exiting && !attached.seccomp_filter);
+    CHECK(owner.seccomp_filter->references == 1);
+    cleanup_guest_seccomp(&attached); /* A failed attempt can unwind once more. */
+    CHECK(owner.seccomp_filter->references == 1);
+
+    /* Different live roots are ambiguous, including filtered versus NULL. */
+    newcomer.opaque = NULL; attached.seccomp_exiting = false;
+    newcomer.next = &other;
+    publication_watch = &newcomer; publication_expected = NULL;
+    CHECK(!guest_seccomp_attach_task(&newcomer, &attached));
+    publication_watch = NULL;
+    CHECK(owner.seccomp_filter->references == 1 && allocations == 2);
+    install(&other, 0);
+    CHECK(!guest_seccomp_attach_task(&newcomer, &attached));
+    CHECK(allocations == 3 && !attached.seccomp_filter);
+
+    /* A departing task is not an eligible policy source. */
+    cleanup_guest_seccomp(&divergent);
+    CHECK(guest_seccomp_attach_task(&newcomer, &attached));
+    CHECK(attached.seccomp_filter == owner.seccomp_filter);
+    cleanup_guest_seccomp(&attached);
+    cleanup_guest_seccomp(&owner);
+    CHECK(allocations == 0);
+    publication_watch = NULL;
+    puts("seccomp attach: shared policy, publication, TSYNC, divergence, exit PASS");
+    test_attach_tsync_race();
+#endif
+}
+
 int main(void) {
     TaskState tasks[3] = {{ .ts_tid = 1 }, { .ts_tid = 2 }, { .ts_tid = 3 }};
     CPUState cpu[3] = {{ .opaque = &tasks[0] }, { .opaque = &tasks[1] }, { .opaque = &tasks[2] }};
+    test_attached_tasks();
     cpus = &cpu[0]; thread_cpu = cpus;
     CHECK(guest_seccomp_filter_ref(NULL) == NULL);
     guest_seccomp_filter_unref(NULL);
@@ -187,6 +319,11 @@ def main():
         text += "void guest_seccomp_filter_unref(GuestSeccompFilter *p) {}\n"
     text += function(source, "static abi_long seccomp_load_filter(")
     text += function(source, "static abi_long seccomp_install_filter(")
+    if "bool guest_seccomp_attach_task(" in source:
+        text += "#define HAVE_SECCOMP_ATTACH 1\n"
+        text += function(source, "bool guest_seccomp_attach_task(")
+        text += function(read_source("linux-user/syscall.c"),
+                         "static void cleanup_guest_seccomp(")
     text += function(main_source, "void fork_end(") + MAIN
     flags = shlex.split(subprocess.check_output(["pkg-config", "--cflags", "--libs", "glib-2.0"], text=True))
     with tempfile.TemporaryDirectory(prefix="lat-seccomp-lifetime-") as temporary:

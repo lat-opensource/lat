@@ -9612,6 +9612,7 @@ abi_long do_arch_prctl(CPUX86State *env, int code, abi_ulong addr)
 
 
 static pthread_mutex_t clone_lock = PTHREAD_MUTEX_INITIALIZER;
+static void cleanup_guest_seccomp(TaskState *ts);
 #ifdef CONFIG_LATX
 static CPUArchState *latx_host_thread_template;
 static pthread_key_t latx_host_thread_key;
@@ -9636,6 +9637,10 @@ static void latx_host_thread_release_cpu(CPUState *cpu)
 #endif
 
     kzt_guest_tls_destroy(env);
+    if (ts) {
+        /* Keep the policy through Guest destructors and TLS deallocation. */
+        cleanup_guest_seccomp(ts);
+    }
 #ifdef CONFIG_LATX_FAST_JMPCACHE
     env->tb_jmp_cache_ptr = NULL;
 #endif
@@ -9729,7 +9734,7 @@ int latx_finalize_host_thread_template(CPUArchState *env)
     template_ts->bprm = source_ts->bprm;
     template_ts->info = source_ts->info;
     template_ts->signal_mask = source_ts->signal_mask;
-    template_ts->seccomp_filter = source_ts->seccomp_filter;
+    /* A template is not a live task and must not retain a stale policy root. */
     template_ts->ipc_namespace_isolated =
         source_ts->ipc_namespace_isolated;
     template_cpu->opaque = template_ts;
@@ -9806,7 +9811,6 @@ static int latx_attach_current_host_thread_once(void)
         return -1;
     }
     new_cpu = env_cpu(new_env);
-    new_cpu->opaque = ts;
 #ifdef CONFIG_LATX_FAST_JMPCACHE
     new_env->tb_jmp_cache_ptr = NULL;
 #endif
@@ -9816,22 +9820,14 @@ static int latx_attach_current_host_thread_once(void)
     new_env->kzt_guest_thread_state = NULL;
     new_env->kzt_libc_semantic_state = NULL;
     if (kzt_guest_tls_clone_parent_snapshot(parent_env, new_env) != 0) {
-        latx_host_thread_release_cpu(new_cpu);
-        rcu_unregister_thread();
-        pthread_mutex_unlock(&clone_lock);
-        pthread_setcancelstate(old_cancel_state, NULL);
-        return -1;
+        goto fail_unpublished;
     }
 #endif
     new_env->kzt_guest_stack_base = 0;
     stack = target_mmap(0, NEW_STACK_SIZE, PROT_READ | PROT_WRITE,
                         MAP_PRIVATE | MAP_ANONYMOUS, -1, 0, 0);
     if (is_error(stack)) {
-        latx_host_thread_release_cpu(env_cpu(new_env));
-        rcu_unregister_thread();
-        pthread_mutex_unlock(&clone_lock);
-        pthread_setcancelstate(old_cancel_state, NULL);
-        return -1;
+        goto fail_unpublished;
     }
     new_env->kzt_guest_stack_base = stack;
 
@@ -9839,13 +9835,19 @@ static int latx_attach_current_host_thread_once(void)
     ts->bprm = parent_ts->bprm;
     ts->info = parent_ts->info;
     ts->signal_mask = parent_ts->signal_mask;
-    ts->seccomp_filter = parent_ts->seccomp_filter;
     ts->ipc_namespace_isolated = parent_ts->ipc_namespace_isolated;
     new_cpu->random_seed = qemu_guest_random_seed_thread_part1();
+    task_settid(ts);
+
+    if (!guest_seccomp_attach_task(new_cpu, ts)) {
+        fprintf(stderr,
+                "KZT cannot attach native thread: no common live Guest "
+                "seccomp policy\n");
+        goto fail_unpublished;
+    }
 
     tcg_register_thread();
     thread_cpu = new_cpu;
-    task_settid(ts);
     qemu_guest_random_seed_thread_part2(new_cpu->random_seed);
 #ifdef CONFIG_LATX_FAST_JMPCACHE
     if (!latx_fast_jmp_cache_init(new_env)) {
@@ -9877,6 +9879,14 @@ static int latx_attach_current_host_thread_once(void)
     pthread_mutex_unlock(&clone_lock);
     pthread_setcancelstate(old_cancel_state, NULL);
     return 0;
+
+fail_unpublished:
+    latx_host_thread_release_cpu(new_cpu);
+    g_free(ts);
+    rcu_unregister_thread();
+    pthread_mutex_unlock(&clone_lock);
+    pthread_setcancelstate(old_cancel_state, NULL);
+    return -1;
 }
 
 int latx_attach_current_host_thread(void)

@@ -5,6 +5,8 @@ struct GuestSeccompFilter;
 struct GuestSeccompFilter *guest_seccomp_filter_ref(
     struct GuestSeccompFilter *filter);
 void guest_seccomp_filter_unref(struct GuestSeccompFilter *filter);
+/* Publish a foreign-thread task only when live Guest tasks share one root. */
+bool guest_seccomp_attach_task(CPUState *cpu, TaskState *task);
 
 typedef enum GuestSeccompAction {
     GUEST_SECCOMP_CONTINUE,

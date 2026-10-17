@@ -46,6 +46,16 @@ thread exit runs recorded TSD and C++ TLS destructors, releases retained
 DSOs and handles non-PI robust mutex owner death before releasing TLS.
 The standard Guest pthread exit path retains its own destructor ownership.
 
+The startup template does not own a seccomp filter. On first attachment, a
+foreign thread takes an owning reference to the common filter root of all live
+Guest tasks and publishes its TaskState under the CPU-list lock. This orders
+attachment against both TSYNC and private filter installation. If the live
+tasks have divergent roots, or no live Guest task remains, attachment fails;
+the runtime cannot infer a foreign pthread's Guest creator. Existing Guest
+threads retain their own policies. Attached-thread teardown retains its filter
+through Guest destructors and TLS deallocation, then releases the reference.
+The scan runs only on first attachment, not on subsequent callbacks or syscalls.
+
 If Guest code running on an attached thread creates a Guest pthread, CPU
 cloning clears the managed stack, TLS allocation, parent snapshot and
 destructor-state pointers. Guest libc supplies the child's own TLS through

@@ -130,6 +130,17 @@ sha256sum guest plugin.so libX11.so.6 > artifacts.sha256
 
 The runner verifies both source and binary hashes before using these fixtures.
 
+`test-kzt-seccomp-attach-*` exercises native-thread attachment after TSYNC or
+private filter installation, repeated TSYNC and native-thread exit, divergent
+policies, and fork with a live attached thread. It uses a native X11 probe and
+does not require an X server. Set `LATX_X86_64_SYSROOT` and `LATX_X86_64_CC` as
+above, or supply `LATX_SECCOMP_ATTACH_GUEST_ARTIFACT_DIR` with `guest`, a Guest
+`libX11.so.6`, and matching `sources.sha256` / `artifacts.sha256` manifests.
+Build `guest` from `kzt-seccomp-attach-guest.c` with `-ldl -pthread` and link it
+against the dummy `libX11.so.6` built from `x11-async-bridge-dummy.c`. Both source
+basenames must appear in `sources.sha256`. `LATX_X11_INCLUDE` can select X11
+headers when they are outside `/usr/include`.
+
 The `test-async-sigill-x86_64` and `test-async-sigill-i386` integration tests
 build `tests/integration/async-sigill.S` with Clang/LLD. Alternatively, compile
 that source from the tested checkout on an x86 Linux host with

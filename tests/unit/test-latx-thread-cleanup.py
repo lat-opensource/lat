@@ -20,6 +20,8 @@ def function(source, signature, optional=False):
         return ""
     if start < 0:
         raise ValueError(f"Missing production function: {signature}")
+    while source.find(";", start, source.index("{", start)) >= 0:
+        start = source.index(signature, start + len(signature))
     return source[start:source.index("\n}", start) + 2] + "\n"
 
 
