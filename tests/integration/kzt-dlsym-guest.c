@@ -73,7 +73,8 @@ int main(int argc, char **argv)
     dlerror();
     result = dlsym(handle, "probe_null_ifunc");
     CHECK(result == NULL);
-    dlerror();
+    CHECK(dlerror() == NULL);
+    CHECK(dlerror() == NULL);
 
     CHECK(dlsym(handle, "probe_symbol_does_not_exist") == NULL);
     error = dlerror();

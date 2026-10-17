@@ -741,9 +741,7 @@ EXPORT void* my_dlsym(void *handle, void *symbol){
         if (!known_handle) {
             uint64_t ret = RunFunctionWithStateInternal(
                 (uintptr_t)dl->x86dlsym, 2, handle, symbol);
-            if (!ret)
-                set_dl_errorf(dl, "Symbol \"%s\" not found in %p\n",
-                              rsymbol, handle);
+            /* NULL can be a resolved value; leave Guest dlerror authoritative. */
             return (void*)ret;
         }
     }
@@ -898,12 +896,8 @@ EXPORT void* my_dlsym(void *handle, void *symbol){
                 "call x86dlsym filename is %s %s ret=0x%lx\n",
                 handle_snapshot.library->x86linkmap->l_name,
                 (char *)symbol, ret);
-            if (ret) {
-                return (void *)ret;
-            }
-            set_dl_errorf(dl, "Symbol \"%s\" not found in %p)\n", rsymbol,
-                          handle);
-            return NULL;
+            /* Preserve both the Guest result and its pending loader error. */
+            return (void *)ret;
 #endif
         }
     } else {
