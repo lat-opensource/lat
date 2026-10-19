@@ -8,6 +8,13 @@ uint64_t RunFunctionWithStateInternal(uintptr_t fnc, int nargs, ...);
 uint64_t RunFunctionWithStateInternalNoRefresh(uintptr_t fnc, int nargs,
                                                ...);
 uint64_t RunFunctionFmt(uintptr_t fnc, const char *fmt, ...);
+/*
+ * Return 0 only when the Guest call ran; preserve its value, including zero.
+ * On preparation failure return -1 and leave *result unchanged. Like
+ * RunFunctionFmt, this supports an existing Guest context with TLS disabled.
+ */
+int RunFunctionFmtChecked(uintptr_t fnc, uint64_t *result,
+                          const char *fmt, ...);
 float RunFunctionFmtFloat(uintptr_t fnc, const char *fmt, ...);
 #define RunFunction RunFunctionWithState
 

@@ -372,17 +372,17 @@ uint64_t RunFunctionWithStateInternalNoRefresh(uintptr_t fnc, int nargs,
     return result;
 }
 
-uint64_t RunFunctionFmt(uintptr_t fnc, const char *fmt, ...)
+static int run_function_fmt_va(uintptr_t fnc, const char *fmt,
+                                va_list ap, uint64_t *result)
 {
 #ifdef TARGET_X86_64
     size_t stack_args;
     CallbackFrame frame;
     LatxCallbackArgs args;
-    va_list ap;
     CallbackScope scope __attribute__((cleanup(callback_scope_leave))) = { 0 };
 
     if (callback_scope_enter(&scope, LATX_GUEST_USER_CALLBACK) != 0) {
-        return 0;
+        return -1;
     }
 
     lsassert(fnc);
@@ -390,7 +390,7 @@ uint64_t RunFunctionFmt(uintptr_t fnc, const char *fmt, ...)
     lsassert(CODEIS64);
     if (!fnc || !fmt || !CODEIS64 ||
         !latx_callback_stack_args(fmt, &stack_args)) {
-        return 0;
+        return -1;
     }
 
     frame = callback_frame_enter(stack_args, true);
@@ -398,9 +398,7 @@ uint64_t RunFunctionFmt(uintptr_t fnc, const char *fmt, ...)
         .stack = (uint64_t *)frame.cpu->regs[R_ESP],
     };
 
-    va_start(ap, fmt);
     latx_callback_collect_args(&args, fmt, &ap);
-    va_end(ap);
 
     g_assert(args.stack_count == stack_args);
     for (size_t i = 0; i < args.gpr_count; i++) {
@@ -410,10 +408,41 @@ uint64_t RunFunctionFmt(uintptr_t fnc, const char *fmt, ...)
         frame.cpu->xmm_regs[i].ZMM_Q(0) = args.xmm[i];
     }
 
-    return callback_frame_run(&frame, fnc);
-#else
+    uint64_t value = callback_frame_run(&frame, fnc);
+
+    /* Cleanup may use Guest registers; publish the captured value afterward. */
+    callback_scope_leave(&scope);
+    *result = value;
     return 0;
+#else
+    return -1;
 #endif
+}
+
+uint64_t RunFunctionFmt(uintptr_t fnc, const char *fmt, ...)
+{
+    uint64_t result = 0;
+    va_list ap;
+
+    va_start(ap, fmt);
+    (void)run_function_fmt_va(fnc, fmt, ap, &result);
+    va_end(ap);
+    return result;
+}
+
+int RunFunctionFmtChecked(uintptr_t fnc, uint64_t *result,
+                          const char *fmt, ...)
+{
+    int status;
+    va_list ap;
+
+    if (!fnc || !fmt || !result) {
+        return -1;
+    }
+    va_start(ap, fmt);
+    status = run_function_fmt_va(fnc, fmt, ap, result);
+    va_end(ap);
+    return status;
 }
 
 float RunFunctionFmtFloat(uintptr_t fnc, const char *fmt, ...)
