@@ -377,12 +377,14 @@ static int run_function_fmt_va(uintptr_t fnc, const char *fmt,
 {
 #ifdef TARGET_X86_64
     size_t stack_args;
+    uint64_t value = 0;
+    int status = -1;
     CallbackFrame frame;
     LatxCallbackArgs args;
-    CallbackScope scope __attribute__((cleanup(callback_scope_leave))) = { 0 };
+    CallbackScope scope = { 0 };
 
     if (callback_scope_enter(&scope, LATX_GUEST_USER_CALLBACK) != 0) {
-        return -1;
+        goto out;
     }
 
     lsassert(fnc);
@@ -390,7 +392,7 @@ static int run_function_fmt_va(uintptr_t fnc, const char *fmt,
     lsassert(CODEIS64);
     if (!fnc || !fmt || !CODEIS64 ||
         !latx_callback_stack_args(fmt, &stack_args)) {
-        return -1;
+        goto out;
     }
 
     frame = callback_frame_enter(stack_args, true);
@@ -408,12 +410,16 @@ static int run_function_fmt_va(uintptr_t fnc, const char *fmt,
         frame.cpu->xmm_regs[i].ZMM_Q(0) = args.xmm[i];
     }
 
-    uint64_t value = callback_frame_run(&frame, fnc);
+    value = callback_frame_run(&frame, fnc);
+    status = 0;
 
+out:
     /* Cleanup may use Guest registers; publish the captured value afterward. */
     callback_scope_leave(&scope);
-    *result = value;
-    return 0;
+    if (status == 0) {
+        *result = value;
+    }
+    return status;
 #else
     return -1;
 #endif
