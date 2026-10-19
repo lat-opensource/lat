@@ -283,3 +283,21 @@ from full guest execution and real-application acceptance.
 ```sh
 meson test -C build64-tests test-latx-smc-shmm test-latx-smc-fallback --print-errorlogs
 ```
+
+### Cairo and FreeType callback preparation errors
+
+`test-kzt-callback-result-*` requires LoongArch, a debug-symbol emulator build, GDB, native Cairo/FreeType, and
+`LATX_CAIRO_CALLBACK_ARTIFACT_DIR`. The fixture directory contains `guest` and
+`freetype-guest`, built from the corresponding `kzt-*-callback-result-guest.c`
+files, `sources.sha256`, and `artifacts.sha256`. It also contains `guest-lib/`
+with matching Guest Cairo/FreeType and their dependencies, including the font
+preflight libraries (FreeType, Fontconfig and Xft). Provide the matching runtime
+through `LATX_X86_64_SYSROOT`, or `runtime/` inside the fixture directory.
+
+Build the Guest programs with `-O2 -Wall -Wextra -Werror`, linking respectively
+`-l:libcairo.so.2` and `-l:libfreetype.so.6`. `sources.sha256` lists both source
+basenames; `artifacts.sha256` lists every binary/runtime file relative to the
+fixture directory. The runner compiles the native thread probe on demand.
+GDB verifies actual wrapper/callback entry and injects one attach or refresh
+failure without product fault-injection hooks. Normal zero returns, Guest errors,
+nested callbacks, and TLS-disabled existing contexts are checked separately.

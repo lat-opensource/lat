@@ -41,6 +41,13 @@ if 'CONFIG_LATX' in config_host
 endif
 
 if 'CONFIG_LATX' in config_host
+  test(
+    'test-callback-result',
+    python,
+    args: [files('test-callback-result.py'), project_source_root],
+    suite: 'lat-pr-fast',
+  )
+
   test_callback_args = executable(
     'test-callback-args',
     files(

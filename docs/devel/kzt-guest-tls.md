@@ -85,6 +85,16 @@ evidence. On systems with a separate Guest libdl, the caller must load/link
 that library before attachment. Missing helpers reject attachment; the
 runtime does not infer private link_map offsets or guess module IDs.
 
+## Callback preparation failures
+
+`RunFunctionFmtChecked` reports execution status separately from the Guest
+return value. A successful Guest return of zero remains zero; a preparation
+failure leaves the output untouched. It retains the existing-context path when
+Guest TLS is disabled. Cairo status callbacks and FreeType outline/list/cache
+callbacks map preparation failures to their library's error convention.
+FreeType stream reads return no bytes on failure, while a zero-length seek
+returns a nonzero error. Pointer and void callbacks keep their existing contracts.
+
 ## Tests
 
 `test-kzt-guest-tls-policy` exercises the opt-in policy.
