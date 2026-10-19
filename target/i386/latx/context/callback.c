@@ -372,19 +372,17 @@ uint64_t RunFunctionWithStateInternalNoRefresh(uintptr_t fnc, int nargs,
     return result;
 }
 
-static int run_function_fmt_va(uintptr_t fnc, const char *fmt,
-                                va_list ap, uint64_t *result)
+static uint64_t run_function_fmt_va(uintptr_t fnc, const char *fmt, va_list *ap,
+                    uint64_t failure_value, int *status)
 {
 #ifdef TARGET_X86_64
     size_t stack_args;
-    uint64_t value = 0;
-    int status = -1;
     CallbackFrame frame;
     LatxCallbackArgs args;
-    CallbackScope scope = { 0 };
+    CallbackScope scope __attribute__((cleanup(callback_scope_leave))) = { 0 };
 
     if (callback_scope_enter(&scope, LATX_GUEST_USER_CALLBACK) != 0) {
-        goto out;
+        goto fail;
     }
 
     lsassert(fnc);
@@ -392,7 +390,7 @@ static int run_function_fmt_va(uintptr_t fnc, const char *fmt,
     lsassert(CODEIS64);
     if (!fnc || !fmt || !CODEIS64 ||
         !latx_callback_stack_args(fmt, &stack_args)) {
-        goto out;
+        goto fail;
     }
 
     frame = callback_frame_enter(stack_args, true);
@@ -400,7 +398,7 @@ static int run_function_fmt_va(uintptr_t fnc, const char *fmt,
         .stack = (uint64_t *)frame.cpu->regs[R_ESP],
     };
 
-    latx_callback_collect_args(&args, fmt, &ap);
+    latx_callback_collect_args(&args, fmt, ap);
 
     g_assert(args.stack_count == stack_args);
     for (size_t i = 0; i < args.gpr_count; i++) {
@@ -410,28 +408,38 @@ static int run_function_fmt_va(uintptr_t fnc, const char *fmt,
         frame.cpu->xmm_regs[i].ZMM_Q(0) = args.xmm[i];
     }
 
-    value = callback_frame_run(&frame, fnc);
-    status = 0;
+    return callback_frame_run(&frame, fnc);
 
-out:
-    /* Cleanup may use Guest registers; publish the captured value afterward. */
-    callback_scope_leave(&scope);
-    if (status == 0) {
-        *result = value;
-    }
-    return status;
-#else
-    return -1;
+fail:
 #endif
+    if (status) {
+        *status = -1;
+    }
+    return failure_value;
 }
 
 uint64_t RunFunctionFmt(uintptr_t fnc, const char *fmt, ...)
 {
-    uint64_t result = 0;
+    uint64_t result;
     va_list ap;
 
     va_start(ap, fmt);
-    (void)run_function_fmt_va(fnc, fmt, ap, &result);
+    result = run_function_fmt_va(fnc, fmt, &ap, 0, NULL);
+    va_end(ap);
+    return result;
+}
+
+uint64_t RunFunctionFmtOr(uintptr_t fnc, uint64_t failure_value,
+                          const char *fmt, ...)
+{
+    uint64_t result;
+    va_list ap;
+
+    if (!fnc || !fmt) {
+        return failure_value;
+    }
+    va_start(ap, fmt);
+    result = run_function_fmt_va(fnc, fmt, &ap, failure_value, NULL);
     va_end(ap);
     return result;
 }
@@ -439,15 +447,20 @@ uint64_t RunFunctionFmt(uintptr_t fnc, const char *fmt, ...)
 int RunFunctionFmtChecked(uintptr_t fnc, uint64_t *result,
                           const char *fmt, ...)
 {
-    int status;
+    int status = 0;
+    uint64_t value;
     va_list ap;
 
     if (!fnc || !fmt || !result) {
         return -1;
     }
     va_start(ap, fmt);
-    status = run_function_fmt_va(fnc, fmt, ap, result);
+    value = run_function_fmt_va(fnc, fmt, &ap, 0, &status);
     va_end(ap);
+    /* The helper's scope cleanup finishes before an aliased output is set. */
+    if (status == 0) {
+        *result = value;
+    }
     return status;
 }
 

@@ -332,11 +332,9 @@ static uintptr_t freetype_stream_read(FtStreamAbi *stream, uintptr_t offset,
         result = ((FtStreamIoFuncAbi)bridge->native_callbacks[0])(
             bridge->guest, offset, buffer, count);
     } else {
-        uint64_t value;
-
-        result = RunFunctionFmtChecked(
-            (uintptr_t)bridge->callbacks[0], &value, "pLpL", bridge->guest,
-            offset, buffer, count) == 0 ? (uintptr_t)value : (count ? 0 : 1);
+        result = (uintptr_t)RunFunctionFmtOr(
+            (uintptr_t)bridge->callbacks[0], count ? 0 : 1, "pLpL",
+            bridge->guest, offset, buffer, count);
     }
     freetype_stream_native_view(bridge);
     return result;
@@ -1032,10 +1030,8 @@ static void *freetype_slot_acquire(FtCallbackSlot *slots,
     static int32_t ft_move_thunk_##N(void *to, void *user) \
     { \
         uintptr_t guest = freetype_slot_guest(ft_move_slots, N); \
-        uint64_t result; \
-        return guest && \
-            RunFunctionFmtChecked(guest, &result, "pp", to, user) == 0 \
-            ? (int32_t)result : FT_ERROR_INVALID_ARGUMENT; \
+        return (int32_t)RunFunctionFmtOr(guest, FT_ERROR_INVALID_ARGUMENT, "pp", \
+            to, user); \
     }
 FT_SLOT_LIST(DEFINE_MOVE_THUNK)
 #undef DEFINE_MOVE_THUNK
@@ -1044,10 +1040,8 @@ FT_SLOT_LIST(DEFINE_MOVE_THUNK)
     static int32_t ft_line_thunk_##N(void *to, void *user) \
     { \
         uintptr_t guest = freetype_slot_guest(ft_line_slots, N); \
-        uint64_t result; \
-        return guest && \
-            RunFunctionFmtChecked(guest, &result, "pp", to, user) == 0 \
-            ? (int32_t)result : FT_ERROR_INVALID_ARGUMENT; \
+        return (int32_t)RunFunctionFmtOr(guest, FT_ERROR_INVALID_ARGUMENT, "pp", \
+            to, user); \
     }
 FT_SLOT_LIST(DEFINE_LINE_THUNK)
 #undef DEFINE_LINE_THUNK
@@ -1056,11 +1050,8 @@ FT_SLOT_LIST(DEFINE_LINE_THUNK)
     static int32_t ft_conic_thunk_##N(void *control, void *to, void *user) \
     { \
         uintptr_t guest = freetype_slot_guest(ft_conic_slots, N); \
-        uint64_t result; \
-        return guest && \
-            RunFunctionFmtChecked(guest, &result, "ppp", control, to, \
-                user) == 0 \
-            ? (int32_t)result : FT_ERROR_INVALID_ARGUMENT; \
+        return (int32_t)RunFunctionFmtOr(guest, FT_ERROR_INVALID_ARGUMENT, \
+            "ppp", control, to, user); \
     }
 FT_SLOT_LIST(DEFINE_CONIC_THUNK)
 #undef DEFINE_CONIC_THUNK
@@ -1070,11 +1061,8 @@ FT_SLOT_LIST(DEFINE_CONIC_THUNK)
                                       void *to, void *user) \
     { \
         uintptr_t guest = freetype_slot_guest(ft_cubic_slots, N); \
-        uint64_t result; \
-        return guest && \
-            RunFunctionFmtChecked(guest, &result, "pppp", control1, control2, \
-                to, user) == 0 \
-            ? (int32_t)result : FT_ERROR_INVALID_ARGUMENT; \
+        return (int32_t)RunFunctionFmtOr(guest, FT_ERROR_INVALID_ARGUMENT, \
+            "pppp", control1, control2, to, user); \
     }
 FT_SLOT_LIST(DEFINE_CUBIC_THUNK)
 #undef DEFINE_CUBIC_THUNK
@@ -1083,10 +1071,8 @@ FT_SLOT_LIST(DEFINE_CUBIC_THUNK)
     static int32_t ft_list_iterator_thunk_##N(void *node, void *user) \
     { \
         uintptr_t guest = freetype_slot_guest(ft_list_iterator_slots, N); \
-        uint64_t result; \
-        return guest && \
-            RunFunctionFmtChecked(guest, &result, "pp", node, user) == 0 \
-            ? (int32_t)result : FT_ERROR_INVALID_ARGUMENT; \
+        return (int32_t)RunFunctionFmtOr(guest, FT_ERROR_INVALID_ARGUMENT, "pp", \
+            node, user); \
     }
 FT_SLOT_LIST(DEFINE_LIST_ITERATOR_THUNK)
 #undef DEFINE_LIST_ITERATOR_THUNK
@@ -1105,11 +1091,9 @@ FT_SLOT_LIST(DEFINE_LIST_DESTROY_THUNK)
         void *face_id, void *library, void *request_data, void **face) \
     { \
         uintptr_t guest = freetype_slot_guest(ft_face_requester_slots, N); \
-        uint64_t result; \
-        int32_t status = guest && \
-            RunFunctionFmtChecked(guest, &result, "pppp", face_id, library, \
-                request_data, face) == 0 \
-            ? (int32_t)result : FT_ERROR_UNIMPLEMENTED_FEATURE; \
+        int32_t status = (int32_t)RunFunctionFmtOr(guest, \
+            FT_ERROR_UNIMPLEMENTED_FEATURE, "pppp", face_id, library, \
+            request_data, face); \
         if (status == FT_ERROR_SUCCESS && face && *face) { \
             bool safe; \
             g_mutex_lock(&freetype_lock); \

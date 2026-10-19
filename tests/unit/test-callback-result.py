@@ -3,6 +3,7 @@
 """Run production format dispatch and status thunks with injected scope failures."""
 import argparse
 import os
+import re
 from pathlib import Path
 import shlex
 import subprocess
@@ -151,6 +152,18 @@ int main(void) {
 #endif
     }
     tls_enabled=true;
+#ifdef HAVE_FALLBACK
+    fail_scope=true; guest_runs=0;
+    CHECK(RunFunctionFmt(1,"")==0 && guest_runs==0);
+    CHECK(RunFunctionFmtOr(1,UINT64_MAX,"")==UINT64_MAX && guest_runs==0);
+    CHECK(RunFunctionFmtOr(0,123,"")==123 && guest_runs==0);
+    CHECK(RunFunctionFmtOr(1,123,NULL)==123 && guest_runs==0);
+    fail_scope=false; guest_value=0;
+    CHECK(RunFunctionFmtOr(1,123,"")==0);
+    guest_value=123;
+    CHECK(RunFunctionFmtOr(1,123,"")==123); /* A real Guest error is preserved. */
+    CHECK(RunFunctionFmtOr(1,456,"?")==456);
+#endif
 CAIRO_TESTS
     puts("PASS: callback execution/result separation and status consumers");
     return 0;
@@ -176,9 +189,15 @@ def main():
     cairo = read('target/i386/latx/context/wrappedcairo.c')
     freetype = read('target/i386/latx/context/wrappedfreetype.c')
     source = PRELUDE + FT_PRELUDE
-    if 'static int run_function_fmt_va(' in callback:
+    if 'run_function_fmt_va(' in callback:
         source += '#define HAVE_CHECKED 1\n'
-        source += function(callback, 'static int run_function_fmt_va(')
+        signature = re.search(
+            r'static(?: inline)?(?: __attribute__\(\(always_inline\)\))? '
+            r'(?:int|uint64_t)\s+run_function_fmt_va\(', callback).group(0)
+        source += function(callback, signature)
+        if 'uint64_t RunFunctionFmtOr(' in callback:
+            source += '#define HAVE_FALLBACK 1\n'
+            source += function(callback, 'uint64_t RunFunctionFmtOr(')
         source += function(callback, 'uint64_t RunFunctionFmt(')
         source += function(callback, 'int RunFunctionFmtChecked(')
     else:

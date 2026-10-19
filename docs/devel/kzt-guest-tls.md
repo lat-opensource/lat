@@ -90,8 +90,12 @@ runtime does not infer private link_map offsets or guess module IDs.
 `RunFunctionFmtChecked` reports execution status separately from the Guest
 return value. A successful Guest return of zero remains zero; a preparation
 failure leaves the output untouched. It retains the existing-context path when
-Guest TLS is disabled. Cairo status callbacks and FreeType outline/list/cache
-callbacks map preparation failures to their library's error convention.
+Guest TLS is disabled. `RunFunctionFmtOr` lets a caller map preparation failure to a selected value
+without an output parameter or a separate status check on successful calls.
+Cairo status callbacks and FreeType outline/list/cache callbacks use this form
+with their library's error convention. It preserves every Guest return value,
+even when it equals the selected failure value; callers that need to distinguish
+those cases use the checked interface.
 FreeType stream reads return no bytes on failure, while a zero-length seek
 returns a nonzero error. Pointer and void callbacks keep their existing contracts.
 

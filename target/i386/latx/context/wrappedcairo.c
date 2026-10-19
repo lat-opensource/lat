@@ -589,11 +589,8 @@ CAIRO_CALLBACK_SLOT_LIST(DEFINE_DESTROY_THUNK)
     static uint32_t cairo_io_thunk_##N(void *closure, void *data, uint32_t length) \
     { \
         uintptr_t guest = cairo_slot_guest(cairo_io_slots, N); \
-        uint64_t result; \
-        return guest && \
-            RunFunctionFmtChecked(guest, &result, "ppu", closure, data, \
-                length) == 0 \
-            ? (uint32_t)result : CAIRO_STATUS_NO_MEMORY; \
+        return (uint32_t)RunFunctionFmtOr(guest, CAIRO_STATUS_NO_MEMORY, "ppu", \
+            closure, data, length); \
     }
 CAIRO_CALLBACK_SLOT_LIST(DEFINE_IO_THUNK)
 #undef DEFINE_IO_THUNK
@@ -602,11 +599,8 @@ CAIRO_CALLBACK_SLOT_LIST(DEFINE_IO_THUNK)
     static uint32_t cairo_user_init_thunk_##N(void *font, void *cr, void *extents) \
     { \
         uintptr_t guest = cairo_slot_guest(cairo_user_init_slots, N); \
-        uint64_t result; \
-        return guest && \
-            RunFunctionFmtChecked(guest, &result, "ppp", font, cr, \
-                extents) == 0 \
-            ? (uint32_t)result : CAIRO_STATUS_NO_MEMORY; \
+        return (uint32_t)RunFunctionFmtOr(guest, CAIRO_STATUS_NO_MEMORY, "ppp", \
+            font, cr, extents); \
     }
 CAIRO_CALLBACK_SLOT_LIST(DEFINE_USER_INIT_THUNK)
 #undef DEFINE_USER_INIT_THUNK
@@ -616,11 +610,8 @@ CAIRO_CALLBACK_SLOT_LIST(DEFINE_USER_INIT_THUNK)
                                                 void *cr, void *extents) \
     { \
         uintptr_t guest = cairo_slot_guest(cairo_user_render_slots, N); \
-        uint64_t result; \
-        return guest && \
-            RunFunctionFmtChecked(guest, &result, "pLpp", font, glyph, cr, \
-                extents) == 0 \
-            ? (uint32_t)result : CAIRO_STATUS_NO_MEMORY; \
+        return (uint32_t)RunFunctionFmtOr(guest, CAIRO_STATUS_NO_MEMORY, "pLpp", \
+            font, glyph, cr, extents); \
     }
 CAIRO_CALLBACK_SLOT_LIST(DEFINE_USER_RENDER_THUNK)
 #undef DEFINE_USER_RENDER_THUNK
@@ -632,12 +623,9 @@ CAIRO_CALLBACK_SLOT_LIST(DEFINE_USER_RENDER_THUNK)
                                               void *flags) \
     { \
         uintptr_t guest = cairo_slot_guest(cairo_user_text_slots, N); \
-        uint64_t result; \
-        return guest && \
-            RunFunctionFmtChecked(guest, &result, "ppippppp", font, utf8, \
-                length, glyphs, num_glyphs, clusters, num_clusters, \
-                flags) == 0 \
-            ? (uint32_t)result : CAIRO_STATUS_NO_MEMORY; \
+        return (uint32_t)RunFunctionFmtOr(guest, CAIRO_STATUS_NO_MEMORY, \
+            "ppippppp", font, utf8, length, glyphs, num_glyphs, clusters, \
+            num_clusters, flags); \
     }
 CAIRO_CALLBACK_SLOT_LIST(DEFINE_USER_TEXT_THUNK)
 #undef DEFINE_USER_TEXT_THUNK
@@ -647,11 +635,8 @@ CAIRO_CALLBACK_SLOT_LIST(DEFINE_USER_TEXT_THUNK)
                                                  void *glyph) \
     { \
         uintptr_t guest = cairo_slot_guest(cairo_user_unicode_slots, N); \
-        uint64_t result; \
-        return guest && \
-            RunFunctionFmtChecked(guest, &result, "pLp", font, unicode, \
-                glyph) == 0 \
-            ? (uint32_t)result : CAIRO_STATUS_NO_MEMORY; \
+        return (uint32_t)RunFunctionFmtOr(guest, CAIRO_STATUS_NO_MEMORY, "pLp", \
+            font, unicode, glyph); \
     }
 CAIRO_CALLBACK_SLOT_LIST(DEFINE_USER_UNICODE_THUNK)
 #undef DEFINE_USER_UNICODE_THUNK
@@ -689,10 +674,8 @@ CAIRO_CALLBACK_SLOT_LIST(DEFINE_RASTER_RELEASE_THUNK)
     static uint32_t cairo_raster_snapshot_thunk_##N(void *pattern, void *data) \
     { \
         uintptr_t guest = cairo_slot_guest(cairo_raster_snapshot_slots, N); \
-        uint64_t result; \
-        return guest && \
-            RunFunctionFmtChecked(guest, &result, "pp", pattern, data) == 0 \
-            ? (uint32_t)result : CAIRO_STATUS_NO_MEMORY; \
+        return (uint32_t)RunFunctionFmtOr(guest, CAIRO_STATUS_NO_MEMORY, "pp", \
+            pattern, data); \
     }
 CAIRO_CALLBACK_SLOT_LIST(DEFINE_RASTER_SNAPSHOT_THUNK)
 #undef DEFINE_RASTER_SNAPSHOT_THUNK
@@ -701,11 +684,8 @@ CAIRO_CALLBACK_SLOT_LIST(DEFINE_RASTER_SNAPSHOT_THUNK)
     static uint32_t cairo_raster_copy_thunk_##N(void *pattern, void *data, void *other) \
     { \
         uintptr_t guest = cairo_slot_guest(cairo_raster_copy_slots, N); \
-        uint64_t result; \
-        uint32_t status = guest && \
-            RunFunctionFmtChecked(guest, &result, "ppp", pattern, data, \
-                other) == 0 \
-            ? (uint32_t)result : CAIRO_STATUS_NO_MEMORY; \
+        uint32_t status = (uint32_t)RunFunctionFmtOr(guest, \
+            CAIRO_STATUS_NO_MEMORY, "ppp", pattern, data, other); \
         if (status == CAIRO_STATUS_SUCCESS && \
             !cairo_binding_clone_raster(other, pattern)) \
             status = CAIRO_STATUS_NO_MEMORY; \
