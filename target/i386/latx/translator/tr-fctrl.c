@@ -223,19 +223,40 @@ void update_fcsr_rm(IR2_OPND control_word, IR2_OPND fcsr)
     ra_free_temp(temp_cw);
 }
 
+void gen_softfpu_fcsr_write_if_changed(IR2_OPND value, IR2_OPND previous)
+{
+    IR2_OPND unchanged = ra_alloc_label();
+
+    /*
+     * Compare the complete value that la_movgr2fcsr will write. Its softfpu
+     * emitter clears bit 6, so an incoming set bit must not bypass the write.
+     * Flags and Cause are ordinary read/write fields; an identical write
+     * neither clears them nor triggers a floating-point exception.
+     */
+    if (option_softfpu) {
+        la_bstrins_w(value, zero_ir2_opnd, 6, 6);
+    }
+    la_beq(value, previous, unchanged);
+    la_movgr2fcsr(fcsr_ir2_opnd, value);
+    la_label(unchanged);
+}
+
 void gen_softfpu_x87_fcsr_exit(void)
 {
     IR2_OPND mxcsr_opnd = ra_alloc_itemp();
     IR2_OPND cw_opnd = ra_alloc_itemp();
     IR2_OPND fcsr_opnd = ra_alloc_itemp();
+    IR2_OPND previous_fcsr = ra_alloc_itemp();
 
     la_ld_wu(mxcsr_opnd, env_ir2_opnd, lsenv_offset_of_mxcsr(lsenv));
     la_bstrpick_d(cw_opnd, mxcsr_opnd, 14, 13);
     la_slli_d(cw_opnd, cw_opnd, 10);
-    la_movfcsr2gr(fcsr_opnd, fcsr_ir2_opnd);
+    la_movfcsr2gr(previous_fcsr, fcsr_ir2_opnd);
+    la_mov64(fcsr_opnd, previous_fcsr);
     update_fcsr_rm(cw_opnd, fcsr_opnd);
-    la_movgr2fcsr(fcsr_ir2_opnd, fcsr_opnd);
+    gen_softfpu_fcsr_write_if_changed(fcsr_opnd, previous_fcsr);
 
+    ra_free_temp(previous_fcsr);
     ra_free_temp(mxcsr_opnd);
     ra_free_temp(cw_opnd);
     ra_free_temp(fcsr_opnd);
