@@ -4609,42 +4609,76 @@ void gen_test_page_flag(IR2_OPND mem_opnd, int mem_imm, uint32_t flag,
          * guest read and write permissions.
          */
         if (option_mem_test != 2) {
-            li_d(itemp0, (ADDR)latx_16k_page_mixed);
-            la_bstrpick_d(itemp1, mem_addr, TARGET_ABI_BITS - 1,
-                          LATX_HOST_16K_PAGE_BITS);
-            la_ldx_bu(itemp2, itemp0, itemp1);
-            la_andi(itemp2, itemp2, required_flag);
-            la_beq(itemp2, zero_ir2_opnd,
-                   mem_size > 1 ? label_check_end : label_exit);
-        }
-        li_d(itemp0, (ADDR)latx_4k_page_flags);
-        la_bstrpick_d(itemp1, mem_addr, TARGET_ABI_BITS - 1,
-                      TARGET_PAGE_BITS);
-        la_ldx_bu(itemp2, itemp0, itemp1);
-        la_andi(itemp2, itemp2, required_flag);
-        la_bne(itemp2, zero_ir2_opnd,
-               mem_size > 1 ? label_check_end : label_exit);
-        la_b(label_fault);
-        if (mem_size > 1) {
-            la_label(label_check_end);
-            la_addi_d(mem_addr, mem_addr, mem_size - 1);
-            if (option_mem_test != 2) {
-                li_d(itemp0, (ADDR)latx_16k_page_mixed);
-                la_bstrpick_d(itemp1, mem_addr, TARGET_ABI_BITS - 1,
-                              LATX_HOST_16K_PAGE_BITS);
-                la_ldx_bu(itemp2, itemp0, itemp1);
-                la_andi(itemp2, itemp2, required_flag);
-                la_beq(itemp2, zero_ir2_opnd, label_exit);
-            }
+            /* Prove permission for this access before checking host mixing. */
             li_d(itemp0, (ADDR)latx_4k_page_flags);
             la_bstrpick_d(itemp1, mem_addr, TARGET_ABI_BITS - 1,
                           TARGET_PAGE_BITS);
             la_ldx_bu(itemp2, itemp0, itemp1);
-            la_andi(itemp2, itemp2, required_flag);
-            la_bne(itemp2, zero_ir2_opnd, label_exit);
-            /* The first inaccessible byte is the start of the final page. */
-            la_bstrins_d(mem_addr, zero_ir2_opnd, TARGET_PAGE_BITS - 1, 0);
-            /* Fall through to label_fault. */
+            if (mem_size > 1) {
+                la_addi_d(itemp1, mem_addr, mem_size - 1);
+                la_bstrpick_d(itemp1, itemp1, TARGET_ABI_BITS - 1,
+                              TARGET_PAGE_BITS);
+                la_ldx_bu(itemp1, itemp0, itemp1);
+                la_and(itemp0, itemp2, itemp1);
+                la_andi(itemp0, itemp0, required_flag);
+                la_bne(itemp0, zero_ir2_opnd, label_exit);
+
+                /* Keep each endpoint's permission for the failed proof. */
+                la_slli_d(itemp1, itemp1, 8);
+                la_or(itemp2, itemp2, itemp1);
+                la_andi(itemp1, itemp2, required_flag);
+                la_bne(itemp1, zero_ir2_opnd, label_check_end);
+            } else {
+                la_andi(itemp1, itemp2, required_flag);
+                la_bne(itemp1, zero_ir2_opnd, label_exit);
+            }
+
+            /*
+             * A denied cached permission faults only on a mixed host page.
+             * Unmixed pages retain the hardware permission check.
+             */
+            li_d(itemp0, (ADDR)latx_16k_page_mixed);
+            la_bstrpick_d(itemp1, mem_addr, TARGET_ABI_BITS - 1,
+                          LATX_HOST_16K_PAGE_BITS);
+            la_ldx_bu(itemp1, itemp0, itemp1);
+            la_andi(itemp1, itemp1, required_flag);
+            if (mem_size > 1) {
+                la_bne(itemp1, zero_ir2_opnd, label_fault);
+                la_label(label_check_end);
+                la_addi_d(mem_addr, mem_addr, mem_size - 1);
+                la_andi(itemp1, itemp2, required_flag << 8);
+                la_bne(itemp1, zero_ir2_opnd, label_exit);
+                li_d(itemp0, (ADDR)latx_16k_page_mixed);
+                la_bstrpick_d(itemp1, mem_addr, TARGET_ABI_BITS - 1,
+                              LATX_HOST_16K_PAGE_BITS);
+                la_ldx_bu(itemp1, itemp0, itemp1);
+                la_andi(itemp1, itemp1, required_flag);
+            }
+            la_beq(itemp1, zero_ir2_opnd, label_exit);
+            if (mem_size > 1) {
+                /* The first inaccessible byte is in the final guest page. */
+                la_bstrins_d(mem_addr, zero_ir2_opnd, TARGET_PAGE_BITS - 1, 0);
+            }
+        } else {
+            li_d(itemp0, (ADDR)latx_4k_page_flags);
+            la_bstrpick_d(itemp1, mem_addr, TARGET_ABI_BITS - 1,
+                          TARGET_PAGE_BITS);
+            la_ldx_bu(itemp1, itemp0, itemp1);
+            la_andi(itemp1, itemp1, required_flag);
+            la_bne(itemp1, zero_ir2_opnd,
+                   mem_size > 1 ? label_check_end : label_exit);
+            la_b(label_fault);
+            if (mem_size > 1) {
+                la_label(label_check_end);
+                la_addi_d(mem_addr, mem_addr, mem_size - 1);
+                li_d(itemp0, (ADDR)latx_4k_page_flags);
+                la_bstrpick_d(itemp1, mem_addr, TARGET_ABI_BITS - 1,
+                              TARGET_PAGE_BITS);
+                la_ldx_bu(itemp1, itemp0, itemp1);
+                la_andi(itemp1, itemp1, required_flag);
+                la_bne(itemp1, zero_ir2_opnd, label_exit);
+                la_bstrins_d(mem_addr, zero_ir2_opnd, TARGET_PAGE_BITS - 1, 0);
+            }
         }
     } else
 #endif
