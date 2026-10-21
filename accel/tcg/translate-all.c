@@ -482,12 +482,15 @@ static int cpu_restore_state_from_tb(CPUState *cpu, TranslationBlock *tb,
     restore_state_to_opc(env, tb, data);
 #ifdef CONFIG_LATX_OPT_PUSH_POP
     uint32_t parallel = cpu->tcg_cflags & CF_PARALLEL;
-    if (!parallel) {
+    /* Quicktrans commits RSP directly and does not use legacy stack scheduling. */
+    if (!parallel && !(tb->bool_flags & IS_QUICKTRANS_TB)) {
         ir2_opt_push_pop_fix(tb, cpu, (searched_pc - (uintptr_t)tb->tc.ptr) / 4);
     }
 #endif
 #ifdef CONFIG_LATX_INSTS_PATTERN
-    opt_instptn_fix(cpu, tb, i);
+    if (tb->s_data && tb->s_data->ir1) {
+        opt_instptn_fix(cpu, tb, i);
+    }
 #endif
 #ifdef CONFIG_PROFILER
     qatomic_set(&prof->restore_time,
@@ -2234,7 +2237,21 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
      * To handle segv case, every insn has encode data at the end of tb
      * Calculate the search_size and set the new gen_code_buf
      */
-    search_size = encode_search(tb, (void *)gen_code_buf + gen_code_size);
+#if defined(CONFIG_LATX_FAST_TRANSLATOR) && defined(TARGET_X86_64)
+    if (tb->bool_flags & IS_QUICKTRANS_TB) {
+        /* Quicktrans already appended the search table and returned the
+         * combined size. Its final instruction end includes the TB exit.
+         * Restore the code/table boundary instead of appending a second
+         * table: cpu_restore_state_from_tb reads at tc.ptr + tc.size. */
+        int qt_code_size = tcg_ctx->gen_insn_end_off[tb->icount - 1];
+        assert(qt_code_size > 0 && qt_code_size <= gen_code_size);
+        search_size = gen_code_size - qt_code_size;
+        gen_code_size = qt_code_size;
+    } else
+#endif
+    {
+        search_size = encode_search(tb, (void *)gen_code_buf + gen_code_size);
+    }
     if (unlikely(search_size < 0)) {
         qatomic_set(&tcg_ctx->code_gen_ptr, tcg_ctx->code_gen_highwater + 1);
         goto buffer_overflow;
@@ -3245,6 +3262,36 @@ int walk_memory_regions(void *priv, walk_memory_regions_fn fn)
         }
     }
     mmap_unlock();
+
+    return rc;
+}
+
+int walk_memory_regions_range_locked(void *priv, target_ulong start,
+                                     target_ulong end,
+                                     walk_memory_regions_fn fn)
+{
+    PageFlagsNode *p;
+    target_ulong last;
+    int rc = 0;
+
+    assert_memory_lock();
+    if (start >= end) {
+        return 0;
+    }
+
+    last = end - 1;
+    for (p = pageflags_find(start, last);
+         p != NULL;
+         p = pageflags_next(p, start, last)) {
+        target_ulong region_start = MAX(start, p->itree.start);
+        target_ulong region_end = p->itree.last >= last
+                                  ? end : p->itree.last + 1;
+
+        rc = fn(priv, region_start, region_end, p->flags);
+        if (rc != 0) {
+            break;
+        }
+    }
 
     return rc;
 }

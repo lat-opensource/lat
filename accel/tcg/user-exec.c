@@ -496,6 +496,22 @@ static inline int handle_cpu_signal(uintptr_t pc, siginfo_t *info,
     unsigned long address = (unsigned long)info->si_addr;
     MMUAccessType access_type = is_write ? MMU_DATA_STORE : MMU_DATA_LOAD;
 
+#if defined(CONFIG_LATX) && defined(CONFIG_LATX_FAST_TRANSLATOR) && \
+    defined(TARGET_X86_64) && !defined(CONFIG_SOFTMMU)
+    CPUArchState *qt_bcd_env = cpu ? cpu->env_ptr : NULL;
+    bool was_qt_bcd = qt_bcd_env && qt_bcd_env->qt_bcd_helper_env_hard64;
+    uint64_t qt_bcd_hard64[8];
+
+    /* page_unprotect may unwind and clear the marker itself. A no-exception
+     * exit must resume with the original hard64 bits, including NaN payloads.
+     */
+    if (was_qt_bcd) {
+        for (int i = 0; i < 8; ++i) {
+            qt_bcd_hard64[i] = qt_bcd_env->fpregs[i].d.low;
+        }
+    }
+#endif
+
 #ifdef CONFIG_LATX_SMC_OPT
     int *emu = NULL;
     int size = 0;
@@ -663,6 +679,33 @@ static inline int handle_cpu_signal(uintptr_t pc, siginfo_t *info,
              * currently executing TB was modified and must be exited
              * immediately.  Clear helper_retaddr for next execution.
              */
+#if defined(CONFIG_LATX) && defined(CONFIG_LATX_FAST_TRANSLATOR) && \
+    defined(TARGET_X86_64) && !defined(CONFIG_SOFTMMU)
+            {
+                if (was_qt_bcd) {
+                    /* The PAGE_WRITE race can return 2 without unwinding.
+                     * pc already names the generated BCD helper caller.
+                     */
+                    if (qt_bcd_env->qt_bcd_helper_env_hard64) {
+                        bool restored = cpu_restore_state(cpu, pc, true);
+                        if (!restored || qt_bcd_env->qt_bcd_helper_env_hard64) {
+                            /* Never resume with a lost PC or stale marker. */
+                            abort();
+                        }
+                    }
+                    for (int i = 0; i < 8; ++i) {
+                        qt_bcd_env->fpregs[i].d.low = qt_bcd_hard64[i];
+                        qt_bcd_env->fpregs[i].d.high = 0;
+                    }
+#ifdef LATX_QUICKTRANS_X87_SIGNAL_ABI
+                    qt_bcd_env->qt_x87_env_format = QT_X87_ENV_HARD64;
+                    /* cpu_loop_exit also clears this on other helper exits. */
+                    qt_bcd_env->qt_helper_env_saved = false;
+#endif
+                    signal_barrier();
+                }
+            }
+#endif
             clear_helper_retaddr();
             cpu_exit_tb_from_sighandler(cpu, old_set);
             /* NORETURN */

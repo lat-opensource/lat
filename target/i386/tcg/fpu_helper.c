@@ -142,6 +142,36 @@ static void do_fstt(CPUX86State *env, floatx80 f, target_ulong ptr,
 
 /* x87 FPU helpers */
 
+#ifdef LATX_QUICKTRANS_X87_SIGNAL_ABI
+void latx_qt_x87_env_to_hard64(CPUX86State *env)
+{
+    if (!env->qt_hard_signal_protocol_enabled || option_softfpu ||
+        env->qt_x87_env_format != QT_X87_ENV_X80) {
+        return;
+    }
+    float_status status = env->fp_status;
+    for (int i = 0; i < 8; ++i) {
+        if (env->mode_fpu) {
+            floatx80 value = env->fpregs[i].d;
+            if (env->fptags[i] && (value.high & 0x7fff) == 0x7fff &&
+                (value.low & 0x7ffffffffffff800ULL)) {
+                /* Invert the empty-slot NaN mapping used by signal frames,
+                 * without quieting an unused MMX signalling-NaN payload. */
+                env->fpregs[i].d.low =
+                    ((uint64_t)(value.high & 0x8000) << 48) |
+                    0x7ff0000000000000ULL |
+                    ((value.low >> 11) & 0x000fffffffffffffULL);
+            } else {
+                env->fpregs[i].d.low = floatx80_to_float64(value, &status);
+            }
+        }
+        env->fpregs[i].d.high = 0;
+    }
+    env->qt_x87_env_format = env->mode_fpu ? QT_X87_ENV_HARD64 :
+                                                      QT_X87_ENV_MMX64;
+}
+#endif
+
 static inline double floatx80_to_double(CPUX86State *env, floatx80 a)
 {
     union {

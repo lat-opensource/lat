@@ -25,6 +25,10 @@
 #include "tcg/tcg-op.h"
 #include "exec/cpu_ldst.h"
 #include "exec/translator.h"
+#if defined(CONFIG_LATX) && defined(CONFIG_LATX_FAST_TRANSLATOR) && \
+    defined(TARGET_X86_64) && !defined(CONFIG_SOFTMMU)
+#include "fpu/softfloat.h"
+#endif
 
 #include "exec/helper-proto.h"
 #include "exec/helper-gen.h"
@@ -8754,12 +8758,33 @@ void restore_state_to_opc(CPUX86State *env, TranslationBlock *tb,
 {
     int cc_op = data[1] & 0xffff;
     uint16_t ymmh_zero_pending = data[1] >> 16;
+#ifdef LATX_QUICKTRANS_RSP_SEARCH_ABI
+    if (tb->bool_flags & IS_QUICKTRANS_TB) {
+        /* QT used zero here before the RSP-search ABI. Keep its cc_op
+         * convention while interpreting the new signed stack correction. */
+        cc_op = 0;
+        ymmh_zero_pending = 0;
+    }
+#endif
 
     /* env->eip = data[0] - tb->cs_base; */
     env->eip = data[0];
     if (cc_op != CC_OP_DYNAMIC) {
         env->cc_op = cc_op;
     }
+
+#if defined(CONFIG_LATX_FAST_TRANSLATOR) && defined(TARGET_X86_64) && \
+    !defined(CONFIG_SOFTMMU)
+    if ((tb->bool_flags & IS_QUICKTRANS_TB) &&
+        env->qt_helper_env_saved) {
+        /* The complete guest snapshot and FCSR were saved before calling C.
+         * Keep its explicit format; C ucontext registers are temporaries.
+         * cpu_loop_exit normalizes x80 before re-entering guest execution.
+         */
+        env->qt_bcd_helper_env_hard64 = false;
+        return;
+    }
+#endif
 
     ucontext_t *uc = env->puc;
     if (!uc)
@@ -8774,6 +8799,11 @@ void restore_state_to_opc(CPUX86State *env, TranslationBlock *tb,
     env->regs[R_ECX] = UC_GR(uc)[reg_gpr_map[ecx_index]];
     env->regs[R_EDX] = UC_GR(uc)[reg_gpr_map[edx_index]];
     env->regs[R_ESP] = UC_GR(uc)[reg_gpr_map[esp_index]];
+#ifdef LATX_QUICKTRANS_RSP_SEARCH_ABI
+    if (tb->bool_flags & IS_QUICKTRANS_TB) {
+        env->regs[R_ESP] += (target_long)data[1];
+    }
+#endif
     env->regs[R_EBP] = UC_GR(uc)[reg_gpr_map[ebp_index]];
     env->regs[R_ESI] = UC_GR(uc)[reg_gpr_map[esi_index]];
     env->regs[R_EDI] = UC_GR(uc)[reg_gpr_map[edi_index]];
@@ -8798,5 +8828,12 @@ void restore_state_to_opc(CPUX86State *env, TranslationBlock *tb,
             }
         }
     }
+#ifdef LATX_QUICKTRANS_X87_SIGNAL_ABI
+    if ((tb->bool_flags & IS_QUICKTRANS_TB) && !option_softfpu) {
+        env->qt_hard_signal_protocol_enabled = true;
+        env->qt_x87_env_format = env->mode_fpu ? QT_X87_ENV_HARD64 :
+                                                          QT_X87_ENV_MMX64;
+    }
+#endif
 }
 #endif
