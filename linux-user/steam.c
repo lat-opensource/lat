@@ -476,10 +476,75 @@ void latx_steam_prepare(const char *program, char **target_argv,
 #endif
 }
 
+static bool latx_steam_runtime_is_sniper(void)
+{
+    const char *files = latx_steam_runtime_files();
+    g_autofree char *contents = NULL;
+    g_autofree char *os_release = NULL;
+
+    if (!files) {
+        return false;
+    }
+    os_release = g_build_filename(files, "lib", "os-release", NULL);
+    return g_file_get_contents(os_release, &contents, NULL, NULL) &&
+           strstr(contents, "VERSION_CODENAME=sniper");
+}
+
+static char **latx_steam_sniper_argv(char **payload)
+{
+    const char *files = latx_steam_runtime_files();
+    g_autofree char *bwrap = NULL;
+    g_autofree char *os_release = NULL;
+    g_autofree char **argv = NULL;
+    size_t payload_count;
+
+    if (!files) {
+        return NULL;
+    }
+    os_release = g_build_filename(files, "lib", "os-release", NULL);
+    if (!g_file_test(os_release, G_FILE_TEST_IS_REGULAR)) {
+        return NULL;
+    }
+    bwrap = g_find_program_in_path("bwrap");
+    if (!bwrap) {
+        return NULL;
+    }
+
+    /*
+     * The direct payload path intentionally bypasses pressure-vessel, but
+     * sniper-aware launchers inspect the container's /etc/os-release before
+     * they start the game.  Reproduce only that mount-namespace contract.
+     */
+    payload_count = g_strv_length(payload);
+    argv = g_new0(char *, payload_count + 12);
+    argv[0] = g_strdup(bwrap);
+    argv[1] = (char *)"--bind";
+    argv[2] = (char *)"/";
+    argv[3] = (char *)"/";
+    argv[4] = (char *)"--dev-bind";
+    argv[5] = (char *)"/dev";
+    argv[6] = (char *)"/dev";
+    argv[7] = (char *)"--ro-bind";
+    argv[8] = g_strdup(os_release);
+    argv[9] = (char *)"/etc/os-release";
+    argv[10] = (char *)"--";
+    memcpy(argv + 11, payload, (payload_count + 1) * sizeof(*payload));
+    return g_steal_pointer(&argv);
+}
+
 void latx_steam_exec_payload(char **target_environ)
 {
+    g_autofree char **argv = NULL;
+
     if (!steam_payload) {
         return;
+    }
+
+    if (latx_steam_runtime_is_sniper()) {
+        argv = latx_steam_sniper_argv(steam_payload);
+        if (argv) {
+            execve(argv[0], argv, target_environ);
+        }
     }
     execve(steam_payload[0], steam_payload,
            target_environ);
