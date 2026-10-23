@@ -108,11 +108,88 @@ bool translate_jcxz(IR1_INST *pir1)
     return true;
 }
 
+/*
+ * JECXZ tests only the low 32 bits of RCX, so the generic load has to clear
+ * the upper half before the 64-bit compare.  A full 32-bit write to ECX in
+ * the immediately preceding instruction already zero-extends the host
+ * register, and straight-line code inside a TB guarantees that write ran
+ * before this branch.  Test the register directly in that case.
+ */
+static bool jecxz_prev_defines_zero_extended_ecx(IR1_INST *jecxz)
+{
+    TranslationBlock *tb = lsenv->tr_data->curr_tb;
+    IR1_INST *first = tb_ir1_inst(tb, 0);
+    ptrdiff_t index = jecxz - first;
+
+    if (index <= 0 || index >= tb_ir1_num(tb)) {
+        return false;
+    }
+
+    IR1_INST *prev = jecxz - 1;
+#ifdef CONFIG_LATX_INSTS_PATTERN
+    if (prev->instptn.opc != INSTPTN_OPC_NONE) {
+        return false;
+    }
+#endif
+    if (ir1_get_opnd_num(prev) < 1) {
+        return false;
+    }
+
+    IR1_OPND *dst = ir1_get_opnd(prev, 0);
+    if (!ir1_opnd_is_gpr(dst) ||
+        ir1_opnd_base_reg_num(dst) != ecx_index ||
+        ir1_opnd_size(dst) != 32) {
+        return false;
+    }
+
+    switch (ir1_opcode(prev)) {
+    /* These either store through store_ireg_to_ir1() or use an explicit
+     * zero-extending operation for a 32-bit destination in every mode. */
+    case dt_X86_INS_MOV:
+    case dt_X86_INS_MOVZX:
+    case dt_X86_INS_MOVSX:
+    case dt_X86_INS_LEA:
+    case dt_X86_INS_ADC:
+    case dt_X86_INS_SBB:
+        return true;
+    default:
+        break;
+    }
+
+#ifdef TARGET_X86_64
+    /* In 64-bit mode these clear the upper half unless HBR proved the
+     * register dead.  The following JECXZ keeps ECX live, so HBR cannot
+     * have elided the clear here. */
+    if (CODEIS64) {
+        switch (ir1_opcode(prev)) {
+        case dt_X86_INS_ADD:
+        case dt_X86_INS_SUB:
+        case dt_X86_INS_AND:
+        case dt_X86_INS_OR:
+        case dt_X86_INS_XOR:
+        case dt_X86_INS_INC:
+        case dt_X86_INS_DEC:
+        case dt_X86_INS_NEG:
+        case dt_X86_INS_NOT:
+            return true;
+        default:
+            break;
+        }
+    }
+#endif
+
+    return false;
+}
+
 bool translate_jecxz(IR1_INST *pir1)
 {
-    /* TODO opt */
-    IR2_OPND ecx_opnd =
-        load_ireg_from_ir1(&ecx_ir1_opnd, ZERO_EXTENSION, false);
+    IR2_OPND ecx_opnd;
+
+    if (jecxz_prev_defines_zero_extended_ecx(pir1)) {
+        ecx_opnd = ra_alloc_gpr(ecx_index);
+    } else {
+        ecx_opnd = load_ireg_from_ir1(&ecx_ir1_opnd, ZERO_EXTENSION, false);
+    }
     IR2_OPND target_label_opnd = ra_alloc_label();
 
 #ifdef CONFIG_LATX_TU
