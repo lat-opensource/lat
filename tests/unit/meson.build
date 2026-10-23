@@ -99,6 +99,13 @@ test(
 )
 
 test(
+  'test-latx-jecxz-opt',
+  python,
+  args: [files('test-latx-jecxz-opt.py')],
+  suite: 'lat-pr-fast',
+)
+
+test(
   'test-x11-synchronize-callback',
   python,
   args: [
