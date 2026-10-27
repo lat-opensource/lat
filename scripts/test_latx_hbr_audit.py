@@ -20,13 +20,13 @@ INVENTORY = REPO_ROOT / (
 class HbrAuditTest(unittest.TestCase):
     def test_repository_inventory(self):
         result = latx_hbr_audit.audit(REPO_ROOT)
-        self.assertEqual(result["counts"]["translator_supported"], 1098)
-        self.assertEqual(result["counts"]["shbr_relevant"], 774)
-        self.assertEqual(result["counts"]["opcode_specific"], 774)
+        self.assertEqual(result["counts"]["translator_supported"], 1101)
+        self.assertEqual(result["counts"]["shbr_relevant"], 777)
+        self.assertEqual(result["counts"]["opcode_specific"], 777)
         self.assertEqual(result["counts"]["conservative_unmodeled"], 0)
-        self.assertEqual(len(result["rows"]), 774)
-        self.assertEqual(len(result["promoted_opcode_specific"]), 618)
-        self.assertEqual(result["generated_opcode_specific"], 519)
+        self.assertEqual(len(result["rows"]), 777)
+        self.assertEqual(len(result["promoted_opcode_specific"]), 621)
+        self.assertEqual(result["generated_opcode_specific"], 522)
         gather = next(
             row for row in result["rows"] if row["mnemonic"] == "VGATHERDPD"
         )
@@ -36,13 +36,21 @@ class HbrAuditTest(unittest.TestCase):
         )
         self.assertEqual(
             result["translator_mnemonic_sha256"],
-            "32bdf9f0e48c0b73ac1f3f0e914d2af621540ffd7c6ccebb86d059c14137250d",
+            "f8b9761a04c987ad075b4986d1dec5aab06a2f9c6dd992c3adcba6881a25a2a8",
         )
         xrstor = next(
             row for row in result["rows"] if row["mnemonic"] == "XRSTOR"
         )
         self.assertEqual(xrstor["policy"], "implicit-read-write-all")
         self.assertIn("preserve path", xrstor["high32"]["reads"])
+        xsave64 = next(
+            row for row in result["rows"] if row["mnemonic"] == "XSAVE64"
+        )
+        self.assertEqual(xsave64["policy"], "implicit-read-all")
+        xrstor64 = next(
+            row for row in result["rows"] if row["mnemonic"] == "XRSTOR64"
+        )
+        self.assertEqual(xrstor64["policy"], "implicit-read-write-all")
 
     def test_commented_hbr_case_is_ignored(self):
         models = latx_hbr_audit.parse_hbr_models(
@@ -115,7 +123,7 @@ class HbrAuditTest(unittest.TestCase):
     def test_exact_family_rules(self):
         data = json.loads(INVENTORY.read_text(encoding="utf-8"))
         rules = generate_latx_hbr_semantics.exact_rules(data)
-        self.assertEqual(len(rules), 519)
+        self.assertEqual(len(rules), 522)
         self.assertEqual(
             rules["VFMADD132SS"],
             {"high32": "DEST", "high64": "DEST"},

@@ -14,9 +14,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 class ShbrMetricsTests(unittest.TestCase):
     def test_current_metrics(self):
         result = latx_hbr_metrics.collect(REPO_ROOT)
-        self.assertEqual(result["coverage"]["precise"], 774)
+        self.assertEqual(result["coverage"]["precise"], 777)
         self.assertEqual(result["coverage"]["conservative"], 0)
-        self.assertEqual(result["coverage"]["relevant"], 774)
+        self.assertEqual(result["coverage"]["relevant"], 777)
         self.assertEqual(result["generation_site_counts"]["SHBR_ON_32"], 12)
         self.assertEqual(result["generation_site_counts"]["SHBR_ON_64"], 10)
         self.assertEqual(result["minimum_removed_per_full_hit"]["lasx"], 22)

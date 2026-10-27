@@ -13,6 +13,12 @@ if 'x86_64-linux-user' in target_dirs
     'timeout': 120,
   }]
   latx_integration_tests += [{
+    'name': 'test-xsave64-roundtrip',
+    'runner': find_program('../../test-avx-regressions.py'),
+    'args': [emulators['latx-x86_64'], files('../../xsave64-roundtrip.S')],
+    'timeout': 120,
+  }]
+  latx_integration_tests += [{
     'name': 'test-avx-compare-jcc',
     'runner': find_program('../../test-avx-regressions.py'),
     'args': [emulators['latx-x86_64'], files('../../vcomis-jcc.S')],

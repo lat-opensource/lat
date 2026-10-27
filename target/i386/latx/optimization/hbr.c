@@ -1884,7 +1884,9 @@ static bool apply_implicit_semantic(TranslationBlock *tb, IR1_INST *ir1,
     case WRAP(FXSAVE):
     case WRAP(FXSAVE64):
     case WRAP(XSAVE):
+    case WRAP(XSAVE64):
     case WRAP(XSAVEOPT):
+    case WRAP(XSAVEOPT64):
         ir1->shbr_read |= SHBR_XMM_ALL;
         for (int i = 0; i < XMM_NUM; i++) {
             ir1->xmm_use |= xmm[i];
@@ -1898,6 +1900,7 @@ static bool apply_implicit_semantic(TranslationBlock *tb, IR1_INST *ir1,
         }
         return true;
     case WRAP(XRSTOR):
+    case WRAP(XRSTOR64):
         /* XRSTOR preserves XMM when EDX:EAX does not request SSE state. */
         ir1->shbr_read |= SHBR_XMM_ALL;
         ir1->shbr_def |= SHBR_XMM_ALL;
@@ -1932,10 +1935,13 @@ static bool has_implicit_semantic(IR1_INST *ir1)
     case WRAP(FXSAVE):
     case WRAP(FXSAVE64):
     case WRAP(XSAVE):
+    case WRAP(XSAVE64):
     case WRAP(XSAVEOPT):
+    case WRAP(XSAVEOPT64):
     case WRAP(FXRSTOR):
     case WRAP(FXRSTOR64):
     case WRAP(XRSTOR):
+    case WRAP(XRSTOR64):
     case WRAP(VZEROALL):
     case WRAP(BLENDVPD):
     case WRAP(BLENDVPS):

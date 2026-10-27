@@ -18,12 +18,12 @@
     "note": "Intel SDM is authoritative; Intel XED validates decoded operand access and Felix Cloutier is a per-family navigation aid."
   },
   "expected_counts": {
-    "translator_supported": 1098,
-    "opcode_specific": 774,
+    "translator_supported": 1101,
+    "opcode_specific": 777,
     "conservative_unmodeled": 0,
-    "strict_xmm_scope": 766,
+    "strict_xmm_scope": 769,
     "ymm_alias_only": 8,
-    "shbr_relevant": 774
+    "shbr_relevant": 777
   },
   "promoted_opcode_specific": [
     "VADDPD",
@@ -126,7 +126,7 @@
     "VPSUBW",
     "VPXOR"
   ],
-  "translator_mnemonic_sha256": "32bdf9f0e48c0b73ac1f3f0e914d2af621540ffd7c6ccebb86d059c14137250d",
+  "translator_mnemonic_sha256": "f8b9761a04c987ad075b4986d1dec5aab06a2f9c6dd992c3adcba6881a25a2a8",
   "form_resolution": {
     "key": "mnemonic plus encoding family",
     "runtime_fields": [
@@ -244,8 +244,11 @@
     "SQRTPD": {"high32": "ACCESS_READ", "high64": "ACCESS_READ"},
     "SQRTPS": {"high32": "ACCESS_READ", "high64": "ACCESS_READ"},
     "XRSTOR": {"high32": "IMPLICIT", "high64": "IMPLICIT"},
+    "XRSTOR64": {"high32": "IMPLICIT", "high64": "IMPLICIT"},
     "XSAVE": {"high32": "IMPLICIT", "high64": "IMPLICIT"},
+    "XSAVE64": {"high32": "IMPLICIT", "high64": "IMPLICIT"},
     "XSAVEOPT": {"high32": "IMPLICIT", "high64": "IMPLICIT"},
+    "XSAVEOPT64": {"high32": "IMPLICIT", "high64": "IMPLICIT"},
     "VBROADCASTF128": {"high32": "BROADCAST", "high64": "BROADCAST"},
     "VBROADCASTI128": {"high32": "BROADCAST", "high64": "BROADCAST"},
     "VBROADCASTSD": {"high32": "BROADCAST", "high64": "BROADCAST"},
@@ -505,7 +508,19 @@
         "all-xmm"
       ]
     },
+    "XSAVE64": {
+      "policy": "implicit-read-all",
+      "implicit": [
+        "all-xmm"
+      ]
+    },
     "XSAVEOPT": {
+      "policy": "implicit-read-all",
+      "implicit": [
+        "all-xmm"
+      ]
+    },
+    "XSAVEOPT64": {
       "policy": "implicit-read-all",
       "implicit": [
         "all-xmm"
@@ -524,6 +539,13 @@
       ]
     },
     "XRSTOR": {
+      "policy": "implicit-read-write-all",
+      "implicit": [
+        "all-xmm"
+      ],
+      "condition": "SSE state is restored only when EDX:EAX requests XSTATE_SSE"
+    },
+    "XRSTOR64": {
       "policy": "implicit-read-write-all",
       "implicit": [
         "all-xmm"
@@ -572,7 +594,7 @@
   "unmodeled_groups": [
     {
       "name": "legacy_unmodeled",
-      "expected_count": 141,
+      "expected_count": 144,
       "form_scope": "legacy-or-non-vex",
       "policy": "conservative-explicit",
       "mnemonics": [
@@ -715,8 +737,11 @@
         "SQRTPD",
         "SQRTPS",
         "XRSTOR",
+        "XRSTOR64",
         "XSAVE",
-        "XSAVEOPT"
+        "XSAVE64",
+        "XSAVEOPT",
+        "XSAVEOPT64"
       ]
     },
     {

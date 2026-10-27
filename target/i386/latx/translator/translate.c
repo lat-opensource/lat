@@ -1771,8 +1771,11 @@ static bool (*translate_functions[])(IR1_INST *) = {
     TRANS_FUNC_GEN(XGETBV, xgetbv_wrap),
     TRANS_FUNC_GEN(XSETBV, xsetbv_wrap),
     TRANS_FUNC_GEN(XSAVE, xsave_wrap),
+    TRANS_FUNC_GEN(XSAVE64, xsave_wrap),
     TRANS_FUNC_GEN(XSAVEOPT, xsaveopt_wrap),
+    TRANS_FUNC_GEN(XSAVEOPT64, xsaveopt_wrap),
     TRANS_FUNC_GEN(XRSTOR, xrstor_wrap),
+    TRANS_FUNC_GEN(XRSTOR64, xrstor_wrap),
     TRANS_FUNC_GEN(VPBROADCASTD, vpbroadcastd),
     //TRANS_FUNC_GEN(VPMAXSD, vpmaxsd),
     //TRANS_FUNC_GEN(VPMINSD, vpminsd),
@@ -2414,8 +2417,11 @@ static SoftFPURegionClass softfpu_region_class(IR1_OPCODE opcode)
     case dt_X86_INS_XGETBV:
     case dt_X86_INS_XSETBV:
     case dt_X86_INS_XSAVE:
+    case dt_X86_INS_XSAVE64:
     case dt_X86_INS_XSAVEOPT:
+    case dt_X86_INS_XSAVEOPT64:
     case dt_X86_INS_XRSTOR:
+    case dt_X86_INS_XRSTOR64:
 #endif
         return SOFTFPU_REGION_REQUIRED;
     case dt_X86_INS_FILD:
