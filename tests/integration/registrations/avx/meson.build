@@ -1,6 +1,12 @@
 if 'x86_64-linux-user' in target_dirs
   if 'CONFIG_LATX_AVX_OPT' in config_host
     latx_integration_tests += [{
+      'name': 'test-f16c-memory-boundary',
+      'runner': find_program('../../test-avx-regressions.py'),
+      'args': [emulators['latx-x86_64'], files('../../f16c-memory-boundary.asm')],
+      'timeout': 120,
+    }]
+    latx_integration_tests += [{
       'name': 'test-f16c-mxcsr',
       'runner': find_program('../../test-avx-regressions.py'),
       'args': [emulators['latx-x86_64'], files('../../f16c-mxcsr.asm')],
