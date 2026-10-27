@@ -2572,16 +2572,25 @@ void helper_sha256msg2(CPUX86State *env, Reg *d, Reg *a, Reg *b)
 void glue(helper_cvtph2ps, SUFFIX)(CPUX86State *env, Reg *d, Reg *s)
 {
     int i;
+    bool prev_daz = get_flush_inputs_to_zero(&env->sse_status);
 
+    /* F16C widens half subnormals even when MXCSR.DAZ is set. */
+    set_flush_inputs_to_zero(false, &env->sse_status);
     for (i = 2 << SHIFT; --i >= 0; ) {
          d->ZMM_S(i) = float16_to_float32(s->ZMM_H(i), true, &env->sse_status);
     }
+    set_flush_inputs_to_zero(prev_daz, &env->sse_status);
+    update_mxcsr_from_sse_status(env);
 }
 
 void glue(helper_cvtps2ph, SUFFIX)(CPUX86State *env, Reg *d, Reg *s, int mode)
 {
     int i;
     FloatRoundMode prev_rounding_mode = env->sse_status.float_rounding_mode;
+    bool prev_ftz = get_flush_to_zero(&env->sse_status);
+
+    /* F16C produces half subnormals regardless of MXCSR.FTZ. */
+    set_flush_to_zero(false, &env->sse_status);
     if (!(mode & (1 << 2))) {
         set_x86_rounding_mode(mode & 3, &env->sse_status);
     }
@@ -2594,6 +2603,8 @@ void glue(helper_cvtps2ph, SUFFIX)(CPUX86State *env, Reg *d, Reg *s, int mode)
     }
 
     env->sse_status.float_rounding_mode = prev_rounding_mode;
+    set_flush_to_zero(prev_ftz, &env->sse_status);
+    update_mxcsr_from_sse_status(env);
 }
 #endif
 
