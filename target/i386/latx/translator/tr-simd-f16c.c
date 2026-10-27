@@ -39,7 +39,11 @@ bool translate_vcvtph2ps(IR1_INST *pir1)
         int s1 = (d + 1) & 7;
         BorrowedXmm borrowed = borrow_guest_xmm(s1);
         IR2_OPND src = borrowed.reg;
-        load_freg128_from_ir1_mem(src, opnd1);
+        if (ir1_opnd_is_ymm(opnd0)) {
+            load_freg128_from_ir1_mem(src, opnd1);
+        } else {
+            load_freg_from_ir1_2(src, opnd1, IS_INTEGER);
+        }
 
         tr_gen_call_to_helper_pcmpxstrx(helper_func, d, s1, 0, rel_kind);
         restore_guest_xmm(borrowed);
