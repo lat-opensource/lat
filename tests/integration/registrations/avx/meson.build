@@ -1,4 +1,18 @@
 if 'x86_64-linux-user' in target_dirs
+  if 'CONFIG_LATX_AVX_OPT' in config_host
+    latx_integration_tests += [{
+      'name': 'test-f16c-mxcsr',
+      'runner': find_program('../../test-avx-regressions.py'),
+      'args': [emulators['latx-x86_64'], files('../../f16c-mxcsr.asm')],
+      'timeout': 120,
+    }]
+    latx_integration_tests += [{
+      'name': 'test-f16c-upper-zero',
+      'runner': find_program('../../test-avx-regressions.py'),
+      'args': [emulators['latx-x86_64'], files('../../f16c-upper-zero.asm')],
+      'timeout': 120,
+    }]
+  endif
   latx_integration_tests += [{
     'name': 'test-ymmh-conditional-save',
     'runner': find_program('../../test-avx-regressions.py'),
@@ -84,6 +98,22 @@ if 'x86_64-linux-user' in target_dirs
 endif
 
 if 'i386-linux-user' in target_dirs
+  if 'CONFIG_LATX_AVX_OPT' in config_host
+    latx_integration_tests += [{
+      'name': 'test-f16c-mxcsr-i386',
+      'runner': find_program('../../test-avx-regressions.py'),
+      'args': ['--guest-bits', '32', emulators['latx-i386'],
+               files('../../f16c-mxcsr.asm')],
+      'timeout': 120,
+    }]
+    latx_integration_tests += [{
+      'name': 'test-f16c-upper-zero-i386',
+      'runner': find_program('../../test-avx-regressions.py'),
+      'args': ['--guest-bits', '32', emulators['latx-i386'],
+               files('../../f16c-upper-zero.asm')],
+      'timeout': 120,
+    }]
+  endif
   latx_integration_tests += [{
     'name': 'test-ymmh-conditional-save-i386',
     'runner': find_program('../../test-avx-regressions.py'),

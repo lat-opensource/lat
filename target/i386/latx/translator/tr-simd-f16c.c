@@ -74,7 +74,10 @@ bool translate_vcvtps2ph(IR1_INST *pir1)
 
     if (!ir1_opnd_is_mem(opnd0)) {
         int d = ir1_opnd_base_reg_num(opnd0);
+        IR2_OPND dest = ra_alloc_xmm(d);
+
         tr_gen_call_to_helper_pcmpxstrx((ADDR)helper_func, d, s, imm, rel_kind);
+        set_high128_xreg_to_zero(dest);
     } else {
         int d = (s + 1) & 7;
         BorrowedXmm borrowed = borrow_guest_xmm(d);
