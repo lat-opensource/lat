@@ -2377,6 +2377,137 @@ static bool translate_ucomiss_xx_jcc(IR1_INST *pir1)
 #endif
 
 
+static void translate_avx_sum3_pair(IR2_OPND out, IR2_OPND first,
+                                    IR2_OPND second, IR2_OPND save_low,
+                                    bool save)
+{
+    IR2_OPND low = ra_alloc_ftemp();
+    IR2_OPND high = ra_alloc_ftemp();
+
+    /* Keep the x86 order: (lane 0 + lane 1) + lane 2. */
+    la_vilvl_w(low, second, first);
+    la_vshuf4i_w(high, low, 0x4e);
+    la_vfadd_s(low, low, high);
+    if (save) {
+        la_vori_b(save_low, low, 0);
+        la_vinsgr2vr_d(save_low, zero_ir2_opnd, 1);
+    }
+    la_vilvh_w(high, second, first);
+    la_vfadd_s(out, low, high);
+    la_vinsgr2vr_d(out, zero_ir2_opnd, 1);
+    ra_free_temp(high);
+    ra_free_temp(low);
+}
+
+static bool translate_avx_sum3(IR1_INST *pir1)
+{
+    static const int product_offset[] = {-22, -18, -13, -9, -5, -1};
+    IR2_OPND product[6];
+    IR2_OPND zero_src = ra_alloc_xmm(
+        ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 2)));
+    IR2_OPND save_low = ra_alloc_xmm(
+        ir1_opnd_base_reg_num(ir1_get_opnd(pir1 + 3, 0)));
+    IR2_OPND temp = ra_alloc_ftemp();
+
+    for (int i = 0; i < 6; ++i) {
+        product[i] = ra_alloc_xmm(ir1_opnd_base_reg_num(
+            ir1_get_opnd(pir1 + product_offset[i], 0)));
+    }
+
+    translate_avx_sum3_pair(product[3], product[1], product[3],
+                            save_low, true);
+    translate_avx_sum3_pair(product[4], product[0], product[4],
+                            zero_ir2_opnd, false);
+    la_vfadd_s(product[3], product[3], product[4]);
+    translate_avx_sum3_pair(product[0], product[2], product[5],
+                            zero_ir2_opnd, false);
+    la_vfsub_s(product[3], product[3], product[0]);
+
+    /* VBLENDPS/VINSERTPS leave product[5] as [p0+p1, 2*p1, p2, z3]. */
+    la_vshuf4i_w(temp, product[5], 0xe5);
+    la_vfadd_s(product[5], product[5], temp);
+    la_vextrins_w(temp, zero_src, VEXTRINS_IMM_4_0(3, 3));
+    la_vextrins_d(product[5], temp, VEXTRINS_IMM_4_0(1, 1));
+    ra_free_temp(temp);
+
+    set_high128_xreg_to_zero(product[3]);
+    set_high128_xreg_to_zero(product[5]);
+    set_high128_xreg_to_zero(save_low);
+    return true;
+}
+
+static bool translate_bsr_not_add(IR1_INST *pir1)
+{
+    IR2_OPND src = load_ireg_from_ir1(ir1_get_opnd(pir1, 1),
+                                    ZERO_EXTENSION, false);
+    IR2_OPND dest = ra_alloc_gpr(
+        ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 0)));
+
+    /* BSR leaves its destination undefined for a zero source. */
+    la_clz_d(dest, src);
+    la_addi_d(dest, dest, -49);
+    la_bstrpick_d(dest, dest, 31, 0);
+    return true;
+}
+
+static bool translate_clamp_u8(IR1_INST *pir1)
+{
+    IR2_OPND limit = ra_alloc_gpr(
+        ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 0)));
+    IR2_OPND value = ra_alloc_gpr(
+        ir1_opnd_base_reg_num(ir1_get_opnd(pir1 + 1, 1)));
+    IR2_OPND zero = ra_alloc_gpr(
+        ir1_opnd_base_reg_num(ir1_get_opnd(pir1 + 3, 0)));
+    IR2_OPND output = ra_alloc_gpr(
+        ir1_opnd_base_reg_num(ir1_get_opnd(pir1 + 8, 0)));
+
+    li_wu(limit, 255);
+    la_sub_w(limit, limit, value);
+    la_srli_w(limit, limit, 23);
+    la_sltui(zero, value, 1);
+    la_or(limit, limit, value);
+    la_or(limit, limit, zero);
+    /* Both guest ORs write 32 bits, even when MOVZX has another destination. */
+    la_bstrpick_d(limit, limit, 31, 0);
+    la_andi(output, limit, 255);
+    return true;
+}
+
+static bool translate_diff_cmov_u16(IR1_INST *pir1)
+{
+    IR1_OPND *load_mem = ir1_get_opnd(pir1, 1);
+    IR2_OPND input = ra_alloc_gpr(
+        ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 0)));
+    IR2_OPND diff = ra_alloc_gpr(
+        ir1_opnd_base_reg_num(ir1_get_opnd(pir1 + 1, 0)));
+    IR2_OPND value = ra_alloc_gpr(
+        ir1_opnd_base_reg_num(ir1_get_opnd(pir1 + 3, 0)));
+    IR2_OPND previous = ra_alloc_gpr(
+        ir1_opnd_base_reg_num(ir1_get_opnd(pir1 + 4, 1)));
+    IR2_OPND alternate = ra_alloc_gpr(
+        ir1_opnd_base_reg_num(ir1_get_opnd(pir1 + 6, 1)));
+    IR2_OPND condition = ra_alloc_itemp();
+    IR2_OPND keep = ra_alloc_itemp();
+
+    load_ireg_from_ir1_mem(input, load_mem, ZERO_EXTENSION, false);
+    /* Preserve both 32-bit guest intermediates, not just the final CX. */
+    li_wu(diff, UINT32_C(0xffff8000));
+    la_sub_w(diff, diff, input);
+    la_bstrpick_d(diff, diff, 31, 0);
+    la_sub_w(value, diff, previous);
+    la_bstrpick_d(condition, value, 15, 0);
+    la_sltui(condition, condition, 5);
+    la_masknez(keep, value, condition);
+    la_maskeqz(condition, alternate, condition);
+    la_or(value, keep, condition);
+    la_bstrpick_d(value, value, 31, 0);
+    la_bstrpick_d(previous, value, 15, 0);
+
+    ra_free_temp(keep);
+    ra_free_temp(condition);
+    return true;
+}
+
 bool try_translate_instptn(IR1_INST *pir1)
 {
     instptn_check_false();
@@ -2457,6 +2588,14 @@ bool try_translate_instptn(IR1_INST *pir1)
         return translate_shr_jcc(pir1);
     case INSTPTN_OPC_AND_JCC:
         return translate_and_jcc(pir1);
+    case INSTPTN_OPC_AVX_SUM3:
+        return translate_avx_sum3(pir1);
+    case INSTPTN_OPC_BSR_NOT_ADD:
+        return translate_bsr_not_add(pir1);
+    case INSTPTN_OPC_CLAMP_U8:
+        return translate_clamp_u8(pir1);
+    case INSTPTN_OPC_DIFF_CMOV_U16:
+        return translate_diff_cmov_u16(pir1);
     default:
         lsassert(0);
         break;

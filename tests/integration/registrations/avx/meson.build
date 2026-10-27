@@ -1,5 +1,11 @@
 if 'x86_64-linux-user' in target_dirs
   latx_integration_tests += [{
+    'name': 'test-avx-vector-sums',
+    'runner': find_program('../../test-avx-regressions.py'),
+    'args': [emulators['latx-x86_64'], files('../../avx-vector-sums.asm')],
+    'timeout': 120,
+  }]
+  latx_integration_tests += [{
     'name': 'test-ymmh-conditional-save',
     'runner': find_program('../../test-avx-regressions.py'),
     'args': [emulators['latx-x86_64'], files('../../ymmh-conditional-save.asm')],
@@ -10,6 +16,18 @@ if 'x86_64-linux-user' in target_dirs
     'name': 'test-sse41-ymmh-preserve',
     'runner': find_program('../../test-avx-regressions.py'),
     'args': [emulators['latx-x86_64'], files('../../sse41-ymmh-preserve.asm')],
+    'timeout': 120,
+  }]
+  latx_integration_tests += [{
+    'name': 'test-integer-diff-cmov',
+    'runner': find_program('../../test-avx-regressions.py'),
+    'args': [emulators['latx-x86_64'], files('../../integer-diff-cmov.asm')],
+    'timeout': 120,
+  }]
+  latx_integration_tests += [{
+    'name': 'test-integer-patterns',
+    'runner': find_program('../../test-avx-regressions.py'),
+    'args': [emulators['latx-x86_64'], files('../../integer-patterns.asm')],
     'timeout': 120,
   }]
   latx_integration_tests += [{
