@@ -56,6 +56,7 @@ extern int option_trace_ir1;
 extern int option_enable_fcsr_exc;
 extern int option_latx_disassemble_trace_cmp;
 extern int option_jr_ra;
+extern int option_fast_jmpcache_hash;
 #define SMC_ILL_INST 0x1
 /* ld.w      $a1,$zero,0 */
 #define READ_ILL_INST 0x28800005
@@ -172,6 +173,7 @@ extern unsigned long long counter_mips_tr;
     ENVFUN(LATX_FPUTAG, handle_arg_latx_fputag) \
     ENVFUN(SAVE_XMM, handle_arg_save_xmm) \
     ENVFUN(LATX_JRRA, handle_arg_latx_jrra) \
+    ENVFUN(LATX_FAST_JMPCACHE_HASH, handle_arg_latx_fast_jmpcache_hash) \
     ENVFUN(LATX_IMM_REG, handle_arg_latx_imm_reg) \
     ENVFUN(LATX_MT, handle_arg_latx_mem_test) \
     ENVFUN(LATX_MINKE_16K_PAGE_CHECK, \

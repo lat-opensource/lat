@@ -23,6 +23,9 @@
 #include "exec/cpu-defs.h"
 #include "exec/exec-all.h"
 #include "qemu/xxhash.h"
+#if defined(CONFIG_LATX) && defined(CONFIG_USER_ONLY)
+#include "latx-options.h"
+#endif
 
 #ifdef CONFIG_SOFTMMU
 
@@ -54,6 +57,16 @@ static inline unsigned int tb_jmp_cache_hash_func(target_ulong pc)
 /* In user-mode we can get better hashing because we do not have a TLB */
 static inline unsigned int tb_jmp_cache_hash_func(target_ulong pc)
 {
+#if defined(CONFIG_LATX)
+    /*
+     * The low-bit jump-cache hash path can avoid two host instructions by
+     * using the low cache-sized bits directly.  Keep lookup, insertion, and
+     * the same function so a generated cache hit still validates the full PC.
+     */
+    if (option_fast_jmpcache_hash) {
+        return pc & (TB_JMP_CACHE_SIZE - 1);
+    }
+#endif
     return (pc ^ (pc >> TB_JMP_CACHE_BITS)) & (TB_JMP_CACHE_SIZE - 1);
 }
 

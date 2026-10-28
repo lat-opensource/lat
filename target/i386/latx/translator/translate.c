@@ -2886,9 +2886,17 @@ static void generate_indirect_goto(void *code_buf)
      * Step 5: if (tb.pc == x86_addr) {goto fpu_rotate}
      *         else {goto labal_miss}
      */
-    la_srli_d(next_tb, next_x86_addr, TB_JMP_CACHE_BITS);
-    la_xor(next_tb, next_x86_addr, next_tb);
-    la_bstrpick_d(next_tb, next_tb, TB_JMP_CACHE_BITS - 1, 0);
+    if (option_fast_jmpcache_hash) {
+        /*
+         * tb_jmp_cache_hash_func() uses the same low-bit hash in this mode.
+         * The following PC comparison still rejects every collision.
+         */
+        la_bstrpick_d(next_tb, next_x86_addr, TB_JMP_CACHE_BITS - 1, 0);
+    } else {
+        la_srli_d(next_tb, next_x86_addr, TB_JMP_CACHE_BITS);
+        la_xor(next_tb, next_x86_addr, next_tb);
+        la_bstrpick_d(next_tb, next_tb, TB_JMP_CACHE_BITS - 1, 0);
+    }
 
 #ifdef CONFIG_LATX_FAST_JMPCACHE
 #ifdef CONFIG_LATX_GLUE_MASK
