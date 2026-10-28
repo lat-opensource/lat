@@ -1418,14 +1418,24 @@ static bool translate_shrd_cl(IR1_INST *pir1)
     /* use temp register to avoid clobber if src == dest */
     load_ireg_from_ir1_2(dest_opnd, ir1_get_opnd(pir1, 0), ZERO_EXTENSION, false);
     load_ireg_from_ir1_2(src_opnd, ir1_get_opnd(pir1, 1), ZERO_EXTENSION, false);
-    /* TODO: 32 bit case in X86_64 */
+    /*
+     * 16-bit operands are widened to a 32-bit [src:dest] window, so their
+     * shifts must stay 64-bit to cover counts above 16.  32-bit operands are
+     * already zero-extended by load_ireg_from_ir1_2(), so use native 32-bit
+     * shifts; the 32-bit store drops the high half afterwards.
+     */
     if (opnd0_size == 16) {
         la_bstrins_d(dest_opnd, src_opnd, 31, 16);
         la_bstrins_d(src_opnd, dest_opnd, 15, 0);
     }
     IR2_OPND low_dest = ra_alloc_itemp();
-    la_srl_d(low_dest, dest_opnd, count);
-    la_sll_d(src_opnd, src_opnd, left_count);
+    if (opnd0_size == 32) {
+        la_srl_w(low_dest, dest_opnd, count);
+        la_sll_w(src_opnd, src_opnd, left_count);
+    } else {
+        la_srl_d(low_dest, dest_opnd, count);
+        la_sll_d(src_opnd, src_opnd, left_count);
+    }
     ra_free_temp(left_count);
 
     IR2_OPND final_dest = ra_alloc_itemp();
@@ -1471,7 +1481,6 @@ static bool translate_shrd_imm(IR1_INST *pir1)
     /* use temp register to avoid clobber if src == dest */
     load_ireg_from_ir1_2(dest_opnd, ir1_get_opnd(pir1, 0), ZERO_EXTENSION, false);
     load_ireg_from_ir1_2(src_opnd, ir1_get_opnd(pir1, 1), ZERO_EXTENSION, false);
-    /* TODO: 32 bit case in dt_X86_64 */
     if (opnd0_size == 16) {
         la_bstrins_d(dest_opnd, src_opnd, 31, 16);
         la_bstrins_d(src_opnd, dest_opnd, 15, 0);
@@ -1479,8 +1488,13 @@ static bool translate_shrd_imm(IR1_INST *pir1)
     /* shift right firest */
     IR2_OPND low_dest = ra_alloc_itemp();
     IR2_OPND high_dest = ra_alloc_itemp();
-    la_srli_d(low_dest, dest_opnd, count);
-    la_slli_d(high_dest, src_opnd, left_count);
+    if (opnd0_size == 32) {
+        la_srli_w(low_dest, dest_opnd, count);
+        la_slli_w(high_dest, src_opnd, left_count);
+    } else {
+        la_srli_d(low_dest, dest_opnd, count);
+        la_slli_d(high_dest, src_opnd, left_count);
+    }
     ra_free_temp(src_opnd);
 
     IR2_OPND final_dest = ra_alloc_itemp();
@@ -1542,17 +1556,20 @@ static bool translate_shld_cl(IR1_INST *pir1)
     load_ireg_from_ir1_2(dest_opnd, ir1_get_opnd(pir1, 0), ZERO_EXTENSION, false);
     load_ireg_from_ir1_2(src_opnd, ir1_get_opnd(pir1, 1), ZERO_EXTENSION, false);
 
-    /* TODO: 32 bit case in dt_X86_64 */
     if (opnd0_size == 16) {
         la_bstrins_d(src_opnd, src_opnd, 31, 16);
         la_bstrins_d(src_opnd, dest_opnd, 15, 0);
     }
 
     IR2_OPND high_dest = ra_alloc_itemp();
-    la_sll_d(high_dest, dest_opnd, count);
-
     IR2_OPND low_dest = ra_alloc_itemp();
-    la_srl_d(low_dest, src_opnd, left_count);
+    if (opnd0_size == 32) {
+        la_sll_w(high_dest, dest_opnd, count);
+        la_srl_w(low_dest, src_opnd, left_count);
+    } else {
+        la_sll_d(high_dest, dest_opnd, count);
+        la_srl_d(low_dest, src_opnd, left_count);
+    }
     ra_free_temp(left_count);
 
     IR2_OPND final_dest = ra_alloc_itemp();
@@ -1604,7 +1621,6 @@ static bool translate_shld_imm(IR1_INST *pir1)
     load_ireg_from_ir1_2(dest_opnd, ir1_get_opnd(pir1, 0), ZERO_EXTENSION, false);
     load_ireg_from_ir1_2(src_opnd, ir1_get_opnd(pir1, 1), ZERO_EXTENSION, false);
 
-    /* TODO: 32 bit case in dt_X86_64 */
     if (opnd0_size == 16) {
         la_bstrins_d(src_opnd, src_opnd, 31, 16);
         la_bstrins_d(src_opnd, dest_opnd, 15, 0);
@@ -1612,8 +1628,13 @@ static bool translate_shld_imm(IR1_INST *pir1)
 
     IR2_OPND high_dest = ra_alloc_itemp();
     IR2_OPND low_dest = ra_alloc_itemp();
-    la_slli_d(high_dest, dest_opnd, count);
-    la_srli_d(low_dest, src_opnd, left_count);
+    if (opnd0_size == 32) {
+        la_slli_w(high_dest, dest_opnd, count);
+        la_srli_w(low_dest, src_opnd, left_count);
+    } else {
+        la_slli_d(high_dest, dest_opnd, count);
+        la_srli_d(low_dest, src_opnd, left_count);
+    }
 
     IR2_OPND final_dest = ra_alloc_itemp();
     la_or(final_dest, high_dest, low_dest);
