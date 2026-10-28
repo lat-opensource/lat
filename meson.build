@@ -839,6 +839,22 @@ foreach target : target_dirs
       )
     endif
 
+    if get_option('tests').enabled() and \
+       'CONFIG_LATX_AVX_OPT' in config_host and \
+       not enable_static and \
+       host_machine.cpu_family() == 'loongarch64'
+      test(
+        target + '-lasx-cpuid',
+        python,
+        args: [files('tests/runtime/test-lasx-cpuid.py'),
+               emulator.full_path(), target_name, ' '.join(cc.cmd_array()),
+               files('tests/runtime/lasx-hwcap-mask.c')],
+        depends: emulator,
+        suite: 'lat-pr-fast',
+        timeout: 180,
+      )
+    endif
+
   endforeach
 endforeach
 
