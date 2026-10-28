@@ -1152,6 +1152,13 @@ int main(int argc, char **argv, char **envp)
 
     optind = parse_args(argc, argv);
 
+#if defined(CONFIG_LATX) && defined(CONFIG_LATX_AVX_OPT)
+    /* Apply the host limit after parsing options, before CPU registration. */
+    if (!option_enable_lasx) {
+        option_avx_cpuid = 0;
+    }
+#endif
+
     error_init(argv[0]);
     module_call_init(MODULE_INIT_TRACE);
     qemu_init_cpu_list();
