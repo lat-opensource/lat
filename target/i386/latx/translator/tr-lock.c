@@ -11,6 +11,22 @@
 #include "translate.h"
 #include "hbr.h"
 
+/*
+ * The fast-atomic path emits byte/halfword AMO variants (e.g. amadd.db.h
+ * for lock addw), which are LoongArch v1.10 extensions. v1.00 CPUs such
+ * as 3B6000M (LA464) do not implement them and raise SIGILL when such
+ * instructions execute. Therefore enable the fast-atomic path only for
+ * 32/64-bit operands; 8/16-bit operations fall back to the existing
+ * ll/sc path in this file.
+ */
+static inline bool latx_use_fast_atomic(IR1_INST *pir1)
+{
+    if (!option_fast_atomic) {
+        return false;
+    }
+    return ir1_opnd_size(ir1_get_opnd(pir1, 0)) >= 32;
+}
+
 /**
 * @brief convert_mem_to_itemp
 *
@@ -182,7 +198,7 @@ bool translate_lock_sbb(IR1_INST *pir1)
 */
 bool translate_lock_add(IR1_INST *pir1)
 {
-    if (option_fast_atomic)
+    if (latx_use_fast_atomic(pir1))
         return translate_lock_add_fast_atomic(pir1);
 
     IR1_OPND *opnd0 = ir1_get_opnd(pir1, 0);
@@ -459,7 +475,7 @@ bool translate_lock_adc(IR1_INST *pir1)
 */
 bool translate_lock_and(IR1_INST *pir1)
 {
-    if (option_fast_atomic)
+    if (latx_use_fast_atomic(pir1))
         return translate_lock_and_fast_atomic(pir1);
 
     IR1_OPND *opnd0 = ir1_get_opnd(pir1, 0);
@@ -596,7 +612,7 @@ bool translate_lock_and(IR1_INST *pir1)
 */
 bool translate_lock_inc(IR1_INST *pir1)
 {
-    if (option_fast_atomic)
+    if (latx_use_fast_atomic(pir1))
         return translate_lock_inc_fast_atomic(pir1);
 
     IR1_OPND *opnd0 = ir1_get_opnd(pir1, 0);
@@ -734,7 +750,7 @@ bool translate_lock_inc(IR1_INST *pir1)
 */
 bool translate_lock_dec(IR1_INST *pir1)
 {
-    if (option_fast_atomic)
+    if (latx_use_fast_atomic(pir1))
         return translate_lock_dec_fast_atomic(pir1);
 
     IR1_OPND *opnd0 = ir1_get_opnd(pir1, 0);
@@ -872,7 +888,7 @@ bool translate_lock_dec(IR1_INST *pir1)
 */
 bool translate_lock_sub(IR1_INST *pir1)
 {
-    if (option_fast_atomic)
+    if (latx_use_fast_atomic(pir1))
         return translate_lock_sub_fast_atomic(pir1);
 
     IR1_OPND *opnd0 = ir1_get_opnd(pir1, 0);
@@ -1155,7 +1171,7 @@ bool translate_lock_neg(IR1_INST *pir1)
 */
 bool translate_lock_or(IR1_INST *pir1)
 {
-    if (option_fast_atomic)
+    if (latx_use_fast_atomic(pir1))
         return translate_lock_or_fast_atomic(pir1);
 
     IR1_OPND *opnd0 = ir1_get_opnd(pir1, 0);
@@ -1292,7 +1308,7 @@ bool translate_lock_or(IR1_INST *pir1)
 */
 bool translate_lock_not(IR1_INST *pir1)
 {
-    if (option_fast_atomic)
+    if (latx_use_fast_atomic(pir1))
         return translate_lock_not_fast_atomic(pir1);
 
     IR1_OPND *opnd0 = ir1_get_opnd(pir1, 0);
@@ -1428,7 +1444,7 @@ bool translate_lock_not(IR1_INST *pir1)
 */
 bool translate_lock_xor(IR1_INST *pir1)
 {
-    if (option_fast_atomic)
+    if (latx_use_fast_atomic(pir1))
         return translate_lock_xor_fast_atomic(pir1);
 
     IR1_OPND *opnd0 = ir1_get_opnd(pir1, 0);
@@ -1568,7 +1584,7 @@ bool translate_lock_xor(IR1_INST *pir1)
 */
 bool translate_lock_xadd(IR1_INST *pir1)
 {
-    if (option_fast_atomic)
+    if (latx_use_fast_atomic(pir1))
         return translate_lock_xadd_fast_atomic(pir1);
 
     IR1_OPND *opnd0 = ir1_get_opnd(pir1, 0);
@@ -1712,7 +1728,7 @@ bool translate_lock_xadd(IR1_INST *pir1)
 */
 bool translate_lock_cmpxchg(IR1_INST *pir1)
 {
-    if (option_fast_atomic)
+    if (latx_use_fast_atomic(pir1))
         return translate_lock_cmpxchg_fast_atomic(pir1);
 
     IR1_OPND *opnd0 = ir1_get_opnd(pir1, 0);
