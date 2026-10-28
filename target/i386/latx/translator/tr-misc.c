@@ -2029,36 +2029,113 @@ bool translate_emms(IR1_INST *pir1)
     return true;
 }
 
+static int xlat_seg_index(IR1_INST *pir1)
+{
+    int index;
+
+    switch (pir1->info->x86.prefix[1]) {
+    case dt_X86_PREFIX_ES:
+        index = es_index;
+        break;
+    case dt_X86_PREFIX_CS:
+        index = cs_index;
+        break;
+    case dt_X86_PREFIX_SS:
+        index = ss_index;
+        break;
+    case dt_X86_PREFIX_DS:
+        index = ds_index;
+        break;
+    case dt_X86_PREFIX_FS:
+        index = fs_index;
+        break;
+    case dt_X86_PREFIX_GS:
+        index = gs_index;
+        break;
+    default:
+        return -1;
+    }
+
+#ifdef TARGET_X86_64
+    /* Only FS and GS have a visible base in 64-bit mode. */
+    if (CODEIS64 && index != fs_index && index != gs_index) {
+        return -1;
+    }
+#endif
+    return index;
+}
+
 bool translate_xlat(IR1_INST *pir1)
 {
-    /* TODO: ds override, also address size */
+    int addr_size = ir1_addr_size(pir1);
+    int seg_index = xlat_seg_index(pir1);
     IR2_OPND value_opnd = ra_alloc_itemp();
     IR2_OPND al_opnd =
         load_ireg_from_ir1(&al_ir1_opnd, ZERO_EXTENSION, false);
     IR2_OPND ebx_opnd = ra_alloc_gpr(ir1_opnd_base_reg_num(&ebx_ir1_opnd));
-#ifndef TARGET_X86_64
-    clear_h32(&ebx_opnd);
-#else
-    if (CODEIS64) {
-        int addr_size = ir1_addr_size(pir1);
-        IR2_OPND ebx_tmp = ra_alloc_itemp();
-        if (addr_size == 32) {
-            la_mov32_zx(ebx_tmp, ebx_opnd);
-            ebx_opnd = ebx_tmp;
-        } else if (addr_size == 16) {
-            la_bstrpick_d(ebx_tmp, ebx_opnd, 15, 0);
-            ebx_opnd = ebx_tmp;
+
+    if (addr_size == 64) {
+        IR2_OPND addr_opnd = ebx_opnd;
+
+        if (seg_index >= 0) {
+            addr_opnd = ra_alloc_itemp();
+            la_load_addrx(addr_opnd, env_ir2_opnd,
+                          lsenv_offset_of_seg_base(lsenv, seg_index));
+            la_add_d(addr_opnd, addr_opnd, ebx_opnd);
         }
+        la_ldx_b(value_opnd, addr_opnd, al_opnd);
+    } else if (addr_size == 32 && seg_index < 0) {
+        IR2_OPND addr_opnd = ra_alloc_itemp();
+
         /*
-         * attention!! This place free ebx_tmp is only safe when
-         * follow did not alloc itemp again.
+         * Flat user mode leaves page zero unmapped, so a 32-bit wrap of
+         * the no-segment form only changes the fault address.  Keep the
+         * single indexed load on this common path.  Segment overrides and
+         * the 16-bit form use the guarded path below because their wrapped
+         * address can still be reachable.
          */
-        ra_free_temp(ebx_tmp);
+        la_bstrpick_d(addr_opnd, ebx_opnd, 31, 0);
+        la_ldx_b(value_opnd, addr_opnd, al_opnd);
     } else {
-        clear_h32(&ebx_opnd);
+        IR2_OPND masked_base = ra_alloc_itemp();
+        IR2_OPND overflow = ra_alloc_itemp();
+        IR2_OPND addr_opnd = masked_base;
+        IR2_OPND seg_base_opnd = zero_ir2_opnd;
+        IR2_OPND label_slow = ra_alloc_label();
+        IR2_OPND label_done = ra_alloc_label();
+
+        /*
+         * Adding AL cannot wrap when masked_base <= mask - 0xff.  Keep the
+         * indexed load on the fast path and mask explicitly only near the
+         * address-size boundary.
+         */
+        la_bstrpick_d(masked_base, ebx_opnd, addr_size - 1, 0);
+        la_addi_d(overflow, masked_base, 0xff);
+        la_srli_d(overflow, overflow, addr_size);
+        if (seg_index >= 0) {
+            seg_base_opnd = ra_alloc_itemp();
+            la_load_addrx(seg_base_opnd, env_ir2_opnd,
+                          lsenv_offset_of_seg_base(lsenv, seg_index));
+        }
+        la_bnez(overflow, label_slow);
+
+        if (seg_index >= 0) {
+            addr_opnd = ra_alloc_itemp();
+            la_add_d(addr_opnd, masked_base, seg_base_opnd);
+        }
+        la_ldx_b(value_opnd, addr_opnd, al_opnd);
+        la_b(label_done);
+
+        la_label(label_slow);
+        la_add_d(masked_base, ebx_opnd, al_opnd);
+        la_bstrpick_d(masked_base, masked_base, addr_size - 1, 0);
+        if (seg_index >= 0) {
+            la_add_d(masked_base, masked_base, seg_base_opnd);
+        }
+        la_ld_b(value_opnd, masked_base, 0);
+        la_label(label_done);
     }
-#endif
-    la_ldx_b(value_opnd, ebx_opnd, al_opnd);
+
     store_ireg_to_ir1(value_opnd, &al_ir1_opnd, false);
     return true;
 }
