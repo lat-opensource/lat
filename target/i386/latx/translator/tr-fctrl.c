@@ -122,6 +122,16 @@ void prepare_sse_rounding_mode(void)
     tr_data->sse_rounding_prepared = true;
 }
 
+void clear_softfpu_exception_flags(void)
+{
+    int offset = lsenv_offset_of_fp_status(lsenv) +
+                 offsetof(float_status, float_exception_flags);
+
+    /* Signal capture must not merge exceptions from a replaced x87 state. */
+    QEMU_BUILD_BUG_ON(sizeof(((float_status *)0)->float_exception_flags) != 2);
+    la_st_h(zero_ir2_opnd, env_ir2_opnd, offset);
+}
+
 static void update_fcsr_flag(IR2_OPND status_word, IR2_OPND fcsr)
 {
     IR2_OPND temp = ra_alloc_itemp();
@@ -294,6 +304,59 @@ void update_sw_by_fcsr(IR2_OPND sw_opnd)
     la_st_h(sw_opnd, env_ir2_opnd, status_offset);
     ra_free_temp(fcsr);
     ra_free_temp(temp1);
+}
+
+static void update_mxcsr_by_fcsr(void)
+{
+    int mxcsr_offset = lsenv_offset_of_mxcsr(lsenv);
+    IR2_OPND mxcsr = ra_alloc_itemp();
+    IR2_OPND fcsr = ra_alloc_itemp();
+    IR2_OPND temp1 = ra_alloc_itemp();
+    IR2_OPND temp2 = ra_alloc_itemp();
+
+    lsassert(mxcsr_offset <= 0x7ff);
+    la_ld_wu(mxcsr, env_ir2_opnd, mxcsr_offset);
+    la_movfcsr2gr(fcsr, fcsr_ir2_opnd);
+
+    /* Convert LA sticky flags to the matching MXCSR status bits. */
+    la_bitrev_w(temp1, fcsr);
+    la_srli_d(temp1, temp1, 11);
+    la_bstrpick_d(temp2, temp1, 0, 0);
+    la_or(mxcsr, mxcsr, temp2);
+    la_bstrpick_d(temp2, temp1, 4, 1);
+    la_slli_d(temp2, temp2, 2);
+    la_or(mxcsr, mxcsr, temp2);
+    la_st_w(mxcsr, env_ir2_opnd, mxcsr_offset);
+
+    la_bstrins_w(fcsr, zero_ir2_opnd,
+                 FCSR_OFF_FLAGS_V, FCSR_OFF_FLAGS_I);
+    la_movgr2fcsr(fcsr_ir2_opnd, fcsr);
+
+    ra_free_temp(mxcsr);
+    ra_free_temp(fcsr);
+    ra_free_temp(temp1);
+    ra_free_temp(temp2);
+}
+
+void begin_x87_fcsr_access(void)
+{
+    IR2_OPND one = ra_alloc_itemp();
+
+    /* Any pending host flags belong to the preceding SSE operation. */
+    update_mxcsr_by_fcsr();
+    li_d(one, 1);
+    la_st_b(one, env_ir2_opnd, lsenv_offset_of_fcsr_is_x87(lsenv));
+    ra_free_temp(one);
+}
+
+void end_x87_fcsr_access(void)
+{
+    IR2_OPND sw = ra_alloc_itemp();
+
+    update_sw_by_fcsr(sw);
+    la_st_b(zero_ir2_opnd, env_ir2_opnd,
+            lsenv_offset_of_fcsr_is_x87(lsenv));
+    ra_free_temp(sw);
 }
 
 bool translate_fnstcw(IR1_INST *pir1)
@@ -887,6 +950,7 @@ bool translate_fldenv(IR1_INST *pir1)
     lsassert(status_offset <= 0x7ff);
     la_st_h(value, env_ir2_opnd, status_offset);
     update_fcsr_by_sw(value);
+    clear_softfpu_exception_flags();
 
     /* get top value */
     la_srli_w(value, value, 11);
@@ -1027,6 +1091,8 @@ bool translate_fnclex(IR1_INST *pir1) {
     IR2_OPND sw_value = ra_alloc_itemp();
     IR2_OPND fcsr0 = ra_alloc_itemp();
     int offset = lsenv_offset_of_status_word(lsenv);
+
+    clear_softfpu_exception_flags();
     la_ld_hu(sw_value, env_ir2_opnd, offset);
     la_movfcsr2gr(fcsr0, fcsr_ir2_opnd);
     la_bstrins_d(sw_value, zero_ir2_opnd, X87_SR_OFF_ES, X87_SR_OFF_IE);
@@ -1045,6 +1111,7 @@ bool translate_fninit(IR1_INST *pir1) {
     IR2_OPND fcsr0 = ra_alloc_itemp();
     int offset;
 
+    clear_softfpu_exception_flags();
     /* clear status and set control*/
     offset = lsenv_offset_of_status_word(lsenv);
     lsassert(offset <= 0x7ff);
