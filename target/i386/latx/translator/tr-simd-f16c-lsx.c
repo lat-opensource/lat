@@ -73,7 +73,11 @@ bool translate_vcvtph2ps_lsx(IR1_INST *pir1)
         IR2_OPND scratch = ra_alloc_xmm(scratch_index);
 
         la_vori_b(saved, scratch, 0);
-        load_freg128_from_ir1_mem(scratch, src_opnd);
+        if (ir1_opnd_is_ymm(dest_opnd)) {
+            load_freg128_from_ir1_mem(scratch, src_opnd);
+        } else {
+            load_freg_from_ir1_2(scratch, src_opnd, IS_INTEGER);
+        }
         call_f16c_helper_lsx(helper, dest_index, scratch_index, 0, rel_kind);
         la_vori_b(scratch, saved, 0);
         store_ymm_high128_shadow(saved_high, scratch_index);
