@@ -298,6 +298,12 @@ void options_init(void)
 
 bool latx_options_finalize(void)
 {
+#ifdef CONFIG_LATX_AVX_OPT
+    /* Configuration must not override the host LASX limit. */
+    if (!option_enable_lasx) {
+        option_avx_cpuid = 0;
+    }
+#endif
 #if defined(CONFIG_LATX_KZT)
     if (option_kzt_guest_tls_error) {
         kzt_groups_reject_configuration(option_kzt_guest_tls_error, true);
