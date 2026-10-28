@@ -63,6 +63,7 @@ extern int option_anonym;
 
 #ifdef CONFIG_LATX_AVX_OPT
 extern int option_avx_cpuid;
+extern int option_enable_lasx;
 #endif
 
 /* Helpers for building CPUID[2] descriptors: */
@@ -7582,9 +7583,10 @@ static void x86_cpu_register_types(void)
 
 #ifdef CONFIG_LATX_AVX_OPT
     printf("option avx cpuid %d\n", option_avx_cpuid);
-    if(!option_avx_cpuid){
+    if(!option_avx_cpuid || !option_enable_lasx){
         uint64_t feat_1_ecx_mask = ~(CPUID_EXT_AVX |
                 CPUID_EXT_FMA |
+                CPUID_EXT_F16C |   /* F16C is VEX-encoded too and tr-simd-f16c.c lacks LASX gating; mask it as well */
                 CPUID_EXT_XSAVE);
         uint64_t feat_7_0_ebx_mask = ~(CPUID_7_0_EBX_HLE |
                 CPUID_7_0_EBX_BMI1 |
