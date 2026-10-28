@@ -47,7 +47,7 @@ def run_case(emulator, source, work, prebuilt, guest_bits=64):
     # Never reuse another test's cache or change the user's HOME/configuration.
     cache = Path.home() / ".cache" / "latx"
     key = hashlib.sha256(str(guest).encode()).hexdigest()
-    pattern = "v2-*-" + key + ".aot2"
+    pattern = "v3-*-" + key + ".aot2"
     env = os.environ.copy()
     marker = work / (source.stem + ".aot-loaded")
     env.pop("LATX_TEST_AOT_LOAD_MARKER", None)

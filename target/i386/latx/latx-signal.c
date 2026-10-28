@@ -164,9 +164,13 @@ void unlink_indirect_jmp(CPUArchState *env, TranslationBlock *tb, ucontext_t *uc
     insn = qatomic_read((uint32_t *)(jmp_rx + INS_SIZE * 11));
     jmp_rw += INS_SIZE * 11;
 #else
-    /* Unmasked fast jmpcache reaches jirl after the eight-instruction hit path. */
-    insn = qatomic_read((uint32_t *)(jmp_rx + INS_SIZE * 7));
-    jmp_rw += INS_SIZE * 7;
+    /*
+     * The low-bit jump-cache hash uses one instruction instead of the normal
+     * three-instruction fold, moving jirl two instructions earlier.
+     */
+    uint32_t jirl_index = option_fast_jmpcache_hash ? 5 : 7;
+    insn = qatomic_read((uint32_t *)(jmp_rx + INS_SIZE * jirl_index));
+    jmp_rw += INS_SIZE * jirl_index;
 #endif
 #else
     CPUState *cpu = env_cpu(env);

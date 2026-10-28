@@ -6,6 +6,8 @@
 
 int qemu_loglevel;
 int option_aot_pe_profile;
+int option_fast_jmpcache_hash;
+int option_load_aot = 1;
 const char *aot_process_profile = "browser";
 
 int qemu_log(const char *fmt G_GNUC_UNUSED, ...)
@@ -20,6 +22,22 @@ void print_stack_trace(void)
 static void get_cache_name(seg_info *seg, char *name)
 {
     g_assert(segment_get_aot_file_name(seg, name, PATH_MAX) == 0);
+}
+
+static void check_hash_policy(seg_info *seg)
+{
+    char names[2][PATH_MAX], configured[PATH_MAX];
+
+    for (int hash = 0; hash <= 1; hash++) {
+        option_fast_jmpcache_hash = hash;
+        get_cache_name(seg, names[hash]);
+        option_load_aot = 0;
+        get_cache_name(seg, configured);
+        g_assert(strcmp(configured, names[hash]) == 0);
+        option_load_aot = 1;
+    }
+    g_assert(strcmp(names[0], names[1]) != 0);
+    option_fast_jmpcache_hash = 0;
 }
 
 int main(void)
@@ -54,10 +72,13 @@ int main(void)
     get_cache_name(&elf_seg, elf_cache_name);
     get_cache_name(&pe_seg, first_name);
     get_cache_name(&colliding_elf_seg, colliding_cache_name);
-    g_assert(g_str_has_prefix(elf_cache_name, "v2-01-"));
-    g_assert(g_str_has_prefix(first_name, "v2-02-"));
+    g_assert(g_str_has_prefix(elf_cache_name, "v3-01-100-"));
+    g_assert(g_str_has_prefix(first_name, "v3-02-100-"));
     g_assert(g_str_has_suffix(first_name, "-140000000"));
     g_assert(strcmp(first_name, colliding_cache_name) != 0);
+
+    check_hash_policy(&elf_seg);
+    check_hash_policy(&pe_seg);
 
     same_page_pe_seg.seg_begin += 0x80;
     get_cache_name(&same_page_pe_seg, second_name);

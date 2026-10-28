@@ -24,6 +24,7 @@ void __wrap_free(void *ptr);
 
 __thread CPUState *thread_cpu;
 int qemu_loglevel;
+int option_fast_jmpcache_hash;
 int option_debug_aot;
 time_t aot_st_ctime;
 aot_file_info *aot_buffer_all;
@@ -159,6 +160,7 @@ static void write_cache(const char *path, const char *library,
     uint32_t *code = (uint32_t *)(tb + 1);
     char *name = (char *)(code + 1);
 
+    header->generation_policy = aot_generation_policy();
     header->aot_file_type = ELF_AOT_FILE;
     header->segment_table_offset = (uint8_t *)segment - contents;
     header->segments_num = 1;
@@ -272,6 +274,46 @@ static void test_merge_lifetime(void)
     seg_info_vector = NULL;
 }
 
+static void test_merge_hash_policy(void)
+{
+    char base[PATH_MAX], fragment[PATH_MAX];
+    char name[] = "policy-merge";
+
+    g_assert(__wrap_get_aot_path(name, base, sizeof(base)) == 0);
+    g_assert(aot_file_get_tmp_path(base, fragment, sizeof(fragment)) == 0);
+    for (int generated = 0; generated <= 1; generated++) {
+        for (int loaded = 0; loaded <= 1; loaded++) {
+            option_fast_jmpcache_hash = generated;
+            write_cache(base, "library", 0, true);
+            option_fast_jmpcache_hash = loaded;
+            write_cache(fragment, "library", 4, true);
+            track_allocations = true;
+            AOTLoadResult result = aot_load_no_lock(name);
+
+            g_assert(result == (generated == loaded ? AOT_LOAD_OK :
+                                                    AOT_LOAD_INVALID_BASE));
+            aot_merge_release_buffers();
+            track_allocations = false;
+            assert_released();
+            /* A current base must not admit a renamed incompatible fragment. */
+            write_cache(base, "library", 0, true);
+            option_fast_jmpcache_hash = generated;
+            write_cache(fragment, "library", 4, true);
+            option_fast_jmpcache_hash = loaded;
+            track_allocations = true;
+            result = aot_load_no_lock(name);
+            g_assert(result == (generated == loaded ? AOT_LOAD_OK :
+                                                    AOT_LOAD_ERROR));
+            aot_merge_release_buffers();
+            track_allocations = false;
+            assert_released();
+        }
+    }
+    option_fast_jmpcache_hash = 0;
+    g_assert(g_remove(base) == 0);
+    g_assert(g_remove(fragment) == 0);
+}
+
 static void test_merge_tree_lifetime(void)
 {
     GTree *tree;
@@ -312,6 +354,7 @@ int main(int argc, char **argv)
     test_dir = g_dir_make_tmp("latx-aot-merge-memory-XXXXXX", NULL);
     g_assert(test_dir != NULL);
     g_test_add_func("/aot-merge/buffer-lifetime", test_merge_lifetime);
+    g_test_add_func("/aot-merge/hash-policy", test_merge_hash_policy);
     g_test_add_func("/aot-merge/tree-lifetime", test_merge_tree_lifetime);
     g_test_add_func("/aot-merge/cache-directory-failure",
                     test_cache_directory_failure);

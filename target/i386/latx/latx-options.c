@@ -35,6 +35,7 @@ int option_flag_reduction = 1;
 #endif
 
 int option_lative = 0;
+int option_fast_jmpcache_hash;
 #if defined(CONFIG_LATX_JRRA_STACK) && defined(CONFIG_LATX_LSFPU)
 
 int option_jr_ra_stack = 1;
@@ -222,6 +223,7 @@ void conf_init(char **argv)
 void options_init(void)
 {
     latx_runtime_reset();
+    option_fast_jmpcache_hash = 0;
 #if defined(CONFIG_LATX_KZT)
     option_kzt = 0;
     option_kzt_guest_tls = 0;

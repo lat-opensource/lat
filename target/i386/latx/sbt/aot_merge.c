@@ -464,6 +464,7 @@ static bool merge_aot_generate(void)
     char *last_name = aot_x86_lib_names;
     char *curr_name = aot_x86_lib_names;
     uint8_t aot_file_type = get_file_type(merge_seg_info_vector[0]->file_name);
+    p_header->generation_policy = aot_generation_policy();
     p_header->aot_file_type = aot_file_type;
     int page_index = 0;
     for (int i = 0; i < seg_info_num; i++) {
@@ -755,7 +756,7 @@ static AOTLoadResult aot_load_no_lock(char *lib_name)
             fclose(pf);
             goto load_error;
         }
-        if ((size_t)file_end < strlen(AOT_VERSION)) {
+        if ((size_t)file_end < sizeof(aot_header) + strlen(AOT_VERSION)) {
             fclose(pf);
             if (i == 0) {
                 goto invalid_base;
@@ -800,6 +801,13 @@ static AOTLoadResult aot_load_no_lock(char *lib_name)
             goto load_error;
         }
         fclose(pf);
+        if (!aot_header_policy_matches(buffer)) {
+            free(buffer);
+            if (i == 0) {
+                goto invalid_base;
+            }
+            goto load_error;
+        }
         aot_buffer_all[j].p = buffer;
         aot_buffer_all[j].maplen = file_sz;
         j++;

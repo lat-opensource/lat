@@ -65,6 +65,11 @@ int aot_get_tb_num(char *lib_name, char *aot_file_name, CPUState *cpu)
     }
     assert(buffer);
     aot_header *p_header = (aot_header *)buffer;
+    if (!aot_header_policy_matches(p_header)) {
+        qemu_log_mask(LAT_LOG_AOT, "AOT generation policy mismatch %s\n",
+                      lib_name);
+        goto out;
+    }
     struct stat statbuf;
 
     if ((p_header->aot_file_type & (ELF_AOT_FILE | PE_AOT_FILE))
@@ -158,6 +163,11 @@ lib_info *aot_load(char *lib_name, char *aot_file_name,
     }
     assert(buffer);
     aot_header *p_header = (aot_header *)buffer;
+    if (!aot_header_policy_matches(p_header)) {
+        qemu_log_mask(LAT_LOG_AOT, "AOT generation policy mismatch %s\n",
+                      lib_name);
+        goto out;
+    }
 
     if (p_header->aot_file_type & (ELF_AOT_FILE | PE_AOT_FILE)) {
         if (stat(lib_name, &statbuf)

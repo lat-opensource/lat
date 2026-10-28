@@ -19,6 +19,7 @@
 #include "aot_link_seg.h"
 #include "ts.h"
 #include "aot_lib.h"
+#include "latx-options.h"
 extern char pf_table[];
 extern  const char *aot_file_size_optarg;
 extern  const char *aot_left_file_minsize_optarg;
@@ -39,6 +40,7 @@ extern  const char *aot_left_file_minsize_optarg;
  * +--------------+
  */
 typedef struct aot_header {
+    uint32_t generation_policy;
     uint32_t lib_size;
     struct timespec last_modify_time;
     uint32_t segment_table_offset;
@@ -53,6 +55,12 @@ typedef struct aot_header {
 #define HASH_AOT_FILE       8
     uint8_t aot_file_type;
 } aot_header;
+
+static inline bool aot_header_policy_matches(const aot_header *header)
+{
+    return header->generation_policy == aot_generation_policy();
+}
+
 
 typedef struct aot_file_info {
     void *p;
