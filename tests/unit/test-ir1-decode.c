@@ -181,9 +181,65 @@ static void test_threads(void)
     }
 }
 
+static void test_vex_string_compare_w(void)
+{
+    static const unsigned int ids[] = {
+        dt_X86_INS_VPCMPESTRM, dt_X86_INS_VPCMPESTRI,
+        dt_X86_INS_VPCMPISTRM, dt_X86_INS_VPCMPISTRI,
+    };
+
+    for (unsigned int op = 0; op < G_N_ELEMENTS(ids); op++) {
+        for (unsigned int w = 0; w < 2; w++) {
+            for (unsigned int mem = 0; mem < 2; mem++) {
+                for (unsigned int high = 0; high < 2; high++) {
+                    uint8_t code[15] = {
+                        0xc4, 0xe3, 0x79, 0x60 + op, 0xdc, 0,
+                    };
+                    struct la_dt_insn decoded = { 0 }, *full = NULL;
+
+                    code[1] = high ? (mem ? 0x63 : 0x43) : 0xe3;
+                    code[2] |= w << 7;
+                    if (mem) {
+                        code[4] = 0x1d;
+                        code[5] = 0x44;
+                        code[6] = 0x33;
+                        code[7] = 0x22;
+                        code[8] = 0x11;
+                        code[9] = 0;
+                    }
+                    int count = gitcapstone_get(code, sizeof(code), 0x1000,
+                                                1, &full, 0, &decoded, 1);
+                    if (count != 1 || !full) {
+                        mismatch(code, "VEX string compare decode", 0, 1);
+                        continue;
+                    }
+                    g_assert_cmpuint(full->id, ==, ids[op]);
+                    g_assert_cmpuint(full->size, ==, mem ? 10 : 6);
+                    g_assert_cmpuint(full->x86.rex & 8, ==, w << 3);
+                    g_assert_cmpuint(full->x86.op_count, ==, 3);
+                    g_assert_cmpuint(full->x86.operands[0].reg, ==,
+                                     high ? dt_X86_REG_XMM11 : dt_X86_REG_XMM3);
+                    g_assert_cmpuint(full->x86.operands[1].size, ==, 16);
+                    if (mem) {
+                        g_assert_cmpuint(full->x86.operands[1].mem.base, ==,
+                                         dt_X86_REG_RIP);
+                        g_assert_cmpint(full->x86.operands[1].mem.disp, ==,
+                                        0x11223344);
+                    } else {
+                        g_assert_cmpuint(full->x86.operands[1].reg, ==,
+                                         high ? dt_X86_REG_XMM12 :
+                                                dt_X86_REG_XMM4);
+                    }
+                }
+            }
+        }
+    }
+}
+
 int main(void)
 {
     gitcapstone_init(64);
+    test_vex_string_compare_w();
     uint8_t code[15];
     /* Every opcode/ModRM/REX combination, with both displacement signs. */
     for (int r = -1; r < 16; r++) {

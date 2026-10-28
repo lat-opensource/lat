@@ -1,5 +1,12 @@
 if 'x86_64-linux-user' in target_dirs
   latx_integration_tests += [{
+    'name': 'test-vpcmpstr-vex-w',
+    'runner': find_program('../../test-avx-regressions.py'),
+    'args': [emulators['latx-x86_64'], files('../../vpcmpstr-vex-w.asm')],
+    'env': {'LATX_SOFTFPU': '0'},
+    'timeout': 120,
+  }]
+  latx_integration_tests += [{
     'name': 'test-ymmh-conditional-save',
     'runner': find_program('../../test-avx-regressions.py'),
     'args': [emulators['latx-x86_64'], files('../../ymmh-conditional-save.asm')],
