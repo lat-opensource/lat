@@ -14,6 +14,9 @@ char aot_file_lock_buffer[PATH_MAX];
 char *aot_file_path = aot_file_path_buffer;
 char *aot_file_lock = aot_file_lock_buffer;
 int qemu_loglevel;
+int option_fast_jmpcache_hash;
+int option_tu;
+int option_aot;
 static bool fail_fdopen;
 static int tracked_fd;
 static int sentinel_fd;
@@ -94,6 +97,7 @@ static void write_cache(const char *name, size_t header_size, bool has_footer,
     g_autofree char *dir = NULL;
     g_autofree uint8_t *contents = NULL;
     aot_header header = {
+        .generation_policy = aot_generation_policy(),
         .aot_file_type = CACHE_AOT_FILE,
         .parallel_tb_num = 11,
         .unparallel_tb_num = 7,
@@ -144,6 +148,65 @@ static void remove_cache(const char *name)
     }
 }
 
+/* Keep the filename unchanged to prove that header validation is mandatory. */
+static void check_generation_policy(void)
+{
+    char name[] = "generation-policy";
+    char library[] = "test-library";
+    char path[PATH_MAX];
+    CPUState cpu = { 0 };
+
+    for (int mode = 1; mode <= 3; mode++) {
+        option_aot = mode;
+        for (int tu = 0; tu <= 1; tu++) {
+            option_tu = tu;
+            for (int generated = 0; generated <= 1; generated++) {
+                option_fast_jmpcache_hash = generated;
+                write_cache(name, sizeof(aot_header), true, path);
+                for (int loaded = 0; loaded <= 1; loaded++) {
+                    void *buffer = NULL;
+                    lib_info *lib;
+
+                    option_fast_jmpcache_hash = loaded;
+                    reset_stream_counts();
+                    g_assert(aot_get_tb_num(library, name, &cpu) ==
+                             (generated == loaded ? 7 : 0));
+                    assert_stream_closed();
+                    reset_stream_counts();
+                    lib = aot_load(library, name, &buffer);
+                    if (generated == loaded) {
+                        g_assert(lib != NULL && buffer != NULL);
+                        g_assert(lib_tree_remove(name));
+                    } else {
+                        g_assert(lib == NULL && buffer == NULL);
+                    }
+                    assert_stream_closed();
+                    g_assert(g_file_test(path, G_FILE_TEST_EXISTS));
+                }
+                remove_cache(name);
+            }
+        }
+    }
+    option_tu = option_aot = option_fast_jmpcache_hash = 0;
+    /* A policy-less legacy header is invalid even with a current footer. */
+    write_cache(name, sizeof(aot_header), true, path);
+    FILE *file = fopen(path, "r+b");
+    uint32_t legacy = 0;
+
+    g_assert(file != NULL);
+    g_assert(fwrite(&legacy, sizeof(legacy), 1, file) == 1);
+    g_assert(__real_fclose(file) == 0);
+    reset_stream_counts();
+    g_assert(aot_get_tb_num(library, name, &cpu) == 0);
+    assert_stream_closed();
+    reset_stream_counts();
+    void *buffer = NULL;
+
+    g_assert(aot_load(library, name, &buffer) == NULL && buffer == NULL);
+    assert_stream_closed();
+    remove_cache(name);
+}
+
 int main(void)
 {
     g_autofree char *cache_dir = NULL;
@@ -179,6 +242,7 @@ int main(void)
     g_assert(g_setenv("HOME", test_dir, true));
 
     lib_tree_init();
+    check_generation_policy();
     for (int i = 0; i < 16; i++) {
         reset_stream_counts();
         write_cache(bad_footer_name, sizeof(aot_header), false, cache_path);

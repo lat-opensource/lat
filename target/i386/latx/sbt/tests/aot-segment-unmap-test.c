@@ -25,6 +25,7 @@ static GHashTable *page_flags;
 bool message_with_timestamp;
 int option_aot = 1;
 int option_aot_pe_profile;
+int option_fast_jmpcache_hash;
 int option_prlimit;
 const char *aot_process_profile = "browser";
 abi_ulong mmap_min_addr;

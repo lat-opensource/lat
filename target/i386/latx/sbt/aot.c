@@ -795,6 +795,7 @@ int do_generate_aot(int first_seg_in_lib, int end_seg_in_lib)
         return false;
     }
 
+    p_header->generation_policy = aot_generation_policy();
     p_header->aot_file_type =
         seg_info_vector[first_seg_in_lib]->aot_file_type;
 
