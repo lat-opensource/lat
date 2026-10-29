@@ -60,6 +60,24 @@ section .text
     CHECK scalar_reference, 15
 %endmacro
 
+%macro BLEND 2
+    vmovdqu ymm0, [junk]
+    vmovdqu ymm1, [words2]
+    vmovdqu ymm2, [words3]
+    %if %2 = 1
+        vmovdqu ymm0, ymm1
+        vpblendd xmm0, xmm0, xmm2, %1
+    %elif %2 = 2
+        vmovdqu ymm0, ymm2
+        vpblendd xmm0, xmm1, xmm0, %1
+    %elif %2 = 3
+        vpblendd xmm0, xmm1, [words3], %1
+    %else
+        vpblendd xmm0, xmm1, xmm2, %1
+    %endif
+    CHECK blend_ %+ %1, 16
+%endmacro
+
 _start:
 %assign alias 0
 %rep 3
@@ -90,6 +108,16 @@ _start:
 
     CHECK_SCALAR_COPY vrcpss
     CHECK_SCALAR_COPY vrsqrtss
+
+%assign blend_mask 0
+%rep 16
+%assign blend_alias 0
+%rep 4
+    BLEND blend_mask, blend_alias
+%assign blend_alias blend_alias + 1
+%endrep
+%assign blend_mask blend_mask + 1
+%endrep
 
     vmovdqu ymm1, [words2]
     vmovdqu ymm2, [words3]
@@ -145,6 +173,21 @@ broadcast_input: dq 0x0123456789abcdef, 0xfedcba9876543210, 0, -1
 broadcast_q: times 4 dq 0x0123456789abcdef
 scalar_input: dd 0x40800000, 0x11223344, 0x55667788, 0x99aabbcc
     times 4 dd 0xdeadbeef
+%assign blend_mask 0
+%rep 16
+blend_ %+ blend_mask:
+%assign lane 0
+%rep 4
+    %if blend_mask & (1 << lane)
+        dd 0x00030003
+    %else
+        dd 0x00020002
+    %endif
+%assign lane lane + 1
+%endrep
+    times 4 dd 0
+%assign blend_mask blend_mask + 1
+%endrep
 
 section .bss align=32
 actual: resb 32

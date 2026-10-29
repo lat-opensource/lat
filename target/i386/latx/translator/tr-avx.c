@@ -1989,30 +1989,33 @@ bool translate_vpblendd(IR1_INST * pir1) {
     IR2_OPND src1 = load_freg256_from_ir1(opnd1);
     IR2_OPND src2 = load_freg256_from_ir1(opnd2);
     uint8_t imm = ir1_opnd_uimm(opnd3);
-    IR2_OPND temp = ra_alloc_ftemp();
-    IR2_OPND rmask = ra_alloc_itemp();
 
     if (ir1_opnd_is_xmm(opnd0)) {
+        bool dest_is_src1 = ir1_opnd_is_same_reg(opnd0, opnd1);
+        bool dest_is_src2 = ir1_opnd_is_same_reg(opnd0, opnd2);
         if((imm & 0xf) == 0xf) {
-            la_xvori_b(dest, src2, 0);
+            if (!dest_is_src2)
+                la_xvori_b(dest, src2, 0);
             set_high128_xreg_to_zero(dest);
             return true;
         } else if((imm & 0xf) == 0x0){
-            la_xvori_b(dest, src1, 0);
+            if (!dest_is_src1)
+                la_xvori_b(dest, src1, 0);
             set_high128_xreg_to_zero(dest);
             return true;
         }
-        uint64_t mask = 0;
-        for (int i = 0; i < 4; i++) {
-            if (imm & (1 << i)) {
-                mask |= (0xFFULL) << (i * 8);
-            }
-        }
-        li_d(rmask, mask);
-        la_movgr2fr_d(temp, rmask);
-        la_vext2xv_w_b(temp, temp);
-        la_xvbitsel_v(dest, src1, src2, temp);
+        bool base_is_src2 = dest_is_src2 ||
+            (!dest_is_src1 && __builtin_popcount(imm & 0xf) > 2);
+        uint8_t insert_mask = (base_is_src2 ? ~imm : imm) & 0xf;
+        IR2_OPND base = base_is_src2 ? src2 : src1;
+        IR2_OPND insert_src = base_is_src2 ? src1 : src2;
 
+        if (!dest_is_src1 && !dest_is_src2)
+            la_xvori_b(dest, base, 0);
+        for (int i = 0; i < 4; i++) {
+            if (insert_mask & (1u << i))
+                la_vextrins_w(dest, insert_src, VEXTRINS_IMM_4_0(i, i));
+        }
         set_high128_xreg_to_zero(dest);
         return true;
     }
@@ -2023,6 +2026,8 @@ bool translate_vpblendd(IR1_INST * pir1) {
             la_xvori_b(dest, src1, 0);
             return true;
         }
+        IR2_OPND temp = ra_alloc_ftemp();
+        IR2_OPND rmask = ra_alloc_itemp();
         uint64_t mask = 0;
         for (int i = 0; i < 8; i++) {
             if (imm & (1 << i)) {
