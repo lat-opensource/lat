@@ -3736,7 +3736,8 @@ bool translate_vrsqrtss(IR1_INST * pir1) {
 
     /* this x86 instruction has no exception ,so we need mask all exception */
     la_frsqrt_s(temp, src2);
-    la_xvori_b(dest, src1, 0x0);
+    if (!ir2_opnd_cmp(&dest, &src1))
+        la_xvori_b(dest, src1, 0x0);
     la_xvinsve0_w(dest, temp, 0);
     set_high128_xreg_to_zero(dest);
 
@@ -3797,7 +3798,8 @@ bool translate_vrcpss(IR1_INST * pir1) {
 
     /* this x86 instruction has no exception ,so we need mask all exception */
     la_frecip_s(temp, src2);
-    la_xvori_b(dest, src1, 0x0);
+    if (!ir2_opnd_cmp(&dest, &src1))
+        la_xvori_b(dest, src1, 0x0);
     la_xvinsve0_w(dest, temp, 0);
     set_high128_xreg_to_zero(dest);
 

@@ -45,6 +45,21 @@ section .text
     %endif
 %endmacro
 
+%macro CHECK_SCALAR_COPY 1
+    vmovdqu ymm0, [junk]
+    vmovdqu ymm1, [scalar_input]
+    %1 xmm0, xmm1, xmm1
+    vmovdqu [scalar_reference], ymm0
+    vmovdqu ymm1, [scalar_input]
+    %1 xmm1, xmm1, xmm1
+    vmovdqu ymm0, ymm1
+    CHECK scalar_reference, 14
+    vmovdqu ymm1, [scalar_input]
+    %1 xmm1, xmm1, [scalar_input]
+    vmovdqu ymm0, ymm1
+    CHECK scalar_reference, 15
+%endmacro
+
 _start:
 %assign alias 0
 %rep 3
@@ -72,6 +87,9 @@ _start:
     CHECK broadcast_q, 12
     vpbroadcastq ymm0, [broadcast_input]
     CHECK broadcast_q, 13
+
+    CHECK_SCALAR_COPY vrcpss
+    CHECK_SCALAR_COPY vrsqrtss
 
     vmovdqu ymm1, [words2]
     vmovdqu ymm2, [words3]
@@ -125,8 +143,11 @@ count63: dq 63, 0
 count64: dq 64, 0
 broadcast_input: dq 0x0123456789abcdef, 0xfedcba9876543210, 0, -1
 broadcast_q: times 4 dq 0x0123456789abcdef
+scalar_input: dd 0x40800000, 0x11223344, 0x55667788, 0x99aabbcc
+    times 4 dd 0xdeadbeef
 
 section .bss align=32
 actual: resb 32
+scalar_reference: resb 32
 
 section .note.GNU-stack noalloc noexec nowrite progbits
