@@ -3266,6 +3266,36 @@ int walk_memory_regions(void *priv, walk_memory_regions_fn fn)
     return rc;
 }
 
+int walk_memory_regions_range_locked(void *priv, target_ulong start,
+                                     target_ulong end,
+                                     walk_memory_regions_fn fn)
+{
+    PageFlagsNode *p;
+    target_ulong last;
+    int rc = 0;
+
+    assert_memory_lock();
+    if (start >= end) {
+        return 0;
+    }
+
+    last = end - 1;
+    for (p = pageflags_find(start, last);
+         p != NULL;
+         p = pageflags_next(p, start, last)) {
+        target_ulong region_start = MAX(start, p->itree.start);
+        target_ulong region_end = p->itree.last >= last
+                                  ? end : p->itree.last + 1;
+
+        rc = fn(priv, region_start, region_end, p->flags);
+        if (rc != 0) {
+            break;
+        }
+    }
+
+    return rc;
+}
+
 static int dump_region(void *priv, target_ulong start,
                        target_ulong end, unsigned long prot)
 {
