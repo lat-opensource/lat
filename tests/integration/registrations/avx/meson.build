@@ -52,6 +52,13 @@ if 'x86_64-linux-user' in target_dirs
     'timeout': 180,
   }]
   latx_integration_tests += [{
+    'name': 'test-avx-test-flags',
+    'runner': find_program('../../test-avx-regressions.py'),
+    'args': [emulators['latx-x86_64'], files('../../avx-test-flags.asm')],
+    'env': {'LATX_SOFTFPU': '0'},
+    'timeout': 180,
+  }]
+  latx_integration_tests += [{
     'name': 'test-xcomis-patterns',
     'runner': find_program('../../test-avx-regressions.py'),
     'args': [emulators['latx-x86_64'], files('../../xcomis-patterns.asm')],
