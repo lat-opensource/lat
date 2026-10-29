@@ -923,6 +923,11 @@ TRANS_FUNC_DEF(vmovups);
 TRANS_FUNC_DEF(vmovups_lsx);
 TRANS_FUNC_DEF(vmaskmovpx);
 TRANS_FUNC_DEF(vmaskmovpx_lsx);
+void latx_masked_mem_op_128(IR2_OPND address, IR2_OPND mask, IR2_OPND value,
+                            int elem_bits, int lanes, int base_off, bool store);
+void latx_masked_mem_op_256(IR2_OPND address, IR2_OPND mask, IR2_OPND value,
+                            int elem_bits, int lanes, int bits, int base_off,
+                            bool store);
 TRANS_FUNC_DEF(vpmovmskb);
 TRANS_FUNC_DEF(vaddpd);
 TRANS_FUNC_DEF(vaddpd_lsx);

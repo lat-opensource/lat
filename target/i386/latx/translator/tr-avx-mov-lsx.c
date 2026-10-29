@@ -614,28 +614,192 @@ bool translate_vpmovmskb_lsx(IR1_INST *pir1)
     return true;
 }
 
-static void vmaskmovpx_lsx_apply(IR2_OPND result, IR2_OPND memory,
-                                 IR2_OPND mask, IR2_OPND value,
-                                 bool is_pd, bool store)
+/*
+ * Emit a masked memory access for one 128-bit vector half.
+ *
+ * VMASKMOVPS/PD and VPMASKMOVD/Q only access the elements whose mask MSB is
+ * set.  Loading or storing the complete vector and applying the mask in
+ * registers is not equivalent: a masked-off element may live in an unmapped
+ * page and must not fault.  Emit one scalar access per selected element so
+ * that both the fault suppression and the fault address follow the x86
+ * semantics.
+ */
+void latx_masked_mem_op_128(IR2_OPND address, IR2_OPND mask, IR2_OPND value,
+                            int elem_bits, int lanes, int base_off, bool store)
 {
-    IR2_OPND selected = ra_alloc_ftemp();
-    IR2_OPND unselected = ra_alloc_ftemp();
+    IR2_OPND mask_tmp = ra_alloc_ftemp();
+    IR2_OPND mask_bits = ra_alloc_itemp();
+    IR2_OPND selected = ra_alloc_itemp();
+    IR2_OPND all_bits = ra_alloc_itemp();
+    IR2_OPND element = ra_alloc_itemp();
+    IR2_OPND label_none = ra_alloc_label();
+    IR2_OPND label_full = ra_alloc_label();
+    IR2_OPND label_done = ra_alloc_label();
+    IR2_OPND label_skip[8];
+    int all = (1 << lanes) - 1;
+    int i;
 
-    if (is_pd) {
-        la_vslti_d(selected, mask, 0);
+    lsassert(elem_bits == 32 || elem_bits == 64);
+    lsassert(lanes > 0 && lanes <= 8);
+
+    if (elem_bits == 32) {
+        la_vmskltz_w(mask_tmp, mask);
     } else {
-        la_vslti_w(selected, mask, 0);
+        la_vmskltz_d(mask_tmp, mask);
     }
+    la_movfr2gr_d(mask_bits, mask_tmp);
+
+    if (!store) {
+        la_vxor_v(value, value, value);
+    }
+
+    la_bstrpick_d(selected, mask_bits, lanes - 1, 0);
+    la_beqz(selected, label_none);
+    li_d(all_bits, all);
+    la_beq(selected, all_bits, label_full);
+
+    for (i = 0; i < lanes; i++) {
+        int off = base_off + i * (elem_bits / 8);
+
+        label_skip[i] = ra_alloc_label();
+        la_bstrpick_d(selected, mask_bits, i, i);
+        la_beqz(selected, label_skip[i]);
+        if (store) {
+            if (elem_bits == 32) {
+                la_vpickve2gr_w(element, value, i);
+                la_st_w(element, address, off);
+            } else {
+                la_vpickve2gr_d(element, value, i);
+                la_st_d(element, address, off);
+            }
+        } else {
+            if (elem_bits == 32) {
+                la_ld_wu(element, address, off);
+                la_vinsgr2vr_w(value, element, i);
+            } else {
+                la_ld_d(element, address, off);
+                la_vinsgr2vr_d(value, element, i);
+            }
+        }
+        la_label(label_skip[i]);
+    }
+    la_b(label_done);
+
+    la_label(label_full);
     if (store) {
-        la_vand_v(result, selected, value);
-        la_vandn_v(unselected, selected, memory);
-        la_vxor_v(result, result, unselected);
+        la_vst(value, address, base_off);
     } else {
-        la_vand_v(result, selected, memory);
+        la_vld(value, address, base_off);
+    }
+    la_b(label_done);
+
+    la_label(label_none);
+    la_label(label_done);
+
+    ra_free_temp(element);
+    ra_free_temp(all_bits);
+    ra_free_temp(selected);
+    ra_free_temp(mask_bits);
+    ra_free_temp(mask_tmp);
+}
+
+/* Same as latx_masked_mem_op_128(), but using LASX registers.  For a 128-bit
+ * instruction, only the low 128 bits of the value and mask are accessed. */
+void latx_masked_mem_op_256(IR2_OPND address, IR2_OPND mask, IR2_OPND value,
+                            int elem_bits, int lanes, int bits, int base_off,
+                            bool store)
+{
+    IR2_OPND mask_tmp = ra_alloc_ftemp();
+    IR2_OPND mask_bits = ra_alloc_itemp();
+    IR2_OPND selected = ra_alloc_itemp();
+    IR2_OPND all_bits = ra_alloc_itemp();
+    IR2_OPND element = ra_alloc_itemp();
+    IR2_OPND label_none = ra_alloc_label();
+    IR2_OPND label_full = ra_alloc_label();
+    IR2_OPND label_done = ra_alloc_label();
+    IR2_OPND label_skip[8];
+    int all = (1 << lanes) - 1;
+    int i;
+
+    lsassert(elem_bits == 32 || elem_bits == 64);
+    lsassert(lanes > 0 && lanes <= 8);
+    lsassert(bits == 128 || bits == 256);
+
+    if (elem_bits == 32) {
+        la_xvmskltz_w(mask_tmp, mask);
+    } else {
+        la_xvmskltz_d(mask_tmp, mask);
+    }
+    if (bits == 256) {
+        IR2_OPND mask_high = ra_alloc_ftemp();
+
+        la_xvpermi_q(mask_high, mask_tmp, VEXTRINS_IMM_4_0(1, 1));
+        la_vslli_b(mask_high, mask_high, elem_bits == 32 ? 4 : 2);
+        la_vor_v(mask_tmp, mask_tmp, mask_high);
+        ra_free_temp(mask_high);
+    }
+    la_movfr2gr_d(mask_bits, mask_tmp);
+
+    if (!store) {
+        la_xvxor_v(value, value, value);
     }
 
-    ra_free_temp(unselected);
+    la_bstrpick_d(selected, mask_bits, lanes - 1, 0);
+    la_beqz(selected, label_none);
+    li_d(all_bits, all);
+    la_beq(selected, all_bits, label_full);
+
+    for (i = 0; i < lanes; i++) {
+        int off = base_off + i * (elem_bits / 8);
+
+        label_skip[i] = ra_alloc_label();
+        la_bstrpick_d(selected, mask_bits, i, i);
+        la_beqz(selected, label_skip[i]);
+        if (store) {
+            if (elem_bits == 32) {
+                la_xvpickve2gr_w(element, value, i);
+                la_st_w(element, address, off);
+            } else {
+                la_xvpickve2gr_d(element, value, i);
+                la_st_d(element, address, off);
+            }
+        } else {
+            if (elem_bits == 32) {
+                la_ld_wu(element, address, off);
+                la_xvinsgr2vr_w(value, element, i);
+            } else {
+                la_ld_d(element, address, off);
+                la_xvinsgr2vr_d(value, element, i);
+            }
+        }
+        la_label(label_skip[i]);
+    }
+    la_b(label_done);
+
+    la_label(label_full);
+    if (bits == 256) {
+        if (store) {
+            la_xvst(value, address, base_off);
+        } else {
+            la_xvld(value, address, base_off);
+        }
+    } else {
+        if (store) {
+            la_vst(value, address, base_off);
+        } else {
+            la_vld(value, address, base_off);
+        }
+    }
+    la_b(label_done);
+
+    la_label(label_none);
+    la_label(label_done);
+
+    ra_free_temp(element);
+    ra_free_temp(all_bits);
     ra_free_temp(selected);
+    ra_free_temp(mask_bits);
+    ra_free_temp(mask_tmp);
 }
 
 bool translate_vmaskmovpx_lsx(IR1_INST *pir1)
@@ -649,99 +813,57 @@ bool translate_vmaskmovpx_lsx(IR1_INST *pir1)
     bool store = ir1_opnd_is_mem(dest);
     IR1_OPND *mem = store ? dest : value_opnd;
     int mask_index = ir1_opnd_base_reg_num(mask_opnd);
-    IR2_OPND mask_low = ra_alloc_ftemp();
+    int elem_bits = is_pd ? 64 : 32;
+    int lanes = is_pd ? 2 : 4;
+    IR2_OPND mask_low = ra_alloc_xmm(mask_index);
+    IR2_OPND address;
 
     lsassert(ir1_opcode(pir1) == dt_X86_INS_VMASKMOVPS || is_pd);
     lsassert(ir1_opnd_is_xmm(mask_opnd) || ir1_opnd_is_ymm(mask_opnd));
     lsassert(ir1_opnd_is_xmm(value_opnd) || ir1_opnd_is_ymm(value_opnd) ||
              ir1_opnd_is_mem(value_opnd));
-
     lsassert(is_ymm ? ir1_opnd_is_ymm(mask_opnd) :
                       ir1_opnd_is_xmm(mask_opnd));
-    la_vori_b(mask_low, ra_alloc_xmm(mask_index), 0);
-    if (is_ymm && store) {
+
+    address = convert_mem_to_itemp(mem);
+    if (store) {
         int value_index = ir1_opnd_base_reg_num(value_opnd);
-        IR2_OPND memory_low;
-        IR2_OPND unused_high;
-        IR2_OPND result_low = ra_alloc_ftemp();
+        IR2_OPND value_low = ra_alloc_xmm(value_index);
 
-        load_v256_from_ir1_mem_exact(mem, &memory_low, &unused_high);
-        ra_free_temp(unused_high);
-        vmaskmovpx_lsx_apply(result_low, memory_low, mask_low,
-                             ra_alloc_xmm(value_index), is_pd, true);
-        store_v256_low_to_ir1_mem_exact(result_low, mem);
-        ra_free_temp(result_low);
-        ra_free_temp(memory_low);
-        ra_free_temp(mask_low);
-
-        IR2_OPND memory_high = load_v256_high_from_ir1_mem_exact(mem);
-        IR2_OPND result_high = ra_alloc_ftemp();
-        IR2_OPND mask_high = load_ymm_high128_shadow(mask_index);
-        IR2_OPND value_high = load_ymm_high128_shadow(value_index);
-
-        vmaskmovpx_lsx_apply(result_high, memory_high, mask_high,
-                             value_high, is_pd, true);
-        store_v256_high_to_ir1_mem_exact(result_high, mem);
-        ra_free_temp(value_high);
-        ra_free_temp(mask_high);
-        ra_free_temp(result_high);
-        ra_free_temp(memory_high);
-        return true;
-    }
-    if (is_ymm) {
-        IR2_OPND memory_low;
-        IR2_OPND memory_high;
-        IR2_OPND result_low = ra_alloc_ftemp();
-        IR2_OPND result_high = ra_alloc_ftemp();
-        IR2_OPND mask_high = load_ymm_high128_shadow(mask_index);
-
-        load_v256_from_ir1_mem_exact(mem, &memory_low, &memory_high);
-        if (store) {
-            int value_index = ir1_opnd_base_reg_num(value_opnd);
+        latx_masked_mem_op_128(address, mask_low, value_low, elem_bits,
+                               lanes, 0, true);
+        if (is_ymm) {
+            IR2_OPND mask_high = load_ymm_high128_shadow(mask_index);
             IR2_OPND value_high = load_ymm_high128_shadow(value_index);
 
-            vmaskmovpx_lsx_apply(result_low, memory_low, mask_low,
-                                 ra_alloc_xmm(value_index), is_pd, true);
-            vmaskmovpx_lsx_apply(result_high, memory_high, mask_high,
-                                 value_high, is_pd, true);
-            store_v256_to_ir1_mem_exact(result_low, result_high, mem);
+            latx_masked_mem_op_128(address, mask_high, value_high, elem_bits,
+                                   lanes, 16, true);
             ra_free_temp(value_high);
-        } else {
-            int dest_index = ir1_opnd_base_reg_num(dest);
+            ra_free_temp(mask_high);
+        }
+    } else {
+        int dest_index = ir1_opnd_base_reg_num(dest);
+        IR2_OPND result_low = ra_alloc_ftemp();
 
-            vmaskmovpx_lsx_apply(result_low, memory_low, mask_low,
-                                 memory_low, is_pd, false);
-            vmaskmovpx_lsx_apply(result_high, memory_high, mask_high,
-                                 memory_high, is_pd, false);
+        latx_masked_mem_op_128(address, mask_low, result_low, elem_bits,
+                               lanes, 0, false);
+        if (is_ymm) {
+            IR2_OPND mask_high = load_ymm_high128_shadow(mask_index);
+            IR2_OPND result_high = ra_alloc_ftemp();
+
+            latx_masked_mem_op_128(address, mask_high, result_high, elem_bits,
+                                   lanes, 16, false);
             la_vori_b(ra_alloc_xmm(dest_index), result_low, 0);
             store_ymm_high128_shadow(result_high, dest_index);
-        }
-        ra_free_temp(mask_high);
-        ra_free_temp(result_high);
-        ra_free_temp(result_low);
-        ra_free_temp(memory_high);
-        ra_free_temp(memory_low);
-    } else {
-        IR2_OPND memory = load_v128_from_ir1_mem_exact(mem);
-        IR2_OPND result = ra_alloc_ftemp();
-
-        if (store) {
-            vmaskmovpx_lsx_apply(result, memory, mask_low,
-                                 ra_alloc_xmm(ir1_opnd_base_reg_num(value_opnd)),
-                                 is_pd, true);
-            store_v128_to_ir1_mem_exact(result, mem);
+            ra_free_temp(result_high);
+            ra_free_temp(mask_high);
         } else {
-            int dest_index = ir1_opnd_base_reg_num(dest);
-
-            vmaskmovpx_lsx_apply(result, memory, mask_low, memory,
-                                 is_pd, false);
-            la_vori_b(ra_alloc_xmm(dest_index), result, 0);
+            la_vori_b(ra_alloc_xmm(dest_index), result_low, 0);
             clear_ymm_high128_shadow(dest_index);
         }
-        ra_free_temp(result);
-        ra_free_temp(memory);
+        ra_free_temp(result_low);
     }
-    ra_free_temp(mask_low);
+    ra_free_temp(address);
     return true;
 }
 
