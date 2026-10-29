@@ -2379,6 +2379,94 @@ static bool translate_ucomiss_xx_jcc(IR1_INST *pir1)
 #endif
 
 
+#ifdef CONFIG_LATX_AVX_OPT
+static bool translate_avx_test_jcc(IR1_INST *pir1)
+{
+    IR1_INST *next = pir1->instptn.next;
+#ifdef CONFIG_LATX_TU
+    TranslationBlock *tb = lsenv->tr_data->curr_tb;
+    if (tb->s_data->next_tb[TU_TB_INDEX_NEXT] &&
+        tb->s_data->next_tb[TU_TB_INDEX_TARGET]) {
+        switch (ir1_opcode(pir1)) {
+        case WRAP(VPTEST):
+            translate_vptest(pir1);
+            break;
+        case WRAP(VTESTPS):
+            translate_vtestps(pir1);
+            break;
+        case WRAP(VTESTPD):
+            translate_vtestpd(pir1);
+            break;
+        default:
+            lsassert(0);
+        }
+        return translate_jcc(next);
+    }
+#endif
+    IR1_OPND *opnd0 = ir1_get_opnd(pir1, 0);
+    IR1_OPND *opnd1 = ir1_get_opnd(pir1, 1);
+    bool wide = ir1_opnd_is_ymm(opnd0);
+    IR2_OPND dest = wide ? load_freg256_from_ir1(opnd0) :
+                           load_freg128_from_ir1(opnd0);
+    IR2_OPND src = wide ? load_freg256_from_ir1(opnd1) :
+                          load_freg128_from_ir1(opnd1);
+    IR2_OPND flags = ra_alloc_itemp();
+    IR2_OPND cond = ra_alloc_itemp();
+    IR2_OPND target = ra_alloc_label();
+    uint8_t eflags = ir1_get_eflag_def(pir1) &
+                    ~lsenv->tr_data->curr_ir1_skipped_eflags;
+    int mask = ZF_BIT;
+    bool nonzero = true;
+    switch (ir1_opcode(next)) {
+    case WRAP(JNE):
+        nonzero = false;
+        break;
+    case WRAP(JAE):
+        nonzero = false;
+        /* fall through */
+    case WRAP(JB):
+        mask = CF_BIT;
+        break;
+    case WRAP(JA):
+        nonzero = false;
+        /* fall through */
+    case WRAP(JBE):
+        mask = ZF_BIT | CF_BIT;
+        break;
+    case WRAP(JE):
+        break;
+    default:
+        lsassert(0);
+    }
+    generate_avx_test_flags(pir1, dest, src, flags,
+                            eflags | ir1_get_eflag_use(next));
+    if (eflags) {
+        la_x86mtflag(flags, eflags);
+    }
+    if (mask == (ZF_BIT | CF_BIT)) {
+        la_andi(cond, flags, mask);
+        if (nonzero) {
+            la_bne(cond, zero_ir2_opnd, target);
+        } else {
+            la_beq(cond, zero_ir2_opnd, target);
+        }
+    } else {
+        IR2_OPND condition = mask == ZF_BIT ? fcc0_ir2_opnd : fcc1_ir2_opnd;
+        if (nonzero) {
+            la_bcnez(condition, target);
+        } else {
+            la_bceqz(condition, target);
+        }
+    }
+    ra_free_temp(cond);
+    ra_free_temp(flags);
+    tr_generate_exit_tb(next, 0);
+    la_label(target);
+    tr_generate_exit_tb(next, 1);
+    return true;
+}
+#endif
+
 bool try_translate_instptn(IR1_INST *pir1)
 {
     instptn_check_false();
@@ -2392,6 +2480,13 @@ bool try_translate_instptn(IR1_INST *pir1)
     case INSTPTN_OPC_CMP_JCC:
         return translate_cmp_jcc(pir1);
     case INSTPTN_OPC_TEST_JCC:
+#ifdef CONFIG_LATX_AVX_OPT
+        if (ir1_opcode(pir1) == WRAP(VPTEST) ||
+            ir1_opcode(pir1) == WRAP(VTESTPS) ||
+            ir1_opcode(pir1) == WRAP(VTESTPD)) {
+            return translate_avx_test_jcc(pir1);
+        }
+#endif
         return translate_test_jcc(pir1);
     case INSTPTN_OPC_CQO_IDIV:
         return translate_cqo_idiv(pir1);
