@@ -64,6 +64,15 @@ _start:
     vpandn xmm0, xmm1, [words3]
     CHECK andnot_xmm, 10
 
+    vmovdqu ymm0, [junk]
+    vpbroadcastq ymm0, xmm0
+    CHECK junk, 11
+    vmovdqu ymm1, [broadcast_input]
+    vpbroadcastq ymm0, xmm1
+    CHECK broadcast_q, 12
+    vpbroadcastq ymm0, [broadcast_input]
+    CHECK broadcast_q, 13
+
     vmovdqu ymm1, [words2]
     vmovdqu ymm2, [words3]
     vmovdqu ymm0, [junk]
@@ -114,6 +123,8 @@ count15: dq 15, 0
 count31: dq 31, 0
 count63: dq 63, 0
 count64: dq 64, 0
+broadcast_input: dq 0x0123456789abcdef, 0xfedcba9876543210, 0, -1
+broadcast_q: times 4 dq 0x0123456789abcdef
 
 section .bss align=32
 actual: resb 32

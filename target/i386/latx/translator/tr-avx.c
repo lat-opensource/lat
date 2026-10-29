@@ -3502,8 +3502,6 @@ bool translate_vpbroadcastq(IR1_INST *pir1)
         set_high128_xreg_to_zero(dest);
     } else if (ir1_opnd_is_ymm(opnd0)) {
         la_xvreplve0_d(dest, src);
-        la_xvinsve0_d(dest, dest, 2);
-        la_xvinsve0_d(dest, dest, 3);
     } else {
         lsassert(0);
     }
