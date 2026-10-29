@@ -2535,50 +2535,90 @@ bool translate_vpsubx(IR1_INST * pir1) {
     return true;
 }
 
-bool translate_vptest(IR1_INST * pir1) {
+/* Requested ZF/CF values also remain in fcc0/fcc1 for a fused branch. */
+void generate_avx_test_flags(IR1_INST *pir1, IR2_OPND dest, IR2_OPND src,
+                             IR2_OPND flags, uint8_t eflags)
+{
+    bool wide = ir1_opnd_is_ymm(ir1_get_opnd(pir1, 0));
+    int shift = ir1_opcode(pir1) == dt_X86_INS_VTESTPS ? 31 :
+                ir1_opcode(pir1) == dt_X86_INS_VTESTPD ? 63 : 0;
+
+    if (!(eflags & CF_USEDEF_BIT)) {
+        la_mov64(flags, zero_ir2_opnd);
+    }
+    if (!(eflags & (ZF_USEDEF_BIT | CF_USEDEF_BIT))) {
+        return;
+    }
+    IR2_OPND temp = ra_alloc_ftemp();
+    IR2_OPND bit = ra_alloc_itemp();
+    for (int cf = 1; cf >= 0; cf--) {
+        if (!(eflags & (cf ? CF_USEDEF_BIT : ZF_USEDEF_BIT))) {
+            continue;
+        }
+        IR2_OPND condition = cf ? fcc1_ir2_opnd : fcc0_ir2_opnd;
+        if (wide) {
+            if (cf) {
+                la_xvandn_v(temp, dest, src);
+            } else {
+                la_xvand_v(temp, dest, src);
+            }
+            if (shift == 31) {
+                la_xvsrli_w(temp, temp, shift);
+            } else if (shift == 63) {
+                la_xvsrli_d(temp, temp, shift);
+            }
+            la_xvseteqz_v(condition, temp);
+        } else {
+            if (cf) {
+                la_vandn_v(temp, dest, src);
+            } else {
+                la_vand_v(temp, dest, src);
+            }
+            if (shift == 31) {
+                la_vsrli_w(temp, temp, shift);
+            } else if (shift == 63) {
+                la_vsrli_d(temp, temp, shift);
+            }
+            la_vseteqz_v(condition, temp);
+        }
+        if (cf) {
+            la_movcf2gr(flags, condition);
+        } else {
+            la_movcf2gr(bit, condition);
+            la_bstrins_w(flags, bit, ZF_BIT_INDEX, ZF_BIT_INDEX);
+        }
+    }
+    ra_free_temp(bit);
+    ra_free_temp(temp);
+}
+
+static bool translate_avx_test(IR1_INST *pir1)
+{
+    IR1_OPND *opnd0 = ir1_get_opnd(pir1, 0);
+    IR1_OPND *opnd1 = ir1_get_opnd(pir1, 1);
+    bool wide = ir1_opnd_is_ymm(opnd0);
+    IR2_OPND dest = wide ? load_freg256_from_ir1(opnd0) :
+                           load_freg128_from_ir1(opnd0);
+    IR2_OPND src = wide ? load_freg256_from_ir1(opnd1) :
+                          load_freg128_from_ir1(opnd1);
+    uint8_t eflags = ir1_get_eflag_def(pir1) &
+                    ~lsenv->tr_data->curr_ir1_skipped_eflags;
+    /* Operand loads must still fault when all generated flags are dead. */
+    if (eflags) {
+        IR2_OPND flags = ra_alloc_itemp();
+        generate_avx_test_flags(pir1, dest, src, flags, eflags);
+        la_x86mtflag(flags, eflags);
+        ra_free_temp(flags);
+    }
+    return true;
+}
+
+bool translate_vptest(IR1_INST *pir1)
+{
     if (!option_enable_lasx) {
         return translate_vptest_lsx(pir1);
     }
-
-    IR1_OPND * opnd0 = ir1_get_opnd(pir1, 0);
-    IR1_OPND * opnd1 = ir1_get_opnd(pir1, 1);
-    lsassert(ir1_opnd_is_xmm(opnd0) || ir1_opnd_is_ymm(opnd0));
-    IR2_OPND dest = load_freg256_from_ir1(opnd0);
-    IR2_OPND src = load_freg256_from_ir1(opnd1);
-    IR2_OPND temp = ra_alloc_ftemp();
-    IR2_OPND label_1 = ra_alloc_label();
-    IR2_OPND label_2 = ra_alloc_label();
-    IR2_OPND n4095_opnd = ra_alloc_num_4095();
-
-    if (ir1_opnd_is_xmm(opnd0)) {
-        la_x86mtflag(zero_ir2_opnd, 0x3f);
-        la_vand_v(temp, src, dest);
-        la_vseteqz_v(fcc0_ir2_opnd, temp);
-        la_bceqz(fcc0_ir2_opnd, label_1);
-        la_x86mtflag(n4095_opnd, ZF_USEDEF_BIT);
-
-        la_label(label_1);
-        la_vandn_v(temp, dest, src);
-        la_vseteqz_v(fcc0_ir2_opnd, temp);
-        la_bceqz(fcc0_ir2_opnd, label_2);
-        la_x86mtflag(n4095_opnd, CF_USEDEF_BIT);
-        la_label(label_2);
-    } else {
-        la_x86mtflag(zero_ir2_opnd, 0x3f);
-        la_xvand_v(temp, src, dest);
-        la_xvseteqz_v(fcc0_ir2_opnd, temp);
-        la_bceqz(fcc0_ir2_opnd, label_1);
-        la_x86mtflag(n4095_opnd, ZF_USEDEF_BIT);
-
-        la_label(label_1);
-        la_xvandn_v(temp, dest, src);
-        la_xvseteqz_v(fcc0_ir2_opnd, temp);
-        la_bceqz(fcc0_ir2_opnd, label_2);
-        la_x86mtflag(n4095_opnd, CF_USEDEF_BIT);
-        la_label(label_2);
-    }
-    ra_free_num_4095(n4095_opnd);
-    return true;
+    return translate_avx_test(pir1);
 }
 
 bool translate_vpunpckhxx(IR1_INST * pir1) {
@@ -4746,119 +4786,14 @@ bool translate_vtestps(IR1_INST * pir1) {
     if (!option_enable_lasx) {
         return translate_vtestps_lsx(pir1);
     }
-
-    IR1_OPND * opnd0 = ir1_get_opnd(pir1, 0);
-    IR1_OPND * opnd1 = ir1_get_opnd(pir1, 1);
-    if (ir1_opnd_is_xmm(opnd0)) {
-        IR2_OPND dest = load_freg128_from_ir1(opnd0);
-        IR2_OPND src = load_freg128_from_ir1(opnd1);
-
-        IR2_OPND temp = ra_alloc_ftemp();
-        IR2_OPND n4095_opnd = ra_alloc_num_4095();
-        IR2_OPND label_1 = ra_alloc_label();
-        IR2_OPND label_2 = ra_alloc_label();
-
-        la_x86mtflag(zero_ir2_opnd, 0x3f);
-        la_vand_v(temp, dest, src);
-        la_vsrli_w(temp, temp, 0x1f);
-        la_vseteqz_v(fcc0_ir2_opnd, temp); //temp==0 fcc=1;
-        la_bceqz(fcc0_ir2_opnd, label_1); //fcc==1,not jump
-        la_x86mtflag(n4095_opnd, ZF_USEDEF_BIT);
-
-        la_label(label_1);
-        la_vandn_v(temp, dest, src);
-        la_vsrli_w(temp, temp, 0x1f);
-        la_vseteqz_v(fcc0_ir2_opnd, temp); //temp==0 fcc=1;
-        la_bceqz(fcc0_ir2_opnd, label_2); //fcc==1,not jump
-        la_x86mtflag(n4095_opnd, CF_USEDEF_BIT);
-        la_label(label_2);
-
-    } else {
-        IR2_OPND dest = load_freg256_from_ir1(opnd0);
-        IR2_OPND src = load_freg256_from_ir1(opnd1);
-
-        IR2_OPND temp = ra_alloc_ftemp();
-        IR2_OPND n4095_opnd = ra_alloc_num_4095();
-        IR2_OPND label_1 = ra_alloc_label();
-        IR2_OPND label_2 = ra_alloc_label();
-
-        la_x86mtflag(zero_ir2_opnd, 0x3f);
-        la_xvand_v(temp, dest, src);
-        la_xvsrli_w(temp, temp, 0x1f);
-        la_xvseteqz_v(fcc0_ir2_opnd, temp); //temp==0 fcc=1;
-        la_bceqz(fcc0_ir2_opnd, label_1); //fcc==1,not jump
-        la_x86mtflag(n4095_opnd, ZF_USEDEF_BIT);
-
-        la_label(label_1);
-        la_xvandn_v(temp, dest, src);
-        la_xvsrli_w(temp, temp, 0x1f);
-        la_xvseteqz_v(fcc0_ir2_opnd, temp); //temp==0 fcc=1;
-        la_bceqz(fcc0_ir2_opnd, label_2); //fcc==1,not jump
-        la_x86mtflag(n4095_opnd, CF_USEDEF_BIT);
-        la_label(label_2);
-    }
-
-    return true;
+    return translate_avx_test(pir1);
 }
 
 bool translate_vtestpd(IR1_INST * pir1) {
     if (!option_enable_lasx) {
         return translate_vtestpd_lsx(pir1);
     }
-
-    IR1_OPND * opnd0 = ir1_get_opnd(pir1, 0);
-    IR1_OPND * opnd1 = ir1_get_opnd(pir1, 1);
-    if (ir1_opnd_is_xmm(opnd0)) {
-        IR2_OPND dest = load_freg128_from_ir1(opnd0);
-        IR2_OPND src = load_freg128_from_ir1(opnd1);
-
-        IR2_OPND temp = ra_alloc_ftemp();
-        IR2_OPND n4095_opnd = ra_alloc_num_4095();
-        IR2_OPND label_1 = ra_alloc_label();
-        IR2_OPND label_2 = ra_alloc_label();
-
-        la_x86mtflag(zero_ir2_opnd, 0x3f);
-        la_vand_v(temp, dest, src);
-        la_vsrli_d(temp, temp, 0x3f);
-        la_vseteqz_v(fcc0_ir2_opnd, temp); //temp==0 fcc=1;
-        la_bceqz(fcc0_ir2_opnd, label_1); //fcc==1,not jump
-        la_x86mtflag(n4095_opnd, ZF_USEDEF_BIT);
-
-        la_label(label_1);
-        la_vandn_v(temp, dest, src);
-        la_vsrli_d(temp, temp, 0x3f);
-        la_vseteqz_v(fcc0_ir2_opnd, temp); //temp==0 fcc=1;
-        la_bceqz(fcc0_ir2_opnd, label_2); //fcc==1,not jump
-        la_x86mtflag(n4095_opnd, CF_USEDEF_BIT);
-        la_label(label_2);
-
-    } else {
-        IR2_OPND dest = load_freg256_from_ir1(opnd0);
-        IR2_OPND src = load_freg256_from_ir1(opnd1);
-
-        IR2_OPND temp = ra_alloc_ftemp();
-        IR2_OPND n4095_opnd = ra_alloc_num_4095();
-        IR2_OPND label_1 = ra_alloc_label();
-        IR2_OPND label_2 = ra_alloc_label();
-
-        la_x86mtflag(zero_ir2_opnd, 0x3f);
-        la_xvand_v(temp, dest, src);
-        la_xvsrli_d(temp, temp, 0x3f);
-        la_xvseteqz_v(fcc0_ir2_opnd, temp); //temp==0 fcc=1;
-        la_bceqz(fcc0_ir2_opnd, label_1); //fcc==1,not jump
-        la_x86mtflag(n4095_opnd, ZF_USEDEF_BIT);
-
-        la_label(label_1);
-        la_xvandn_v(temp, dest, src);
-        la_xvsrli_d(temp, temp, 0x3f);
-        la_xvseteqz_v(fcc0_ir2_opnd, temp); //temp==0 fcc=1;
-        la_bceqz(fcc0_ir2_opnd, label_2); //fcc==1,not jump
-        la_x86mtflag(n4095_opnd, CF_USEDEF_BIT);
-        la_label(label_2);
-
-    }
-
-    return true;
+    return translate_avx_test(pir1);
 }
 
 bool translate_vpackssxx(IR1_INST * pir1) {
