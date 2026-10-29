@@ -26,6 +26,9 @@
 #include "cpu.h"
 #ifdef CONFIG_LATX
 #include "optimize-config.h"
+#ifdef CONFIG_LATX_FAST_TRANSLATOR
+#include "exec/latx-tb-exit.h"
+#endif
 #endif
 #include "exec/tb-context.h"
 #ifdef CONFIG_TCG
@@ -648,7 +651,8 @@ struct TranslationBlock {
 #define IS_TU_SPLIT       0x2000
 #define TBSMC_OPTED       0x4000
 #define AOT_STATS_COUNTED 0x8000
-    uint16_t bool_flags;
+#define IS_QUICKTRANS_TB  0x10000 /* Runtime-only Quicktrans marker. */
+    uint32_t bool_flags;
     uint8_t  eflag_use;
 #ifdef CONFIG_LATX_INSTS_PATTERN
     /*

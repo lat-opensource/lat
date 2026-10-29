@@ -482,12 +482,15 @@ static int cpu_restore_state_from_tb(CPUState *cpu, TranslationBlock *tb,
     restore_state_to_opc(env, tb, data);
 #ifdef CONFIG_LATX_OPT_PUSH_POP
     uint32_t parallel = cpu->tcg_cflags & CF_PARALLEL;
-    if (!parallel) {
+    /* Quicktrans commits RSP directly and does not use legacy stack scheduling. */
+    if (!parallel && !(tb->bool_flags & IS_QUICKTRANS_TB)) {
         ir2_opt_push_pop_fix(tb, cpu, (searched_pc - (uintptr_t)tb->tc.ptr) / 4);
     }
 #endif
 #ifdef CONFIG_LATX_INSTS_PATTERN
-    opt_instptn_fix(cpu, tb, i);
+    if (tb->s_data && tb->s_data->ir1) {
+        opt_instptn_fix(cpu, tb, i);
+    }
 #endif
 #ifdef CONFIG_PROFILER
     qatomic_set(&prof->restore_time,
