@@ -1968,9 +1968,7 @@ bool translate_vpandn(IR1_INST * pir1) {
         la_xvandn_v(dest, src1, src2);
         return true;
     }
-    IR2_OPND temp = ra_alloc_ftemp();
-    la_xvandn_v(temp, src1, src2);
-    la_xvori_b(dest, temp, 0);
+    la_vandn_v(dest, src1, src2);
     set_high128_xreg_to_zero(dest);
     return true;
 }

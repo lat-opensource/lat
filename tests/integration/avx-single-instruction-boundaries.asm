@@ -52,8 +52,17 @@ _start:
     MADD vpmaddwd, alias, words2, words3, maddwd, ymm
     MADD vpmaddubsw, alias, bytes255, bytes128, maddubsw, xmm
     MADD vpmaddubsw, alias, bytes255, bytes128, maddubsw, ymm
+    MADD vpandn, alias, words2, words3, andnot, xmm
+    MADD vpandn, alias, words2, words3, andnot, ymm
 %assign alias alias + 1
 %endrep
+
+    vmovdqu ymm0, [junk]
+    vpandn xmm0, xmm0, xmm0
+    CHECK zeros, 9
+    vmovdqu ymm1, [words2]
+    vpandn xmm0, xmm1, [words3]
+    CHECK andnot_xmm, 10
 
     vmovdqu ymm1, [words2]
     vmovdqu ymm2, [words3]
@@ -93,6 +102,9 @@ maddwd_xmm: times 4 dd 12
     times 4 dd 0
 maddubsw: times 16 dw 0x8000
 maddubsw_xmm: times 8 dw 0x8000
+    times 8 dw 0
+andnot: times 16 dw 1
+andnot_xmm: times 8 dw 1
     times 8 dw 0
 zeros: times 4 dq 0
 ones16: times 16 dw 1
