@@ -117,6 +117,28 @@ _start:
 %endrep
 %assign form form + 1
 %endrep
+    ; PTEST writes flags only, including when its source aliases the destination.
+%assign form 0
+%rep 3
+%assign pending 0
+%rep 2
+    vmovdqu ymm0, [words]
+    vmovdqu ymm1, [words]
+%if pending
+    vmovaps xmm0, xmm0
+%endif
+%if form == 0
+    ptest xmm0, xmm1
+%elif form == 1
+    ptest xmm0, xmm0
+%else
+    ptest xmm0, [words]
+%endif
+    CHECK words, pending, 128
+%assign pending pending + 1
+%endrep
+%assign form form + 1
+%endrep
     mov edi, r15d
     mov eax, 60
     syscall

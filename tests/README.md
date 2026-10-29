@@ -3,6 +3,24 @@
 LAT tests are registered with Meson and are configured only when
 `--enable-tests` is passed to `configure`.
 
+## SSE PTEST flags
+
+`test-ptest-flags` and its `-i386` variant check register and memory
+sources, selected flag consumers followed by a retained overwrite, and
+vector preservation. They require NASM and LLD, but not the AVX build option.
+
+Each guest runs in JIT, cold AOT, and hot AOT; the runner requires confirmation
+that the hot run loaded its isolated AOT artifact. Run both tests with:
+
+```sh
+meson test -C build --suite latx-integration \
+  test-ptest-flags test-ptest-flags-i386 --print-errorlogs
+```
+
+With AVX available, `test-sse41-ymmh-preserve` also checks legacy PTEST
+preserving upper YMM state and pending zero state. These are correctness
+tests, not workload benchmarks.
+
 See [CI validation tiers](../docs/devel/ci-validation.md) for PR coverage,
 daily full matrices and the pre-release validation entry point.
 

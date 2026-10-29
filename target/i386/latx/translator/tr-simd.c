@@ -3495,32 +3495,137 @@ bool translate_pmovzxdq(IR1_INST *pir1)
     return true;
 }
 
+/* Requested ZF/CF values also remain in fcc0/fcc1 for a fused branch. */
+void generate_vector_test_flags(IR1_INST *pir1, IR2_OPND dest, IR2_OPND src,
+                                IR2_OPND flags, uint8_t eflags)
+{
+    bool wide = ir1_opnd_is_ymm(ir1_get_opnd(pir1, 0));
+    int shift = ir1_opcode(pir1) == dt_X86_INS_VTESTPS ? 31 :
+                ir1_opcode(pir1) == dt_X86_INS_VTESTPD ? 63 : 0;
+
+    if (!(eflags & CF_USEDEF_BIT)) {
+        la_mov64(flags, zero_ir2_opnd);
+    }
+    if (!(eflags & (ZF_USEDEF_BIT | CF_USEDEF_BIT))) {
+        return;
+    }
+    IR2_OPND temp = ra_alloc_ftemp();
+    IR2_OPND bit = ra_alloc_itemp();
+    for (int cf = 1; cf >= 0; cf--) {
+        if (!(eflags & (cf ? CF_USEDEF_BIT : ZF_USEDEF_BIT))) {
+            continue;
+        }
+        IR2_OPND condition = cf ? fcc1_ir2_opnd : fcc0_ir2_opnd;
+        if (wide) {
+            if (cf) {
+                la_xvandn_v(temp, dest, src);
+            } else {
+                la_xvand_v(temp, dest, src);
+            }
+            if (shift == 31) {
+                la_xvsrli_w(temp, temp, shift);
+            } else if (shift == 63) {
+                la_xvsrli_d(temp, temp, shift);
+            }
+            la_xvseteqz_v(condition, temp);
+        } else {
+            if (cf) {
+                la_vandn_v(temp, dest, src);
+            } else {
+                la_vand_v(temp, dest, src);
+            }
+            if (shift == 31) {
+                la_vsrli_w(temp, temp, shift);
+            } else if (shift == 63) {
+                la_vsrli_d(temp, temp, shift);
+            }
+            la_vseteqz_v(condition, temp);
+        }
+        if (cf) {
+            la_movcf2gr(flags, condition);
+        } else {
+            la_movcf2gr(bit, condition);
+            la_bstrins_w(flags, bit, ZF_BIT_INDEX, ZF_BIT_INDEX);
+        }
+    }
+    ra_free_temp(bit);
+    ra_free_temp(temp);
+}
+
+static uint8_t ptest_live_flags(IR1_INST *pir1)
+{
+#ifdef CONFIG_LATX_FLAG_REDUCTION
+    if (option_flag_reduction) {
+        TranslationBlock *tb = lsenv->tr_data->curr_tb;
+        uint8_t flags = 0;
+
+        /* Keep flags visible to faults and unknown successors. Only reduce
+         * them before a retained overwrite reached through register ops. */
+        for (IR1_INST *inst = pir1 + 1; inst <= tb_ir1_inst_last(tb); inst++) {
+            if (ir1_is_prefix_lock(inst)) {
+                return 0x3f;
+            }
+            for (int i = 0; i < ir1_opnd_num(inst); i++) {
+                IR1_OPND *opnd = ir1_get_opnd(inst, i);
+                if (!ir1_opnd_is_gpr(opnd) && !ir1_opnd_is_imm(opnd)) {
+                    return 0x3f;
+                }
+            }
+            switch (ir1_opcode(inst)) {
+            case dt_X86_INS_ADD:
+            case dt_X86_INS_SUB:
+            case dt_X86_INS_CMP:
+#ifdef CONFIG_LATX_INSTS_PATTERN
+                if (inst->instptn.opc != INSTPTN_OPC_NONE) {
+                    return 0x3f;
+                }
+#endif
+                return ir1_get_eflag_def(inst) == 0x3f ? flags : 0x3f;
+            case dt_X86_INS_MOV:
+            case dt_X86_INS_MOVZX:
+            case dt_X86_INS_MOVSX:
+            case dt_X86_INS_MOVSXD:
+            case dt_X86_INS_NOP:
+            case dt_X86_INS_LAHF:
+            case dt_X86_INS_SETO:
+            case dt_X86_INS_SETNO:
+            case dt_X86_INS_SETB:
+            case dt_X86_INS_SETAE:
+            case dt_X86_INS_SETE:
+            case dt_X86_INS_SETNE:
+            case dt_X86_INS_SETBE:
+            case dt_X86_INS_SETA:
+            case dt_X86_INS_SETS:
+            case dt_X86_INS_SETNS:
+            case dt_X86_INS_SETP:
+            case dt_X86_INS_SETNP:
+            case dt_X86_INS_SETL:
+            case dt_X86_INS_SETGE:
+            case dt_X86_INS_SETLE:
+            case dt_X86_INS_SETG:
+                flags |= ir1_get_eflag_use(inst);
+                break;
+            default:
+                return 0x3f;
+            }
+        }
+    }
+#endif
+    return 0x3f;
+}
+
 bool translate_ptest(IR1_INST *pir1)
 {
-    IR1_OPND *opnd0 = ir1_get_opnd(pir1, 0);
-    IR1_OPND *opnd1 = ir1_get_opnd(pir1, 1);
-    lsassert(ir1_opnd_is_xmm(opnd0));
-    IR2_OPND dest = load_freg128_from_ir1(opnd0);
-    IR2_OPND src = load_freg128_from_ir1(opnd1);
-    IR2_OPND temp = ra_alloc_ftemp();
-    IR2_OPND label_1 = ra_alloc_label();
-    IR2_OPND label_2 = ra_alloc_label();
-    IR2_OPND n4095_opnd = ra_alloc_num_4095();
+    IR2_OPND dest = load_freg128_from_ir1(ir1_get_opnd(pir1, 0));
+    IR2_OPND src = load_freg128_from_ir1(ir1_get_opnd(pir1, 1));
+    uint8_t eflags = ptest_live_flags(pir1);
 
-    la_x86mtflag(zero_ir2_opnd, 0x3f);
-    la_vand_v(temp, src, dest);
-    la_vseteqz_v(fcc0_ir2_opnd, temp);
-    la_bceqz(fcc0_ir2_opnd, label_1);
-    la_x86mtflag(n4095_opnd, ZF_USEDEF_BIT);
-
-    la_label(label_1);
-    la_vandn_v(temp, dest, src);
-    la_vseteqz_v(fcc0_ir2_opnd, temp);
-    la_bceqz(fcc0_ir2_opnd, label_2);
-    la_x86mtflag(n4095_opnd, CF_USEDEF_BIT);
-    la_label(label_2);
-
-    ra_free_num_4095(n4095_opnd);
+    if (eflags) {
+        IR2_OPND flags = ra_alloc_itemp();
+        generate_vector_test_flags(pir1, dest, src, flags, eflags);
+        la_x86mtflag(flags, eflags);
+        ra_free_temp(flags);
+    }
     return true;
 }
 

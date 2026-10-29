@@ -8,6 +8,13 @@ if 'x86_64-linux-user' in target_dirs
       'timeout': 120,
     }]
   endforeach
+  latx_integration_tests += [{
+    'name': 'test-ptest-flags',
+    'runner': find_program('../../test-avx-regressions.py'),
+    'args': [emulators['latx-x86_64'], files('../../ptest-flags.asm')],
+    'env': {'LATX_SOFTFPU': '0'},
+    'timeout': 180,
+  }]
   if 'CONFIG_LATX_AVX_OPT' in config_host
     latx_integration_tests += [{
       'name': 'test-vcmpsd-writeback',
@@ -64,6 +71,13 @@ if 'x86_64-linux-user' in target_dirs
     'name': 'test-vcomis-flag-reduction',
     'runner': find_program('../../test-avx-regressions.py'),
     'args': [emulators['latx-x86_64'], files('../../vcomis-flag-reduction.asm')],
+    'env': {'LATX_SOFTFPU': '0'},
+    'timeout': 180,
+  }]
+  latx_integration_tests += [{
+    'name': 'test-avx-test-flags',
+    'runner': find_program('../../test-avx-regressions.py'),
+    'args': [emulators['latx-x86_64'], files('../../avx-test-flags.asm')],
     'env': {'LATX_SOFTFPU': '0'},
     'timeout': 180,
   }]
@@ -160,6 +174,16 @@ if 'x86_64-linux-user' in target_dirs
 endif
 
 if 'i386-linux-user' in target_dirs
+  foreach ptest_case : ['flags']
+    latx_integration_tests += [{
+      'name': 'test-ptest-' + ptest_case + '-i386',
+      'runner': find_program('../../test-avx-regressions.py'),
+      'args': [emulators['latx-i386'], '--guest-bits', '32',
+               files('../../ptest-' + ptest_case + '.asm')],
+      'env': {'LATX_SOFTFPU': '0'},
+      'timeout': 180,
+    }]
+  endforeach
   if 'CONFIG_LATX_AVX_OPT' in config_host
     latx_integration_tests += [{
       'name': 'test-f16c-mxcsr-i386',
