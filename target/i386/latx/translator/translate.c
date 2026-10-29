@@ -4502,7 +4502,11 @@ void tr_gen_call_to_helper2(ADDR func, IR2_OPND mem_opnd, int use_fp,
         tb = (TranslationBlock *)lsenv->tr_data->curr_tb;
     }
 
-    /* prologue */
+    /* FP conversion calls may clobber the temporary holding the address. */
+    if (use_fp) {
+        la_addi_d(sp_ir2_opnd, sp_ir2_opnd, -16);
+        la_st_d(mem_opnd, sp_ir2_opnd, 0);
+    }
     tr_gen_call_to_helper_prologue(use_fp);
 
     /* load the helper addr */
@@ -4511,7 +4515,12 @@ void tr_gen_call_to_helper2(ADDR func, IR2_OPND mem_opnd, int use_fp,
 
     /* prologue, jmp and epilogue */
     la_mov64(a0_ir2_opnd, env_ir2_opnd);
-    la_mov64(a1_ir2_opnd, mem_opnd);
+    if (use_fp) {
+        la_ld_d(a1_ir2_opnd, sp_ir2_opnd, 0);
+        la_addi_d(sp_ir2_opnd, sp_ir2_opnd, 16);
+    } else {
+        la_mov64(a1_ir2_opnd, mem_opnd);
+    }
     la_jirl(ra_ir2_opnd, func_addr_opnd, 0);
     tr_gen_call_to_helper_epilogue(use_fp);
 }
