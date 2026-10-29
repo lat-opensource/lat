@@ -2237,7 +2237,21 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
      * To handle segv case, every insn has encode data at the end of tb
      * Calculate the search_size and set the new gen_code_buf
      */
-    search_size = encode_search(tb, (void *)gen_code_buf + gen_code_size);
+#if defined(CONFIG_LATX_FAST_TRANSLATOR) && defined(TARGET_X86_64)
+    if (tb->bool_flags & IS_QUICKTRANS_TB) {
+        /* Quicktrans already appended the search table and returned the
+         * combined size. Its final instruction end includes the TB exit.
+         * Restore the code/table boundary instead of appending a second
+         * table: cpu_restore_state_from_tb reads at tc.ptr + tc.size. */
+        int qt_code_size = tcg_ctx->gen_insn_end_off[tb->icount - 1];
+        assert(qt_code_size > 0 && qt_code_size <= gen_code_size);
+        search_size = gen_code_size - qt_code_size;
+        gen_code_size = qt_code_size;
+    } else
+#endif
+    {
+        search_size = encode_search(tb, (void *)gen_code_buf + gen_code_size);
+    }
     if (unlikely(search_size < 0)) {
         qatomic_set(&tcg_ctx->code_gen_ptr, tcg_ctx->code_gen_highwater + 1);
         goto buffer_overflow;
