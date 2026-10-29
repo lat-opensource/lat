@@ -373,6 +373,7 @@ latx_kzt="no"
 latx_new_world="no"
 latx_profiler="no"
 latx_perf="no"
+latx_fast_translator="no"
 latx_superblock="no"
 latx_tunnel_lib="no"
 latx_flag_reduction="no"
@@ -1187,6 +1188,8 @@ for opt do
   ;;
   --enable-latx-perf) latx_perf="yes"
   ;;
+  --enable-latx-fast-translator) latx_fast_translator="yes"
+  ;;
   --enable-latx-superblock) latx_superblock="yes"
   ;;
   --enable-latx-insts-pattern) latx_insts_pattern="yes"
@@ -1978,6 +1981,8 @@ Optional only for LATX:
   --optimize-O3           Open testing optimization
   ====== Profiler Optional ======
   --enable-latx-profiler  enable profiler and print when process exit
+  --enable-latx-fast-translator
+                          compile the Quicktrans fast translation path
 
 Optional features, enabled with --enable-FEATURE and
 disabled with --disable-FEATURE, default is enabled if available
@@ -5575,6 +5580,10 @@ if test "$cpu" = "s390x" ; then
   fi
 fi
 
+if test "$latx_fast_translator" = "yes"; then
+    git_submodules="${git_submodules} target/i386/latx/quicktrans"
+fi
+
 # Check that the C++ compiler exists and works with the C compiler.
 # All the QEMU_CXXFLAGS are based on QEMU_CFLAGS. Keep this at the end to don't miss any other that could be added.
 if has $cxx; then
@@ -5685,6 +5694,9 @@ if test "$latx" = "yes" ; then
     echo "CONFIG_LATX_KZT=y" >> $config_host_mak
   fi
   echo "CONFIG_LATX=y" >> $config_host_mak
+  if test "$latx_fast_translator" = "yes" ; then
+    echo "CONFIG_LATX_FAST_TRANSLATOR=y" >> $config_host_mak
+  fi
   if test "$debug" = "yes" ; then
     echo "CONFIG_LATX_DEBUG=y" >> $config_host_mak
   else

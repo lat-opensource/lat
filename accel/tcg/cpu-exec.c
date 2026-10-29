@@ -278,15 +278,29 @@ cpu_tb_exec(CPUState *cpu, TranslationBlock *itb, int *tb_exit)
     if (rettb) {
         uint64_t lazypc = 0;
         if (tbexit) {
+#ifdef CONFIG_LATX_FAST_TRANSLATOR
+            if (!latx_tb_exit_resolve_pc(rettb->canlink[1], rettb->pc,
+                                         rettb->lazypc[1], &lazypc)) {
+                goto latx_skip_lazypc_update;
+            }
+#else
+            lazypc = rettb->pc + rettb->lazypc[1];
+#endif
             if (rettb->canlink[1]) {
                 ret |= (uint64_t)rettb;
             }
-            lazypc = rettb->pc + rettb->lazypc[1];
         } else {
+#ifdef CONFIG_LATX_FAST_TRANSLATOR
+            if (!latx_tb_exit_resolve_pc(rettb->canlink[0], rettb->pc,
+                                         rettb->lazypc[0], &lazypc)) {
+                goto latx_skip_lazypc_update;
+            }
+#else
+            lazypc = rettb->pc + rettb->lazypc[0];
+#endif
             if (rettb->canlink[0]) {
                 ret |= (uint64_t)rettb;
             }
-            lazypc = rettb->pc + rettb->lazypc[0];
 #if defined(CONFIG_LATX_KZT)
             if (latx_kzt_runtime_enabled() && lazypc >= reserved_va) {
                 uintptr_t alt_pc = (uintptr_t)getAlternate((void *)(uintptr_t)lazypc);
@@ -297,6 +311,10 @@ cpu_tb_exec(CPUState *cpu, TranslationBlock *itb, int *tb_exit)
 #endif
         }
         env->eip = lazypc;
+#ifdef CONFIG_LATX_FAST_TRANSLATOR
+latx_skip_lazypc_update:
+        ;
+#endif
     }
 
 #ifdef CONFIG_LATX_MONITOR_SHARED_MEM
@@ -336,6 +354,16 @@ cpu_tb_exec(CPUState *cpu, TranslationBlock *itb, int *tb_exit)
         last_tb = tcg_splitwx_to_rw((void *)(ret & ~TB_EXIT_MASK));
     }
     *tb_exit = ret & TB_EXIT_MASK;
+
+#ifdef LATX_QUICKTRANS_X87_SIGNAL_ABI
+    if (last_tb && (last_tb->bool_flags & IS_QUICKTRANS_TB) &&
+        !option_softfpu) {
+        /* Normal exits saved all physical low64 slots in the shared glue. */
+        env->qt_hard_signal_protocol_enabled = true;
+        env->qt_x87_env_format = env->mode_fpu ? QT_X87_ENV_HARD64 :
+                                                          QT_X87_ENV_MMX64;
+    }
+#endif
 
     trace_exec_tb_exit(last_tb, *tb_exit);
     if (last_tb) {

@@ -61,6 +61,9 @@ int mydebug = 1;
 #ifdef CONFIG_LATX
 #include "latx-config.h"
 #include "latx-options.h"
+#if defined(CONFIG_LATX_FAST_TRANSLATOR) && defined(TARGET_X86_64)
+#include "quicktrans/detail/fast-translator.h"
+#endif
 #include "latx-runtime.h"
 #include "aot.h"
 #include <openssl/evp.h>
@@ -804,6 +807,17 @@ static void handle_arg_latx_rounding(const char *arg)
     option_set_rounding_opt = strtol(arg, NULL, 0);
 }
 
+#if defined(CONFIG_LATX_FAST_TRANSLATOR) && defined(TARGET_X86_64)
+static void handle_arg_latx_quicktrans_rsp_merge(const char *arg)
+{
+    if (strcmp(arg, "0") && strcmp(arg, "1")) {
+        fprintf(stderr, "LATX_QUICKTRANS_RSP_MERGE must be 0 or 1\n");
+        exit(EXIT_FAILURE);
+    }
+    latx_fast_set_rsp_merge(arg[0] == '1');
+}
+#endif
+
 static void handle_arg_latx_cvt_opt(const char *arg)
 {
     option_cvt_opt = strtol(arg, NULL, 0);
@@ -1015,6 +1029,11 @@ static const struct qemu_argument arg_table[] = {
     "",           "enable prlimit"},
     {"latx-rounding",    "LATX_ROUNDING_OPT",     true,  handle_arg_latx_rounding,
     "",           "enable rounding opt"},
+#if defined(CONFIG_LATX_FAST_TRANSLATOR) && defined(TARGET_X86_64)
+    {"latx-quicktrans-rsp-merge", "LATX_QUICKTRANS_RSP_MERGE", true,
+     handle_arg_latx_quicktrans_rsp_merge, "0|1",
+     "merge Quicktrans RSP adjustments (default: 1)"},
+#endif
     {"latx-cvt-opt",    "LATX_CVT_OPT",     true,  handle_arg_latx_cvt_opt,
     "",           "enable cvt opt"},
 #if defined(CONFIG_LATX_AVX_OPT)

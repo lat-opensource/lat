@@ -158,8 +158,16 @@ extern unsigned long long counter_tb_tr;
 extern unsigned long long counter_ir1_tr;
 extern unsigned long long counter_mips_tr;
 
+#if defined(CONFIG_LATX_FAST_TRANSLATOR) && defined(TARGET_X86_64)
+#define ENVSUP_QUICKTRANS_RSP \
+    ENVFUN(LATX_QUICKTRANS_RSP_MERGE, handle_arg_latx_quicktrans_rsp_merge)
+#else
+#define ENVSUP_QUICKTRANS_RSP
+#endif
+
 #ifdef CONFIG_LATX
 #define ENVSUP_LATX \
+    ENVSUP_QUICKTRANS_RSP \
     ENVFUN(LATX_OPTIMIZE, handle_arg_optimize) \
     ENVFUN(LATX_VPAES, handle_arg_latx_vpaes) \
     ENVFUN(LATX_SMC, handle_arg_latx_smc) \
