@@ -27,6 +27,9 @@
 #include "jrra.h"
 #endif
 #endif
+#ifdef LATX_QUICKTRANS_X87_SIGNAL_ABI
+#include "fpu/softfloat.h"
+#endif
 
 /* from the Linux kernel - /arch/x86/include/uapi/asm/sigcontext.h */
 #define TARGET_FP_XSTATE_MAGIC1         0x46505853U /* FPXS */
@@ -449,7 +452,7 @@ static void latx_clear_saved_fcsr_flags(CPUX86State *env)
  * Set up a signal frame.
  */
 
-static void xsave_sigcontext(CPUX86State *env, struct target_fpstate_fxsave *fxsave,
+static void xsave_sigcontext_raw(CPUX86State *env, struct target_fpstate_fxsave *fxsave,
                               abi_ulong fxsave_addr)
 {
 #ifdef CONFIG_LATX
@@ -491,6 +494,57 @@ static void xsave_sigcontext(CPUX86State *env, struct target_fpstate_fxsave *fxs
         __put_user(xstate_size, &fxsave->sw_reserved.xstate_size);
         __put_user(TARGET_FP_XSTATE_MAGIC2, (uint32_t *) &fxsave->xfeatures[xfeatures_size]);
     }
+}
+
+static void xsave_sigcontext(CPUX86State *env,
+                             struct target_fpstate_fxsave *fxsave,
+                             abi_ulong fxsave_addr)
+{
+#ifdef LATX_QUICKTRANS_X87_SIGNAL_ABI
+    if (env->qt_hard_signal_protocol_enabled && !option_softfpu) {
+        FPReg saved[8];
+        uint8_t saved_tags[8];
+        unsigned int saved_top = env->fpstt;
+        float_status status = env->fp_status;
+
+        latx_qt_x87_env_to_hard64(env);
+        memcpy(saved, env->fpregs, sizeof(saved));
+        memcpy(saved_tags, env->fptags, sizeof(saved_tags));
+        for (int i = 0; i < 8; ++i) {
+            if (env->mode_fpu) {
+                uint64_t bits = saved[i].d.low;
+                if (saved_tags[i] &&
+                    (bits & 0x7ff0000000000000ULL) == 0x7ff0000000000000ULL &&
+                    (bits & 0x000fffffffffffffULL)) {
+                    /* Empty slots can retain MMX signalling-NaN bits after
+                     * EMMS. Keep their payload while forming an x80 image. */
+                    env->fpregs[i].d.high = (bits >> 48 & 0x8000) | 0x7fff;
+                    env->fpregs[i].d.low = 0x8000000000000000ULL | (bits << 11);
+                } else {
+                    env->fpregs[i].d = float64_to_floatx80(
+                        (float64)bits, &status);
+                }
+            } else {
+                /* MMX aliases contain integer bits, never a double value. */
+                env->fpregs[i].d.high = 0xffff;
+                env->fptags[i] = 0;
+            }
+        }
+        if (!env->mode_fpu) {
+            env->fpstt = 0;
+        }
+        env->qt_x87_env_format = QT_X87_ENV_X80;
+        xsave_sigcontext_raw(env, fxsave, fxsave_addr);
+        /* Preserve raw hard64 bits: an x80 round trip can quiet an unused NaN. */
+        memcpy(env->fpregs, saved, sizeof(saved));
+        memcpy(env->fptags, saved_tags, sizeof(saved_tags));
+        env->fpstt = saved_top;
+        env->qt_x87_env_format = env->mode_fpu ? QT_X87_ENV_HARD64 :
+                                                          QT_X87_ENV_MMX64;
+        return;
+    }
+#endif
+    xsave_sigcontext_raw(env, fxsave, fxsave_addr);
 }
 
 static void setup_sigcontext(struct target_sigcontext *sc,
@@ -796,7 +850,7 @@ give_sigsegv:
     force_sigsegv(sig);
 }
 
-static int xrstor_sigcontext(CPUX86State *env, struct target_fpstate_fxsave *fxsave,
+static int xrstor_sigcontext_raw(CPUX86State *env, struct target_fpstate_fxsave *fxsave,
                              abi_ulong fxsave_addr)
 {
     if (env->features[FEAT_1_ECX] & CPUID_EXT_XSAVE) {
@@ -824,6 +878,58 @@ static int xrstor_sigcontext(CPUX86State *env, struct target_fpstate_fxsave *fxs
 
     cpu_x86_fxrstor(env, fxsave_addr);
     return 0;
+}
+
+static int xrstor_sigcontext(CPUX86State *env,
+                             struct target_fpstate_fxsave *fxsave,
+                             abi_ulong fxsave_addr)
+{
+    int err = xrstor_sigcontext_raw(env, fxsave, fxsave_addr);
+#ifdef LATX_QUICKTRANS_X87_SIGNAL_ABI
+    if (!err && env->qt_hard_signal_protocol_enabled && !option_softfpu) {
+        /* FXSAVE has no separate MMX-mode bit. Its canonical MMX image has
+         * TOP=0, all tags valid and all eight exponent fields equal to ffff.
+         * Classify the restored image, not the handler's current mode_fpu.
+         */
+        bool mmx = env->fpstt == 0;
+        for (int i = 0; i < 8; ++i) {
+            mmx &= !env->fptags[i] && env->fpregs[i].d.high == 0xffff;
+        }
+        env->mode_fpu = !mmx;
+        env->qt_x87_env_format = QT_X87_ENV_X80;
+        latx_qt_x87_env_to_hard64(env);
+        /* cpu_x86_xrstor restored fp_status from CW and sse_status from MXCSR.
+         * Rebuild the saved host control state too: the handler may have used
+         * a different rounding mode. x87 CW supplies hard-x87 RM/enables;
+         * sticky host flags represent SIMD here, as in the QT emitters.
+         */
+        unsigned int rc = ((mmx ? env->mxcsr >> 13 : env->fpuc >> 10) & 3);
+        unsigned int rm = rc ^ ((rc & 1) << 1);
+        unsigned int cw = env->fpuc;
+        unsigned int mxcsr = env->mxcsr;
+        unsigned int enables = ((~cw & 1) << 4) |
+                               ((~cw & 4) << 1) |
+                               ((~cw & 8) >> 1) |
+                               ((~cw & 16) >> 3) |
+                               ((~cw & 32) >> 5);
+        unsigned int flags = ((mxcsr & 1) << 4) |
+                             ((mxcsr & 4) << 1) |
+                             ((mxcsr & 8) >> 1) |
+                             ((mxcsr & 16) >> 3) |
+                             ((mxcsr & 32) >> 5);
+        if (mmx) {
+            enables = ((~mxcsr >> 7 & 1) << 4) |
+                      ((~mxcsr >> 9 & 1) << 3) |
+                      ((~mxcsr >> 10 & 1) << 2) |
+                      ((~mxcsr >> 11 & 1) << 1) |
+                       (~mxcsr >> 12 & 1);
+        }
+        env->fcsr = (env->fcsr & ~((3u << 8) | (31u << 16) |
+                                   (31u << 24) | 31u)) |
+                    (rm << 8) | (flags << 16) | enables;
+    }
+#endif
+    return err;
 }
 
 static int

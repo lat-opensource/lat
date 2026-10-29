@@ -68,6 +68,13 @@ void cpu_loop_exit(CPUState *cpu)
 #ifdef CONFIG_LATX
     CPUArchState *env = cpu->env_ptr;
     env->fpu_clobber = true;
+#ifdef LATX_QUICKTRANS_X87_SIGNAL_ABI
+    if (env->qt_helper_env_saved) {
+        latx_qt_x87_env_to_hard64(env);
+        env->qt_helper_env_saved = false;
+        env->qt_bcd_helper_env_hard64 = false;
+    }
+#endif
 #endif
     siglongjmp(cpu->jmp_env, 1);
 }

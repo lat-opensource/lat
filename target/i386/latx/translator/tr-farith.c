@@ -1451,16 +1451,17 @@ bool translate_fbld(IR1_INST *pir1)
 {
     IR1_OPND *opnd0 = ir1_get_opnd(pir1, 0);
     IR2_OPND mem_opnd = convert_mem_no_offset(opnd0);
-    tr_gen_call_to_helper2((ADDR)helper_fbld_ST0, mem_opnd, 0, LOAD_HELPER_FBLD_ST0);
-    /* adjust top */
-    tr_fpu_push();
+    /* The helper uses floatx80 and already pushes the result.  Convert the
+     * hard-FPU registers around the call and keep its updated TOP. */
+    tr_gen_call_to_helper2((ADDR)helper_fbld_ST0, mem_opnd, 1, LOAD_HELPER_FBLD_ST0);
     return true;
 }
 bool translate_fbstp(IR1_INST *pir1)
 {
     IR1_OPND *opnd0 = ir1_get_opnd(pir1, 0);
     IR2_OPND mem_opnd = convert_mem_no_offset(opnd0);
-    tr_gen_call_to_helper2((ADDR)helper_fbst_ST0, mem_opnd, 0, LOAD_HELPER_FBST_ST0);
+    /* The helper reads floatx80, while hard-FPU registers hold float64. */
+    tr_gen_call_to_helper2((ADDR)helper_fbst_ST0, mem_opnd, 1, LOAD_HELPER_FBST_ST0);
     /* adjust top */
     tr_fpu_pop();
     return true;

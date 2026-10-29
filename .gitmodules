@@ -1,3 +1,8 @@
 [submodule "meson"]
 	path = meson
 	url = https://gitlab.com/qemu-project/meson.git
+
+[submodule "target/i386/latx/quicktrans"]
+	path = target/i386/latx/quicktrans
+	url = https://github.com/lat-opensource/lat-quicktrans.git
+	branch = open-source

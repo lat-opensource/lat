@@ -3305,6 +3305,22 @@ void generate_context_switch_bt_to_native(void *code_buf)
     ra_free_temp(fcsr_value_opnd);
 
     /* load x86 registers from env. top, eflags, and ss */
+#ifdef LATX_QUICKTRANS_X87_SIGNAL_ABI
+    /* A QT signal/syscall exit may save FCSR with TOP mode still enabled.
+     * Physical-slot loads must precede enabling TOP mode in the loader.
+     * Pure legacy execution retains its original entry sequence.
+     */
+    IR2_OPND qt_signal_mode = ra_alloc_itemp();
+    IR2_OPND qt_signal_legacy = ra_alloc_label();
+    li_d(qt_signal_mode,
+         offsetof(CPUX86State, qt_hard_signal_protocol_enabled));
+    la_add_d(qt_signal_mode, env_ir2_opnd, qt_signal_mode);
+    la_ld_bu(qt_signal_mode, qt_signal_mode, 0);
+    la_beq(qt_signal_mode, zero_ir2_opnd, qt_signal_legacy);
+    tr_fpu_disable_top_mode();
+    la_label(qt_signal_legacy);
+    ra_free_temp(qt_signal_mode);
+#endif
     tr_load_registers_from_env(0xff, 0xff, option_save_xmm, options_to_save());
 #ifdef TARGET_X86_64
     tr_load_x64_8_registers_from_env(0xff, option_save_xmm);
@@ -4385,6 +4401,11 @@ void convert_fpregs_64_to_x80(void)
         FPReg *p = &(env->fpregs[i]);
         p->d = float64_to_floatx80((float64)p->d.low, &s);
     }
+#ifdef LATX_QUICKTRANS_X87_SIGNAL_ABI
+    if (env->qt_hard_signal_protocol_enabled) {
+        env->qt_x87_env_format = QT_X87_ENV_X80;
+    }
+#endif
 }
 
 void convert_fpregs_x80_to_64(void)
@@ -4399,6 +4420,11 @@ void convert_fpregs_x80_to_64(void)
         p->d.low = (uint64_t)floatx80_to_float64(p->d, &s);
         p->d.high = 0;
     }
+#ifdef LATX_QUICKTRANS_X87_SIGNAL_ABI
+    if (env->qt_hard_signal_protocol_enabled) {
+        env->qt_x87_env_format = QT_X87_ENV_HARD64;
+    }
+#endif
 }
 
 static void tr_gen_call_to_helper_prologue(int use_fp)
@@ -4476,7 +4502,11 @@ void tr_gen_call_to_helper2(ADDR func, IR2_OPND mem_opnd, int use_fp,
         tb = (TranslationBlock *)lsenv->tr_data->curr_tb;
     }
 
-    /* prologue */
+    /* FP conversion calls may clobber the temporary holding the address. */
+    if (use_fp) {
+        la_addi_d(sp_ir2_opnd, sp_ir2_opnd, -16);
+        la_st_d(mem_opnd, sp_ir2_opnd, 0);
+    }
     tr_gen_call_to_helper_prologue(use_fp);
 
     /* load the helper addr */
@@ -4485,7 +4515,12 @@ void tr_gen_call_to_helper2(ADDR func, IR2_OPND mem_opnd, int use_fp,
 
     /* prologue, jmp and epilogue */
     la_mov64(a0_ir2_opnd, env_ir2_opnd);
-    la_mov64(a1_ir2_opnd, mem_opnd);
+    if (use_fp) {
+        la_ld_d(a1_ir2_opnd, sp_ir2_opnd, 0);
+        la_addi_d(sp_ir2_opnd, sp_ir2_opnd, 16);
+    } else {
+        la_mov64(a1_ir2_opnd, mem_opnd);
+    }
     la_jirl(ra_ir2_opnd, func_addr_opnd, 0);
     tr_gen_call_to_helper_epilogue(use_fp);
 }
