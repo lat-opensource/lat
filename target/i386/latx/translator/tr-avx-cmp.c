@@ -22,6 +22,24 @@ static inline void xcomisx(IR1_INST *pir1, bool is_double, bool qnan_exp)
     lsassert(ir1_opnd_num(pir1) == 2);
     IR2_OPND dest = load_freg128_from_ir1(ir1_get_opnd(pir1, 0));
     IR2_OPND src = load_freg128_from_ir1(ir1_get_opnd(pir1, 1));
+#ifdef CONFIG_LATX_XCOMISX_OPT
+    uint8_t eflags = ir1_get_eflag_def(pir1) &
+                    ~lsenv->tr_data->curr_ir1_skipped_eflags;
+    if (eflags != 0x3f) {
+        /* Keep the comparison even when its flags die: it can raise invalid. */
+        if (!(eflags & (ZF_USEDEF_BIT | PF_USEDEF_BIT | CF_USEDEF_BIT))) {
+            if (is_double) {
+                la_fcmp_cond_d(fcc0_ir2_opnd, dest, src,
+                              FCMP_COND_CUEQ + qnan_exp);
+            } else {
+                la_fcmp_cond_s(fcc0_ir2_opnd, dest, src,
+                              FCMP_COND_CUEQ + qnan_exp);
+            }
+        }
+        generate_xcomisx(dest, src, is_double, qnan_exp, eflags);
+        return;
+    }
+#endif
     /* 0. set flag = 0 */
     IR2_OPND flag_zf = ra_alloc_itemp();
     IR2_OPND flag_pf = ra_alloc_itemp();
@@ -56,7 +74,6 @@ static inline void xcomisx(IR1_INST *pir1, bool is_double, bool qnan_exp)
     ra_free_temp(flag_pf);
     ra_free_temp(flag_zf);
     ra_free_temp(flag);
-
 }
 
 bool translate_vcomisd(IR1_INST * pir1) {
