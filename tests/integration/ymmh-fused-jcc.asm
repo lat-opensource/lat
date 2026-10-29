@@ -94,6 +94,8 @@ _start:
     CHECK_EXIT ucomiss, jne, 1
     CHECK_EXIT comisd, jne, 1
     CHECK_EXIT ucomisd, jne, 1
+    CHECK_EXIT ptest, jne, 0
+    CHECK_EXIT ptest, jne, 1
     CHECK_EXIT vcomiss, jne, 1
     CHECK_EXIT vucomiss, jne, 1
     CHECK_EXIT vcomisd, jne, 1

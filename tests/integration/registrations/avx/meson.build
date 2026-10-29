@@ -14,6 +14,12 @@ if 'x86_64-linux-user' in target_dirs
     'args': [emulators['latx-x86_64'], files('../../ptest-flags.asm')],
     'env': {'LATX_SOFTFPU': '0'},
     'timeout': 180,
+  }, {
+    'name': 'test-ptest-jcc',
+    'runner': find_program('../../test-avx-regressions.py'),
+    'args': [emulators['latx-x86_64'], files('../../ptest-jcc.asm')],
+    'env': {'LATX_SOFTFPU': '0'},
+    'timeout': 180,
   }]
   if 'CONFIG_LATX_AVX_OPT' in config_host
     latx_integration_tests += [{
@@ -78,6 +84,13 @@ if 'x86_64-linux-user' in target_dirs
     'name': 'test-avx-test-flags',
     'runner': find_program('../../test-avx-regressions.py'),
     'args': [emulators['latx-x86_64'], files('../../avx-test-flags.asm')],
+    'env': {'LATX_SOFTFPU': '0'},
+    'timeout': 180,
+  }]
+  latx_integration_tests += [{
+    'name': 'test-avx-test-jcc',
+    'runner': find_program('../../test-avx-regressions.py'),
+    'args': [emulators['latx-x86_64'], files('../../avx-test-jcc.asm')],
     'env': {'LATX_SOFTFPU': '0'},
     'timeout': 180,
   }]
@@ -174,7 +187,7 @@ if 'x86_64-linux-user' in target_dirs
 endif
 
 if 'i386-linux-user' in target_dirs
-  foreach ptest_case : ['flags']
+  foreach ptest_case : ['flags', 'jcc']
     latx_integration_tests += [{
       'name': 'test-ptest-' + ptest_case + '-i386',
       'runner': find_program('../../test-avx-regressions.py'),
