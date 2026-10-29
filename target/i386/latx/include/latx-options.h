@@ -177,6 +177,7 @@ extern unsigned long long counter_mips_tr;
     ENVFUN(LATX_PRLIMIT, handle_arg_latx_prlimit) \
     ENVFUN(LATX_ROUNDING_OPT, handle_arg_latx_rounding) \
     ENVFUN(LATX_CVT_OPT, handle_arg_latx_cvt_opt) \
+    ENVFUN(LATX_INSTPTN, handle_arg_latx_instptn) \
     ENVFUN(LATX_FPUTAG, handle_arg_latx_fputag) \
     ENVFUN(SAVE_XMM, handle_arg_save_xmm) \
     ENVFUN(LATX_JRRA, handle_arg_latx_jrra) \
