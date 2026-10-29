@@ -19,8 +19,63 @@
 #include "latx-config.h"
 #include "syscall-tunnel.h"
 #include "imm-cache.h"
+#if defined(CONFIG_LATX_FAST_TRANSLATOR) && defined(TARGET_X86_64)
+#include "quicktrans/detail/fast-translator.h"
+#endif
 #if defined(CONFIG_LATX_KZT)
 #include "wrappertbbridge.h"
+#endif
+
+#if defined(CONFIG_LATX_FAST_TRANSLATOR) && defined(TARGET_X86_64)
+static bool latx_env_enabled(const char *name, bool default_value)
+{
+    const char *value = getenv(name);
+
+    if (!value) {
+        return default_value;
+    }
+    return value[0] && strcmp(value, "0") &&
+           strcasecmp(value, "false") && strcasecmp(value, "off");
+}
+
+/* Host configuration is fixed before the first translated TB. */
+static unsigned int latx_quicktrans_options(void)
+{
+    static gsize options;
+
+    if (g_once_init_enter(&options)) {
+        gsize value = 8; /* Nonzero even when all options are disabled. */
+
+        if (latx_env_enabled("LATX_FAST_TRANSLATOR", false)) {
+            value |= 1;
+        }
+        if (latx_env_enabled("LATX_FAST_TRANSLATOR_STRICT", true)) {
+            value |= 2;
+        }
+        if (latx_env_enabled("LATX_FAST_TRANSLATOR_TRACE_MISSES", false)) {
+            value |= 4;
+        }
+        g_once_init_leave(&options, value);
+    }
+    return options;
+}
+
+static void latx_quicktrans_report_failure(const QuickTransFailure *failure,
+                                           const char *old_decode)
+{
+    fprintf(stderr,
+            "[Quicktrans] fallback pc=0x%" PRIx64
+            " stage=%s reason=%s index=%d id=%u kind=%d bytes=",
+            failure->pc,
+            quicktrans_failure_stage_name(failure->stage),
+            quicktrans_failure_reason_name(failure->reason),
+            failure->instruction_index, failure->instruction_id,
+            failure->template_kind);
+    for (int i = 0; i < failure->byte_count; i++) {
+        fprintf(stderr, "%02x", failure->bytes[i]);
+    }
+    fprintf(stderr, " old_decoder=%s\n", old_decode);
+}
 #endif
 
 #ifdef CONFIG_LATX_TU
@@ -80,6 +135,12 @@ void target_disasm(struct TranslationBlock *tb, int max_insns)
 int target_latx_host(CPUArchState *env, struct TranslationBlock *tb,
                      int max_insns)
 {
+#if defined(CONFIG_LATX_FAST_TRANSLATOR) && defined(TARGET_X86_64)
+    unsigned int quicktrans_options = latx_quicktrans_options();
+    bool quicktrans_enabled = (quicktrans_options & 1) != 0;
+    bool quicktrans_fallback = false;
+    QuickTransFailure quicktrans_failure;
+#endif
     counter_tb_tr += 1;
 
     trace_xtm_tr_tb((void *)tb, (void *)tb->tc.ptr,
@@ -106,9 +167,39 @@ int target_latx_host(CPUArchState *env, struct TranslationBlock *tb,
     is_tbbridge = latx_kzt_runtime_enabled() &&
                   kzt_tbbridge_contains(tb->pc);
 #endif
+#if defined(CONFIG_LATX_FAST_TRANSLATOR) && defined(TARGET_X86_64)
+    tb->bool_flags &= ~IS_QUICKTRANS_TB;
+    if (quicktrans_enabled && !is_tbbridge) {
+        int code_size = 0;
+        int search_size = 0;
+
+        if (latx_fast_decode_translate_tb_primary_ex(
+                env, tb, max_insns, &code_size, &search_size,
+                &quicktrans_failure)) {
+            tb->bool_flags |= IS_QUICKTRANS_TB;
+            return code_size + search_size;
+        }
+        quicktrans_fallback = true;
+        if ((quicktrans_options & 2)) {
+            latx_quicktrans_report_failure(&quicktrans_failure, "not-run");
+            abort();
+        }
+
+        /* The old decoder starts again from the beginning of this TB. */
+        tb->icount = 0;
+        tb->size = 0;
+    }
+#endif
     if (!is_tbbridge) {
         tr_disasm(tb, max_insns);
     }
+#if defined(CONFIG_LATX_FAST_TRANSLATOR) && defined(TARGET_X86_64)
+    if (quicktrans_fallback &&
+        (quicktrans_options & 4)) {
+        latx_quicktrans_report_failure(&quicktrans_failure,
+                                       tb->icount ? "accepted" : "rejected");
+    }
+#endif
     /* return code_size and skip translate */
     if (!tb->icount && !is_tbbridge) {
         return 0;
