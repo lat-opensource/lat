@@ -96,6 +96,7 @@ if 'x86_64-linux-user' in target_dirs
       emulators['latx-x86_64'],
       files('../../avx-single-instruction-boundaries.asm'),
       files('../../avx-scalar-double-alias.asm'),
+      files('../../vaddsubpd-lanes.asm'),
       files('../../avx128-shuffle.S'),
       files('../../avx-ymm-writeback.S'),
       files('../../vpshufd-distinct-regs.S'),

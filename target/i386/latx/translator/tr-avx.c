@@ -541,6 +541,19 @@ bool translate_vaddsubpd(IR1_INST * pir1) {
     IR2_OPND dest = load_freg256_from_ir1(opnd0);
     IR2_OPND src1 = load_freg256_from_ir1(opnd1);
     IR2_OPND src2 = load_freg256_from_ir1(opnd2);
+    if (ir1_opnd_is_xmm(opnd0)) {
+        IR2_OPND low = ra_alloc_ftemp();
+        IR2_OPND high1 = ra_alloc_ftemp();
+        IR2_OPND high2 = ra_alloc_ftemp();
+
+        la_fsub_d(low, src1, src2);
+        la_xvpickve_d(high1, src1, 1);
+        la_xvpickve_d(high2, src2, 1);
+        la_fadd_d(high1, high1, high2);
+        la_vilvl_d(dest, high1, low);
+        set_high128_xreg_to_zero(dest);
+        return true;
+    }
     IR2_OPND add_src1 = ra_alloc_ftemp();
     IR2_OPND add_src2 = ra_alloc_ftemp();
     IR2_OPND sub_src1 = ra_alloc_ftemp();
@@ -550,17 +563,9 @@ bool translate_vaddsubpd(IR1_INST * pir1) {
     la_xvpackev_d(sub_src2, src2, src2);
     la_xvpackod_d(add_src1, src1, src1);
     la_xvpackod_d(add_src2, src2, src2);
-    if (ir1_opnd_is_xmm(opnd0)) {
-        la_vfsub_d(sub_src1, sub_src1, sub_src2);
-        la_vfadd_d(add_src1, add_src1, add_src2);
-    } else {
-        la_xvfsub_d(sub_src1, sub_src1, sub_src2);
-        la_xvfadd_d(add_src1, add_src1, add_src2);
-    }
+    la_xvfsub_d(sub_src1, sub_src1, sub_src2);
+    la_xvfadd_d(add_src1, add_src1, add_src2);
     la_xvpackev_d(dest, add_src1, sub_src1);
-    if (ir1_opnd_is_xmm(opnd0)) {
-        set_high128_xreg_to_zero(dest);
-    }
     return true;
 }
 
