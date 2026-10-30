@@ -101,6 +101,7 @@ if 'x86_64-linux-user' in target_dirs
       files('../../vpshufd-distinct-regs.S'),
       files('../../vroundps-imm0b.S'),
       files('../../vroundsd-fixed.asm'),
+      files('../../vroundss-fixed.asm'),
       files('../../avx-regression-extract-alias.S'),
       files('../../avx-regression-narrow-state.S'),
       files('../../avx-regression-fma-alias.S'),

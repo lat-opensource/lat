@@ -5532,6 +5532,38 @@ bool translate_vroundss(IR1_INST *pir1)
     IR2_OPND mxcsr = ra_alloc_itemp();
     bool is_xmm = ir1_opnd_is_xmm(opnd0);
     la_xvreplve0_w(src, src2);
+    IR2_OPND merge = ra_alloc_label();
+    if (!(imm & 0x4)) {
+        IR2_OPND slow = ra_alloc_label();
+
+        la_movfcsr2gr(fcsr, fcsr_ir2_opnd);
+        la_andi(fcsr_save, fcsr, FCSR_ENABLE_SET);
+        la_bnez(fcsr_save, slow);
+        if (imm & 0x8) {
+            /* Keep invalid status, but discard the round's inexact status. */
+            la_vfcmp_cond_s(temp, src, src, 0x8);
+            la_movfcsr2gr(fcsr, fcsr_ir2_opnd);
+        }
+        switch (imm & 0x3) {
+        case 0:
+            la_vfrintrne_s(temp_dest, src);
+            break;
+        case 1:
+            la_vfrintrm_s(temp_dest, src);
+            break;
+        case 2:
+            la_vfrintrp_s(temp_dest, src);
+            break;
+        default:
+            la_vfrintrz_s(temp_dest, src);
+            break;
+        }
+        if (imm & 0x8) {
+            la_movgr2fcsr(fcsr_ir2_opnd, fcsr);
+        }
+        la_b(merge);
+        la_label(slow);
+    }
     if(imm & 0x8){
         IR2_INST * ( * tr_inst)(IR2_OPND, IR2_OPND, IR2_OPND, int);
         tr_inst = is_xmm ? la_vfcmp_cond_s : la_xvfcmp_cond_s;
@@ -5594,13 +5626,14 @@ bool translate_vroundss(IR1_INST *pir1)
         tr_inst = is_xmm ? la_vfrintrz_s : la_xvfrintrz_s;
         tr_inst(temp_dest, src);
 	}
+    la_movgr2fcsr(fcsr_ir2_opnd, fcsr_save);
+    la_label(merge);
     if (ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 0)) !=
         ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 1))) {
         la_xvori_b(dest, src1, 0);
     }
     la_xvinsve0_w(dest, temp_dest, 0);
     set_high128_xreg_to_zero(dest);
-    la_movgr2fcsr(fcsr_ir2_opnd, fcsr_save);
 
     ra_free_temp(temp);
     ra_free_temp(fcsr);
