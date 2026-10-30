@@ -86,9 +86,11 @@ bool translate_vaddsd(IR1_INST * pir1) {
                       ra_alloc_ftemp() : dest;
 
     la_fadd_d(result, src1, src2);
-    la_vshuf4i_d(result, src1, 0xc);
-    if (!ir2_opnd_cmp(&result, &dest))
-        la_xvori_b(dest, result, 0);
+    if (ir2_opnd_cmp(&dest, &src1)) {
+        la_xvinsve0_d(dest, result, 0);
+    } else {
+        la_vshuf4i_d(dest, src1, 0xc);
+    }
     set_high128_xreg_to_zero(dest);
     return true;
 }
@@ -191,9 +193,11 @@ bool translate_vsubsd(IR1_INST * pir1) {
                       ra_alloc_ftemp() : dest;
 
     la_fsub_d(result, src1, src2);
-    la_vshuf4i_d(result, src1, 0xc);
-    if (!ir2_opnd_cmp(&result, &dest))
-        la_xvori_b(dest, result, 0);
+    if (ir2_opnd_cmp(&dest, &src1)) {
+        la_xvinsve0_d(dest, result, 0);
+    } else {
+        la_vshuf4i_d(dest, src1, 0xc);
+    }
     set_high128_xreg_to_zero(dest);
     return true;
 }
@@ -293,9 +297,11 @@ bool translate_vmulsd(IR1_INST * pir1) {
                       ra_alloc_ftemp() : dest;
 
     la_fmul_d(result, src1, src2);
-    la_vshuf4i_d(result, src1, 0xc);
-    if (!ir2_opnd_cmp(&result, &dest))
-        la_xvori_b(dest, result, 0);
+    if (ir2_opnd_cmp(&dest, &src1)) {
+        la_xvinsve0_d(dest, result, 0);
+    } else {
+        la_vshuf4i_d(dest, src1, 0xc);
+    }
     set_high128_xreg_to_zero(dest);
     return true;
 }
@@ -395,9 +401,11 @@ bool translate_vdivsd(IR1_INST * pir1) {
                       ra_alloc_ftemp() : dest;
 
     la_fdiv_d(result, src1, src2);
-    la_vshuf4i_d(result, src1, 0xc);
-    if (!ir2_opnd_cmp(&result, &dest))
-        la_xvori_b(dest, result, 0);
+    if (ir2_opnd_cmp(&dest, &src1)) {
+        la_xvinsve0_d(dest, result, 0);
+    } else {
+        la_vshuf4i_d(dest, src1, 0xc);
+    }
     set_high128_xreg_to_zero(dest);
     return true;
 }
