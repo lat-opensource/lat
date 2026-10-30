@@ -75,6 +75,37 @@ _start:
 	inc r9d
 	cmp r9d, 4
 	jne .rounding
+	; A preexisting inexact flag must survive precision-suppressed rounds.
+	xor r9d, r9d
+.sticky:
+	mov eax, r9d
+	shl eax, 13
+	or eax, 0x1f80
+	mov [mxcsr], eax
+	ldmxcsr [mxcsr]
+	lea r10, [cases + 4 * 20]
+	mov eax, [r10]
+	mov [initial], eax
+	fnclex
+	vmovss xmm15, [initial]
+	vroundss xmm15, xmm15, xmm15, 3
+	fnstsw [status]
+	stmxcsr [mxcsr_before]
+	TEST 8
+	TEST 9
+	TEST 10
+	TEST 11
+	fnstsw ax
+	xor ax, [status]
+	test ax, 0x3f
+	jnz fail
+	stmxcsr [mxcsr]
+	mov eax, [mxcsr]
+	cmp eax, [mxcsr_before]
+	jne fail
+	inc r9d
+	cmp r9d, 4
+	jne .sticky
 	; Enabled x87 invalid must retain the original fixed-round path.
 	fldcw [control]
 	lea r10, [cases + 4 * 20]
@@ -114,5 +145,7 @@ initial:
 section .bss align=32
 output: resb 32
 mxcsr: resd 1
+mxcsr_before: resd 1
+status: resw 1
 
 section .note.GNU-stack noalloc noexec nowrite progbits

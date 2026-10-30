@@ -5540,33 +5540,47 @@ bool translate_vroundss(IR1_INST *pir1)
     IR2_OPND merge = ra_alloc_label();
     if (!(imm & 0x4)) {
         IR2_OPND slow = ra_alloc_label();
+        IR2_OPND sticky = ra_alloc_label();
+        IR2_INST *(*fixed_round)(IR2_OPND, IR2_OPND);
+
+        switch (imm & 0x3) {
+        case 0:
+            fixed_round = la_vfrintrne_s;
+            break;
+        case 1:
+            fixed_round = la_vfrintrm_s;
+            break;
+        case 2:
+            fixed_round = la_vfrintrp_s;
+            break;
+        default:
+            fixed_round = la_vfrintrz_s;
+            break;
+        }
 
         la_movfcsr2gr(fcsr, fcsr_ir2_opnd);
         la_andi(fcsr_save, fcsr, FCSR_ENABLE_SET);
         la_bnez(fcsr_save, slow);
         if (imm & 0x8) {
+            la_bstrpick_w(fcsr_save, fcsr, FCSR_OFF_FLAGS_I,
+                         FCSR_OFF_FLAGS_I);
+            la_bnez(fcsr_save, sticky);
             /* Keep invalid status, but discard the round's inexact status. */
             la_vfcmp_cond_s(temp, src, src, 0x8);
             la_movfcsr2gr(fcsr, fcsr_ir2_opnd);
         }
-        switch (imm & 0x3) {
-        case 0:
-            la_vfrintrne_s(temp_dest, src);
-            break;
-        case 1:
-            la_vfrintrm_s(temp_dest, src);
-            break;
-        case 2:
-            la_vfrintrp_s(temp_dest, src);
-            break;
-        default:
-            la_vfrintrz_s(temp_dest, src);
-            break;
-        }
+        fixed_round(temp_dest, src);
         if (imm & 0x8) {
             la_movgr2fcsr(fcsr_ir2_opnd, fcsr);
         }
         la_b(merge);
+        if (imm & 0x8) {
+            la_label(sticky);
+            /* Inexact is already sticky; the compare restores final causes. */
+            fixed_round(temp_dest, src);
+            la_vfcmp_cond_s(temp, src, src, 0x8);
+            la_b(merge);
+        }
         la_label(slow);
     }
     if(imm & 0x8){
