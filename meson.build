@@ -607,6 +607,20 @@ foreach target : target_dirs
       env: ['ASAN_OPTIONS=detect_leaks=0'],
       timeout: 30,
     )
+
+    hardware_ras_metadata_test = executable(
+      'test-' + target + '-latx-hardware-ras-metadata',
+      files('target/i386/latx/sbt/tests/hardware-ras-metadata-test.c') + genh,
+      c_args: c_args,
+      dependencies: [glib],
+      include_directories: target_inc,
+    )
+    test(
+      target + '-latx-hardware-ras-metadata',
+      hardware_ras_metadata_test,
+      suite: 'lat-pr-fast',
+      timeout: 30,
+    )
   endif
 
   if get_option('tests').enabled() and \

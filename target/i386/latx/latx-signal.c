@@ -13,6 +13,7 @@
 #include "reg-alloc.h"
 #include "translate.h"
 #include "latx-signal.h"
+#include "hardware-ras.h"
 #include "qemu/cacheflush.h"
 #include "exec/tb-lookup.h"
 #include "loongarch-extcontext.h"
@@ -248,6 +249,32 @@ static void unlink_tb_jmp(CPUArchState *env, TranslationBlock *current_tb,
             current_tb->jmp_indirect != TB_JMP_RESET_OFFSET_INVALID) {
         unlink_indirect_jmp(env, current_tb, uc);
     } else {
+#if defined(CONFIG_LATX_TU) && defined(CONFIG_LATX_FAST_JMPCACHE) && \
+    defined(CONFIG_LATX_LAZYLINK)
+        target_ulong continuation;
+
+        /*
+         * A signal may interrupt a linked CALL between NOP and BL. Unlinking
+         * restores PCADDU18I+JIRL, so resuming at the second word would use a
+         * base register that NOP never initialized. Replay only the host
+         * jump pair, after the guest CALL's stack update.
+         *
+         * Use persistent CALL metadata rather than the current instructions:
+         * another thread may already have started restoring the pair.
+         * Replaying PCADDU18I is also safe for an already unlinked pair.
+         */
+        if (hras_unpack_call_offset(current_tb->lazypc[1], current_tb->pc,
+                                    &continuation) &&
+            current_tb->jmp_target_arg[0] != TB_JMP_RESET_OFFSET_INVALID &&
+            current_tb->jmp_reset_offset[0] != TB_JMP_RESET_OFFSET_INVALID) {
+            uintptr_t slot = (uintptr_t)current_tb->tc.ptr +
+                             current_tb->jmp_target_arg[0];
+
+            if (UC_PC(uc) == slot + HRAS_LA_INSN_SIZE) {
+                UC_PC(uc) = slot;
+            }
+        }
+#endif
         unlink_direct_jmp(current_tb);
     }
 }

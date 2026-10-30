@@ -794,6 +794,33 @@ static void handle_arg_latx_jrra(const char *arg)
     }
 }
 
+static void handle_arg_latx_tu(const char *arg)
+{
+    long value;
+
+    if (qemu_strtol(arg, NULL, 0, &value) < 0 ||
+        (value != 0 && value != 1)) {
+        fprintf(stderr, "LATX_TU must be 0 or 1\n");
+        return;
+    }
+#ifdef CONFIG_LATX_TU
+    option_tu = value;
+#else
+    option_tu = 0;
+#endif
+}
+
+static void handle_arg_latx_hras(const char *arg)
+{
+    long value;
+
+    if (qemu_strtol(arg, NULL, 0, &value) || (value != 0 && value != 1)) {
+        fprintf(stderr, "LATX_HRAS must be 0 or 1\n");
+        return;
+    }
+    option_hw_cache_ras = value;
+}
+
 static void handle_arg_latx_smc(const char *arg)
 {
     option_smc_opt = strtol(arg, NULL, 0);
@@ -1040,6 +1067,10 @@ static const struct qemu_argument arg_table[] = {
     "",           ""},
     {"latx-jrra",    "LATX_JRRA",     true,  handle_arg_latx_jrra,
     "",           "enable jrra"},
+    {"latx-tu", "LATX_TU", true, handle_arg_latx_tu,
+    "0|1", "enable translation units"},
+    {"latx-hras", "LATX_HRAS", true, handle_arg_latx_hras,
+    "0|1", "enable experimental TU hardware return prediction"},
     {"latx-imm-reg",    "LATX_IMM_REG",     true,  handle_arg_latx_imm_reg,
     "",           "enable imm reg optimization"},
     {"latx-mem-test",    "LATX_MT",     true,  handle_arg_latx_mem_test,
@@ -1563,6 +1594,22 @@ int main(int argc, char **argv, char **envp)
 
     /* set environment variables */
     options_set(target_argv);
+
+#ifdef CONFIG_LATX
+    if (option_hw_cache_ras) {
+#if defined(CONFIG_LATX_TU) && defined(CONFIG_LATX_FAST_JMPCACHE) && \
+    defined(CONFIG_LATX_LAZYLINK) && !defined(CONFIG_LATX_GLUE_MASK)
+        if (!option_tu) {
+            option_hw_cache_ras = 0;
+        } else if (option_jr_ra || option_jr_ra_stack) {
+            fprintf(stderr, "LATX_HRAS disabled because JRRA is enabled\n");
+            option_hw_cache_ras = 0;
+        }
+#else
+        option_hw_cache_ras = 0;
+#endif
+    }
+#endif
 
 #if defined(CONFIG_LATX) && defined(TARGET_I386) && TARGET_ABI_BITS == 32
     if (option_mem_test) {
