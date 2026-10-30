@@ -14,6 +14,7 @@ if host_machine.cpu_family() == 'loongarch64'
   subdir('registrations/prctl')
   subdir('registrations/seccomp')
   subdir('registrations/hbr')
+  subdir('registrations/ras')
 endif
 
 subdir('registrations')

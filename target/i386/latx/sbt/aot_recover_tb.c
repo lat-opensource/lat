@@ -61,6 +61,7 @@ inline static TranslationBlock *creat_tb(aot_tb *p_aot_tb, abi_ulong start,
     tb->pc = start + p_aot_tb->offset_in_segment;
     /* tb->cs_base = base; */
     tb->flags = p_aot_tb->flags;
+    tb->s_data->last_ir1_type = p_aot_tb->last_ir1_type;
     tb->size = p_aot_tb->size;
     tb->first_jmp_align = p_aot_tb->first_jmp_align;
     tb->bool_flags = p_aot_tb->bool_flags;
