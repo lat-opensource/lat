@@ -335,9 +335,9 @@ bool page_check_range(target_ulong start, target_ulong last, int flags);
  * @size: size of data to allocate
  *
  * Allocate @size bytes of out-of-band data to associate with the
- * guest page at @address.  If the page is not mapped, NULL will
- * be returned.  If there is existing data associated with @address,
- * no new memory will be allocated.
+ * guest page at @address, with mmap_lock held. Mapping construction may
+ * allocate data before publishing PAGE_VALID. If there is existing data
+ * associated with @address, no new memory will be allocated.
  *
  * The memory will be freed when the guest page is deallocated,
  * e.g. with the munmap system call.

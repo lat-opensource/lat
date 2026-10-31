@@ -3903,8 +3903,8 @@ void *page_alloc_target_data(target_ulong address, size_t size)
 
     page = address & TARGET_PAGE_MASK;
 
-    if(!(page_get_flags(address) & PAGE_VALID))
-        return NULL;
+    /* Mapping construction prepares shadow data before publishing PAGE_VALID. */
+    assert(have_mmap_lock());
 
     n = interval_tree_iter_first(&targetdata_root, page, page);
     if (!n) {
