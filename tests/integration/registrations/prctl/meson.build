@@ -84,3 +84,15 @@ if 'i386-linux-user' in target_dirs
     ],
   }]
 endif
+
+foreach guest : ['i386', 'x86_64']
+  if guest + '-linux-user' in target_dirs
+    latx_integration_tests += [{
+      'name': 'test-shared-mmap-optin-' + guest,
+      'runner': find_program('../../test-shared-mmap-optin.sh'),
+      'args': [emulators['latx-' + guest],
+               files('../../shared-mmap-optin.c'), guest],
+      'timeout': 90,
+    }]
+  endif
+endforeach

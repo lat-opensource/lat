@@ -973,14 +973,16 @@ abi_long target_mmap(abi_ulong start, abi_ulong len, int target_prot,
 
         /* worst case: we cannot map the file because the offset is not
            aligned, so we read it */
-#ifdef TARGET_X86_64
-        if (!(flags & MAP_ANONYMOUS) && ((flags & MAP_TYPE) == MAP_SHARED) &&
+        if (
+#ifndef TARGET_X86_64
+            option_i386_shared_mmap_shadow &&
+#endif
+            !(flags & MAP_ANONYMOUS) && ((flags & MAP_TYPE) == MAP_SHARED) &&
             (offset & ~qemu_host_page_mask) != (start & ~qemu_host_page_mask)) {
             create_shadow_page_chunk(start, end, target_prot, flags, fd, offset);
             page_set_flags(start, start + len, page_flags);
             goto the_end1;
         }
-#endif
         if (option_shadow_file && !(flags & MAP_ANONYMOUS) &&
             (offset & ~qemu_host_page_mask) != (start & ~qemu_host_page_mask)
             && (len >= 0x4000)) {
