@@ -5824,6 +5824,31 @@ int shared_private_interpret(siginfo_t *info, ucontext_t *uc)
     int64_t new_value = UC_GR(uc)[rk];
 
     real_guest_addr -= imm12;
+    /* Indexed loads/stores use rj + rk.  Atomic operations below use rj
+     * alone: their rk is the value operand, not an address index. */
+    switch (inst >> 15) {
+    case 0x7000: /* LDX.B */
+    case 0x7008: /* LDX.H */
+    case 0x7010: /* LDX.W */
+    case 0x7018: /* LDX.D */
+    case 0x7020: /* STX.B */
+    case 0x7028: /* STX.H */
+    case 0x7030: /* STX.W */
+    case 0x7038: /* STX.D */
+    case 0x7040: /* LDX.BU */
+    case 0x7048: /* LDX.HU */
+    case 0x7050: /* LDX.WU */
+    case 0x7060: /* FLDX.S */
+    case 0x7068: /* FLDX.D */
+    case 0x7070: /* FSTX.S */
+    case 0x7078: /* FSTX.D */
+    case 0x7080: /* VLDX */
+    case 0x7088: /* VSTX */
+    case 0x7090: /* XVLDX */
+    case 0x7098: /* XVSTX */
+        real_guest_addr = UC_GR(uc)[rj] + UC_GR(uc)[rk];
+        break;
+    }
     switch (inst >> 15) {
     case 0x7000: /* LDX.B */
         if (no_right(real_guest_addr, 1, PAGE_READ, &siaddr)) {
