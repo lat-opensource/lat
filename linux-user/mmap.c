@@ -344,7 +344,7 @@ out:
 /* map an incomplete host page */
 static int mmap_frag(abi_ulong real_start,
                      abi_ulong start, abi_ulong end,
-                     int prot, int flags, int fd, abi_ulong offset)
+                     int prot, int flags, int fd, uint64_t offset)
 {
     abi_ulong real_end, addr;
     void *host_start;
