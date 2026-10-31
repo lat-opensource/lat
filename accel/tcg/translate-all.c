@@ -7933,7 +7933,7 @@ void shadow_page_munmap(abi_ulong start, abi_ulong end)
 
 void create_shadow_page_chunk(abi_ulong start, abi_ulong end,
                               int inside_prot, int inside_flags,
-                              int fd, abi_ulong offset)
+                              int fd, uint64_t offset)
 {
     abi_ulong real_start, real_end, addr, len;
     void *outside_p, *inside_p;
@@ -7960,7 +7960,7 @@ void create_shadow_page_chunk(abi_ulong start, abi_ulong end,
                     __func__, addr, fd > 0 ? "file" : "anon",
                     inside_flags & MAP_SHARED ? "shared" : "private",
                     inside_prot);
-            if (fd > 0) {
+            if (fd >= 0) {
                 /* file mapping */
                 inside_p = mmap(0, qemu_host_page_size, inside_prot,
                                 (inside_flags & ~MAP_FIXED), fd,
@@ -8005,7 +8005,7 @@ void create_shadow_page_chunk(abi_ulong start, abi_ulong end,
 }
 
 void update_shadow_page_chunk(abi_ulong start, abi_ulong end, int prot,
-                              int flags, int fd, abi_ulong offset)
+                              int flags, int fd, uint64_t offset)
 {
     abi_ulong addr;
     void *shadow_p;
@@ -8030,7 +8030,7 @@ void update_shadow_page_chunk(abi_ulong start, abi_ulong end, int prot,
                     flags & MAP_SHARED ? "shared" : "private", prot);
         }
         set_shadow_page(addr, shadow_p, access_off);
-        if (fd > 0) {
+        if (fd >= 0) {
             offset += TARGET_PAGE_SIZE;
         }
     }
