@@ -3903,8 +3903,8 @@ void *page_alloc_target_data(target_ulong address, size_t size)
 
     page = address & TARGET_PAGE_MASK;
 
-    if(!(page_get_flags(address) & PAGE_VALID))
-        return NULL;
+    /* Mapping construction prepares shadow data before publishing PAGE_VALID. */
+    assert(have_mmap_lock());
 
     n = interval_tree_iter_first(&targetdata_root, page, page);
     if (!n) {
@@ -5824,6 +5824,31 @@ int shared_private_interpret(siginfo_t *info, ucontext_t *uc)
     int64_t new_value = UC_GR(uc)[rk];
 
     real_guest_addr -= imm12;
+    /* Indexed loads/stores use rj + rk.  Atomic operations below use rj
+     * alone: their rk is the value operand, not an address index. */
+    switch (inst >> 15) {
+    case 0x7000: /* LDX.B */
+    case 0x7008: /* LDX.H */
+    case 0x7010: /* LDX.W */
+    case 0x7018: /* LDX.D */
+    case 0x7020: /* STX.B */
+    case 0x7028: /* STX.H */
+    case 0x7030: /* STX.W */
+    case 0x7038: /* STX.D */
+    case 0x7040: /* LDX.BU */
+    case 0x7048: /* LDX.HU */
+    case 0x7050: /* LDX.WU */
+    case 0x7060: /* FLDX.S */
+    case 0x7068: /* FLDX.D */
+    case 0x7070: /* FSTX.S */
+    case 0x7078: /* FSTX.D */
+    case 0x7080: /* VLDX */
+    case 0x7088: /* VSTX */
+    case 0x7090: /* XVLDX */
+    case 0x7098: /* XVSTX */
+        real_guest_addr = UC_GR(uc)[rj] + UC_GR(uc)[rk];
+        break;
+    }
     switch (inst >> 15) {
     case 0x7000: /* LDX.B */
         if (no_right(real_guest_addr, 1, PAGE_READ, &siaddr)) {
@@ -7935,7 +7960,7 @@ void create_shadow_page_chunk(abi_ulong start, abi_ulong end,
                     __func__, addr, fd > 0 ? "file" : "anon",
                     inside_flags & MAP_SHARED ? "shared" : "private",
                     inside_prot);
-            if (fd > 0) {
+            if (fd >= 0) {
                 /* file mapping */
                 inside_p = mmap(0, qemu_host_page_size, inside_prot,
                                 (inside_flags & ~MAP_FIXED), fd,
@@ -8005,7 +8030,7 @@ void update_shadow_page_chunk(abi_ulong start, abi_ulong end, int prot,
                     flags & MAP_SHARED ? "shared" : "private", prot);
         }
         set_shadow_page(addr, shadow_p, access_off);
-        if (fd > 0) {
+        if (fd >= 0) {
             offset += TARGET_PAGE_SIZE;
         }
     }

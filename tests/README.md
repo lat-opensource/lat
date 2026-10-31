@@ -301,3 +301,18 @@ fixture directory. The runner compiles the native thread probe on demand.
 GDB verifies actual wrapper/callback entry and injects one attach or refresh
 failure without product fault-injection hooks. Normal zero returns, Guest errors,
 nested callbacks, and TLS-disabled existing contexts are checked separately.
+
+`test-shared-mmap-optin-i386` checks that the previously disabled misaligned
+`MAP_SHARED` shadow path is enabled only by `LATX_I386_SHARED_MMAP_SHADOW=1`
+(or `-latx-i386-shared-mmap-shadow 1`). Its default remains zero. The option is
+absent from x86_64, whose existing mapping policy is unchanged. Both guest
+fixtures cover fresh fragment metadata, descriptor zero, shadow code fetch and
+fork sharing. The x86_64 misaligned cases reserve the guest VMA first, matching
+a separate existing fresh-VMA limitation; they do not claim support for fresh,
+unreserved x86_64 misaligned mappings.
+
+The runner uses Clang/LLD, or `LATX_SHARED_MMAP_OPTIN_FIXTURE_DIR` containing
+`shared-mmap-optin-i386`, `shared-mmap-optin-x86_64`, and `source.sha256` with
+the hash of `tests/integration/shared-mmap-optin.c`. On an x86 Linux host, build
+with `gcc -m32` or `gcc -m64`, plus `-O2 -fomit-frame-pointer -fno-pie
+-fno-stack-protector -ffreestanding -fno-builtin -nostdlib -static -no-pie`.
