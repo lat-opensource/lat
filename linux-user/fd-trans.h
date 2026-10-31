@@ -16,6 +16,20 @@
 #ifndef FD_TRANS_H
 #define FD_TRANS_H
 
+/* Only the cursor is shared across fork; packet bytes stay in the kernel. */
+typedef struct NetlinkRecvState {
+    struct NetlinkRecvShared {
+        pthread_mutex_t mutex;
+        size_t offset;
+        uint32_t magic;
+    } *shared;
+    int error;
+} NetlinkRecvState;
+
+int fd_trans_netlink_attach(int fd, NetlinkRecvState *state);
+NetlinkRecvState *fd_trans_netlink_acquire(int fd);
+void fd_trans_netlink_release(NetlinkRecvState *state);
+
 typedef abi_long (*TargetFdDataFunc)(void *, size_t);
 typedef abi_long (*TargetFdAddrFunc)(void *, abi_ulong, socklen_t);
 typedef struct TargetFdTrans {
