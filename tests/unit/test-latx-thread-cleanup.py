@@ -164,10 +164,12 @@ static void thread_exit_case(int mode) {
         tr_data_real.imm_cache->bucket = mode == 1 ? NULL : malloc(300 * 72);
     }
     if (mode == 3) {
+#ifndef KERNEL_NETLINK_QUEUE
         struct iovec iov = {0};
         struct msghdr msg = { .msg_iov = &iov, .msg_iovlen = 1 };
         set_16k_buf(&msg);
         all_len = 8192; /* The guest exits before draining pending messages. */
+#endif
     }
     if (!setjmp(exit_buffer)) {
         exit_guest_thread_locked(&env);
@@ -432,7 +434,7 @@ def main():
     tu = source("target/i386/latx/optimization/tu.c")
     translate = source("accel/tcg/translate-all.c")
     reset = function(syscall, "static void reset_16k_buf(", optional=True)
-    set_buffer = function(syscall, "static void set_16k_buf(")
+    set_buffer = function(syscall, "static void set_16k_buf(", optional=True)
     destroy = function(config, "void latx_lsenv_destroy(", optional=True)
     tu_destroy = function(tu, "void tu_control_destroy(", optional=True)
     # Both syscall exit and seccomp KILL_THREAD must keep the common teardown.
@@ -452,16 +454,33 @@ def main():
             "static gint gpc_cmp(", "static inline void tu_trees_init(",
             "void tu_control_init(")) + tu_destroy
         exit_body = function(syscall, "static void QEMU_NORETURN exit_guest_thread_locked(")
+        if not set_buffer:
+            common = "#define KERNEL_NETLINK_QUEUE 1\n" + common
         define_destroy = "#define HAVE_LATX_DESTROY 1\n" if destroy else ""
         cases["thread-no-tu"] = common + define_destroy + destroy + exit_body + MAIN
         cases["thread-tu"] = ("#define CONFIG_LATX_TU 1\n" + common
                               + define_destroy + tu_functions + destroy + exit_body + MAIN)
     if args.case in ("all", "netlink"):
-        start = syscall.index("        bool need_fix = buf_need_fix(&msg, fd);")
-        end = syscall.index("\n\n        if (!is_error(ret))", start)
-        cases["netlink"] = (PRELUDE + reset + set_buffer
-                            + function(syscall, "static abi_long get_from_16k_buf(")
-                            + NETLINK_STUBS + syscall[start:end] + NETLINK_MAIN)
+        if "static ssize_t netlink_recvmsg(" in syscall:
+            fixture = source("tests/unit/netlink-recv-cursor.c")
+            timeout_helpers = (
+                function(syscall, "static int64_t timeout_to_ns_saturated(")
+                + function(syscall, "static int64_t monotonic_deadline(")
+                + function(syscall, "static int64_t monotonic_remaining(")
+                + function(syscall, "static int netlink_wait_readable(")
+            )
+            cases["netlink"] = fixture.replace(
+                "/* INSERT_RECEIVER */",
+                timeout_helpers
+                + function(syscall, "static ssize_t netlink_recvmsg("))
+        else:
+            start = syscall.index(
+                "        bool need_fix = buf_need_fix(&msg, fd);")
+            end = syscall.index("\n\n        if (!is_error(ret))", start)
+            reader = function(syscall, "static abi_long get_from_16k_buf(")
+            cases["netlink"] = (PRELUDE + reset + set_buffer + reader
+                                + NETLINK_STUBS + syscall[start:end]
+                                + NETLINK_MAIN)
     if args.case in ("all", "clone"):
         start = syscall.index("        ret = pthread_create(&info.thread,")
         start = syscall.index("        sigprocmask(SIG_SETMASK,", start)
@@ -493,7 +512,7 @@ def main():
         for name, source in cases.items():
             for mode in ([], ["-DNDEBUG"]):
                 binary = pathlib.Path(directory) / name
-                subprocess.run(cc + ["-std=gnu11", "-O2"] + mode
+                subprocess.run(cc + ["-std=gnu11", "-O2", "-pthread"] + mode
                                + ["-x", "c", "-", "-o", str(binary)] + glib_flags,
                                input=source, text=True, check=True)
                 subprocess.run([str(binary)], cwd=directory, check=True)

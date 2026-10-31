@@ -4567,72 +4567,305 @@ static abi_long do_connect(int sockfd, abi_ulong target_addr,
     return get_errno(safe_connect(sockfd, addr, addrlen));
 }
 
-#define BUFF_4K 4096
-#define BUFF_16K 16384
-static __thread struct nlmsghdr *pre_nlmh;
-static __thread void* buf;
-static __thread abi_long all_len;
-
-static void reset_16k_buf(void)
+static int64_t timeout_to_ns_saturated(int64_t seconds, int64_t nanoseconds)
 {
-    free(buf);
-    buf = NULL;
-    pre_nlmh = NULL;
-    all_len = 0;
-}
+    int64_t result;
 
-static void set_16k_buf(struct msghdr *msg)
-{
-    buf = malloc(BUFF_16K);
-    assert(buf);
-    msg->msg_iov->iov_len = BUFF_16K;
-    msg->msg_iov->iov_base = buf;
-    pre_nlmh = buf;
-}
-
-static abi_long get_from_16k_buf(struct msghdr *msg)
-{
-#ifdef LATX_DEBUG
-    struct sockaddr *saddr = msg->msg_name;
-    /* Fix me! */
-    /* Need make msg_name={sa_family=AF_NETLINK, nl_pid=0, nl_groups=00000000}. */
-    assert(sockaddr && sockaddr->sa_family == AF_NETLINK);
-#endif
-    struct nlmsghdr *nlmh = pre_nlmh;
-    abi_long curr_nlmh_len = 0;
-    for (;NLMSG_OK (nlmh, all_len);
-            nlmh = (struct nlmsghdr *) NLMSG_NEXT (nlmh, all_len)) {
-        if (curr_nlmh_len + nlmh->nlmsg_len > BUFF_4K) {
-            break;
-        }
-        curr_nlmh_len += nlmh->nlmsg_len;
+    if (smul64_overflow(seconds, 1000000000LL, &result) ||
+        sadd64_overflow(result, nanoseconds, &result)) {
+        return INT64_MAX;
     }
-    memcpy(msg->msg_iov->iov_base, pre_nlmh, BUFF_4K);
-    if (NLMSG_OK(nlmh, all_len)) {
-        pre_nlmh = nlmh;
-    } else {
-        reset_16k_buf();
-    }
-    return curr_nlmh_len;
+    return result;
 }
 
-static int get_socket_domain(int sockfd) {
-    int socket_domain;
-    socklen_t optlen = sizeof(socket_domain);
-    if (getsockopt(sockfd, SOL_SOCKET, SO_DOMAIN, &socket_domain, &optlen) == -1) {
+static int64_t monotonic_deadline(const struct timespec *now,
+                                  int64_t seconds, int64_t nanoseconds)
+{
+    int64_t current = timeout_to_ns_saturated(now->tv_sec, now->tv_nsec);
+    int64_t timeout = timeout_to_ns_saturated(seconds, nanoseconds);
+    int64_t deadline;
+
+    if (sadd64_overflow(current, timeout, &deadline)) {
+        return INT64_MAX;
+    }
+    return deadline;
+}
+
+static int64_t monotonic_remaining(const struct timespec *now, int64_t deadline)
+{
+    int64_t current = timeout_to_ns_saturated(now->tv_sec, now->tv_nsec);
+
+    return deadline > current ? deadline - current : 0;
+}
+
+static int netlink_wait_readable(int fd, int flags, int64_t deadline)
+{
+    struct pollfd event = { .fd = fd, .events = POLLIN };
+    struct timespec wait, *waitp = NULL;
+
+    if ((flags & MSG_DONTWAIT) || (fcntl(fd, F_GETFL) & O_NONBLOCK)) {
+        errno = EAGAIN;
         return -1;
     }
-    return socket_domain;
+    if (deadline) {
+        struct timespec now;
+        int64_t left;
+
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        left = monotonic_remaining(&now, deadline);
+        if (left <= 0) {
+            errno = EAGAIN;
+            return -1;
+        }
+        wait.tv_sec = left / 1000000000;
+        wait.tv_nsec = left % 1000000000;
+        waitp = &wait;
+    }
+    if (safe_ppoll(&event, 1, waitp, NULL, 0) <= 0) {
+        if (!errno) {
+            errno = EAGAIN;
+        }
+        return -1;
+    }
+    return 0;
 }
 
-static bool buf_need_fix(struct msghdr *msg, int fd)
+/*
+ * Keep the head datagram queued until its last complete-message slice.
+ * poll/epoll therefore see unread data, and dup/fork share one cursor.
+ * No thread waits for network data while holding the shared cursor lock.
+ */
+static ssize_t netlink_recvmsg(int fd, struct msghdr *msg, int flags,
+                              NetlinkRecvState *state)
 {
-    int socket_domain = get_socket_domain(fd);
-    if (socket_domain == AF_NETLINK && msg->msg_iov->iov_len == BUFF_4K
-            && sysconf(_SC_PAGESIZE) == BUFF_16K) {
-        return true;
+    struct NetlinkRecvShared *shared;
+
+    if (state->error) {
+        errno = state->error;
+        return -1;
     }
-    return false;
+    if (!state->shared) {
+        struct msghdr probe = {0};
+        ssize_t ready = safe_recvmsg(fd, &probe, flags | MSG_PEEK | MSG_TRUNC);
+        if (ready < 0) {
+            return -1;
+        }
+        if (fd_trans_netlink_attach(fd, state)) {
+            return -1;
+        }
+        if (!state->shared) {
+            errno = EIO;
+            return -1;
+        }
+    }
+    shared = state->shared;
+    struct timeval timeout;
+    struct timespec now;
+    socklen_t optlen = sizeof(timeout);
+    int64_t deadline = 0;
+    size_t capacity = 0;
+    ssize_t ret;
+    int saved_errno;
+    unsigned int i;
+
+    for (i = 0; i < msg->msg_iovlen; i++) {
+        if (msg->msg_iov[i].iov_len > SSIZE_MAX - capacity) {
+            errno = EINVAL;
+            return -1;
+        }
+        if (msg->msg_iov[i].iov_len && !msg->msg_iov[i].iov_base) {
+            errno = EFAULT;
+            return -1;
+        }
+        capacity += msg->msg_iov[i].iov_len;
+    }
+    if (!getsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, &optlen) &&
+        (timeout.tv_sec || timeout.tv_usec)) {
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        deadline = monotonic_deadline(&now, timeout.tv_sec,
+                                      timeout.tv_usec * 1000LL);
+    }
+
+    for (;;) {
+        struct msghdr peek = *msg;
+        struct iovec vec;
+        char *data;
+        size_t offset, length, copied, step;
+        bool complete = true;
+        bool multipart = true;
+        int error = pthread_mutex_trylock(&shared->mutex);
+
+        if (error == EBUSY) {
+            struct timespec wait = { .tv_nsec = 1000000 };
+
+            if ((flags & MSG_DONTWAIT) ||
+                (fcntl(fd, F_GETFL) & O_NONBLOCK)) {
+                errno = EAGAIN;
+                return -1;
+            }
+            if (deadline) {
+                clock_gettime(CLOCK_MONOTONIC, &now);
+                int64_t left = monotonic_remaining(&now, deadline);
+                if (left <= 0) {
+                    errno = EAGAIN;
+                    return -1;
+                }
+                wait.tv_nsec = MIN(left, 1000000);
+            }
+            /* Wait without owning the cursor; signals can interrupt us. */
+            if (safe_ppoll(NULL, 0, &wait, NULL, 0) < 0) {
+                return -1;
+            }
+            continue;
+        }
+        if (error == EOWNERDEAD) {
+            pthread_mutex_consistent(&shared->mutex);
+        } else if (error) {
+            errno = error;
+            return -1;
+        }
+        /* Probe without modifying caller metadata or dequeuing anything. */
+        vec.iov_base = NULL;
+        vec.iov_len = 0;
+        peek.msg_iov = &vec;
+        peek.msg_iovlen = 1;
+        peek.msg_name = NULL;
+        peek.msg_namelen = 0;
+        peek.msg_control = NULL;
+        peek.msg_controllen = 0;
+        ret = safe_recvmsg(fd, &peek, MSG_PEEK | MSG_TRUNC | MSG_DONTWAIT);
+        if (ret < 0) {
+            saved_errno = errno;
+            pthread_mutex_unlock(&shared->mutex);
+            if (saved_errno != EAGAIN) {
+                errno = saved_errno;
+                return -1;
+            }
+            if (netlink_wait_readable(fd, flags, deadline)) {
+                return -1;
+            }
+            continue;
+        }
+        if (!shared->offset && ret <= capacity) {
+            /* The whole datagram fits; skip staging and parse copy. */
+            ret = safe_recvmsg(fd, msg, flags | MSG_DONTWAIT);
+            if (ret >= 0) {
+                saved_errno = errno;
+                pthread_mutex_unlock(&shared->mutex);
+                errno = saved_errno;
+                return ret;
+            }
+            saved_errno = errno;
+            pthread_mutex_unlock(&shared->mutex);
+            if (saved_errno != EAGAIN) {
+                errno = saved_errno;
+                return -1;
+            }
+            if (netlink_wait_readable(fd, flags, deadline)) {
+                return -1;
+            }
+            continue;
+        }
+        data = g_try_malloc(MAX(ret, 1));
+        if (!data) {
+            pthread_mutex_unlock(&shared->mutex);
+            errno = ENOMEM;
+            return -1;
+        }
+        vec.iov_base = data;
+        vec.iov_len = ret;
+        peek = *msg;
+        peek.msg_iov = &vec;
+        peek.msg_iovlen = 1;
+        ret = safe_recvmsg(fd, &peek, (flags & ~MSG_TRUNC) | MSG_PEEK |
+                           MSG_DONTWAIT);
+        if (ret < 0) {
+            goto unlock;
+        }
+        length = ret;
+        offset = shared->offset;
+        if (offset > length) {
+            offset = shared->offset = 0;
+        }
+        /* Validate the entire remainder before treating it as multipart. */
+        for (step = offset; step < length; ) {
+            struct nlmsghdr *head = (void *)(data + step);
+            size_t left = length - step;
+            if (left < sizeof(*head) || head->nlmsg_len < sizeof(*head) ||
+                head->nlmsg_len > left) {
+                complete = false;
+                break;
+            }
+            multipart &= (head->nlmsg_flags & NLM_F_MULTI) != 0;
+            step += MIN(NLMSG_ALIGN(head->nlmsg_len), left);
+        }
+        copied = 0;
+        if (complete && multipart && capacity >= 4096 &&
+            length - offset > capacity) {
+            for (step = offset; step < length; ) {
+                struct nlmsghdr *head = (void *)(data + step);
+                size_t next = MIN(NLMSG_ALIGN(head->nlmsg_len), length - step);
+                if (next > capacity - copied) {
+                    break;
+                }
+                copied += next;
+                step += next;
+            }
+        }
+        /* An individual message that does not fit keeps normal truncation. */
+        if (!copied) {
+            copied = length - offset;
+        }
+        if (!(flags & MSG_PEEK) && offset + copied == length) {
+            /* Commit the final slice by dequeuing the original packet. */
+            peek = *msg;
+            peek.msg_iov = &vec;
+            peek.msg_iovlen = 1;
+            ret = safe_recvmsg(fd, &peek, flags | MSG_DONTWAIT);
+            if (ret < 0) {
+                goto unlock;
+            }
+            shared->offset = 0;
+        } else if (!(flags & MSG_PEEK)) {
+            shared->offset = offset + copied;
+        }
+        step = 0;
+        for (i = 0; i < msg->msg_iovlen && step < copied; i++) {
+            size_t part = MIN(msg->msg_iov[i].iov_len, copied - step);
+            memcpy(msg->msg_iov[i].iov_base, data + offset + step, part);
+            step += part;
+        }
+        msg->msg_namelen = peek.msg_namelen;
+        msg->msg_controllen = peek.msg_controllen;
+        msg->msg_flags = peek.msg_flags & ~MSG_TRUNC;
+        if (copied > capacity) {
+            msg->msg_flags |= MSG_TRUNC;
+        }
+        ret = (flags & MSG_TRUNC) ? copied : MIN(copied, capacity);
+unlock:
+        saved_errno = errno;
+        g_free(data);
+        pthread_mutex_unlock(&shared->mutex);
+        errno = saved_errno;
+        return ret;
+    }
+}
+
+static ssize_t netlink_receive(int fd, struct msghdr *msg, int flags)
+{
+    NetlinkRecvState *state = fd_trans_netlink_acquire(fd);
+    ssize_t ret;
+    int saved_errno;
+
+    if (!state || (flags & (MSG_ERRQUEUE | MSG_OOB))) {
+        fd_trans_netlink_release(state);
+        return safe_recvmsg(fd, msg, flags);
+    }
+    ret = netlink_recvmsg(fd, msg, flags, state);
+    saved_errno = errno;
+    fd_trans_netlink_release(state);
+    errno = saved_errno;
+    return ret;
 }
 
 /* do_sendrecvmsg_locked() Must return target values and target errnos. */
@@ -4685,6 +4918,10 @@ static abi_long do_sendrecvmsg_locked(int fd, struct target_msghdr *msgp,
 
     vec = lock_iovec(send ? VERIFY_READ : VERIFY_WRITE,
                      target_vec, count, send);
+    if (count && !vec) {
+        ret = get_errno(-1);
+        goto out2;
+    }
     msg.msg_iovlen = count;
     msg.msg_iov = vec;
 
@@ -4708,39 +4945,21 @@ static abi_long do_sendrecvmsg_locked(int fd, struct target_msghdr *msgp,
             }
         }
     } else {
-        bool need_fix = buf_need_fix(&msg, fd);
-        if (need_fix) {
-            if (!buf) {
-                void *iov_base = msg.msg_iov->iov_base;
-                size_t iov_len = msg.msg_iov->iov_len;
-                set_16k_buf(&msg);
-                ret = get_errno(safe_recvmsg(fd, &msg, flags));
-                msg.msg_iov->iov_base = iov_base;
-                msg.msg_iov->iov_len = iov_len;
-                if (is_error(ret)) {
-                    reset_16k_buf();
-                    goto out;
-                }
-                all_len = ret;
-            }
-            ret =  get_from_16k_buf(&msg);
-        } else {
-            ret = get_errno(safe_recvmsg(fd, &msg, flags));
-        }
+        ret = get_errno(netlink_receive(fd, &msg, flags));
 
         if (!is_error(ret)) {
             len = ret;
             trans = fd_trans_host_to_target_data(fd);
-            if (trans) {
+            if (trans && count && msg.msg_iov->iov_len && len) {
                 ret = trans(msg.msg_iov->iov_base,
                             MIN(msg.msg_iov->iov_len, len));
             }
             if (!is_error(ret)) {
+                msgp->msg_flags = tswap32(msg.msg_flags);
                 ret = host_to_target_cmsg(msgp, &msg);
             }
             if (!is_error(ret)) {
                 msgp->msg_namelen = tswap32(msg.msg_namelen);
-                msgp->msg_flags |= tswap32(msg.msg_flags);
                 if (msg.msg_name != NULL && msg.msg_name != (void *)-1) {
                     ret = host_to_target_sockaddr(tswapal(msgp->msg_name),
                                     msg.msg_name, msg.msg_namelen);
@@ -4789,9 +5008,33 @@ static abi_long do_sendrecvmmsg(int fd, abi_ulong target_msgvec,
 {
     struct target_mmsghdr *mmsgp;
     abi_long ret = 0;
+    struct timespec host_timeout;
+    abi_ulong target_timeout = (uintptr_t)timeout;
 
     if (vlen > UIO_MAXIOV) {
         vlen = UIO_MAXIOV;
+    }
+    if (!send && vlen == 0) {
+        int domain;
+        socklen_t domain_length = sizeof(domain);
+        struct timespec ignored_timeout;
+
+        if (timeout) {
+            ret = target_to_host_timespec(&ignored_timeout,
+                                          (uintptr_t)timeout);
+            if (ret) {
+                return ret;
+            }
+            if (ignored_timeout.tv_sec < 0 || ignored_timeout.tv_nsec < 0 ||
+                ignored_timeout.tv_nsec >= 1000000000) {
+                return -TARGET_EINVAL;
+            }
+        }
+        if (getsockopt(fd, SOL_SOCKET, SO_DOMAIN,
+                       &domain, &domain_length)) {
+            return get_errno(-1);
+        }
+        return 0;
     }
 
     mmsgp = lock_user(VERIFY_WRITE, target_msgvec, sizeof(*mmsgp) * vlen, 1);
@@ -4799,39 +5042,137 @@ static abi_long do_sendrecvmmsg(int fd, abi_ulong target_msgvec,
         return -TARGET_EFAULT;
     }
 
+    NetlinkRecvState *state = fd_trans_netlink_acquire(fd);
+    bool adapted = state != NULL;
+    fd_trans_netlink_release(state);
 #ifdef TARGET_X86_64
-    /* direct syscall (only for 64bit guest and host) */
-    if(send==0) {
-        ret = get_errno(safe_recvmmsg(fd, (struct msghdr *)mmsgp, vlen, flags, timeout));
-    } else {
-        ret = get_errno(safe_sendmmsg(fd, (struct msghdr *)mmsgp, vlen, flags));
+    /* Keep sendmmsg and non-Netlink receives on their existing path. */
+    if (send || !adapted) {
+        if (send) {
+            ret = get_errno(safe_sendmmsg(fd, (struct msghdr *)mmsgp,
+                                         vlen, flags));
+        } else {
+            ret = get_errno(safe_recvmmsg(fd, (struct msghdr *)mmsgp,
+                                         vlen, flags, timeout));
+        }
+        unlock_user(mmsgp, target_msgvec, sizeof(*mmsgp) * vlen);
+        return ret;
     }
-    unlock_user(mmsgp, target_msgvec, sizeof(*mmsgp) * vlen);
-	return ret;
-#else
-    /* use sendmsg/recvmsg to emulate sendmmsg/recvmmsg */
+#endif
+    if (adapted && timeout) {
+        ret = target_to_host_timespec(&host_timeout, target_timeout);
+        if (ret) {
+            unlock_user(mmsgp, target_msgvec, 0);
+            return ret;
+        }
+        timeout = &host_timeout;
+    }
+    /* Netlink uses the same cursor for every receiving interface. */
     int i;
+    int64_t deadline = 0;
+    int64_t socket_wait = 0;
+    if (adapted && !send && timeout) {
+        struct timespec now;
+        if (timeout->tv_sec < 0 || timeout->tv_nsec < 0 ||
+            timeout->tv_nsec >= 1000000000) {
+            unlock_user(mmsgp, target_msgvec, 0);
+            return -TARGET_EINVAL;
+        }
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        deadline = monotonic_deadline(&now, timeout->tv_sec,
+                                      timeout->tv_nsec);
+    }
+    if (deadline) {
+        struct timeval receive_timeout;
+        socklen_t length = sizeof(receive_timeout);
+
+        if (!getsockopt(fd, SOL_SOCKET, SO_RCVTIMEO,
+                        &receive_timeout, &length)) {
+            socket_wait = timeout_to_ns_saturated(
+                receive_timeout.tv_sec, receive_timeout.tv_usec * 1000LL);
+        }
+    }
     for (i = 0; i < vlen; i++) {
-        ret = do_sendrecvmsg_locked(fd, &mmsgp[i].msg_hdr, flags, send);
+        int64_t receive_deadline = deadline;
+        bool socket_expires_first = false;
+
+        /* SO_RCVTIMEO bounds each receive, not the whole message vector. */
+        if (socket_wait) {
+            struct timespec now;
+            int64_t socket_deadline;
+
+            clock_gettime(CLOCK_MONOTONIC, &now);
+            socket_deadline = monotonic_deadline(
+                &now, socket_wait / 1000000000, socket_wait % 1000000000);
+            if (socket_deadline <= receive_deadline) {
+                receive_deadline = socket_deadline;
+                socket_expires_first = true;
+            }
+        }
+        for (;;) {
+            int recv_flags = flags;
+            if (deadline) {
+                recv_flags |= MSG_DONTWAIT;
+            }
+            ret = do_sendrecvmsg_locked(fd, &mmsgp[i].msg_hdr,
+                                       recv_flags, send);
+            if (ret != -TARGET_EAGAIN || !deadline ||
+                (flags & MSG_DONTWAIT) ||
+                (fcntl(fd, F_GETFL) & O_NONBLOCK)) {
+                break;
+            }
+            struct timespec now, wait;
+            struct pollfd event = { .fd = fd, .events = POLLIN };
+            int64_t left;
+            clock_gettime(CLOCK_MONOTONIC, &now);
+            left = monotonic_remaining(&now, receive_deadline);
+            if (left <= 0) {
+                ret = socket_expires_first ? -TARGET_EAGAIN : 0;
+                goto mmsg_done;
+            }
+            wait.tv_sec = left / 1000000000;
+            wait.tv_nsec = left % 1000000000;
+            ret = get_errno(safe_ppoll(&event, 1, &wait, NULL, 0));
+            if (ret <= 0) {
+                if (!ret && socket_expires_first) {
+                    ret = -TARGET_EAGAIN;
+                }
+                goto mmsg_done;
+            }
+        }
         if (is_error(ret)) {
             break;
         }
         mmsgp[i].msg_len = tswap32(ret);
-        /* MSG_WAITFORONE turns on MSG_DONTWAIT after one packet */
+        if (deadline) {
+            struct timespec now;
+
+            clock_gettime(CLOCK_MONOTONIC, &now);
+            int64_t left = monotonic_remaining(&now, deadline);
+            timeout->tv_sec = left / 1000000000;
+            timeout->tv_nsec = left % 1000000000;
+            if (!left) {
+                /* Include this message before stopping at the deadline. */
+                i++;
+                goto mmsg_done;
+            }
+        }
         if (flags & MSG_WAITFORONE) {
             flags |= MSG_DONTWAIT;
         }
     }
+mmsg_done:
+    if (deadline && !ret && i < vlen) {
+        /* A normal call timeout ends with no remaining time. */
+        timeout->tv_sec = timeout->tv_nsec = 0;
+    }
 
-    /* timeout used only in recvmmsg but not supported */
-	if (timeout) {
-#ifdef CONFIG_LATX_DEBUG
-        qemu_log_mask(LAT_LOG_SYSCALL,
-                "[LATX_SYSCALL] do_sendrecvmmsg error fd " TARGET_FMT_ld
-                " with timeout not supported\n", fd);
-#endif
-	}
-
+    /* No completed receive: preserve errors without touching the timeout. */
+    if (adapted && timeout && (i || !is_error(ret)) &&
+        host_to_target_timespec(target_timeout, timeout)) {
+        unlock_user(mmsgp, target_msgvec, sizeof(*mmsgp) * i);
+        return -TARGET_EFAULT;
+    }
     unlock_user(mmsgp, target_msgvec, sizeof(*mmsgp) * i);
 
     /* Return number of datagrams sent if we sent any at all;
@@ -4841,7 +5182,6 @@ static abi_long do_sendrecvmmsg(int fd, abi_ulong target_msgvec,
         return i;
     }
     return ret;
-#endif
 }
 
 /* do_accept4() Must return target values and target errnos. */
@@ -5016,6 +5356,31 @@ fail:
     return ret;
 }
 
+static ssize_t netlink_recvfrom(int fd, void *data, size_t len, int flags,
+                                void *addr, socklen_t *addrlen)
+{
+    struct iovec vec = { .iov_base = data, .iov_len = len };
+    struct msghdr msg = { .msg_iov = &vec, .msg_iovlen = 1,
+                         .msg_name = addr,
+                         .msg_namelen = addrlen ? *addrlen : 0 };
+    NetlinkRecvState *state = fd_trans_netlink_acquire(fd);
+    ssize_t ret;
+    int saved_errno;
+
+    if (!state || (flags & (MSG_ERRQUEUE | MSG_OOB))) {
+        fd_trans_netlink_release(state);
+        return safe_recvfrom(fd, data, len, flags, addr, addrlen);
+    }
+    ret = netlink_recvmsg(fd, &msg, flags, state);
+    saved_errno = errno;
+    fd_trans_netlink_release(state);
+    if (ret >= 0 && addrlen) {
+        *addrlen = msg.msg_namelen;
+    }
+    errno = saved_errno;
+    return ret;
+}
+
 /* do_recvfrom() Must return target values and target errnos. */
 static abi_long do_recvfrom(int fd, abi_ulong msg, size_t len, int flags,
                             abi_ulong target_addr,
@@ -5046,12 +5411,12 @@ static abi_long do_recvfrom(int fd, abi_ulong msg, size_t len, int flags,
         }
         addr = alloca(addrlen);
         ret_addrlen = addrlen;
-        ret = get_errno(safe_recvfrom(fd, host_msg, len, flags,
-                                      addr, &ret_addrlen));
+        ret = get_errno(netlink_recvfrom(fd, host_msg, len, flags,
+                                          addr, &ret_addrlen));
     } else {
         addr = NULL; /* To keep compiler quiet.  */
         addrlen = 0; /* To keep compiler quiet.  */
-        ret = get_errno(safe_recvfrom(fd, host_msg, len, flags, NULL, 0));
+        ret = get_errno(netlink_recvfrom(fd, host_msg, len, flags, NULL, NULL));
     }
     if (!is_error(ret)) {
         trans = fd_trans_host_to_target_data(fd);
@@ -10050,7 +10415,6 @@ static void QEMU_NORETURN exit_guest_thread_locked(CPUArchState *env)
     }
     thread_cpu = NULL;
     g_free(ts);
-    reset_16k_buf();
 #ifdef CONFIG_LATX
     latx_lsenv_destroy();
 #endif
