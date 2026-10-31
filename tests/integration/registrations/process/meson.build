@@ -25,6 +25,15 @@ endif
 foreach arch : ['x86_64', 'i386']
   if arch + '-linux-user' in target_dirs
     latx_integration_tests += [{
+      'name': 'test-empty-cmdline-fds-' + arch,
+      'runner': find_program('../../test-empty-cmdline-fds.sh'),
+      'args': [
+        emulators['latx-' + arch],
+        files('../../empty-cmdline-fds.c'),
+        arch,
+      ],
+      'timeout': 30,
+    }, {
       'name': 'test-proc-fd-thread-race-' + arch,
       'runner': find_program('../../test-proc-fd-thread-race.sh'),
       'args': [
