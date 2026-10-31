@@ -232,9 +232,14 @@ static char **latx_steam_direct_payload(const char *program,
 
             (void)envlist_setenv(envlist, assignment);
         }
-        latx_steam_apply_runtime_paths(envlist, app_library_path,
-                                                 old_xdg_data_dirs);
     }
+    /*
+     * The webhelper wrapper is a host script that launches the guest
+     * steamwebhelper itself, so it must still receive the Runtime library
+     * set.  Keep its host environment handling separate above.
+     */
+    latx_steam_apply_runtime_paths(envlist, app_library_path,
+                                             old_xdg_data_dirs);
 
 out:
     if (preloads) {
