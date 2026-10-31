@@ -348,4 +348,12 @@ if 'i386-linux-user' in target_dirs
       files('../../fd-transform-race-shim.c'),
     ],
   }]
+  latx_integration_tests += [{
+    'name': 'test-steam-i386-library-order',
+    'runner': find_program('../../test-steam-i386-library-order.sh'),
+    'args': [
+      emulators['latx-i386'],
+      files('../../steam-i386-env.S'),
+    ],
+  }]
 endif

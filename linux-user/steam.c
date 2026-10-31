@@ -232,9 +232,14 @@ static char **latx_steam_direct_payload(const char *program,
 
             (void)envlist_setenv(envlist, assignment);
         }
-        latx_steam_apply_runtime_paths(envlist, app_library_path,
-                                                 old_xdg_data_dirs);
     }
+    /*
+     * The webhelper wrapper is a host script that launches the guest
+     * steamwebhelper itself, so it must still receive the Runtime library
+     * set.  Keep its host environment handling separate above.
+     */
+    latx_steam_apply_runtime_paths(envlist, app_library_path,
+                                             old_xdg_data_dirs);
 
 out:
     if (preloads) {
@@ -298,37 +303,29 @@ static bool latx_steam_i386_library_dir(const char *guest_dir)
     return found;
 }
 
-static bool latx_steam_guest_path_present(const char *library_path,
-                                                    const char *guest_path)
+static bool latx_steam_guest_path_equal(const char *directory,
+                                        const char *guest_path)
 {
-    g_auto(GStrv) directories = NULL;
+    g_autofree char *directory_host = NULL;
+    g_autofree char *guest_host = NULL;
+    g_autofree char *directory_real = NULL;
+    g_autofree char *guest_real = NULL;
 
-    if (!library_path || !guest_path) {
+    if (!directory || !guest_path) {
         return false;
     }
-    directories = g_strsplit(library_path, ":", -1);
-    for (char **directory = directories; *directory; directory++) {
-        g_autofree char *directory_host = NULL;
-        g_autofree char *guest_host = NULL;
-        g_autofree char *directory_real = NULL;
-        g_autofree char *guest_real = NULL;
-
-        if (!strcmp(*directory, guest_path)) {
-            return true;
-        }
-        if ((*directory)[0] != '/' || guest_path[0] != '/') {
-            continue;
-        }
-        directory_host = path_get_prefixed(*directory);
-        guest_host = path_get_prefixed(guest_path);
-        directory_real = realpath(directory_host, NULL);
-        guest_real = realpath(guest_host, NULL);
-        if (directory_real && guest_real && !strcmp(directory_real,
-                                                     guest_real)) {
-            return true;
-        }
+    if (!strcmp(directory, guest_path)) {
+        return true;
     }
-    return false;
+    if (directory[0] != '/' || guest_path[0] != '/') {
+        return false;
+    }
+    directory_host = path_get_prefixed(directory);
+    guest_host = path_get_prefixed(guest_path);
+    directory_real = realpath(directory_host, NULL);
+    guest_real = realpath(guest_host, NULL);
+    return directory_real && guest_real &&
+           !strcmp(directory_real, guest_real);
 }
 
 static bool latx_steam_path_is_within(const char *parent,
@@ -342,6 +339,41 @@ static bool latx_steam_path_is_within(const char *parent,
     length = strlen(parent);
     return !strncmp(parent, path, length) &&
            (path[length] == '\0' || path[length] == '/');
+}
+
+static bool latx_steam_runtime_i386_dir(const envlist_t *envlist,
+                                        const char *directory)
+{
+    static const char *const runtime_dirs[] = {
+        "lib/i386-linux-gnu",
+        "usr/lib/i386-linux-gnu",
+    };
+    const char *runtime = envlist_getenv(envlist, "STEAM_RUNTIME");
+    g_autofree char *real_directory = NULL;
+    size_t i;
+
+    if (latx_steam_runtime_is_i386_library_path(directory)) {
+        return true;
+    }
+    if (!runtime || runtime[0] != '/' || !directory || directory[0] != '/') {
+        return false;
+    }
+    real_directory = realpath(directory, NULL);
+    if (!real_directory) {
+        return false;
+    }
+    for (i = 0; i < G_N_ELEMENTS(runtime_dirs); i++) {
+        g_autofree char *candidate = g_build_filename(runtime, runtime_dirs[i],
+                                                       NULL);
+        g_autofree char *real_candidate = realpath(candidate, NULL);
+
+        if (real_candidate &&
+            (!strcmp(real_candidate, real_directory) ||
+             latx_steam_path_is_within(real_candidate, real_directory))) {
+            return true;
+        }
+    }
+    return false;
 }
 
 static char *latx_steam_find_i386_sysroot(
@@ -366,6 +398,9 @@ static char *latx_steam_find_i386_sysroot(
         }
         directories = g_strsplit(environment_paths[i], ":", -1);
         for (char **directory = directories; *directory; directory++) {
+            if (latx_steam_runtime_i386_dir(envlist, *directory)) {
+                continue;
+            }
             if (latx_steam_i386_library_dir(*directory)) {
                 return g_strdup(*directory);
             }
@@ -394,15 +429,18 @@ static char *latx_steam_find_i386_sysroot(
     return NULL;
 }
 
-static void latx_steam_append_i386_sysroot(envlist_t *envlist)
+static void latx_steam_place_i386_sysroot(envlist_t *envlist)
 {
-    const char *library_path = latx_steam_runtime_library_path();
+    const char *library_path = envlist_getenv(envlist, "LD_LIBRARY_PATH");
     g_auto(GStrv) directories = NULL;
+    GString *ordered = NULL;
     g_autofree char *sysroot = NULL;
     g_autofree char *assignment = NULL;
     bool runtime_seen = false;
+    bool inserted = false;
+    bool first = true;
 
-    if (!library_path) {
+    if (!library_path || !library_path[0]) {
         return;
     }
 
@@ -411,20 +449,51 @@ static void latx_steam_append_i386_sysroot(envlist_t *envlist)
         if (!(*directory)[0]) {
             continue;
         }
-        runtime_seen |= latx_steam_runtime_is_i386_library_path(
-            *directory);
+        runtime_seen |= latx_steam_runtime_i386_dir(envlist, *directory);
     }
     if (!runtime_seen) {
         return;
     }
 
     sysroot = latx_steam_find_i386_sysroot(envlist, library_path);
-    if (!sysroot || latx_steam_guest_path_present(library_path, sysroot)) {
+    if (!sysroot) {
         return;
     }
-    assignment = g_strdup_printf("LD_LIBRARY_PATH=%s:%s", library_path,
-                                 sysroot);
+
+    /*
+     * Keep the application and host library paths ahead of the guest sysroot,
+     * but place the sysroot before the Runtime's older i386 set.  The Runtime
+     * must remain a fallback; its libgcc_s/libstdc++ cannot satisfy libraries
+     * built against the guest sysroot ABI.  Move an existing copy as well so a
+     * later Runtime discovery step cannot leave it behind the i386 set.
+     */
+    ordered = g_string_new(NULL);
+    for (char **directory = directories; *directory; directory++) {
+        if (!(*directory)[0] ||
+            latx_steam_guest_path_equal(*directory, sysroot)) {
+            continue;
+        }
+        if (!inserted && latx_steam_runtime_i386_dir(envlist, *directory)) {
+            if (!first) {
+                g_string_append_c(ordered, ':');
+            }
+            g_string_append(ordered, sysroot);
+            inserted = true;
+            first = false;
+        }
+        if (!first) {
+            g_string_append_c(ordered, ':');
+        }
+        g_string_append(ordered, *directory);
+        first = false;
+    }
+    if (!inserted) {
+        g_string_free(ordered, true);
+        return;
+    }
+    assignment = g_strdup_printf("LD_LIBRARY_PATH=%s", ordered->str);
     (void)envlist_setenv(envlist, assignment);
+    g_string_free(ordered, true);
 }
 #endif
 
@@ -443,6 +512,17 @@ void latx_steam_prepare(const char *program, char **target_argv,
                               "pressure-vessel-wrap");
     latx_steam_context_configure(envlist,
                                  wrapper_name || expected_files != NULL);
+
+#if defined(TARGET_I386) && !defined(TARGET_X86_64)
+    /*
+     * Legacy Steam Runtime launches do not carry the pressure-vessel lineage
+     * marker below, but their older i386 library set must not shadow the
+     * guest sysroot ABI either.
+     */
+    if (latx_steam_context_active()) {
+        latx_steam_place_i386_sysroot(envlist);
+    }
+#endif
 
     /* Avoid Runtime discovery for launches outside the pressure-vessel chain. */
     if (!wrapper_name && !expected_files) {
@@ -471,7 +551,7 @@ void latx_steam_prepare(const char *program, char **target_argv,
     }
 
 #if defined(TARGET_I386) && !defined(TARGET_X86_64)
-    latx_steam_append_i386_sysroot(envlist);
+    latx_steam_place_i386_sysroot(envlist);
     (void)latx_steam_runtime_configure(envlist, expected_files);
 #endif
 }
