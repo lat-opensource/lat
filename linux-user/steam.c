@@ -303,37 +303,29 @@ static bool latx_steam_i386_library_dir(const char *guest_dir)
     return found;
 }
 
-static bool latx_steam_guest_path_present(const char *library_path,
-                                                    const char *guest_path)
+static bool latx_steam_guest_path_equal(const char *directory,
+                                        const char *guest_path)
 {
-    g_auto(GStrv) directories = NULL;
+    g_autofree char *directory_host = NULL;
+    g_autofree char *guest_host = NULL;
+    g_autofree char *directory_real = NULL;
+    g_autofree char *guest_real = NULL;
 
-    if (!library_path || !guest_path) {
+    if (!directory || !guest_path) {
         return false;
     }
-    directories = g_strsplit(library_path, ":", -1);
-    for (char **directory = directories; *directory; directory++) {
-        g_autofree char *directory_host = NULL;
-        g_autofree char *guest_host = NULL;
-        g_autofree char *directory_real = NULL;
-        g_autofree char *guest_real = NULL;
-
-        if (!strcmp(*directory, guest_path)) {
-            return true;
-        }
-        if ((*directory)[0] != '/' || guest_path[0] != '/') {
-            continue;
-        }
-        directory_host = path_get_prefixed(*directory);
-        guest_host = path_get_prefixed(guest_path);
-        directory_real = realpath(directory_host, NULL);
-        guest_real = realpath(guest_host, NULL);
-        if (directory_real && guest_real && !strcmp(directory_real,
-                                                     guest_real)) {
-            return true;
-        }
+    if (!strcmp(directory, guest_path)) {
+        return true;
     }
-    return false;
+    if (directory[0] != '/' || guest_path[0] != '/') {
+        return false;
+    }
+    directory_host = path_get_prefixed(directory);
+    guest_host = path_get_prefixed(guest_path);
+    directory_real = realpath(directory_host, NULL);
+    guest_real = realpath(guest_host, NULL);
+    return directory_real && guest_real &&
+           !strcmp(directory_real, guest_real);
 }
 
 static bool latx_steam_path_is_within(const char *parent,
@@ -464,7 +456,7 @@ static void latx_steam_place_i386_sysroot(envlist_t *envlist)
     }
 
     sysroot = latx_steam_find_i386_sysroot(envlist, library_path);
-    if (!sysroot || latx_steam_guest_path_present(library_path, sysroot)) {
+    if (!sysroot) {
         return;
     }
 
@@ -472,10 +464,15 @@ static void latx_steam_place_i386_sysroot(envlist_t *envlist)
      * Keep the application and host library paths ahead of the guest sysroot,
      * but place the sysroot before the Runtime's older i386 set.  The Runtime
      * must remain a fallback; its libgcc_s/libstdc++ cannot satisfy libraries
-     * built against the guest sysroot ABI.
+     * built against the guest sysroot ABI.  Move an existing copy as well so a
+     * later Runtime discovery step cannot leave it behind the i386 set.
      */
     ordered = g_string_new(NULL);
     for (char **directory = directories; *directory; directory++) {
+        if (!(*directory)[0] ||
+            latx_steam_guest_path_equal(*directory, sysroot)) {
+            continue;
+        }
         if (!inserted && latx_steam_runtime_i386_dir(envlist, *directory)) {
             if (!first) {
                 g_string_append_c(ordered, ':');
