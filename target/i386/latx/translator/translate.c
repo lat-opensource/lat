@@ -20,6 +20,7 @@
 #include "latx-smc.h"
 #include "jrra.h"
 #include "latx-native-asm.h"
+#include "latx-unwind.h"
 
 extern void *helper_tb_lookup_ptr(CPUArchState *);
 static int ss_generate_match_fail_native_code(void* code_buf);
@@ -2497,6 +2498,11 @@ int tr_ir2_generate(struct TranslationBlock *tb)
     bool reduce_proepo = false;
     bool x87_fcsr_active = false;
     int softfpu_region_end = -1;
+#ifdef CONFIG_LATX_INSTS_PATTERN
+    unsigned flags_recovery = INSTPTN_FLAGS_NONE;
+#endif
+
+    QEMU_BUILD_BUG_ON(CC_OP_NB > LATX_UNWIND_CC_OP_MASK + 1);
 
     lsenv->tr_data->softfpu_region_active = false;
 
@@ -2586,11 +2592,14 @@ int tr_ir2_generate(struct TranslationBlock *tb)
          * at the end of TB translate cache.
          */
         tcg_ctx->gen_insn_data[i][0] = pir1->info->address;
-        /* Preserve logical upper zeros if this instruction faults before
-         * the deferred clears at the normal TB exit have executed.  The
-         * low 16 bits remain the condition-code operation. */
+        /* Persist recovery state with the code, including loaded AOT TBs. */
         tcg_ctx->gen_insn_data[i][1] =
-            (target_ulong)lsenv->tr_data->ymmh_zero_pending << 16;
+            (target_ulong)lsenv->tr_data->ymmh_zero_pending <<
+            LATX_UNWIND_YMMH_SHIFT;
+#ifdef CONFIG_LATX_INSTS_PATTERN
+        tcg_ctx->gen_insn_data[i][1] |=
+            flags_recovery << LATX_UNWIND_INSTPTN_SHIFT;
+#endif
 
 #ifdef CONFIG_LATX_IMM_REG
         imm_cache->curr_ir1_index = i;
@@ -2630,6 +2639,16 @@ int tr_ir2_generate(struct TranslationBlock *tb)
         }
 
         bool translation_success = ir1_translate(pir1);
+#ifdef CONFIG_LATX_INSTS_PATTERN
+        if (translation_success) {
+            unsigned recovery = instptn_flags_recovery(pir1);
+
+            /* A fault in the comparison itself still needs the old flags. */
+            if (recovery != INSTPTN_FLAGS_NONE) {
+                flags_recovery = recovery;
+            }
+        }
+#endif
         if (!translation_success) {
 #ifdef CONFIG_LATX_TU
             tb->s_data->tu_tb_mode = BAD_TB;
