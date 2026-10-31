@@ -12218,7 +12218,8 @@ static int open_other_cmdline(void *cpu_env, int fd, const char *oldpath)
     while(!feof(f)) {
         size_t ret = fread(buf, 1, sizeof(buf), f);
         if (ret == 0 && !strlen(buf)&&feof(f)) {// /proc/%d/cmdline is nil
-            return 0;
+            fclose(f);
+            goto out;
         }
         if (ret > 0) {
             int len = strlen(buf);
