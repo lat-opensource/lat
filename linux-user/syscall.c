@@ -10722,7 +10722,8 @@ static abi_long guest_exe_identity_relocate(CPUArchState *env, int fd)
 
     mmap_lock();
     if (ts->info->prctl_mm_exe_fd == fd) {
-        new_fd = fcntl(fd, F_DUPFD_CLOEXEC, 0);
+        /* Keep translator-owned descriptors out of guest standard I/O. */
+        new_fd = fcntl(fd, F_DUPFD_CLOEXEC, STDERR_FILENO + 1);
         if (new_fd < 0) {
             ret = get_errno(-1);
         } else {
@@ -12024,7 +12025,8 @@ static bool guest_exe_identity_acquire(CPUArchState *env, int *owned_fd)
     mmap_lock();
     present = ts->info->prctl_mm_exe_fd >= 0;
     if (present) {
-        *owned_fd = fcntl(ts->info->prctl_mm_exe_fd, F_DUPFD_CLOEXEC, 0);
+        *owned_fd = fcntl(ts->info->prctl_mm_exe_fd, F_DUPFD_CLOEXEC,
+                          STDERR_FILENO + 1);
     }
     mmap_unlock();
     return present;
@@ -14934,7 +14936,7 @@ static abi_long guest_prctl_prepare_exe_file(unsigned int fd,
         return get_errno(-1);
     }
 
-    saved_fd = fcntl(fd, F_DUPFD_CLOEXEC, 0);
+    saved_fd = fcntl(fd, F_DUPFD_CLOEXEC, STDERR_FILENO + 1);
     if (saved_fd < 0) {
         return get_errno(-1);
     }

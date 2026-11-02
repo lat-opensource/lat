@@ -34,6 +34,15 @@ foreach arch : ['x86_64', 'i386']
       ],
       'timeout': 120,
     }, {
+      'name': 'test-prctl-exe-fd-' + arch,
+      'runner': find_program('../../test-prctl-exe-fd.sh'),
+      'args': [
+        emulators['latx-' + arch],
+        files('../../prctl-exe-fd.c'),
+        arch,
+      ],
+      'timeout': 30,
+    }, {
       'name': 'test-fd-conversion-scope-' + arch,
       'runner': find_program('../../test-fd-conversion-scope.sh'),
       'args': [
