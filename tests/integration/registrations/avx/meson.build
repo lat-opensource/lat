@@ -90,6 +90,8 @@ if 'x86_64-linux-user' in target_dirs
       files('../../vpermilpd-ymm-immediate.asm'),
       files('../../vpermilpd-immediate.asm'),
       files('../../vpermilpd-variable.asm'),
+      files('../../vmovd-xmm-zero.asm'),
+      files('../../vmovss-memory-zero.asm'),
       files('../../avx128-shuffle.S'),
       files('../../avx-ymm-writeback.S'),
       files('../../vpshufd-distinct-regs.S'),
