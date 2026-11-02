@@ -92,6 +92,13 @@ test(
 )
 
 test(
+  'test-i386-shared-mmap-failure',
+  python,
+  args: [files('test-i386-shared-mmap-failure.py'), project_source_root],
+  suite: 'lat-pr-fast',
+)
+
+test(
   'test-latx-smc-fallback',
   python,
   args: [files('test-latx-smc-fallback.py'), project_source_root],

@@ -107,6 +107,9 @@ int option_minke_16k_page_check;
 int option_real_maps;
 int option_monitor_shared_mem;
 int option_private_mmap_shadow;
+#ifndef TARGET_X86_64
+int option_i386_shared_mmap_shadow;
+#endif
 int option_shadow_file;
 int option_smc_opt;
 /* Disabled by default; LATX_FORK_UNLINK enables the internal signal. */
@@ -280,6 +283,9 @@ void options_init(void)
     option_real_maps = 0;
     option_monitor_shared_mem = 0;
     option_private_mmap_shadow = 0;
+#ifndef TARGET_X86_64
+    option_i386_shared_mmap_shadow = 0;
+#endif
 #ifdef LOW_MEM_MODE_0
     option_shadow_file = 1;
 #endif

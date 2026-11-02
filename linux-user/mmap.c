@@ -341,6 +341,201 @@ out:
     return result;
 }
 
+#ifndef TARGET_X86_64
+/* Prepare every backing mapping before replacing any existing shadow. */
+static int
+mmap_i386_shared_shadow(abi_ulong start, abi_ulong end,
+                        int inside_prot, int inside_flags,
+                        int fd, uint64_t offset)
+{
+    typedef struct PendingShadow {
+        void *mapping;
+        int prot;
+        bool copy;
+        bool host_changed;
+        bool host_created;
+        int host_prot;
+        int64_t access_off;
+    } PendingShadow;
+    abi_ulong real_start = start & qemu_host_page_mask;
+    abi_ulong real_end = HOST_PAGE_ALIGN(end);
+    size_t count = (real_end - real_start) / TARGET_PAGE_SIZE;
+    g_autofree PendingShadow *pending = g_try_new0(PendingShadow, count);
+    abi_ulong addr;
+    size_t i;
+    int saved_errno;
+
+    assert(have_mmap_lock());
+    if (!pending) {
+        errno = ENOMEM;
+        return -1;
+    }
+    for (i = 0, addr = real_start; i < count;
+         i++, addr += TARGET_PAGE_SIZE) {
+        PendingShadow *p = &pending[i];
+        int old_flags = page_get_flags(addr);
+        bool inside = addr >= start && addr < end;
+        ShadowPageDesc *old = page_get_target_data(addr);
+
+        if (!inside && (!(old_flags & PAGE_VALID) ||
+                        (old && !old->is_shmm))) {
+            continue;
+        }
+        p->prot = inside ? inside_prot : old_flags & PAGE_BITS;
+        if (!inside && (old_flags & PAGE_WRITE_ORG)) {
+            /* SMC may temporarily clear PAGE_WRITE on a writable guest page.
+             * Its backing must allow the store after TB invalidation. */
+            p->prot |= PROT_WRITE;
+        }
+        if (inside) {
+            p->mapping = mmap(NULL, qemu_host_page_size, p->prot,
+                              inside_flags & ~MAP_FIXED, fd,
+                              offset & qemu_host_page_mask);
+            p->access_off = (intptr_t)p->mapping - addr +
+                            (offset & ~qemu_host_page_mask);
+            offset += TARGET_PAGE_SIZE;
+        } else if (!inside && old && old->is_shmm) {
+            p->mapping = mremap(old->p_addr, 0, qemu_host_page_size,
+                               MREMAP_MAYMOVE);
+            p->access_off = (intptr_t)p->mapping - (intptr_t)old->p_addr +
+                            old->access_off;
+        } else if (!inside && (old_flags & PAGE_MEMSHARE)) {
+            /* Duplicate the real shared backing, not a private snapshot. */
+            p->mapping = mremap(g2h_untagged(addr & qemu_host_page_mask),
+                               0, qemu_host_page_size, MREMAP_MAYMOVE);
+            p->access_off = (intptr_t)p->mapping - addr +
+                            (addr & ~qemu_host_page_mask);
+        } else {
+            p->mapping = mmap(NULL, qemu_host_page_size,
+                              PROT_READ | PROT_WRITE,
+                              MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+            p->access_off = (intptr_t)p->mapping - addr;
+            p->copy = true;
+        }
+        if (p->mapping == MAP_FAILED) {
+            p->mapping = NULL;
+            goto fail;
+        }
+    }
+
+    /* Freeze writes only where direct private neighbor contents need copying.
+     * Existing shadow ranges must remain inaccessible throughout preparation. */
+    for (addr = real_start; addr < real_end; addr += qemu_host_page_size) {
+        int old_flags = 0;
+        bool copy = false;
+        bool shared_smc = false;
+        bool private_shadow = false;
+        abi_ulong page;
+        PendingShadow *host = &pending[(addr - real_start) / TARGET_PAGE_SIZE];
+
+        for (page = addr; page < addr + qemu_host_page_size;
+             page += TARGET_PAGE_SIZE) {
+            ShadowPageDesc *old = page_get_target_data(page);
+
+            old_flags |= page_get_flags(page);
+            copy |= pending[(page - real_start) / TARGET_PAGE_SIZE].copy;
+            if (old) {
+                shared_smc |= old->is_shmm != 0;
+                private_shadow |= old->is_shmm == 0;
+            }
+        }
+        if (old_flags & PAGE_VALID) {
+            host->host_prot = private_shadow ? PROT_NONE :
+                old_flags & (shared_smc ? PROT_READ : PAGE_BITS);
+            if (copy) {
+                if (mprotect(g2h_untagged(addr), qemu_host_page_size,
+                             PROT_READ) < 0) {
+                    goto restore;
+                }
+                host->host_changed = true;
+            }
+        } else {
+            if (mmap(g2h_untagged(addr), qemu_host_page_size, PROT_NONE,
+                     MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS,
+                     -1, 0) == MAP_FAILED) {
+                goto restore;
+            }
+            host->host_created = true;
+        }
+    }
+    for (i = 0, addr = real_start; i < count;
+         i++, addr += TARGET_PAGE_SIZE) {
+        PendingShadow *p = &pending[i];
+
+        if (p->mapping && p->copy) {
+            memcpy(p->mapping, g2h_untagged(addr), TARGET_PAGE_SIZE);
+        }
+        if (p->mapping &&
+            mprotect(p->mapping, qemu_host_page_size, p->prot) < 0) {
+            goto restore;
+        }
+    }
+    /* A range mprotect may fail after changing an earlier host VMA. */
+    for (addr = real_start; addr < real_end; addr += qemu_host_page_size) {
+        PendingShadow *host = &pending[(addr - real_start) / TARGET_PAGE_SIZE];
+
+        host->host_changed |= !host->host_created;
+    }
+    if (mprotect(g2h_untagged(real_start), real_end - real_start,
+                 PROT_NONE) < 0) {
+        goto restore;
+    }
+    for (i = 0, addr = real_start; i < count;
+         i++, addr += TARGET_PAGE_SIZE) {
+        if (pending[i].mapping) {
+            ShadowPageDesc *old = page_get_target_data(addr);
+
+            if (old && old->is_shmm && old->p_addr) {
+                void *backing = old->p_addr;
+                abi_ulong first = addr & qemu_host_page_mask;
+                abi_ulong page;
+
+                /* SMC descriptors can share one host mapping.  Release it
+                 * once, after all replacement aliases have been prepared. */
+                munmap(backing, qemu_host_page_size);
+                for (page = first; page < first + qemu_host_page_size;
+                     page += TARGET_PAGE_SIZE) {
+                    ShadowPageDesc *neighbor = page_get_target_data(page);
+                    if (neighbor && neighbor->p_addr == backing) {
+                        neighbor->p_addr = NULL;
+                    }
+                }
+            }
+            old = set_shadow_page(addr, pending[i].mapping,
+                                  pending[i].access_off);
+            old->is_shmm = 0;
+        }
+    }
+    /* Publish new mapping flags without retaining the old backing identity.
+     * The caller installs permissions and MAP_SHARED after this succeeds. */
+    pageflags_set_clear(start, end - 1, 0,
+                        PAGE_ANON | PAGE_OVERFLOW | PAGE_MEMSHARE);
+    return 0;
+
+restore:
+    saved_errno = errno;
+    for (addr = real_start; addr < real_end; addr += qemu_host_page_size) {
+        PendingShadow *host = &pending[(addr - real_start) / TARGET_PAGE_SIZE];
+
+        if (host->host_changed) {
+            mprotect(g2h_untagged(addr), qemu_host_page_size, host->host_prot);
+        } else if (host->host_created && !reserved_va) {
+            munmap(g2h_untagged(addr), qemu_host_page_size);
+        }
+    }
+    errno = saved_errno;
+fail:
+    saved_errno = errno;
+    for (i = 0; i < count; i++) {
+        if (pending[i].mapping) {
+            munmap(pending[i].mapping, qemu_host_page_size);
+        }
+    }
+    errno = saved_errno;
+    return -1;
+}
+#endif
+
 /* map an incomplete host page */
 static int mmap_frag(abi_ulong real_start,
                      abi_ulong start, abi_ulong end,
@@ -973,14 +1168,23 @@ abi_long target_mmap(abi_ulong start, abi_ulong len, int target_prot,
 
         /* worst case: we cannot map the file because the offset is not
            aligned, so we read it */
-#ifdef TARGET_X86_64
-        if (!(flags & MAP_ANONYMOUS) && ((flags & MAP_TYPE) == MAP_SHARED) &&
+        if (
+#ifndef TARGET_X86_64
+            option_i386_shared_mmap_shadow &&
+#endif
+            !(flags & MAP_ANONYMOUS) && ((flags & MAP_TYPE) == MAP_SHARED) &&
             (offset & ~qemu_host_page_mask) != (start & ~qemu_host_page_mask)) {
+#ifdef TARGET_X86_64
             create_shadow_page_chunk(start, end, target_prot, flags, fd, offset);
+#else
+            if (mmap_i386_shared_shadow(start, end, host_prot, flags,
+                                       fd, offset) < 0) {
+                goto fail;
+            }
+#endif
             page_set_flags(start, start + len, page_flags);
             goto the_end1;
         }
-#endif
         if (option_shadow_file && !(flags & MAP_ANONYMOUS) &&
             (offset & ~qemu_host_page_mask) != (start & ~qemu_host_page_mask)
             && (len >= 0x4000)) {
