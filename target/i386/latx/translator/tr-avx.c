@@ -4630,6 +4630,10 @@ bool translate_vpermilpd(IR1_INST * pir1) {
         IR2_OPND src1 = load_freg256_from_ir1(opnd1);
         if (ir1_opnd_is_imm(opnd2)) {
             uint8_t imm = ir1_opnd_uimm(opnd2);
+            if ((imm & 0xf) == 0 || (imm & 0xf) == 0xf) {
+                la_xvrepl128vei_d(dest, src1, imm & 1);
+                return true;
+            }
             imm = 0b10100000 + ((imm & 0b00001000) << 3) + ((imm & 0b00000100) << 2) + ((imm & 0b00000010) << 1) + (imm & 0b00000001);
             la_xvpermi_d(dest, src1, imm);
 
