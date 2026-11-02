@@ -138,6 +138,9 @@ extern int option_minke_16k_page_check;
 extern int option_real_maps;
 extern int option_monitor_shared_mem;
 extern int option_private_mmap_shadow;
+#ifndef TARGET_X86_64
+extern int option_i386_shared_mmap_shadow;
+#endif
 extern int option_shadow_file;
 extern int option_smc_opt;
 #define FORK_UNLINK_MAGIC 0x88888889
@@ -158,8 +161,16 @@ extern unsigned long long counter_tb_tr;
 extern unsigned long long counter_ir1_tr;
 extern unsigned long long counter_mips_tr;
 
+#if defined(CONFIG_LATX) && !defined(TARGET_X86_64)
+#define ENVSUP_I386_SHARED_MMAP \
+    ENVFUN(LATX_I386_SHARED_MMAP_SHADOW, handle_arg_i386_shared_mmap_shadow)
+#else
+#define ENVSUP_I386_SHARED_MMAP
+#endif
+
 #ifdef CONFIG_LATX
 #define ENVSUP_LATX \
+    ENVSUP_I386_SHARED_MMAP \
     ENVFUN(LATX_OPTIMIZE, handle_arg_optimize) \
     ENVFUN(LATX_VPAES, handle_arg_latx_vpaes) \
     ENVFUN(LATX_SMC, handle_arg_latx_smc) \

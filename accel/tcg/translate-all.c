@@ -5043,7 +5043,9 @@ void *set_shadow_page(target_ulong orig_page, void *shadow_p, int64_t access_off
     } else {
         /* this page has been managed, shadow page needs to be released first */
         mmap_lock();
-        munmap(shadow_pd->p_addr, qemu_host_page_size);
+        if (shadow_pd->p_addr) {
+            munmap(shadow_pd->p_addr, qemu_host_page_size);
+        }
         shadow_pd->p_addr = shadow_p;
         shadow_pd->access_off = access_off;
         qemu_log_mask(LAT_LOG_MEM, "[LATX_16K] %s orig_p 0x"
