@@ -630,8 +630,6 @@ void latx_masked_mem_op_128(IR2_OPND address, IR2_OPND mask, IR2_OPND value,
     IR2_OPND mask_tmp = ra_alloc_ftemp();
     IR2_OPND mask_bits = ra_alloc_itemp();
     IR2_OPND selected = ra_alloc_itemp();
-    IR2_OPND all_bits = ra_alloc_itemp();
-    IR2_OPND element = ra_alloc_itemp();
     IR2_OPND label_none = ra_alloc_label();
     IR2_OPND label_full = ra_alloc_label();
     IR2_OPND label_done = ra_alloc_label();
@@ -655,8 +653,8 @@ void latx_masked_mem_op_128(IR2_OPND address, IR2_OPND mask, IR2_OPND value,
 
     la_bstrpick_d(selected, mask_bits, lanes - 1, 0);
     la_beqz(selected, label_none);
-    li_d(all_bits, all);
-    la_beq(selected, all_bits, label_full);
+    la_xori(selected, selected, all);
+    la_beqz(selected, label_full);
 
     for (i = 0; i < lanes; i++) {
         int off = base_off + i * (elem_bits / 8);
@@ -664,21 +662,24 @@ void latx_masked_mem_op_128(IR2_OPND address, IR2_OPND mask, IR2_OPND value,
         label_skip[i] = ra_alloc_label();
         la_bstrpick_d(selected, mask_bits, i, i);
         la_beqz(selected, label_skip[i]);
+        gen_test_page_flag(address, off,
+                           store ? PAGE_WRITE | PAGE_WRITE_ORG : PAGE_READ,
+                           elem_bits / 8);
         if (store) {
             if (elem_bits == 32) {
-                la_vpickve2gr_w(element, value, i);
-                la_st_w(element, address, off);
+                la_vpickve2gr_w(selected, value, i);
+                la_st_w(selected, address, off);
             } else {
-                la_vpickve2gr_d(element, value, i);
-                la_st_d(element, address, off);
+                la_vpickve2gr_d(selected, value, i);
+                la_st_d(selected, address, off);
             }
         } else {
             if (elem_bits == 32) {
-                la_ld_wu(element, address, off);
-                la_vinsgr2vr_w(value, element, i);
+                la_ld_wu(selected, address, off);
+                la_vinsgr2vr_w(value, selected, i);
             } else {
-                la_ld_d(element, address, off);
-                la_vinsgr2vr_d(value, element, i);
+                la_ld_d(selected, address, off);
+                la_vinsgr2vr_d(value, selected, i);
             }
         }
         la_label(label_skip[i]);
@@ -686,6 +687,9 @@ void latx_masked_mem_op_128(IR2_OPND address, IR2_OPND mask, IR2_OPND value,
     la_b(label_done);
 
     la_label(label_full);
+    gen_test_page_flag(address, base_off,
+                       store ? PAGE_WRITE | PAGE_WRITE_ORG : PAGE_READ,
+                       lanes * (elem_bits / 8));
     if (store) {
         la_vst(value, address, base_off);
     } else {
@@ -696,8 +700,6 @@ void latx_masked_mem_op_128(IR2_OPND address, IR2_OPND mask, IR2_OPND value,
     la_label(label_none);
     la_label(label_done);
 
-    ra_free_temp(element);
-    ra_free_temp(all_bits);
     ra_free_temp(selected);
     ra_free_temp(mask_bits);
     ra_free_temp(mask_tmp);
@@ -712,8 +714,6 @@ void latx_masked_mem_op_256(IR2_OPND address, IR2_OPND mask, IR2_OPND value,
     IR2_OPND mask_tmp = ra_alloc_ftemp();
     IR2_OPND mask_bits = ra_alloc_itemp();
     IR2_OPND selected = ra_alloc_itemp();
-    IR2_OPND all_bits = ra_alloc_itemp();
-    IR2_OPND element = ra_alloc_itemp();
     IR2_OPND label_none = ra_alloc_label();
     IR2_OPND label_full = ra_alloc_label();
     IR2_OPND label_done = ra_alloc_label();
@@ -746,8 +746,8 @@ void latx_masked_mem_op_256(IR2_OPND address, IR2_OPND mask, IR2_OPND value,
 
     la_bstrpick_d(selected, mask_bits, lanes - 1, 0);
     la_beqz(selected, label_none);
-    li_d(all_bits, all);
-    la_beq(selected, all_bits, label_full);
+    la_xori(selected, selected, all);
+    la_beqz(selected, label_full);
 
     for (i = 0; i < lanes; i++) {
         int off = base_off + i * (elem_bits / 8);
@@ -755,21 +755,24 @@ void latx_masked_mem_op_256(IR2_OPND address, IR2_OPND mask, IR2_OPND value,
         label_skip[i] = ra_alloc_label();
         la_bstrpick_d(selected, mask_bits, i, i);
         la_beqz(selected, label_skip[i]);
+        gen_test_page_flag(address, off,
+                           store ? PAGE_WRITE | PAGE_WRITE_ORG : PAGE_READ,
+                           elem_bits / 8);
         if (store) {
             if (elem_bits == 32) {
-                la_xvpickve2gr_w(element, value, i);
-                la_st_w(element, address, off);
+                la_xvpickve2gr_w(selected, value, i);
+                la_st_w(selected, address, off);
             } else {
-                la_xvpickve2gr_d(element, value, i);
-                la_st_d(element, address, off);
+                la_xvpickve2gr_d(selected, value, i);
+                la_st_d(selected, address, off);
             }
         } else {
             if (elem_bits == 32) {
-                la_ld_wu(element, address, off);
-                la_xvinsgr2vr_w(value, element, i);
+                la_ld_wu(selected, address, off);
+                la_xvinsgr2vr_w(value, selected, i);
             } else {
-                la_ld_d(element, address, off);
-                la_xvinsgr2vr_d(value, element, i);
+                la_ld_d(selected, address, off);
+                la_xvinsgr2vr_d(value, selected, i);
             }
         }
         la_label(label_skip[i]);
@@ -777,6 +780,9 @@ void latx_masked_mem_op_256(IR2_OPND address, IR2_OPND mask, IR2_OPND value,
     la_b(label_done);
 
     la_label(label_full);
+    gen_test_page_flag(address, base_off,
+                       store ? PAGE_WRITE | PAGE_WRITE_ORG : PAGE_READ,
+                       bits / 8);
     if (bits == 256) {
         if (store) {
             la_xvst(value, address, base_off);
@@ -795,8 +801,6 @@ void latx_masked_mem_op_256(IR2_OPND address, IR2_OPND mask, IR2_OPND value,
     la_label(label_none);
     la_label(label_done);
 
-    ra_free_temp(element);
-    ra_free_temp(all_bits);
     ra_free_temp(selected);
     ra_free_temp(mask_bits);
     ra_free_temp(mask_tmp);
