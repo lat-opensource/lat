@@ -2,10 +2,10 @@
  * SPDX-FileCopyrightText: 2026 LAT Project Authors
  * SPDX-License-Identifier: GPL-2.0-only
  *
- * VMASKMOVPS/PD and VPMASKMOVD/Q must only access elements whose mask MSB is
- * set.  Put the second half of a 256-bit access in an unmapped region while
- * selecting only elements in the mapped half: the operation must complete
- * without touching the unmapped half.
+ * VMASKMOVPS/PD, VPMASKMOVD/Q, MASKMOVDQU, MASKMOVQ and the AVX2 gathers must
+ * only access the elements whose mask MSB is set.  Put the second half of the
+ * access in an unmapped region while selecting only elements in the mapped
+ * half: the operation must complete without touching the unmapped half.
  */
 .intel_syntax noprefix
 .text
@@ -148,6 +148,27 @@ _start:
     cmp qword ptr [rip + out + 24], 0
     jne fail
 
+    /* ---------------- MASKMOVDQU (SSE2), partially masked --------------- */
+    mov qword ptr [r13 + 8], 0
+    vmovdqu xmm0, [rip + src]
+    vmovdqu xmm1, [rip + mask_bytes8]
+    lea rdi, [r13 + 8]
+    maskmovdqu xmm0, xmm1
+    mov rax, qword ptr [r13 + 8]
+    cmp rax, qword ptr [rip + src]
+    jne fail
+
+    /* ---------------- MASKMOVQ (MMX), partially masked ------------------ */
+    lea rdi, [r13 + 12]
+    mov dword ptr [rdi], 0
+    movq mm0, qword ptr [rip + src]
+    movq mm1, qword ptr [rip + mask_bytes4]
+    maskmovq mm0, mm1
+    emms
+    mov eax, dword ptr [r13 + 12]
+    cmp eax, dword ptr [rip + src]
+    jne fail
+
     xor edi, edi
     jmp exit
 
@@ -171,6 +192,12 @@ mask_d_none:
 /* Select the first two qwords (the mapped half), clear the upper half. */
 mask_q_part:
     .quad 0x8000000000000000, 0x8000000000000000, 0, 0
+/* MASKMOVDQU selects eight bytes (two dwords) in the mapped half. */
+mask_bytes8:
+    .quad 0x8080808080808080, 0
+/* MASKMOVQ selects four bytes (one dword) in the mapped half. */
+mask_bytes4:
+    .quad 0x0000000080808080
 
 .bss
 .p2align 5

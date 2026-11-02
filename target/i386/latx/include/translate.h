@@ -510,7 +510,6 @@ TRANS_FUNC_DEF(pmaddwd);
 TRANS_FUNC_DEF(psadbw);
 TRANS_FUNC_DEF(maskmovq);
 TRANS_FUNC_DEF(maskmovdqu);
-TRANS_FUNC_DEF(maskmovdqu_lsx);
 TRANS_FUNC_DEF(psubb);
 TRANS_FUNC_DEF(psubw);
 TRANS_FUNC_DEF(psubd);
