@@ -320,7 +320,7 @@ bool translate_vmovss(IR1_INST *pir1)
     } else if (ir1_opnd_is_xmm(opnd0) && ir1_opnd_is_mem(opnd1)) {
         IR2_OPND dest = load_freg128_from_ir1(ir1_get_opnd(pir1, 0));
         la_xvpickve_w(dest, src1, 0);
-        set_high128_xreg_to_zero(dest);
+        cancel_pending_ymmh_zero(dest);
     } else if (ir1_opnd_is_mem(opnd0) && ir1_opnd_is_xmm(opnd1)) {
         int little_disp;
         IR2_OPND mem_opnd = convert_mem(opnd0, &little_disp);

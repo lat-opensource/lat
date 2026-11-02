@@ -105,6 +105,7 @@ if 'x86_64-linux-user' in target_dirs
       files('../../avx-single-instruction-boundaries.asm'),
       files('../../avx-scalar-double-alias.asm'),
       files('../../vaddsubpd-lanes.asm'),
+      files('../../vmovss-memory-zero.asm'),
       files('../../avx128-shuffle.S'),
       files('../../avx-ymm-writeback.S'),
       files('../../vpshufd-distinct-regs.S'),
