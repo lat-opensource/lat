@@ -4608,8 +4608,12 @@ bool translate_vpermilpd(IR1_INST * pir1) {
         IR2_OPND src1 = load_freg128_from_ir1(opnd1);
         if (ir1_opnd_is_imm(opnd2)) {
             uint8_t imm = ir1_opnd_uimm(opnd2);
-            imm = 0b10100000 + ((imm & 0b00001000) << 3) + ((imm & 0b00000100) << 2) + ((imm & 0b00000010) << 1) + (imm & 0b00000001);
-            la_xvpermi_d(dest, src1, imm);
+            if ((imm & 3) == 0 || (imm & 3) == 3) {
+                la_vreplvei_d(dest, src1, imm & 1);
+            } else {
+                imm = 0b10100000 + ((imm & 0b00001000) << 3) + ((imm & 0b00000100) << 2) + ((imm & 0b00000010) << 1) + (imm & 0b00000001);
+                la_xvpermi_d(dest, src1, imm);
+            }
 
         } else {
             IR2_OPND src2 = load_freg128_from_ir1(opnd2);

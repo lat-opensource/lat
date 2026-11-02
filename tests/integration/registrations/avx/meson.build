@@ -107,6 +107,7 @@ if 'x86_64-linux-user' in target_dirs
       files('../../vaddsubpd-lanes.asm'),
       files('../../vperm2x128-immediate.asm'),
       files('../../vpermilpd-ymm-immediate.asm'),
+      files('../../vpermilpd-immediate.asm'),
       files('../../vmovd-xmm-zero.asm'),
       files('../../vmovss-memory-zero.asm'),
       files('../../avx128-shuffle.S'),
