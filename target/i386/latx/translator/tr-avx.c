@@ -2197,6 +2197,10 @@ bool translate_vperm2i128(IR1_INST * pir1) {
     IR2_OPND src2 = load_freg256_from_ir1(opnd2);
     IR2_OPND result = dest;
 
+    if (ir2_opnd_cmp(&src1, &src2) && (imm & 0xbb) == 0) {
+        la_xvreplve0_q(dest, src1);
+        return true;
+    }
     if (ir2_opnd_cmp(&dest, &src1) && !ir2_opnd_cmp(&src1, &src2))
         result = ra_alloc_ftemp();
     if (!ir2_opnd_cmp(&result, &src2))
