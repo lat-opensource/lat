@@ -645,6 +645,272 @@ static void load_step_to_reg_ir1(IR2_OPND *p_step_opnd, IR1_OPND *opnd_ir1)
     ra_free_temp(tmp_step);
 }
 
+#ifdef TARGET_X86_64
+static bool tr_can_fast_rep_string_b(IR1_INST *pir1, IR1_OPCODE insn)
+{
+    return CODEIS64 &&
+           ir1_prefix(pir1) == dt_X86_PREFIX_REP &&
+           pir1->info->id == insn &&
+           pir1->info->x86.prefix[3] != 0x67;
+}
+
+static void tr_emit_rep_string_df_guard(IR2_OPND label_slow)
+{
+    IR2_OPND df_opnd = ra_alloc_itemp();
+    IR2_OPND eflags_opnd = ra_alloc_eflags();
+
+    la_andi(df_opnd, eflags_opnd, 1 << DF_BIT_INDEX);
+    la_bne(df_opnd, zero_ir2_opnd, label_slow);
+
+    ra_free_temp(df_opnd);
+}
+
+static void tr_emit_finish_fast_rep_string(IR2_OPND ecx_opnd,
+                                           IR2_OPND label_exit)
+{
+    la_or(ecx_opnd, zero_ir2_opnd, zero_ir2_opnd);
+    store_ireg_to_ir1(ecx_opnd, &rcx_ir1_opnd, false);
+    la_b(label_exit);
+}
+
+static bool tr_emit_fast_rep_movsb(IR1_INST *pir1, IR2_OPND rsi_opnd,
+                                   IR2_OPND rdi_opnd, IR2_OPND rcx_opnd,
+                                   IR2_OPND label_exit)
+{
+    if (!tr_can_fast_rep_string_b(pir1, dt_X86_INS_MOVSB)) {
+        return false;
+    }
+
+    IR2_OPND label_slow = ra_alloc_label();
+    IR2_OPND label_backward = ra_alloc_label();
+    IR2_OPND label_backward_no_overlap = ra_alloc_label();
+    IR2_OPND label_backward_block_done = ra_alloc_label();
+    IR2_OPND label_backward_block_loop = ra_alloc_label();
+    IR2_OPND label_backward_qword_done = ra_alloc_label();
+    IR2_OPND label_backward_qword_loop = ra_alloc_label();
+    IR2_OPND label_backward_tail_done = ra_alloc_label();
+    IR2_OPND label_backward_tail_loop = ra_alloc_label();
+    IR2_OPND label_no_overlap = ra_alloc_label();
+    IR2_OPND label_block_done = ra_alloc_label();
+    IR2_OPND label_block_loop = ra_alloc_label();
+    IR2_OPND label_qword_done = ra_alloc_label();
+    IR2_OPND label_qword_loop = ra_alloc_label();
+    IR2_OPND label_tail_done = ra_alloc_label();
+    IR2_OPND label_tail_loop = ra_alloc_label();
+    IR2_OPND qwords = ra_alloc_itemp();
+    IR2_OPND tail = ra_alloc_itemp();
+    IR2_OPND value = ra_alloc_itemp();
+    IR2_OPND overlap = ra_alloc_itemp();
+    IR2_OPND vec0 = ra_alloc_ftemp();
+    IR2_OPND vec1 = ra_alloc_ftemp();
+    IR2_OPND vec2 = ra_alloc_ftemp();
+    IR2_OPND vec3 = ra_alloc_ftemp();
+
+    IR2_OPND df_opnd = ra_alloc_itemp();
+    IR2_OPND eflags_opnd = ra_alloc_eflags();
+    la_andi(df_opnd, eflags_opnd, 1 << DF_BIT_INDEX);
+    la_bne(df_opnd, zero_ir2_opnd, label_backward);
+    ra_free_temp(df_opnd);
+
+    la_bgeu(rsi_opnd, rdi_opnd, label_no_overlap);
+    la_sub_d(overlap, rdi_opnd, rsi_opnd);
+    la_bltu(overlap, rcx_opnd, label_slow);
+
+    la_label(label_no_overlap);
+    la_srli_d(qwords, rcx_opnd, 6);
+    la_andi(tail, rcx_opnd, 63);
+
+    la_beq(qwords, zero_ir2_opnd, label_block_done);
+    la_label(label_block_loop);
+    la_vld(vec0, rsi_opnd, 0);
+    la_vld(vec1, rsi_opnd, 16);
+    la_vld(vec2, rsi_opnd, 32);
+    la_vld(vec3, rsi_opnd, 48);
+    la_vst(vec0, rdi_opnd, 0);
+    la_vst(vec1, rdi_opnd, 16);
+    la_vst(vec2, rdi_opnd, 32);
+    la_vst(vec3, rdi_opnd, 48);
+    la_addi_d(rsi_opnd, rsi_opnd, 64);
+    la_addi_d(rdi_opnd, rdi_opnd, 64);
+    la_addi_d(qwords, qwords, -1);
+    la_bne(qwords, zero_ir2_opnd, label_block_loop);
+
+    la_label(label_block_done);
+    la_srli_d(qwords, tail, 3);
+    la_andi(tail, tail, 7);
+
+    la_beq(qwords, zero_ir2_opnd, label_qword_done);
+    la_label(label_qword_loop);
+    la_ld_d(value, rsi_opnd, 0);
+    la_st_d(value, rdi_opnd, 0);
+    la_addi_d(rsi_opnd, rsi_opnd, 8);
+    la_addi_d(rdi_opnd, rdi_opnd, 8);
+    la_addi_d(qwords, qwords, -1);
+    la_bne(qwords, zero_ir2_opnd, label_qword_loop);
+
+    la_label(label_qword_done);
+    la_beq(tail, zero_ir2_opnd, label_tail_done);
+    la_label(label_tail_loop);
+    la_ld_bu(value, rsi_opnd, 0);
+    la_st_b(value, rdi_opnd, 0);
+    la_addi_d(rsi_opnd, rsi_opnd, 1);
+    la_addi_d(rdi_opnd, rdi_opnd, 1);
+    la_addi_d(tail, tail, -1);
+    la_bne(tail, zero_ir2_opnd, label_tail_loop);
+
+    la_label(label_tail_done);
+    tr_emit_finish_fast_rep_string(rcx_opnd, label_exit);
+
+    la_label(label_backward);
+    la_bgeu(rdi_opnd, rsi_opnd, label_backward_no_overlap);
+    la_sub_d(overlap, rsi_opnd, rdi_opnd);
+    la_bltu(overlap, rcx_opnd, label_slow);
+
+    la_label(label_backward_no_overlap);
+    la_srli_d(qwords, rcx_opnd, 6);
+    la_andi(tail, rcx_opnd, 63);
+
+    la_beq(qwords, zero_ir2_opnd, label_backward_block_done);
+    la_label(label_backward_block_loop);
+    la_vld(vec0, rsi_opnd, -63);
+    la_vld(vec1, rsi_opnd, -47);
+    la_vld(vec2, rsi_opnd, -31);
+    la_vld(vec3, rsi_opnd, -15);
+    la_vst(vec0, rdi_opnd, -63);
+    la_vst(vec1, rdi_opnd, -47);
+    la_vst(vec2, rdi_opnd, -31);
+    la_vst(vec3, rdi_opnd, -15);
+    la_addi_d(rsi_opnd, rsi_opnd, -64);
+    la_addi_d(rdi_opnd, rdi_opnd, -64);
+    la_addi_d(qwords, qwords, -1);
+    la_bne(qwords, zero_ir2_opnd, label_backward_block_loop);
+
+    la_label(label_backward_block_done);
+    la_srli_d(qwords, tail, 3);
+    la_andi(tail, tail, 7);
+
+    la_beq(qwords, zero_ir2_opnd, label_backward_qword_done);
+    la_label(label_backward_qword_loop);
+    la_ld_d(value, rsi_opnd, -7);
+    la_st_d(value, rdi_opnd, -7);
+    la_addi_d(rsi_opnd, rsi_opnd, -8);
+    la_addi_d(rdi_opnd, rdi_opnd, -8);
+    la_addi_d(qwords, qwords, -1);
+    la_bne(qwords, zero_ir2_opnd, label_backward_qword_loop);
+
+    la_label(label_backward_qword_done);
+    la_beq(tail, zero_ir2_opnd, label_backward_tail_done);
+    la_label(label_backward_tail_loop);
+    la_ld_bu(value, rsi_opnd, 0);
+    la_st_b(value, rdi_opnd, 0);
+    la_addi_d(rsi_opnd, rsi_opnd, -1);
+    la_addi_d(rdi_opnd, rdi_opnd, -1);
+    la_addi_d(tail, tail, -1);
+    la_bne(tail, zero_ir2_opnd, label_backward_tail_loop);
+
+    la_label(label_backward_tail_done);
+    tr_emit_finish_fast_rep_string(rcx_opnd, label_exit);
+
+    la_label(label_slow);
+
+    ra_free_temp(qwords);
+    ra_free_temp(tail);
+    ra_free_temp(value);
+    ra_free_temp(overlap);
+    ra_free_temp(vec0);
+    ra_free_temp(vec1);
+    ra_free_temp(vec2);
+    ra_free_temp(vec3);
+    return true;
+}
+
+static void tr_replicate_byte_to_dword(IR2_OPND dst, IR2_OPND src,
+                                       IR2_OPND tmp)
+{
+    la_andi(dst, src, 0xff);
+    la_slli_d(tmp, dst, 8);
+    la_or(dst, dst, tmp);
+    la_slli_d(tmp, dst, 16);
+    la_or(dst, dst, tmp);
+    la_slli_d(tmp, dst, 32);
+    la_or(dst, dst, tmp);
+}
+
+static bool tr_emit_fast_rep_stosb(IR1_INST *pir1, IR2_OPND rdi_opnd,
+                                   IR2_OPND rcx_opnd, IR2_OPND value_opnd,
+                                   IR2_OPND label_exit)
+{
+    if (!tr_can_fast_rep_string_b(pir1, dt_X86_INS_STOSB)) {
+        return false;
+    }
+
+    IR2_OPND label_slow = ra_alloc_label();
+    IR2_OPND label_block_done = ra_alloc_label();
+    IR2_OPND label_block_loop = ra_alloc_label();
+    IR2_OPND label_qword_done = ra_alloc_label();
+    IR2_OPND label_qword_loop = ra_alloc_label();
+    IR2_OPND label_tail_done = ra_alloc_label();
+    IR2_OPND label_tail_loop = ra_alloc_label();
+    IR2_OPND qwords = ra_alloc_itemp();
+    IR2_OPND tail = ra_alloc_itemp();
+    IR2_OPND fill = ra_alloc_itemp();
+    IR2_OPND tmp = ra_alloc_itemp();
+    IR2_OPND vfill = ra_alloc_ftemp();
+
+    tr_emit_rep_string_df_guard(label_slow);
+
+    tr_replicate_byte_to_dword(fill, value_opnd, tmp);
+    la_vreplgr2vr_b(vfill, value_opnd);
+    la_srli_d(qwords, rcx_opnd, 7);
+    la_andi(tail, rcx_opnd, 127);
+
+    la_beq(qwords, zero_ir2_opnd, label_block_done);
+    la_label(label_block_loop);
+    la_vst(vfill, rdi_opnd, 0);
+    la_vst(vfill, rdi_opnd, 16);
+    la_vst(vfill, rdi_opnd, 32);
+    la_vst(vfill, rdi_opnd, 48);
+    la_vst(vfill, rdi_opnd, 64);
+    la_vst(vfill, rdi_opnd, 80);
+    la_vst(vfill, rdi_opnd, 96);
+    la_vst(vfill, rdi_opnd, 112);
+    la_addi_d(rdi_opnd, rdi_opnd, 128);
+    la_addi_d(qwords, qwords, -1);
+    la_bne(qwords, zero_ir2_opnd, label_block_loop);
+
+    la_label(label_block_done);
+    la_srli_d(qwords, tail, 3);
+    la_andi(tail, tail, 7);
+
+    la_beq(qwords, zero_ir2_opnd, label_qword_done);
+    la_label(label_qword_loop);
+    la_st_d(fill, rdi_opnd, 0);
+    la_addi_d(rdi_opnd, rdi_opnd, 8);
+    la_addi_d(qwords, qwords, -1);
+    la_bne(qwords, zero_ir2_opnd, label_qword_loop);
+
+    la_label(label_qword_done);
+    la_beq(tail, zero_ir2_opnd, label_tail_done);
+    la_label(label_tail_loop);
+    la_st_b(fill, rdi_opnd, 0);
+    la_addi_d(rdi_opnd, rdi_opnd, 1);
+    la_addi_d(tail, tail, -1);
+    la_bne(tail, zero_ir2_opnd, label_tail_loop);
+
+    la_label(label_tail_done);
+    tr_emit_finish_fast_rep_string(rcx_opnd, label_exit);
+
+    la_label(label_slow);
+
+    ra_free_temp(qwords);
+    ra_free_temp(tail);
+    ra_free_temp(fill);
+    ra_free_temp(tmp);
+    ra_free_temp(vfill);
+    return true;
+}
+#endif
+
 bool translate_movs(IR1_INST *pir1)
 {
     IR2_OPND esi_opnd = ra_alloc_gpr(esi_index);
@@ -768,6 +1034,10 @@ bool translate_movs(IR1_INST *pir1)
     } else {
         lsassert(0);
     }
+
+#ifdef TARGET_X86_64
+    tr_emit_fast_rep_movsb(pir1, esi_opnd, edi_opnd, ecx_opnd, label_exit);
+#endif
 
     /* 2. preparations outside the loop */
     IR2_OPND step_opnd = ra_alloc_itemp();
@@ -970,6 +1240,10 @@ bool translate_stos(IR1_INST *pir1)
     }
     IR2_OPND eax_value_opnd =
         load_ireg_from_ir1(opnd_eax, SIGN_EXTENSION, false);
+#ifdef TARGET_X86_64
+    tr_emit_fast_rep_stosb(pir1, edi_opnd, ecx_opnd, eax_value_opnd,
+                           label_exit);
+#endif
     IR2_OPND step_opnd = ra_alloc_itemp();
     load_step_to_reg_ir1(&step_opnd, opnd_di);
 
