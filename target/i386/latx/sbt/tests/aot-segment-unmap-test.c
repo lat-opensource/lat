@@ -75,13 +75,13 @@ void shadow_page_munmap(abi_ulong start, abi_ulong end)
 }
 
 void create_shadow_page_chunk(abi_ulong start, abi_ulong end, int prot,
-                              int flags, int fd, abi_ulong offset)
+                              int flags, int fd, uint64_t offset)
 {
     g_assert_not_reached();
 }
 
 void update_shadow_page_chunk(abi_ulong start, abi_ulong end, int prot,
-                              int flags, int fd, abi_ulong offset)
+                              int flags, int fd, uint64_t offset)
 {
     g_assert_not_reached();
 }
