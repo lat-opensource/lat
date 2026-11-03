@@ -234,7 +234,6 @@ cpu_tb_exec(CPUState *cpu, TranslationBlock *itb, int *tb_exit)
         }
     }
 
-    env->tb_exec_count++;
     if (unlikely(latx_unlink_count) && qemu_loglevel_mask(CPU_LOG_TB_NOCHAIN) &&
         latx_unlink_cpu == cpu->cpu_index) {
         printf("Trace %d cpu%d [0x" TARGET_FMT_lx "] "
@@ -263,13 +262,31 @@ cpu_tb_exec(CPUState *cpu, TranslationBlock *itb, int *tb_exit)
 #endif /* DEBUG_DISAS */
 
     qemu_thread_jit_execute();
+#ifdef CONFIG_LATX
+    TranslationBlock *previous_entry = qatomic_read(&latx_entry_tb);
+
+    env->fpu_clobber = false;
+    qatomic_set(&latx_entry_tb, itb);
+    /*
+     * tb_find() and tracing can receive a signal after cpu_handle_interrupt().
+     */
+    if (unlikely(qatomic_read(&cpu->exit_request))) {
+        qatomic_set(&latx_entry_tb, previous_entry);
+        if (env->insn_save[0]) {
+            link_indirect_jmp(env);
+        }
+        cpu->can_do_io = 1;
+        *tb_exit = TB_EXIT_IDX0;
+        return NULL;
+    }
+#endif
 #ifdef CONFIG_LATX_DEBUG
+    env->tb_exec_count++;
     latx_before_exec_trace_tb(env, itb);
 #endif
 #ifdef CONFIG_LATX
-
-    env->fpu_clobber = false;
     ret = tcg_qemu_tb_exec(env, tb_ptr);
+    qatomic_set(&latx_entry_tb, previous_entry);
 
     int tbexit = ret & TB_EXIT_MASK;
     ret = (ret & ~TB_EXIT_MASK) - 4;
@@ -400,6 +417,14 @@ static void cpu_exec_exit(CPUState *cpu)
 void cpu_exec_step_atomic(CPUState *cpu)
 {
     CPUArchState *env = (CPUArchState *)cpu->env_ptr;
+#ifdef CONFIG_LATX
+    /*
+     * This local is not modified between sigsetjmp and siglongjmp, so ISO C
+     * preserves its value across the exceptional return.
+     */
+    TranslationBlock * volatile longjmp_entry =
+        qatomic_read(&latx_entry_tb);
+#endif
     TranslationBlock *tb;
     target_ulong cs_base, pc;
     uint32_t flags;
@@ -449,6 +474,10 @@ void cpu_exec_step_atomic(CPUState *cpu)
      */
     g_assert(cpu_in_exclusive_context(cpu));
     cpu->running = false;
+#ifdef CONFIG_LATX
+    /* An exception can bypass cpu_tb_exec()'s normal restoration. */
+    qatomic_set(&latx_entry_tb, longjmp_entry);
+#endif
     end_exclusive();
 }
 
@@ -1140,6 +1169,14 @@ int cpu_exec(CPUState *cpu)
 {
     int ret;
     SyncClocks sc = { 0 };
+#ifdef CONFIG_LATX
+    /*
+     * This local is not modified between sigsetjmp and siglongjmp, so ISO C
+     * preserves its value across the exceptional return.
+     */
+    TranslationBlock * volatile longjmp_entry =
+        qatomic_read(&latx_entry_tb);
+#endif
 
     /* replay_interrupt may need current_cpu */
     current_cpu = cpu;
@@ -1189,6 +1226,8 @@ int cpu_exec(CPUState *cpu)
 #ifdef CONFIG_LATX
         CPUArchState *env = cpu->env_ptr;
 
+        /* Preserve an outer translated caller across native callbacks. */
+        qatomic_set(&latx_entry_tb, longjmp_entry);
         /*
          * Some exits bypass the translated cleanup and siglongjmp restores a
          * possibly active LBT TOP mapping.  Clear both copies after the jump,
@@ -1251,6 +1290,9 @@ int cpu_exec(CPUState *cpu)
     cpu_exec_exit(cpu);
 #endif
     rcu_read_unlock();
+#ifdef CONFIG_LATX
+    qatomic_set(&latx_entry_tb, longjmp_entry);
+#endif
 
     return ret;
 }

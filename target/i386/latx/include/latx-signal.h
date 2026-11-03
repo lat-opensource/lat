@@ -15,6 +15,8 @@
 #include <inttypes.h>
 #include "qemu/osdep.h"
 #include "exec/exec-all.h"
+extern __thread TranslationBlock *latx_entry_tb;
+
 void link_indirect_jmp(CPUArchState *env);
 void unlink_direct_jmp(TranslationBlock *tb);
 #ifdef CONFIG_LATX_TU
