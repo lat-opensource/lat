@@ -2604,7 +2604,8 @@ static bool def_h32(TranslationBlock *tb, IR1_INST *ir1)
     case WRAP(CMOVO):
     case WRAP(CMOVP):
     case WRAP(CMOVS):
-        set_may_def_reg(tb, ir1, ir1_opnd_base_reg_num(des_opnd));
+        /* Both condition outcomes zero the high half of an r32 result. */
+        des_def_gpr(tb, ir1);
         return true;
     case WRAP(XOR):
     case WRAP(AND):

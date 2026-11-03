@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Check GHBR's conditional CMPXCHG destination semantics."""
+"""Check definite CMOV and conditional CMPXCHG high-half writes."""
 
+import json
 import sys
 from pathlib import Path
 
@@ -13,6 +14,7 @@ def main():
         encoding="utf-8"
     )
     definitions = normalize(function_body(source, "deal_hide_opnd_def"))
+    explicit = normalize(function_body(source, "def_h32"))
 
     require(
         r"caseWRAP\(CMPXCHG\):if\(width==32\)\{"
@@ -25,6 +27,21 @@ def main():
         "32-bit CMPXCHG must conditionally define both EAX and a GPR "
         "destination",
     )
+    require(
+        r"caseWRAP\(CMOVS\):(?:/\*.*?\*/)?"
+        r"des_def_gpr\(tb,ir1\);returntrue;",
+        explicit,
+        "CMOV r32 must definitely define its high half on both outcomes",
+    )
+    inventory = json.loads((root / (
+        "target/i386/latx/optimization/hbr-gpr-semantics.json"
+    )).read_text(encoding="utf-8"))
+    cmov = next(rule for rule in inventory["def_rules"]
+                if rule["family"] == "CMOVcc")
+    assert cmov["operand_bits"] == 32
+    assert not cmov["use"] and not cmov["preserve"]
+    assert all(rule["family"] != "CMOVcc"
+               for rule in inventory["may_def_rules"])
 
     print("GHBR conditional semantics: PASS")
     return 0
