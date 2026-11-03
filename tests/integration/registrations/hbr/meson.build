@@ -23,6 +23,7 @@ if 'x86_64-linux-user' in target_dirs
     'ghbr-btx',
     'ghbr-cmpxchg8b',
     'ghbr-conditional',
+    'ghbr-fault-context',
     'ghbr-implicit-registers',
     'ghbr-imul',
     'ghbr-lea',

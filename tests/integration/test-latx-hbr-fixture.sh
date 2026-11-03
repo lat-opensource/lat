@@ -10,8 +10,9 @@ trap 'rm -rf "$workdir"' EXIT HUP INT TERM
 
 guest_compiler=${LATX_X86_64_CC:-x86_64-linux-gnu-gcc}
 guest_root=${LATX_X86_64_SYSROOT:-/usr/gnemul/latx-x86_64}
+artifacts=${LATX_HBR_GUEST_ARTIFACT_DIR:-}
 
-if ! command -v "$guest_compiler" >/dev/null 2>&1; then
+if [ -z "$artifacts" ] && ! command -v "$guest_compiler" >/dev/null 2>&1; then
     echo "SKIP: x86_64 guest compiler not found: $guest_compiler"
     exit 77
 fi
@@ -21,8 +22,28 @@ if [ ! -d "$guest_root" ]; then
 fi
 
 guest="$workdir/$(basename "${source_file%.c}")"
-"$guest_compiler" --sysroot="$guest_root" -O2 -Wall -Wextra -Werror \
-    -mavx2 -mxsave "$source_file" -o "$guest"
+if [ -n "$artifacts" ]; then
+    source_name=$(basename "$source_file")
+    guest_name=$(basename "$guest")
+    actual=$(sha256sum "$source_file" | awk '{print $1}')
+    expected=$(awk -v name="$source_name" '$2 == name {print $1}' \
+        "$artifacts/sources.sha256")
+    if [ "$actual" != "$expected" ]; then
+        echo "FAIL: source mismatch: $source_name" >&2
+        exit 1
+    fi
+    actual=$(sha256sum "$artifacts/$guest_name" | awk '{print $1}')
+    expected=$(awk -v name="$guest_name" '$2 == name {print $1}' \
+        "$artifacts/artifacts.sha256")
+    if [ "$actual" != "$expected" ]; then
+        echo "FAIL: guest binary mismatch: $guest_name" >&2
+        exit 1
+    fi
+    cp "$artifacts/$guest_name" "$guest"
+else
+    "$guest_compiler" --sysroot="$guest_root" -O2 -Wall -Wextra -Werror \
+        -mavx2 -mxsave "$source_file" -o "$guest"
+fi
 
 set +e
 LATX_AOT=0 LATX_KZT=0 timeout -s KILL 90 "$emulator" -L "$guest_root" \

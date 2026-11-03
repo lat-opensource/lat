@@ -2820,6 +2820,90 @@ static void use_h32(TranslationBlock *tb, IR1_INST *ir1,
     }
 }
 
+/* Without recovery metadata, an exception observes every GPR high half. */
+static bool ghbr_needs_precise_state(IR1_INST *ir1)
+{
+    if (ir1_is_prefix_lock(ir1)) {
+        return true;
+    }
+    if (ir1_opcode(ir1) == WRAP(LEA)) {
+        return false;
+    }
+    for (int i = 0; i < ir1_get_opnd_num(ir1); i++) {
+        IR1_OPND *opnd = ir1_get_opnd(ir1, i);
+
+        if (!ir1_opnd_is_gpr(opnd) && !ir1_opnd_is_imm(opnd)) {
+            return true;
+        }
+    }
+
+    /* Keep this list limited to register operations with no guest fault. */
+    switch (ir1_opcode(ir1)) {
+    case WRAP(MOV):
+    case WRAP(MOVSX):
+    case WRAP(MOVZX):
+    case WRAP(MOVSXD):
+    case WRAP(XCHG):
+    case WRAP(XADD):
+    case WRAP(ADD):
+    case WRAP(ADC):
+    case WRAP(INC):
+    case WRAP(DEC):
+    case WRAP(SUB):
+    case WRAP(SBB):
+    case WRAP(NEG):
+    case WRAP(CMP):
+    case WRAP(TEST):
+    case WRAP(XOR):
+    case WRAP(AND):
+    case WRAP(OR):
+    case WRAP(NOT):
+    case WRAP(ROL):
+    case WRAP(ROR):
+    case WRAP(RCL):
+    case WRAP(RCR):
+    case WRAP(SHRD):
+    case WRAP(SHLD):
+    case WRAP(SHL):
+    case WRAP(SHR):
+    case WRAP(SAR):
+    case WRAP(SAL):
+    case WRAP(BT):
+    case WRAP(BTS):
+    case WRAP(BTR):
+    case WRAP(BTC):
+    case WRAP(BSWAP):
+    case WRAP(BSF):
+    case WRAP(BSR):
+    case WRAP(POPCNT):
+    case WRAP(TZCNT):
+    case WRAP(LZCNT):
+    case WRAP(MUL):
+    case WRAP(IMUL):
+    case WRAP(MULX):
+    case WRAP(CMOVA):
+    case WRAP(CMOVAE):
+    case WRAP(CMOVB):
+    case WRAP(CMOVBE):
+    case WRAP(CMOVE):
+    case WRAP(CMOVG):
+    case WRAP(CMOVGE):
+    case WRAP(CMOVL):
+    case WRAP(CMOVLE):
+    case WRAP(CMOVNE):
+    case WRAP(CMOVNO):
+    case WRAP(CMOVNP):
+    case WRAP(CMOVNS):
+    case WRAP(CMOVO):
+    case WRAP(CMOVP):
+    case WRAP(CMOVS):
+    case WRAP(NOP):
+        return false;
+    default:
+        return true;
+    }
+}
+
 /* The current strategy used is relatively conservative, */
 /* only including analysis of a small number of instructions.
  * If the strategy is changed to analyze more instructions,
@@ -2838,6 +2922,10 @@ static void get_gpr_use_def(TranslationBlock *tb)
         ir1->gpr_use = 0;
         bool has_explicit_def = def_h32(tb, ir1);
         use_h32(tb, ir1, has_explicit_def);
+        if (ghbr_needs_precise_state(ir1)) {
+            ir1->gpr_use |= GHBR_GPR_ALL;
+            tb->s_data->gpr_use |= GHBR_GPR_ALL & ~tb->s_data->gpr_def;
+        }
         /* Inputs observe the value before this instruction's writes. */
         tb->s_data->gpr_def |= ir1->gpr_def;
     }
