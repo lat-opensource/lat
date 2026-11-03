@@ -112,4 +112,11 @@ if 'i386-linux-user' in target_dirs
     'env': {'LATX_SOFTFPU': '0'},
     'timeout': 120,
   }]
+  latx_integration_tests += [{
+    'name': 'test-vmaskmov-mt-permission-i386',
+    'runner': find_program('../../test-vmaskmov-mt-permission-i386.sh'),
+    'args': [emulators['latx-i386'],
+             files('../../vmaskmov-mt-permission-i386.S')],
+    'timeout': 180,
+  }]
 endif
