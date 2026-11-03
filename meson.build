@@ -786,6 +786,17 @@ foreach target : target_dirs
            args: ['--shm-' + mode], suite: 'latx-integration')
     endforeach
 
+    tb_missing_slot_test = executable(
+      'test-latx-tb-missing-slot',
+      files('target/i386/latx/sbt/tests/tb-missing-slot-test.c') +
+        genh + tcg_trace_genh + [syscall_nr_generated],
+      c_args: smc_reload_test_c_args,
+      dependencies: [glib],
+      include_directories: target_inc,
+      link_args: smc_reload_test_link_args,
+    )
+    test('latx-tb-missing-slot', tb_missing_slot_test, suite: 'lat-pr-fast')
+
     foreach variant : ['', '-no-tu']
       aot_merge_memory_test = executable(
         'test-latx-aot-merge-memory' + variant,

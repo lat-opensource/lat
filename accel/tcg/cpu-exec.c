@@ -679,6 +679,13 @@ inline void tb_add_jump(TranslationBlock *tb, int n,
         return;
     }
 #endif
+#ifdef CONFIG_LATX
+    /* Inlined CALL-to-next and PC thunks have no host patch slot. */
+    if (!use_tu_jmp(tb) &&
+        tb->jmp_target_arg[n] == TB_JMP_RESET_OFFSET_INVALID) {
+        return;
+    }
+#endif
     qemu_spin_lock(&tb_next->jmp_lock);
 
     /* make sure the destination TB is valid */
