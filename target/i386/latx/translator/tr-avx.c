@@ -1495,10 +1495,16 @@ bool translate_vinserti128(IR1_INST * pir1) {
         ir1_opnd_is_ymm(ir1_get_opnd(pir1, 1)) &&
         ir1_opnd_size(ir1_get_opnd(pir1, 2)) == 128 &&
         ir1_opnd_is_imm(ir1_get_opnd(pir1, 3)));
-    IR2_OPND dest = load_freg256_from_ir1(ir1_get_opnd(pir1, 0));
-    IR2_OPND src1 = load_freg256_from_ir1(ir1_get_opnd(pir1, 1));
-    IR2_OPND src2 = load_freg128_from_ir1(ir1_get_opnd(pir1, 2));
     uint8 imm = ir1_opnd_uimm(ir1_get_opnd(pir1, 3)) & 0x1;
+    bool high_insert_partial_read = imm &&
+        ir1_opcode(pir1) == dt_X86_INS_VINSERTF128;
+    IR2_OPND dest = high_insert_partial_read ?
+        ra_alloc_xmm(ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 0))) :
+        load_freg256_from_ir1(ir1_get_opnd(pir1, 0));
+    IR2_OPND src1 = high_insert_partial_read ?
+        ra_alloc_xmm(ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 1))) :
+        load_freg256_from_ir1(ir1_get_opnd(pir1, 1));
+    IR2_OPND src2 = load_freg128_from_ir1(ir1_get_opnd(pir1, 2));
     bool dest_is_src1 = ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 0)) ==
                         ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 1));
     bool dest_is_src2 = ir1_opnd_is_xmm(ir1_get_opnd(pir1, 2)) &&
