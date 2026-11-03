@@ -105,6 +105,7 @@ if 'x86_64-linux-user' in target_dirs
       files('../../avx-single-instruction-boundaries.asm'),
       files('../../avx-scalar-double-alias.asm'),
       files('../../vaddsubpd-lanes.asm'),
+      files('../../vinsertf128-alias.asm'),
       files('../../vperm2x128-immediate.asm'),
       files('../../vpermilpd-ymm-immediate.asm'),
       files('../../vpermilpd-immediate.asm'),
