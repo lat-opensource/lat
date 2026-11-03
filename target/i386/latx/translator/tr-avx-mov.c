@@ -635,14 +635,19 @@ bool translate_vmovsd(IR1_INST * pir1) {
 
         IR2_OPND temp_src1 = load_freg128_from_ir1(src);
         IR2_OPND temp_src2 = load_freg128_from_ir1(src2);
-        IR2_OPND result = ir2_opnd_cmp(&temp_dest, &temp_src2) ?
-                          ra_alloc_ftemp() : temp_dest;
 
-        if (!ir2_opnd_cmp(&result, &temp_src1))
-            la_vori_b(result, temp_src1, 0x0);
-        la_vshuf4i_d(result, temp_src2, 0b00000110);
-        if (!ir2_opnd_cmp(&result, &temp_dest))
-            la_xvori_b(temp_dest, result, 0x0);
+        if (ir2_opnd_cmp(&temp_src1, &temp_src2)) {
+            if (!ir2_opnd_cmp(&temp_dest, &temp_src1)) {
+                la_vori_b(temp_dest, temp_src1, 0);
+            }
+        } else if (ir2_opnd_cmp(&temp_dest, &temp_src2)) {
+            la_vextrins_d(temp_dest, temp_src1, VEXTRINS_IMM_4_0(1, 1));
+        } else {
+            if (!ir2_opnd_cmp(&temp_dest, &temp_src1)) {
+                la_vori_b(temp_dest, temp_src1, 0);
+            }
+            la_vshuf4i_d(temp_dest, temp_src2, 0b00000110);
+        }
         set_high128_xreg_to_zero(temp_dest);
         return true;
     }

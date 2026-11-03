@@ -108,6 +108,7 @@ if 'x86_64-linux-user' in target_dirs
       files('../../vbroadcastsd-memory.asm'),
       files('../../vinsertf128-alias.asm'),
       files('../../vinsertf128-high-pending.asm'),
+      files('../../vmovsd-alias.asm'),
       files('../../vperm2x128-immediate.asm'),
       files('../../vpermilpd-ymm-immediate.asm'),
       files('../../vpermilpd-immediate.asm'),
