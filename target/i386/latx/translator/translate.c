@@ -1924,6 +1924,13 @@ bool ir1_translate(IR1_INST *ir1)
             IR1_OPND *opnd = ir1_get_opnd(ir1, i);
 
             if (ir1_opnd_is_ymm(opnd)) {
+                /* A high insert reads only src1's low 128 bits. */
+                if (i == 1 &&
+                    (ir1_opcode(ir1) == dt_X86_INS_VINSERTF128 ||
+                     ir1_opcode(ir1) == dt_X86_INS_VINSERTI128) &&
+                    (ir1_opnd_uimm(ir1_get_opnd(ir1, 3)) & 1)) {
+                    continue;
+                }
                 flush_pending_ymmh_zero(
                     ra_alloc_xmm(ir1_opnd_base_reg_num(opnd)));
             } else if (ir1_opnd_is_mem(opnd) &&

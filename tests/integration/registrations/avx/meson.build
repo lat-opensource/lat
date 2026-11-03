@@ -85,6 +85,8 @@ if 'x86_64-linux-user' in target_dirs
       files('../../avx-single-instruction-boundaries.asm'),
       files('../../avx-scalar-double-alias.asm'),
       files('../../vblendpd-xmm-alias.asm'),
+      files('../../vinsertf128-alias.asm'),
+      files('../../vinsertf128-high-pending.asm'),
       files('../../vmovsd-alias.asm'),
       files('../../vperm2x128-immediate.asm'),
       files('../../vpermilpd-ymm-immediate.asm'),
