@@ -1569,10 +1569,30 @@ bool translate_vshufpd(IR1_INST * pir1) {
         IR2_OPND dest = load_freg256_from_ir1(ir1_get_opnd(pir1, 0));
         IR2_OPND src1 = load_freg256_from_ir1(ir1_get_opnd(pir1, 1));
         IR2_OPND src2 = load_freg256_from_ir1(ir1_get_opnd(pir1, 2));
+        uint8_t imm8 = ir1_opnd_uimm(ir1_get_opnd(pir1, 3)) & 0xf;
+
+        if ((imm8 & 0x5) == ((imm8 >> 1) & 0x5)) {
+            if (imm8 == 0) {
+                la_xvilvl_d(dest, src2, src1);
+            } else if (imm8 == 0xf) {
+                la_xvilvh_d(dest, src2, src1);
+            } else {
+                IR2_OPND low = ra_alloc_ftemp();
+
+                if (imm8 == 0xc) {
+                    la_xvilvl_d(low, src2, src1);
+                    la_xvilvh_d(dest, src2, src1);
+                } else {
+                    la_xvilvh_d(low, src2, src1);
+                    la_xvilvl_d(dest, src2, src1);
+                }
+                la_xvpermi_q(dest, low, VEXTRINS_IMM_4_0(3, 0));
+            }
+            return true;
+        }
         IR2_OPND temp_l = ra_alloc_ftemp();
         IR2_OPND result = ir2_opnd_cmp(&dest, &src2) ?
                           ra_alloc_ftemp() : dest;
-        uint8_t imm8 = ir1_opnd_uimm(ir1_get_opnd(pir1, 3)) & 0xf;
         uint8_t l = imm8 & 0x3;
         uint8_t h = imm8 >> 2;
         if (l == 0) {
