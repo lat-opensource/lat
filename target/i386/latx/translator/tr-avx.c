@@ -1286,7 +1286,28 @@ bool translate_vbroadcastsd(IR1_INST * pir1) {
 
     lsassert(ir1_opnd_is_ymm(ir1_get_opnd(pir1, 0)));
     IR2_OPND dest = load_freg256_from_ir1(ir1_get_opnd(pir1, 0));
-    IR2_OPND src = load_freg128_from_ir1(ir1_get_opnd(pir1, 1));
+    IR1_OPND *opnd1 = ir1_get_opnd(pir1, 1);
+
+    if (ir1_opnd_is_mem(opnd1)) {
+        int disp;
+        IR2_OPND address = convert_mem(opnd1, &disp);
+
+        gen_test_page_flag(address, disp, PAGE_READ, 8);
+        /* XVLDREPL.D encodes its signed displacement in units of 8 bytes. */
+        if (!(disp & 7)) {
+            la_xvldrepl_d(dest, address, disp / 8);
+        } else {
+            IR2_OPND src = ra_alloc_ftemp();
+
+            la_fld_d(src, address, disp);
+            la_xvreplve0_d(dest, src);
+            ra_free_temp(src);
+        }
+        ra_free_mem_temp(address);
+        return true;
+    }
+
+    IR2_OPND src = load_freg128_from_ir1(opnd1);
     la_xvreplve0_d(dest, src);
     return true;
 }
