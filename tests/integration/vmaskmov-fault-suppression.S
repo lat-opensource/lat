@@ -169,6 +169,51 @@ _start:
     cmp eax, dword ptr [rip + src]
     jne fail
 
+    /* ---------------- VPGATHERDD, denied half masked off ---------------- */
+    mov dword ptr [r13], 0x11111111
+    mov dword ptr [r13 + 4], 0x22222222
+    vmovdqu ymm0, [rip + gather_dest]
+    vmovdqu ymm1, [rip + gather_idx_dd]
+    vmovdqu ymm2, [rip + gather_mask_dd_low]
+    vpgatherdd ymm0, [r13 + ymm1*4], ymm2
+    vmovdqu [rip + out], ymm0
+    vzeroupper
+    mov eax, dword ptr [rip + out]
+    cmp eax, 0x11111111
+    jne fail
+    mov eax, dword ptr [rip + out + 4]
+    cmp eax, 0x22222222
+    jne fail
+    mov eax, dword ptr [rip + out + 8]
+    cmp eax, 0xdeadbeef
+    jne fail
+    mov eax, dword ptr [rip + out + 12]
+    cmp eax, 0xdeadbeef
+    jne fail
+
+    /* ---------------- VPGATHERQQ, denied half masked off ---------------- */
+    mov dword ptr [r13], 0x11111111
+    mov dword ptr [r13 + 4], 0x22222222
+    mov dword ptr [r13 + 8], 0x33333333
+    mov dword ptr [r13 + 12], 0x44444444
+    vmovdqu ymm0, [rip + gather_dest]
+    vmovdqu ymm1, [rip + gather_idx_qq]
+    vmovdqu ymm2, [rip + gather_mask_qq_low]
+    vpgatherqq ymm0, [r13 + ymm1*8], ymm2
+    vmovdqu [rip + out], ymm0
+    vzeroupper
+    mov r15, 0x2222222211111111
+    cmp qword ptr [rip + out], r15
+    jne fail
+    mov r15, 0x4444444433333333
+    cmp qword ptr [rip + out + 8], r15
+    jne fail
+    mov r15, 0xdeadbeefdeadbeef
+    cmp qword ptr [rip + out + 16], r15
+    jne fail
+    cmp qword ptr [rip + out + 24], r15
+    jne fail
+
     xor edi, edi
     jmp exit
 
@@ -198,6 +243,18 @@ mask_bytes8:
 /* MASKMOVQ selects four bytes (one dword) in the mapped half. */
 mask_bytes4:
     .quad 0x0000000080808080
+/* Gathers: lanes 2-3 point past the mapped half into the hole. */
+gather_dest:
+    .long 0xdeadbeef, 0xdeadbeef, 0xdeadbeef, 0xdeadbeef
+    .long 0xdeadbeef, 0xdeadbeef, 0xdeadbeef, 0xdeadbeef
+gather_idx_dd:
+    .long 0, 1, 4, 5, 0, 0, 0, 0
+gather_idx_qq:
+    .quad 0, 1, 2, 3
+gather_mask_dd_low:
+    .long 0x80000000, 0x80000000, 0, 0, 0, 0, 0, 0
+gather_mask_qq_low:
+    .quad 0x8000000000000000, 0x8000000000000000, 0, 0
 
 .bss
 .p2align 5

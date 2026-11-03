@@ -39,6 +39,14 @@
  *      selected -> no fault
  *   w: MASKMOVQ (MMX) store, one selected byte lies in the denied page
  *      -> SIGSEGV
+ *   x: VPGATHERDD load, denied-page lanes masked off -> no fault
+ *   y: VPGATHERDD load, one selected lane lies in the denied page -> SIGSEGV
+ *   z: VPGATHERQQ load, denied-page lanes masked off -> no fault
+ *   A: VPGATHERQQ load, one selected lane lies in the denied page -> SIGSEGV
+ *   B: VPGATHERDQ load, denied-page lane masked off -> no fault
+ *   C: VPGATHERDQ load, selected lane lies in the denied page -> SIGSEGV
+ *   D: VPGATHERQD load, denied-page lane masked off -> no fault
+ *   E: VPGATHERQD load, selected lane lies in the denied page -> SIGSEGV
  */
 .intel_syntax noprefix
 .equ __NR_exit, 60
@@ -160,6 +168,22 @@ _start:
     je case_v
     cmp al, 'w'
     je case_w
+    cmp al, 'x'
+    je case_x
+    cmp al, 'y'
+    je case_y
+    cmp al, 'z'
+    je case_z
+    cmp al, 'A'
+    je case_A
+    cmp al, 'B'
+    je case_B
+    cmp al, 'C'
+    je case_C
+    cmp al, 'D'
+    je case_D
+    cmp al, 'E'
+    je case_E
     jmp fail_args
 
 /* Vector base starts 16 bytes before the denied page; select only the upper
@@ -386,6 +410,130 @@ case_w:
     emms
     jmp unexpectedly_allowed
 
+/* Gathers merge masked-off lanes from the destination and must not access
+ * them.  Lanes 2-3 point into the denied page and are masked off here. */
+case_x:
+    lea r14, [r13 - 16]
+    mov dword ptr [r14], 0x11111111
+    mov dword ptr [r14 + 4], 0x22222222
+    vmovdqu ymm0, [rip + gather_dest]
+    vmovdqu ymm1, [rip + gather_idx_dd]
+    vmovdqu ymm2, [rip + gather_mask_dd_low]
+    vpgatherdd ymm0, [r14 + ymm1*4], ymm2
+    vmovdqu [rip + out], ymm0
+    vzeroupper
+    mov eax, dword ptr [rip + out]
+    cmp eax, 0x11111111
+    jne fail_data
+    mov eax, dword ptr [rip + out + 4]
+    cmp eax, 0x22222222
+    jne fail_data
+    mov eax, dword ptr [rip + out + 8]
+    cmp eax, 0xdeadbeef
+    jne fail_data
+    mov eax, dword ptr [rip + out + 12]
+    cmp eax, 0xdeadbeef
+    jne fail_data
+    jmp pass
+
+case_y:
+    lea r14, [r13 - 16]
+    mov qword ptr [rip + expected_addr], r13
+    vmovdqu ymm0, [rip + gather_dest]
+    vmovdqu ymm1, [rip + gather_idx_dd]
+    vmovdqu ymm2, [rip + gather_mask_dd_lane2]
+    vpgatherdd ymm0, [r14 + ymm1*4], ymm2
+    jmp unexpectedly_allowed
+
+case_z:
+    lea r14, [r13 - 16]
+    mov dword ptr [r14], 0x11111111
+    mov dword ptr [r14 + 4], 0x22222222
+    mov dword ptr [r14 + 8], 0x33333333
+    mov dword ptr [r14 + 12], 0x44444444
+    vmovdqu ymm0, [rip + gather_dest]
+    vmovdqu ymm1, [rip + gather_idx_qq]
+    vmovdqu ymm2, [rip + gather_mask_qq_low]
+    vpgatherqq ymm0, [r14 + ymm1*8], ymm2
+    vmovdqu [rip + out], ymm0
+    vzeroupper
+    mov r15, 0x2222222211111111
+    cmp qword ptr [rip + out], r15
+    jne fail_data
+    mov r15, 0x4444444433333333
+    cmp qword ptr [rip + out + 8], r15
+    jne fail_data
+    mov r15, 0xdeadbeefdeadbeef
+    cmp qword ptr [rip + out + 16], r15
+    jne fail_data
+    cmp qword ptr [rip + out + 24], r15
+    jne fail_data
+    jmp pass
+
+case_A:
+    lea r14, [r13 - 16]
+    mov qword ptr [rip + expected_addr], r13
+    vmovdqu ymm0, [rip + gather_dest]
+    vmovdqu ymm1, [rip + gather_idx_qq]
+    vmovdqu ymm2, [rip + gather_mask_qq_lane2]
+    vpgatherqq ymm0, [r14 + ymm1*8], ymm2
+    jmp unexpectedly_allowed
+
+/* VPGATHERDQ uses dword indices and qword data. */
+case_B:
+    lea r14, [r13 - 16]
+    mov dword ptr [r14], 0x11111111
+    mov dword ptr [r14 + 4], 0x22222222
+    mov dword ptr [r14 + 8], 0x33333333
+    mov dword ptr [r14 + 12], 0x44444444
+    vmovdqu xmm0, [rip + gather_dest]
+    vmovdqu xmm1, [rip + gather_idx_dq]
+    vmovdqu xmm2, [rip + gather_mask_q_low]
+    vpgatherdq xmm0, [r14 + xmm1*8], xmm2
+    vmovdqu [rip + out], xmm0
+    mov r15, 0x2222222211111111
+    cmp qword ptr [rip + out], r15
+    jne fail_data
+    mov r15, 0xdeadbeefdeadbeef
+    cmp qword ptr [rip + out + 8], r15
+    jne fail_data
+    jmp pass
+
+case_C:
+    lea r14, [r13 - 16]
+    mov qword ptr [rip + expected_addr], r13
+    vmovdqu xmm0, [rip + gather_dest]
+    vmovdqu xmm1, [rip + gather_idx_dq]
+    vmovdqu xmm2, [rip + gather_mask_q_lane1]
+    vpgatherdq xmm0, [r14 + xmm1*8], xmm2
+    jmp unexpectedly_allowed
+
+/* VPGATHERQD uses qword indices and dword data. */
+case_D:
+    lea r14, [r13 - 8]
+    mov dword ptr [r14], 0x33333333
+    vmovdqu xmm0, [rip + gather_dest]
+    vmovdqu xmm1, [rip + gather_idx_qd]
+    vmovdqu xmm2, [rip + gather_mask_d2_low]
+    vpgatherqd xmm0, [r14 + xmm1*4], xmm2
+    vmovdqu [rip + out], xmm0
+    mov eax, dword ptr [rip + out]
+    cmp eax, 0x33333333
+    jne fail_data
+    mov eax, dword ptr [rip + out + 4]
+    cmp eax, 0xdeadbeef
+    jne fail_data
+    jmp pass
+
+case_E:
+    lea r14, [r13 - 8]
+    mov qword ptr [rip + expected_addr], r13
+    vmovdqu xmm0, [rip + gather_dest]
+    vmovdqu xmm1, [rip + gather_idx_qd]
+    vmovdqu xmm2, [rip + gather_mask_d2_lane1]
+    vpgatherqd xmm0, [r14 + xmm1*4], xmm2
+    jmp unexpectedly_allowed
+
 unexpectedly_allowed:
     mov edi, 20
     jmp exit
@@ -482,4 +630,33 @@ mask_low_mmx:
 /* MMX: also select the first byte of the denied page. */
 mask_low5_mmx:
     .quad 0x0000008080808080
+/* Gather: lanes 2-3 point into the denied page. */
+gather_dest:
+    .long 0xdeadbeef, 0xdeadbeef, 0xdeadbeef, 0xdeadbeef
+    .long 0xdeadbeef, 0xdeadbeef, 0xdeadbeef, 0xdeadbeef
+gather_idx_dd:
+    .long 0, 1, 4, 5, 0, 0, 0, 0
+gather_idx_qq:
+    .quad 0, 1, 2, 3
+gather_mask_dd_low:
+    .long 0x80000000, 0x80000000, 0, 0, 0, 0, 0, 0
+gather_mask_dd_lane2:
+    .long 0, 0, 0x80000000, 0, 0, 0, 0, 0
+gather_mask_qq_low:
+    .quad 0x8000000000000000, 0x8000000000000000, 0, 0
+gather_mask_qq_lane2:
+    .quad 0, 0, 0x8000000000000000, 0
+gather_idx_dq:
+    .long 0, 2, 0, 0
+gather_mask_q_low:
+    .quad 0x8000000000000000, 0
+gather_mask_q_lane1:
+    .quad 0, 0x8000000000000000
+gather_idx_qd:
+    .quad 0, 2
+gather_mask_d2_low:
+    .long 0x80000000, 0, 0, 0
+gather_mask_d2_lane1:
+    .long 0, 0x80000000, 0, 0
+
 .section .note.GNU-stack,"",@progbits

@@ -6356,6 +6356,53 @@ static void flush_gather_dest_ymmh_zero(IR1_OPND *opnd)
     }
 }
 
+/*
+ * AVX2 gathers access memory only for lanes whose mask MSB is set.  Guard
+ * each lane, check its guest read permission, and reuse the lane value
+ * register as the address so the extra check does not exhaust itemps.
+ */
+static void translate_avx_gather_lane_lasx(IR2_OPND mask_values,
+                                           IR2_OPND index_values,
+                                           IR2_OPND base_addr,
+                                           IR2_OPND temp_dest,
+                                           int scale, int lane, int index_lane,
+                                           bool index64, bool value64)
+{
+    IR2_OPND mask_value = ra_alloc_itemp();
+    IR2_OPND value = ra_alloc_itemp();
+    IR2_OPND select = ra_alloc_label();
+    IR2_OPND done = ra_alloc_label();
+
+    if (value64) {
+        la_xvpickve2gr_d(mask_value, mask_values, lane);
+    } else {
+        la_xvpickve2gr_w(mask_value, mask_values, lane);
+    }
+    if (index64) {
+        la_xvpickve2gr_d(value, index_values, index_lane);
+    } else {
+        la_xvpickve2gr_w(value, index_values, index_lane);
+    }
+
+    la_blt(mask_value, zero_ir2_opnd, select);
+    la_b(done);
+    la_label(select);
+
+    adjust_vsib_index(value, base_addr, value, scale);
+    gen_test_page_flag(value, 0, PAGE_READ, value64 ? 8 : 4);
+    if (value64) {
+        la_ld_d(value, value, 0);
+        la_xvinsgr2vr_d(temp_dest, value, lane);
+    } else {
+        la_ld_w(value, value, 0);
+        la_xvinsgr2vr_w(temp_dest, value, lane);
+    }
+
+    la_label(done);
+    ra_free_temp(value);
+    ra_free_temp(mask_value);
+}
+
 bool translate_vpgatherdd(IR1_INST *pir1)
 {
     if (!option_enable_lasx) {
@@ -6374,11 +6421,11 @@ bool translate_vpgatherdd(IR1_INST *pir1)
     IR2_OPND mask = ra_alloc_xmm(ir1_opnd_base_reg_num(opnd2));
     IR2_OPND index_op = ra_alloc_xmm(ir1_opnd_vsib_index_reg_num(opnd1));
     IR2_OPND temp_addr = ra_alloc_itemp();
-    IR2_OPND temp_index = ra_alloc_itemp();
     IR2_OPND temp_mask = ra_alloc_ftemp();
     IR2_OPND temp_dest = ra_alloc_ftemp();
     bool has_base = ir1_opnd_has_base(opnd1);
     longx offset = ir1_opnd_simm(opnd1);
+    int lanes = ir1_opnd_is_ymm(opnd0) ? 8 : 4;
 
     la_xvslti_w(temp_mask, mask, 0);
     li_guest_addr(temp_addr, offset);
@@ -6387,62 +6434,10 @@ bool translate_vpgatherdd(IR1_INST *pir1)
         la_add(temp_addr, temp_addr, base_op);
     }
 
-    /* fetch the first element in vsib */
-    la_xvpickve2gr_w(temp_index, index_op, 0);
-    adjust_vsib_index(temp_index, temp_addr, temp_index,
-                    ir1_opnd_scale(opnd1));
-    la_ld_w(temp_index, temp_index, 0);
-    la_xvinsgr2vr_w(temp_dest, temp_index, 0);
-
-    /* fetch the second element in vsib */
-    la_xvpickve2gr_w(temp_index, index_op, 1);
-    adjust_vsib_index(temp_index, temp_addr, temp_index,
-                    ir1_opnd_scale(opnd1));
-    la_ld_w(temp_index, temp_index, 0);
-    la_xvinsgr2vr_w(temp_dest, temp_index, 1);
-
-    /* fetch the third element in vsib */
-    la_xvpickve2gr_w(temp_index, index_op, 2);
-    adjust_vsib_index(temp_index, temp_addr, temp_index,
-                    ir1_opnd_scale(opnd1));
-    la_ld_w(temp_index, temp_index, 0);
-    la_xvinsgr2vr_w(temp_dest, temp_index, 2);
-
-    /* fetch the fourth element in vsib */
-    la_xvpickve2gr_w(temp_index, index_op, 3);
-    adjust_vsib_index(temp_index, temp_addr, temp_index,
-                    ir1_opnd_scale(opnd1));
-    la_ld_w(temp_index, temp_index, 0);
-    la_xvinsgr2vr_w(temp_dest, temp_index, 3);
-
-    if(ir1_opnd_is_ymm(opnd0)){
-        /* fetch the fifth element in vsib */
-        la_xvpickve2gr_w(temp_index, index_op, 4);
-        adjust_vsib_index(temp_index, temp_addr, temp_index,
-                        ir1_opnd_scale(opnd1));
-        la_ld_w(temp_index, temp_index, 0);
-        la_xvinsgr2vr_w(temp_dest, temp_index, 4);
-
-        /* fetch the sixth element in vsib */
-        la_xvpickve2gr_w(temp_index, index_op, 5);
-        adjust_vsib_index(temp_index, temp_addr, temp_index,
-                        ir1_opnd_scale(opnd1));
-        la_ld_w(temp_index, temp_index, 0);
-        la_xvinsgr2vr_w(temp_dest, temp_index, 5);
-
-        /* fetch the seventh element in vsib */
-        la_xvpickve2gr_w(temp_index, index_op, 6);
-        adjust_vsib_index(temp_index, temp_addr, temp_index,
-                        ir1_opnd_scale(opnd1));
-        la_ld_w(temp_index, temp_index, 0);
-        la_xvinsgr2vr_w(temp_dest, temp_index, 6);
-
-        /* fetch the eighth element in vsib */
-        la_xvpickve2gr_w(temp_index, index_op, 7);
-        adjust_vsib_index(temp_index, temp_addr, temp_index,
-                        ir1_opnd_scale(opnd1));
-        la_ld_w(temp_index, temp_index, 0);
-        la_xvinsgr2vr_w(temp_dest, temp_index, 7);
+    for (int lane = 0; lane < lanes; lane++) {
+        translate_avx_gather_lane_lasx(temp_mask, index_op, temp_addr,
+                                       temp_dest, ir1_opnd_scale(opnd1),
+                                       lane, lane, false, false);
     }
     la_xvbitsel_v(dest, dest, temp_dest, temp_mask);
     la_xvxor_v(mask, mask, mask);
@@ -6466,11 +6461,11 @@ bool translate_vpgatherqd(IR1_INST *pir1)
     IR2_OPND mask = ra_alloc_xmm(ir1_opnd_base_reg_num(opnd2));
     IR2_OPND index_op = ra_alloc_xmm(ir1_opnd_vsib_index_reg_num(opnd1));
     IR2_OPND temp_addr = ra_alloc_itemp();
-    IR2_OPND temp_index = ra_alloc_itemp();
     IR2_OPND temp_mask = ra_alloc_ftemp();
     IR2_OPND temp_dest = ra_alloc_ftemp();
     bool has_base = ir1_opnd_has_base(opnd1);
     longx offset = ir1_opnd_simm(opnd1);
+    int lanes = ir1_index_reg_is_ymm(opnd1) ? 4 : 2;
 
     la_xvslti_w(temp_mask, mask, 0);
     li_guest_addr(temp_addr, offset);
@@ -6479,34 +6474,10 @@ bool translate_vpgatherqd(IR1_INST *pir1)
         la_add(temp_addr, temp_addr, base_op);
     }
 
-    /* fetch the first element in vsib */
-    la_xvpickve2gr_d(temp_index, index_op, 0);
-    adjust_vsib_index(temp_index, temp_addr, temp_index,
-                    ir1_opnd_scale(opnd1));
-    la_ld_w(temp_index, temp_index, 0);
-    la_xvinsgr2vr_w(temp_dest, temp_index, 0);
-
-    /* fetch the second element in vsib */
-    la_xvpickve2gr_d(temp_index, index_op, 1);
-    adjust_vsib_index(temp_index, temp_addr, temp_index,
-                    ir1_opnd_scale(opnd1));
-    la_ld_w(temp_index, temp_index, 0);
-    la_xvinsgr2vr_w(temp_dest, temp_index, 1);
-
-    if(ir1_index_reg_is_ymm(opnd1)){
-        /* fetch the third element in vsib */
-        la_xvpickve2gr_d(temp_index, index_op, 2);
-        adjust_vsib_index(temp_index, temp_addr, temp_index,
-                        ir1_opnd_scale(opnd1));
-        la_ld_w(temp_index, temp_index, 0);
-        la_xvinsgr2vr_w(temp_dest, temp_index, 2);
-
-        /* fetch the fourth element in vsib */
-        la_xvpickve2gr_d(temp_index, index_op, 3);
-        adjust_vsib_index(temp_index, temp_addr, temp_index,
-                        ir1_opnd_scale(opnd1));
-        la_ld_w(temp_index, temp_index, 0);
-        la_xvinsgr2vr_w(temp_dest, temp_index, 3);
+    for (int lane = 0; lane < lanes; lane++) {
+        translate_avx_gather_lane_lasx(temp_mask, index_op, temp_addr,
+                                       temp_dest, ir1_opnd_scale(opnd1),
+                                       lane, lane, true, false);
     }
     if(ir1_index_reg_is_ymm(opnd1)) {
         la_xvbitsel_v(dest, dest, temp_dest, temp_mask);
@@ -6540,11 +6511,11 @@ bool translate_vpgatherdq(IR1_INST *pir1)
     IR2_OPND mask = ra_alloc_xmm(ir1_opnd_base_reg_num(opnd2));
     IR2_OPND index_op = ra_alloc_xmm(ir1_opnd_vsib_index_reg_num(opnd1));
     IR2_OPND temp_addr = ra_alloc_itemp();
-    IR2_OPND temp_index = ra_alloc_itemp();
     IR2_OPND temp_mask = ra_alloc_ftemp();
     IR2_OPND temp_dest = ra_alloc_ftemp();
     bool has_base = ir1_opnd_has_base(opnd1);
     longx offset = ir1_opnd_simm(opnd1);
+    int lanes = ir1_opnd_is_ymm(opnd0) ? 4 : 2;
 
     la_xvslti_d(temp_mask, mask, 0);
     li_guest_addr(temp_addr, offset);
@@ -6553,34 +6524,10 @@ bool translate_vpgatherdq(IR1_INST *pir1)
         la_add(temp_addr, temp_addr, base_op);
     }
 
-    /* fetch the first element in vsib */
-    la_xvpickve2gr_w(temp_index, index_op, 0);
-    adjust_vsib_index(temp_index, temp_addr, temp_index,
-                    ir1_opnd_scale(opnd1));
-    la_ld_d(temp_index, temp_index, 0);
-    la_xvinsgr2vr_d(temp_dest, temp_index, 0);
-
-    /* fetch the second element in vsib */
-    la_xvpickve2gr_w(temp_index, index_op, 1);
-    adjust_vsib_index(temp_index, temp_addr, temp_index,
-                    ir1_opnd_scale(opnd1));
-    la_ld_d(temp_index, temp_index, 0);
-    la_xvinsgr2vr_d(temp_dest, temp_index, 1);
-
-    if(ir1_opnd_is_ymm(opnd0)){
-        /* fetch the third element in vsib */
-        la_xvpickve2gr_w(temp_index, index_op, 2);
-        adjust_vsib_index(temp_index, temp_addr, temp_index,
-                        ir1_opnd_scale(opnd1));
-        la_ld_d(temp_index, temp_index, 0);
-        la_xvinsgr2vr_d(temp_dest, temp_index, 2);
-
-        /* fetch the fourth element in vsib */
-        la_xvpickve2gr_w(temp_index, index_op, 3);
-        adjust_vsib_index(temp_index, temp_addr, temp_index,
-                        ir1_opnd_scale(opnd1));
-        la_ld_d(temp_index, temp_index, 0);
-        la_xvinsgr2vr_d(temp_dest, temp_index, 3);
+    for (int lane = 0; lane < lanes; lane++) {
+        translate_avx_gather_lane_lasx(temp_mask, index_op, temp_addr,
+                                       temp_dest, ir1_opnd_scale(opnd1),
+                                       lane, lane, false, true);
     }
     la_xvbitsel_v(dest, dest, temp_dest, temp_mask);
     if(ir1_opnd_is_xmm(opnd0)) {
@@ -6609,11 +6556,11 @@ bool translate_vpgatherqq(IR1_INST *pir1)
     IR2_OPND mask = ra_alloc_xmm(ir1_opnd_base_reg_num(opnd2));
     IR2_OPND index_op = ra_alloc_xmm(ir1_opnd_vsib_index_reg_num(opnd1));
     IR2_OPND temp_addr = ra_alloc_itemp();
-    IR2_OPND temp_index = ra_alloc_itemp();
     IR2_OPND temp_mask = ra_alloc_ftemp();
     IR2_OPND temp_dest = ra_alloc_ftemp();
     bool has_base = ir1_opnd_has_base(opnd1);
     longx offset = ir1_opnd_simm(opnd1);
+    int lanes = ir1_opnd_is_ymm(opnd0) ? 4 : 2;
 
     la_xvslti_d(temp_mask, mask, 0);
     li_guest_addr(temp_addr, offset);
@@ -6622,34 +6569,10 @@ bool translate_vpgatherqq(IR1_INST *pir1)
         la_add(temp_addr, temp_addr, base_op);
     }
 
-    /* fetch the first element in vsib */
-    la_xvpickve2gr_d(temp_index, index_op, 0);
-    adjust_vsib_index(temp_index, temp_addr, temp_index,
-                    ir1_opnd_scale(opnd1));
-    la_ld_d(temp_index, temp_index, 0);
-    la_xvinsgr2vr_d(temp_dest, temp_index, 0);
-
-    /* fetch the second element in vsib */
-    la_xvpickve2gr_d(temp_index, index_op, 1);
-    adjust_vsib_index(temp_index, temp_addr, temp_index,
-                    ir1_opnd_scale(opnd1));
-    la_ld_d(temp_index, temp_index, 0);
-    la_xvinsgr2vr_d(temp_dest, temp_index, 1);
-
-    if(ir1_opnd_is_ymm(opnd0)){
-        /* fetch the third element in vsib */
-        la_xvpickve2gr_d(temp_index, index_op, 2);
-        adjust_vsib_index(temp_index, temp_addr, temp_index,
-                        ir1_opnd_scale(opnd1));
-        la_ld_d(temp_index, temp_index, 0);
-        la_xvinsgr2vr_d(temp_dest, temp_index, 2);
-
-        /* fetch the fourth element in vsib */
-        la_xvpickve2gr_d(temp_index, index_op, 3);
-        adjust_vsib_index(temp_index, temp_addr, temp_index,
-                        ir1_opnd_scale(opnd1));
-        la_ld_d(temp_index, temp_index, 0);
-        la_xvinsgr2vr_d(temp_dest, temp_index, 3);
+    for (int lane = 0; lane < lanes; lane++) {
+        translate_avx_gather_lane_lasx(temp_mask, index_op, temp_addr,
+                                       temp_dest, ir1_opnd_scale(opnd1),
+                                       lane, lane, true, true);
     }
     la_xvbitsel_v(dest, dest, temp_dest, temp_mask);
     if(ir1_opnd_is_xmm(opnd0)) {

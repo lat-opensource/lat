@@ -80,11 +80,11 @@ run_case()
 # VMASKMOVPS/PD and VPMASKMOVD/Q selected elements in the denied page, plus the
 # all-selected fast path.  These must fault only with the guest-page check.
 for mode in 1 2; do
-    for name in a b c d e f g h k l m n o p q s u w; do
+    for name in a b c d e f g h k l m n o p q s u w y A C E; do
         run_case "$mode" "$name" fault
     done
     # Unselected denied bytes and an all-clear mask must not fault.
-    for name in i j r t v; do
+    for name in i j r t v x z B D; do
         run_case "$mode" "$name" nofault
     done
 done

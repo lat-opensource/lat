@@ -4837,7 +4837,7 @@ static void translate_avx_gather_lane_lsx(IR2_OPND dest,
 {
     IR2_OPND mask_value = ra_alloc_itemp();
     IR2_OPND index_value = ra_alloc_itemp();
-    IR2_OPND loaded = ra_alloc_itemp();
+    IR2_OPND loaded;
     IR2_OPND select = ra_alloc_label();
     IR2_OPND done = ra_alloc_label();
 
@@ -4863,6 +4863,8 @@ static void translate_avx_gather_lane_lsx(IR2_OPND dest,
     la_label(select);
     /* x86 gathers access memory only for lanes with a negative mask. */
     adjust_vsib_index(address, base_addr, index_value, scale);
+    gen_test_page_flag(address, 0, PAGE_READ, value64 ? 8 : 4);
+    loaded = ra_alloc_itemp();
     if (value64) {
         la_ld_d(loaded, address, 0);
     } else {
