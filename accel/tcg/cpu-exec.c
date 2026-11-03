@@ -272,8 +272,18 @@ cpu_tb_exec(CPUState *cpu, TranslationBlock *itb, int *tb_exit)
     ret = tcg_qemu_tb_exec(env, tb_ptr);
 
     int tbexit = ret & TB_EXIT_MASK;
-    ret = (ret & ~TB_EXIT_MASK) - 4;
-    TranslationBlock *rettb = tcg_tb_lookup(ret);
+    uintptr_t tc_ptr = ret & ~TB_EXIT_MASK;
+    TranslationBlock *rettb = NULL;
+    if (likely(tc_ptr != 0)) {
+        uintptr_t ret_pc = tc_ptr - 4;
+        uintptr_t tc_start = (uintptr_t)itb->tc.ptr;
+
+        if (ret_pc >= tc_start && ret_pc < tc_start + itb->tc.size) {
+            rettb = itb;
+        } else {
+            rettb = tcg_tb_lookup(ret_pc);
+        }
+    }
     ret = tbexit;
     if (rettb) {
         uint64_t lazypc = 0;
