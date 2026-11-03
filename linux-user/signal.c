@@ -1634,6 +1634,11 @@ void process_pending_signals(CPUArchState *cpu_env)
     sigset_t set;
     sigset_t *blocked_set;
 
+    if (likely(!qatomic_read(&ts->signal_pending))) {
+        ts->in_sigsuspend = 0;
+        return;
+    }
+
     sigact_lock();
     while (qatomic_read(&ts->signal_pending)) {
         /* FIXME: This is not threadsafe.  */
