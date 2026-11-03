@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check GHBR's implicit MUL/IMUL/DIV/IDIV register semantics."""
+"""Check GHBR's implicit multiply/divide register semantics."""
 
 import re
 import sys
@@ -8,7 +8,8 @@ from pathlib import Path
 
 def function_body(source, name):
     match = re.search(
-        r"static\s+void\s+" + re.escape(name) + r"\s*\([^)]*\)\s*\{",
+        r"static\s+(?:void|bool)\s+" + re.escape(name) +
+        r"\s*\([^)]*\)\s*\{",
         source,
     )
     if not match:
@@ -78,6 +79,13 @@ def main():
         r"set_use_reg\(tb,ir1,edx_index\);\}",
         uses,
         "64-bit DIV/IDIV must read RAX and RDX",
+    )
+    require(
+        r"caseWRAP\(MULX\):if"
+        r"\(ir1_opnd_size\(ir1_get_opnd\(ir1,0\)\)==64\)"
+        r"\{set_use_reg\(tb,ir1,edx_index\);\}",
+        uses,
+        "64-bit MULX must read the implicit RDX high half",
     )
 
     mul_block = re.search(

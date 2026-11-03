@@ -2740,6 +2740,11 @@ static void deal_hide_opnd_use(TranslationBlock *tb, IR1_INST *ir1)
             set_use_reg(tb, ir1, edx_index);
         }
         break;
+    case WRAP(MULX):
+        if (ir1_opnd_size(ir1_get_opnd(ir1, 0)) == 64) {
+            set_use_reg(tb, ir1, edx_index);
+        }
+        break;
     case WRAP(ENTER):
     case WRAP(LEAVE):
         set_use_reg(tb, ir1, esp_index);

@@ -63,11 +63,31 @@ static __attribute__((noinline)) struct result128 mul64_explicit_source(void)
     return result;
 }
 
+static __attribute__((noinline)) struct result128 mulx64_implicit_rdx(void)
+{
+    struct result128 result;
+
+    __asm__ volatile(
+        "movabsq $0x1234567800000003, %%rcx\n\t"
+        "movl $2, %%ebx\n\t"
+        "movl %%ecx, %%edx\n\t"
+        "mulxq %%rbx, %%r8, %%r9\n\t"
+        "xorl %%edx, %%edx\n\t"
+        "movq %%r8, %[low]\n\t"
+        "movq %%r9, %[high]"
+        : [low] "=r"(result.low), [high] "=r"(result.high)
+        :
+        : "rbx", "rcx", "rdx", "r8", "r9", "cc");
+
+    return result;
+}
+
 int main(void)
 {
     struct result128 div = div64_after_edx_write(0xdeadbeef00000001ULL);
     struct result128 implicit = mul64_implicit_rax();
     struct result128 explicit = mul64_explicit_source();
+    struct result128 mulx = mulx64_implicit_rdx();
 
     printf("div64=%016" PRIx64 ":%016" PRIx64 "\n",
            div.low, div.high);
@@ -75,8 +95,11 @@ int main(void)
            implicit.high, implicit.low);
     printf("mul64-source=%016" PRIx64 ":%016" PRIx64 "\n",
            explicit.high, explicit.low);
+    printf("mulx64=%016" PRIx64 ":%016" PRIx64 "\n",
+           mulx.high, mulx.low);
 
     return div.low != 0x028f5c28f5f129d3ULL || div.high != 12 ||
            implicit.high != 0 || implicit.low != 0x0000000300000003ULL ||
-           explicit.high != 0 || explicit.low != 6;
+           explicit.high != 0 || explicit.low != 6 ||
+           mulx.high != 0 || mulx.low != 6;
 }
