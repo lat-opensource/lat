@@ -1215,12 +1215,8 @@ static bool alloc_tb_gen_buffer(size_t size)
         return false;
     }
 
-    /* Request large pages for the buffer.  */
-#ifdef LOW_MEM_MODE_0
+    /* Avoid allocating a large page for a small number of TBs. */
     qemu_madvise(buf, size, QEMU_MADV_NOHUGEPAGE);
-#else
-    qemu_madvise(buf, size, QEMU_MADV_HUGEPAGE);
-#endif
 
     tcg_ctx->tb_gen_buffer = buf;
     tcg_ctx->tb_gen_highwater = buf + size - 1024;
