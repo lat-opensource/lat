@@ -160,6 +160,10 @@ sysctl 配置立即生效：
 
 默认发布构建同时生成 32 位和 64 位翻译器：
 
+发布构建使用仓库中固定版本的 GLib 核心源码，并将需要的部分静态链接进
+翻译器，无需安装系统 GLib 开发包。该步骤需要 Meson 0.60 或更新版本。
+其他构建方式仍使用系统 GLib。
+
 .. code-block:: bash
 
     ./latxbuild/build-release.sh

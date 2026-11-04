@@ -115,8 +115,15 @@ configure_file(output: 'latx-version.h', configuration: latx_version_data)
 # grandfathered in from the QEMU Makefiles.
 add_project_arguments(config_host['GLIB_CFLAGS'].split(),
                       native: false, language: ['c', 'cpp', 'objc'])
+glib_link_deps = []
+if config_host['GLIB_CFLAGS'].contains('/third_party/glib')
+  glib_link_deps += [cc.find_library('latx-glib',
+                                    dirs: project_source_root / 'build-glib/glib',
+                                    static: true)]
+endif
 glib = declare_dependency(compile_args: config_host['GLIB_CFLAGS'].split(),
-                          link_args: config_host['GLIB_LIBS'].split())
+                          link_args: config_host['GLIB_LIBS'].split(),
+                          dependencies: glib_link_deps)
 # override glib dep with the configure results (for subprojects)
 meson.override_dependency('glib-2.0', glib)
 
@@ -841,6 +848,15 @@ foreach target : target_dirs
         suite: 'lat-pr-fast',
         timeout: 300,
       )
+      if config_host['GLIB_CFLAGS'].contains('/third_party/glib')
+        test(
+          target + '-bundled-glib',
+          python,
+          args: [files('tests/runtime/test-bundled-glib.py'), emulator],
+          depends: emulator,
+          suite: 'lat-pr-fast',
+        )
+      endif
     endif
 
   endforeach
