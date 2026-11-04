@@ -2499,15 +2499,16 @@ static bool translate_fnsave_softfpu(IR1_INST *pir1)
         IR2_OPND gpr_stn_high_opnd = ra_alloc_itemp();
         IR2_OPND gpr_stn_low_opnd = ra_alloc_itemp();
 
-        /* store fpu data registers stack */
+        /* The image contains logical ST(0)..ST(7), relative to TOP. */
         int ptr = 14 << data32;
         for (int i = 0; i <= 7; i++) {
-            int offset = lsenv_offset_of_fpr(lsenv, i);
-            la_ld_d(gpr_stn_low_opnd, env_ir2_opnd, offset);
-            la_ld_hu(gpr_stn_high_opnd, env_ir2_opnd, offset + 8);
+            IR2_OPND stn_opnd_addr = get_stn_opnd_addr(i);
+            la_ld_d(gpr_stn_low_opnd, stn_opnd_addr, 0);
+            la_ld_hu(gpr_stn_high_opnd, stn_opnd_addr, 8);
 
             la_st_d(gpr_stn_low_opnd, mem_opnd, ptr + 10 * i);
             la_st_h(gpr_stn_high_opnd, mem_opnd, ptr + 10 * i + 8);
+            ra_free_temp(stn_opnd_addr);
         }
 
         ra_free_temp(gpr_stn_low_opnd);
@@ -2649,15 +2650,17 @@ static bool translate_frstor_softfpu(IR1_INST *pir1)
         IR2_OPND gpr_stn_low_opnd = ra_alloc_itemp();
         IR2_OPND gpr_stn_high_opnd = ra_alloc_itemp();
 
+        /* FLDENV restored TOP; map the logical image into physical slots. */
         int ptr = 14 << data32;
         for (int i = 0; i <= 7; i++) {
-            int offset = lsenv_offset_of_fpr(lsenv, i);
+            IR2_OPND stn_opnd_addr = get_stn_opnd_addr(i);
 
             la_ld_d(gpr_stn_low_opnd, mem_opnd, ptr + 10 * i);
             la_ld_hu(gpr_stn_high_opnd, mem_opnd, ptr + 10 * i + 8);
 
-            la_st_d(gpr_stn_low_opnd, env_ir2_opnd, offset);
-            la_st_h(gpr_stn_high_opnd, env_ir2_opnd, offset + 8);
+            la_st_d(gpr_stn_low_opnd, stn_opnd_addr, 0);
+            la_st_h(gpr_stn_high_opnd, stn_opnd_addr, 8);
+            ra_free_temp(stn_opnd_addr);
         }
         ra_free_temp(gpr_stn_low_opnd);
         ra_free_temp(gpr_stn_high_opnd);
