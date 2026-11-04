@@ -1144,6 +1144,18 @@ bool translate_vblendpd(IR1_INST * pir1) {
     }
 
     if (ir1_opnd_is_xmm(ir1_get_opnd(pir1, 0))) {
+        if (ir2_opnd_cmp(&dest, &src1) && ir2_opnd_cmp(&dest, &src2)) {
+            set_high128_xreg_to_zero(dest);
+            return true;
+        }
+        if (ir2_opnd_cmp(&dest, &src2) && !ir2_opnd_cmp(&dest, &src1)) {
+            if (!(imm & 0x1))
+                la_vextrins_d(dest, src1, VEXTRINS_IMM_4_0(0, 0));
+            if (!(imm & 0x2))
+                la_vextrins_d(dest, src1, VEXTRINS_IMM_4_0(1, 1));
+            set_high128_xreg_to_zero(dest);
+            return true;
+        }
         IR2_OPND result = ir2_opnd_cmp(&dest, &src2) ?
                           ra_alloc_ftemp() : dest;
 
