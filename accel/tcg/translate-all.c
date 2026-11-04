@@ -1110,6 +1110,17 @@ static size_t size_code_gen_buffer(size_t tb_size)
     return tb_size;
 }
 
+#if !defined(_WIN32) || defined(USE_STATIC_CODE_GEN_BUFFER)
+/* Keep the start of the code buffer on ordinary pages for short-lived guests. */
+static void advise_code_gen_buffer(void *buf, size_t size)
+{
+    size_t small = MIN(size, 32 * MiB);
+
+    qemu_madvise(buf, size, QEMU_MADV_HUGEPAGE);
+    qemu_madvise(buf, small, QEMU_MADV_NOHUGEPAGE);
+}
+#endif
+
 #ifdef USE_STATIC_CODE_GEN_BUFFER
 static uint8_t static_code_gen_buffer[DEFAULT_CODE_GEN_BUFFER_SIZE]
     __attribute__((aligned(CODE_GEN_ALIGN)));
@@ -1142,7 +1153,7 @@ static bool alloc_code_gen_buffer(size_t tb_size, int splitwx, Error **errp)
         error_setg_errno(errp, errno, "mprotect of jit buffer");
         return false;
     }
-    qemu_madvise(buf, size, QEMU_MADV_HUGEPAGE);
+    advise_code_gen_buffer(buf, size);
 
     tcg_ctx->code_gen_buffer = buf;
     return true;
@@ -1187,7 +1198,7 @@ static bool alloc_code_gen_buffer_anon(size_t size, int prot,
 #ifdef LOW_MEM_MODE_0
     qemu_madvise(buf, size, QEMU_MADV_NOHUGEPAGE);
 #else
-    qemu_madvise(buf, size, QEMU_MADV_HUGEPAGE);
+    advise_code_gen_buffer(buf, size);
 #endif
 
     tcg_ctx->code_gen_buffer = buf;
@@ -1241,8 +1252,8 @@ static bool alloc_code_gen_buffer_splitwx_memfd(size_t size, Error **errp)
     tcg_splitwx_diff = buf_rx - buf_rw;
 
     /* Request large pages for the buffer and the splitwx.  */
-    qemu_madvise(buf_rw, size, QEMU_MADV_HUGEPAGE);
-    qemu_madvise(buf_rx, size, QEMU_MADV_HUGEPAGE);
+    advise_code_gen_buffer(buf_rw, size);
+    advise_code_gen_buffer(buf_rx, size);
     return true;
 
  fail_rx:
