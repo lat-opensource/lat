@@ -12,8 +12,15 @@
 #undef CONFIG_LATX_TU
 #endif
 
-/* Include the implementation to cover the private merge-tree lifecycle too. */
+void *__wrap_malloc(size_t size);
+void __wrap_free(void *ptr);
+
+/* Instrument the merge code without counting allocations inside static GLib. */
+#define malloc __wrap_malloc
+#define free __wrap_free
 #include "../aot_merge.c"
+#undef malloc
+#undef free
 
 __thread CPUState *thread_cpu;
 int qemu_loglevel;
@@ -40,8 +47,6 @@ static struct {
     size_t size;
 } allocations[128];
 
-void *__real_malloc(size_t size);
-void __real_free(void *ptr);
 void *__wrap_malloc(size_t size);
 void __wrap_free(void *ptr);
 int __wrap_get_aot_path(const char *name, char *path, size_t size);
@@ -50,7 +55,7 @@ DIR *__wrap_opendir(const char *name);
 
 void *__wrap_malloc(size_t size)
 {
-    void *ptr = __real_malloc(size);
+    void *ptr = malloc(size);
 
     if (track_allocations && ptr) {
         size_t i;
@@ -80,7 +85,7 @@ void __wrap_free(void *ptr)
             }
         }
     }
-    __real_free(ptr);
+    free(ptr);
 }
 
 int __wrap_get_aot_path(const char *name, char *path, size_t size)
