@@ -22431,6 +22431,8 @@ abi_long do_syscall_with_seccomp(void *cpu_env, int num, int seccomp_num,
     CPUState *cpu = env_cpu(cpu_env);
     CPUArchState *env = cpu->env_ptr;
     TaskState *ts = cpu->opaque;
+    struct GuestSeccompFilter *seccomp_filter =
+        __atomic_load_n(&ts->seccomp_filter, __ATOMIC_ACQUIRE);
     const abi_long seccomp_args[6] = {
         arg1, arg2, arg3, arg4, arg5, arg6,
     };
@@ -22485,11 +22487,13 @@ abi_long do_syscall_with_seccomp(void *cpu_env, int num, int seccomp_num,
     }
 
 #ifdef CONFIG_LATX_TUNNEL_LIB
-    suppress_tunnel = qatomic_read(&ts->seccomp_filter) && loader_tunnel;
+    suppress_tunnel = seccomp_filter && loader_tunnel;
 #endif
     if (suppress_tunnel) {
         ret = 0;
         seccomp_action = GUEST_SECCOMP_RETURN;
+    } else if (likely(!seccomp_filter)) {
+        seccomp_action = GUEST_SECCOMP_CONTINUE;
     } else {
         seccomp_action = guest_seccomp_filter_syscall(
             env, seccomp_num, seccomp_arch, seccomp_args, &ret);
