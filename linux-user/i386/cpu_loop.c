@@ -386,7 +386,11 @@ void cpu_loop(CPUX86State *env)
                       (long)pc, trapnr);
             abort();
         }
-        process_pending_signals(env);
+        if (unlikely(qatomic_read(&ts->signal_pending))) {
+            process_pending_signals(env);
+        } else {
+            ts->in_sigsuspend = 0;
+        }
     }
 }
 
