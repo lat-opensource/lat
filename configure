@@ -1741,11 +1741,12 @@ if test "$latx" = "yes" ; then
     QEMU_LDFLAGS="$latx_ldflags $QEMU_LDFLAGS"
     ;;
   esac
-  if test "$debug" = "yes" ; then
-    # add `--export-dynamic`, used for backtrace
+  if test "$debug" = "yes" || test "$plugins" = "yes" || test "$modules" = "yes" ; then
+    # Preserve symbols for backtraces, plugins and modules.
     QEMU_LDFLAGS="-export-dynamic $QEMU_LDFLAGS"
   else
-    QEMU_LDFLAGS="-export-dynamic $QEMU_LDFLAGS"
+    # KZT looks up its wrappers in the main executable with dlsym().
+    QEMU_LDFLAGS="-Wl,--dynamic-list=$source_path/latx-dynamic-symbols.list $QEMU_LDFLAGS"
   fi
   QEMU_LDFLAGS="-lz $QEMU_LDFLAGS"
 else
