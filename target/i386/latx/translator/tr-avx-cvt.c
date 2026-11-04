@@ -361,17 +361,12 @@ bool translate_vcvtdq2pd(IR1_INST * pir1) {
     if (ir1_opnd_is_ymm(ir1_get_opnd(pir1, 0))) {
         IR2_OPND dest = load_freg256_from_ir1(ir1_get_opnd(pir1, 0));
         IR2_OPND src = load_freg128_from_ir1(ir1_get_opnd(pir1, 1));
-        IR2_OPND result = dest;
         IR2_OPND high = ra_alloc_ftemp();
 
-        if (ir1_opnd_is_same_reg_without_width(ir1_get_opnd(pir1, 0),
-                                                ir1_get_opnd(pir1, 1)))
-            result = ra_alloc_ftemp();
-        la_vffintl_d_w(result, src);
+        /* Read the overlapping source before overwriting dest's low half. */
         la_vffinth_d_w(high, src);
-        la_xvpermi_q(result, high, XVPERMI_Q_4_0(0, 2));
-        if (!ir2_opnd_cmp(&result, &dest))
-            la_xvori_b(dest, result, 0);
+        la_vffintl_d_w(dest, src);
+        la_xvpermi_q(dest, high, XVPERMI_Q_4_0(0, 2));
     } else {
         IR2_OPND dest = load_freg128_from_ir1(ir1_get_opnd(pir1, 0));
         IR2_OPND src = load_freg128_from_ir1(ir1_get_opnd(pir1, 1));

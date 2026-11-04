@@ -121,6 +121,7 @@ if 'x86_64-linux-user' in target_dirs
       files('../../vroundsd-fixed.asm'),
       files('../../vroundss-fixed.asm'),
       files('../../vcvtss2sd-alias.asm'),
+      files('../../vcvtdq2pd-ymm-alias.asm'),
       files('../../vshufpd-interleave.asm'),
       files('../../avx-regression-extract-alias.S'),
       files('../../avx-regression-narrow-state.S'),
