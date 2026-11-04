@@ -21,6 +21,8 @@ build() {
     unset CFLAGS
     unset LDFLAGS
     export CFLAGS="-Wno-error=unused-but-set-variable -Wno-error=unused-function -Wformat -Werror=format-y2k"
+    "$srcdir/latxbuild/build-bundled-glib.sh"
+    export PKG_CONFIG_PATH="$srcdir/build-glib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
 
     local _configure32_flags=(
         --target-list=i386-linux-user
@@ -51,7 +53,7 @@ build() {
         --enable-guest-base-zero
         --disable-debug-info
         --optimize-O1
-        --extra-ldflags=-ldl
+        --extra-ldflags=-ldl\ -static-libgcc
         --disable-blobs
         --disable-docs
         --disable-werror
@@ -61,6 +63,9 @@ build() {
 
     local _configure64_flags=(
         --target-list=x86_64-linux-user
+        --disable-gcrypt
+        --disable-gnutls
+        --disable-nettle
         --disable-blobs
         --disable-debug-info
         --disable-docs
@@ -68,7 +73,7 @@ build() {
         --disable-werror
         --enable-kzt
         --enable-latx
-        --extra-ldflags=-ldl
+        --extra-ldflags=-ldl\ -static-libgcc
         --optimize-O1
     )
 
@@ -89,6 +94,10 @@ package() {
     install -Dm755 -s $srcdir/build64/latx-x86_64 $pkgdir/$pkgname-$pkgver/usr/bin/latx-x86_64
     install -Dm755 -s $srcdir/build64/runtime/latu-runtime-manager \
         $pkgdir/$pkgname-$pkgver/usr/bin/latu-runtime-manager
+    install -Dm644 "$srcdir/third_party/glib/LATX.md" \
+        "$package_root/usr/share/licenses/lat/glib/LATX.md"
+    install -m644 "$srcdir/third_party/glib/COPYING" "$package_root/usr/share/licenses/lat/glib/"
+    install -m644 "$srcdir/third_party/glib/LICENSES/"* "$package_root/usr/share/licenses/lat/glib/"
     cat >$pkgdir/$pkgname-$pkgver/usr/lib/binfmt.d/latx-i386.conf <<EOF
 :latx-i386:M::\x7fELF\x01\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00\x03\x00:\xff\xff\xff\xff\xff\xfe\xfe\x00\x00\x00\xf4\xff\xff\xff\xff\xff\xfe\xff\xff\xff:/usr/bin/latx-i386:OC
 EOF

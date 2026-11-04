@@ -174,6 +174,10 @@ Build and Outputs
 
 The default release build creates both 32-bit and 64-bit translators:
 
+Release builds compile the bundled GLib core and link the required parts
+statically, without the system GLib development package. This step requires
+Meson 0.60 or newer. Other build methods continue to use system GLib.
+
 .. code-block:: bash
 
     ./latxbuild/build-release.sh
