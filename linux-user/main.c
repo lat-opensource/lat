@@ -63,7 +63,6 @@ int mydebug = 1;
 #include "latx-options.h"
 #include "latx-runtime.h"
 #include "aot.h"
-#include <openssl/evp.h>
 #endif
 #ifdef CONFIG_LATX_PERF
 #include "latx-perf.h"
@@ -1793,9 +1792,9 @@ int main(int argc, char **argv, char **envp)
     }
 
 #ifdef CONFIG_LATX_AOT
-    EVP_MD_CTX *ctx = EVP_MD_CTX_new();
-    unsigned char hash[EVP_MAX_MD_SIZE];
-    unsigned int hash_len;
+    GChecksum *ctx = g_checksum_new(G_CHECKSUM_SHA1);
+    unsigned char hash[20];
+    gsize hash_len = sizeof(hash);
     char *buf;
     char real[PATH_MAX], *temp;
     char *aot_dir;
@@ -1821,8 +1820,7 @@ int main(int argc, char **argv, char **envp)
     if (temp == NULL) {
         lsassertm(0, "%s error!", __func__);
     }
-    EVP_DigestInit_ex(ctx, EVP_sha1(), NULL);
-    EVP_DigestUpdate(ctx, real, strlen(real));
+    g_checksum_update(ctx, (const guchar *)real, strlen(real));
     int aotac = 4;
     for (i = 0; i < target_argc; i++) {
         if (option_aot_wine == 0 && strstr(target_argv[i], "wine")) {
@@ -1837,11 +1835,11 @@ int main(int argc, char **argv, char **envp)
                 aotac = 2;
                 continue;
             }
-            EVP_DigestUpdate(ctx, target_argv[i], arglen);
+            g_checksum_update(ctx, (const guchar *)target_argv[i], arglen);
         }
     }
-    EVP_DigestFinal_ex(ctx, hash, &hash_len);
-    EVP_MD_CTX_free(ctx);
+    g_checksum_get_digest(ctx, hash, &hash_len);
+    g_checksum_free(ctx);
     for (i = 0; i < hash_len; i++) {
         sprintf(buf, "%02x", hash[i] & 0xff);
         buf += 2;
