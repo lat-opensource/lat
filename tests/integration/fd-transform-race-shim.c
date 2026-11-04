@@ -12,10 +12,10 @@
 #include <time.h>
 #include <unistd.h>
 
-typedef void *(*GReallocNFunc)(void *, size_t, size_t);
 typedef int (*SignalfdFunc)(int, const sigset_t *, int);
 
-static GReallocNFunc real_g_realloc_n;
+/* Avoid recursive dlsym calls when the loader itself reallocates memory. */
+extern void *__libc_realloc(void *mem, size_t size);
 static SignalfdFunc real_signalfd;
 static pthread_once_t init_once = PTHREAD_ONCE_INIT;
 static void *fd_table;
@@ -27,11 +27,11 @@ static __thread int expect_fd_table;
 
 static void init_symbols(void)
 {
-    real_g_realloc_n = dlsym(RTLD_NEXT, "g_realloc_n");
     real_signalfd = dlsym(RTLD_NEXT, "signalfd");
     marker = getenv("LATX_TEST_FD_TRANS_RACE_MARKER");
-    enabled = getenv("LATX_TEST_FD_TRANS_RACE") != NULL && marker;
-    if (!real_g_realloc_n || !real_signalfd) {
+    __atomic_store_n(&enabled, getenv("LATX_TEST_FD_TRANS_RACE") != NULL && marker,
+                     __ATOMIC_RELEASE);
+    if (!real_signalfd) {
         abort();
     }
 }
@@ -67,31 +67,31 @@ int signalfd(int fd, const sigset_t *mask, int flags)
 
     pthread_once(&init_once, init_symbols);
     ret = real_signalfd(fd, mask, flags);
-    if (enabled && fd == -1 && flags == SFD_NONBLOCK &&
+    if (__atomic_load_n(&enabled, __ATOMIC_ACQUIRE) &&
+        fd == -1 && flags == SFD_NONBLOCK &&
         sigismember(mask, SIGRTMIN) && ret >= 0) {
         expect_fd_table = 1;
     }
     return ret;
 }
 
-void *g_realloc_n(void *mem, size_t n_blocks, size_t n_block_bytes)
+void *realloc(void *mem, size_t size)
 {
     struct timespec delay = { .tv_sec = 0, .tv_nsec = 250000000 };
+    size_t n_blocks = size / sizeof(void *);
     size_t old_blocks;
     size_t old_size;
     void *old_table;
     void *new_mem;
 
-    pthread_once(&init_once, init_symbols);
-
-    if (!enabled || n_block_bytes != sizeof(void *)) {
-        return real_g_realloc_n(mem, n_blocks, n_block_bytes);
+    if (!__atomic_load_n(&enabled, __ATOMIC_ACQUIRE) || size % sizeof(void *)) {
+        return __libc_realloc(mem, size);
     }
 
     if (expect_fd_table) {
         expect_fd_table = 0;
         if (!mem) {
-            new_mem = allocate_table(n_blocks, n_block_bytes);
+            new_mem = allocate_table(n_blocks, sizeof(void *));
             if (!new_mem) {
                 abort();
             }
@@ -106,14 +106,14 @@ void *g_realloc_n(void *mem, size_t n_blocks, size_t n_block_bytes)
     if (mem != old_table || old_blocks > SIZE_MAX - 64 ||
         n_blocks != old_blocks + 64 || !old_blocks ||
         !__sync_bool_compare_and_swap(&injected, 0, 1)) {
-        return real_g_realloc_n(mem, n_blocks, n_block_bytes);
+        return __libc_realloc(mem, size);
     }
 
-    new_mem = allocate_table(n_blocks, n_block_bytes);
+    new_mem = allocate_table(n_blocks, sizeof(void *));
     if (!new_mem) {
         abort();
     }
-    old_size = old_blocks * n_block_bytes;
+    old_size = old_blocks * sizeof(void *);
     memcpy(new_mem, mem, old_size);
     munmap(mem, old_size);
     mark_injected();
