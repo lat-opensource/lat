@@ -619,9 +619,11 @@ bool translate_vcvtsi2sd(IR1_INST * pir1) {
     } else {
         lsassert(0);
     }
-    la_vshuf4i_d(result, src1, 0xc);
-    if (!ir2_opnd_cmp(&result, &dest))
-        la_xvori_b(dest, result, 0);
+    if (ir2_opnd_cmp(&dest, &src1)) {
+        la_xvinsve0_d(dest, result, 0);
+    } else {
+        la_vshuf4i_d(dest, src1, 0xc);
+    }
     set_high128_xreg_to_zero(dest);
     return true;
 }
