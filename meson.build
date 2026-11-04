@@ -814,6 +814,10 @@ foreach target : target_dirs
     }]
   foreach exe: execs
     exe_name = exe['name']
+    latx_link_depends = exe.get('link_depends', [])
+    if 'CONFIG_LATX' in config_host
+      latx_link_depends += files('latx-dynamic-symbols.list')
+    endif
 
     emulator = executable(exe_name, exe['sources'],
                install: true,
@@ -821,7 +825,7 @@ foreach target : target_dirs
                dependencies: arch_deps + deps + exe['dependencies'],
                objects: lib.extract_all_objects(recursive: true),
                link_language: link_language,
-               link_depends: exe.get('link_depends', []),
+               link_depends: latx_link_depends,
                link_args: link_args)
 
     emulators += {exe['name']: emulator}
