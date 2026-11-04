@@ -61,6 +61,9 @@ build() {
 
     local _configure64_flags=(
         --target-list=x86_64-linux-user
+        --disable-gcrypt
+        --disable-gnutls
+        --disable-nettle
         --disable-blobs
         --disable-debug-info
         --disable-docs
