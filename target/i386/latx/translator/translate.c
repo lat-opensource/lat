@@ -4542,6 +4542,53 @@ static inline void helper_restore_reg(IR2_OPND opnd)
             lsenv_offset_of_all_gpr(lsenv, ir2_opnd_base_reg_num(&opnd)));
 }
 
+/*
+ * Emit a guest page permission check for one address using the pageflags
+ * interval tree.  Control continues at success_label when the page is absent
+ * from the tree or carries the required flags; otherwise it falls through so
+ * the caller can raise the fault.
+ */
+static void gen_pageflags_test(IR2_OPND mem_addr, IR2_OPND itemp0,
+                               IR2_OPND itemp1, IR2_OPND itemp2,
+                               uint32_t flag, IR2_OPND success_label)
+{
+    IR2_OPND label0 = ra_alloc_label();
+    IR2_OPND label1 = ra_alloc_label();
+    IR2_OPND label2 = ra_alloc_label();
+
+    aot_load_host_addr(itemp0, (ADDR) (&pageflags_root),
+                       LOAD_PAGEFLAGS_ROOT, 0);
+    la_addi_d(itemp0, itemp0,
+             offsetof(IntervalTreeRoot, rb_root) +
+             offsetof(RBRoot, rb_node));
+    la_ld_d(itemp0, itemp0, 0);
+    la_beq(itemp0, zero_ir2_opnd, success_label);
+
+    la_label(label0);
+    la_ld_d(itemp1, itemp0, 0x10);
+    la_beq(itemp1, zero_ir2_opnd, label1);
+    la_ld_d(itemp2, itemp1, 0x28);
+    la_bltu(itemp2, mem_addr, label1);
+    la_mov64(itemp0, itemp1);
+    la_b(label0);
+
+    la_label(label1);
+    la_ld_d(itemp1, itemp0, 0x18);
+    la_bltu(mem_addr, itemp1, success_label);
+    la_ld_d(itemp1, itemp0, 0x20);
+    la_bgeu(itemp1, mem_addr, label2);
+    la_ld_d(itemp0, itemp0, 0x8);
+    la_beq(itemp0, zero_ir2_opnd, success_label);
+    la_ld_d(itemp1, itemp0, 0x28);
+    la_bgeu(itemp1, mem_addr, label0);
+    la_b(success_label);
+
+    la_label(label2);
+    la_ld_w(itemp0, itemp0, 0x30);
+    la_andi(itemp0, itemp0, flag & 0xff);
+    la_bne(itemp0, zero_ir2_opnd, success_label);
+}
+
 void gen_test_page_flag(IR2_OPND mem_opnd, int mem_imm, uint32_t flag,
                         unsigned int mem_size)
 {
@@ -4574,9 +4621,6 @@ void gen_test_page_flag(IR2_OPND mem_opnd, int mem_imm, uint32_t flag,
     }
 
     IR2_OPND label_exit = ra_alloc_label();
-    IR2_OPND label0 = ra_alloc_label();
-    IR2_OPND label1 = ra_alloc_label();
-    IR2_OPND label2 = ra_alloc_label();
     IR2_OPND label_fault = ra_alloc_label();
 #if TARGET_ABI_BITS == 32
     IR2_OPND label_check_end = ra_alloc_label();
@@ -4689,37 +4733,23 @@ void gen_test_page_flag(IR2_OPND mem_opnd, int mem_imm, uint32_t flag,
     } else
 #endif
     {
-        aot_load_host_addr(itemp0, (ADDR) (&pageflags_root),
-                           LOAD_PAGEFLAGS_ROOT, 0);
-        la_addi_d(itemp0, itemp0,
-                 offsetof(IntervalTreeRoot, rb_root) +
-                 offsetof(RBRoot, rb_node));
-        la_ld_d(itemp0, itemp0, 0);
-        la_beq(itemp0, zero_ir2_opnd, label_exit);
+        if (mem_size > 1) {
+            IR2_OPND label_start_ok = ra_alloc_label();
 
-        la_label(label0);
-        la_ld_d(itemp1, itemp0, 0x10);
-        la_beq(itemp1, zero_ir2_opnd, label1);
-        la_ld_d(itemp2, itemp1, 0x28);
-        la_bltu(itemp2, mem_addr, label1);
-        la_mov64(itemp0, itemp1);
-        la_b(label0);
-
-        la_label(label1);
-        la_ld_d(itemp1, itemp0, 0x18);
-        la_bltu(mem_addr, itemp1, label_exit);
-        la_ld_d(itemp1, itemp0, 0x20);
-        la_bgeu(itemp1, mem_addr, label2);
-        la_ld_d(itemp0, itemp0, 0x8);
-        la_beq(itemp0, zero_ir2_opnd, label_exit);
-        la_ld_d(itemp1, itemp0, 0x28);
-        la_bgeu(itemp1, mem_addr, label0);
-        la_b(label_exit);
-
-        la_label(label2);
-        la_ld_w(itemp0, itemp0, 0x30);
-        la_andi(itemp0, itemp0, flag & 0xff);
-        la_bne(itemp0, zero_ir2_opnd, label_exit);
+            gen_pageflags_test(mem_addr, itemp0, itemp1, itemp2, flag,
+                               label_start_ok);
+            /* The first byte's page denied the access. */
+            la_b(label_fault);
+            la_label(label_start_ok);
+            la_addi_d(mem_addr, mem_addr, mem_size - 1);
+            gen_pageflags_test(mem_addr, itemp0, itemp1, itemp2, flag,
+                               label_exit);
+            /* The first inaccessible byte is in the final guest page. */
+            la_bstrins_d(mem_addr, zero_ir2_opnd, TARGET_PAGE_BITS - 1, 0);
+        } else {
+            gen_pageflags_test(mem_addr, itemp0, itemp1, itemp2, flag,
+                               label_exit);
+        }
     }
 
     la_label(label_fault);
