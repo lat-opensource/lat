@@ -966,16 +966,24 @@ abi_long target_mmap(abi_ulong start, abi_ulong len, int target_prot,
     uint64_t host_offset;
     int shadow_fd = -1;
 
-    /* Hacking wine user_shared_data mapping to avoid shadow page */
-    if (start == 0x7ffe0000 && len == 0x1000 && (flags == (MAP_FIXED | MAP_SHARED)) && fd > 0
-        && (qemu_host_page_size > TARGET_PAGE_SIZE)) {
-        len = 0x4000;
-        target_prot |= PROT_WRITE;
-    }
-    /* Hacking wine syscall dispatcher for signal x86_64 */
-    if (start == 0x7ffe1000 && len == 0x1000 && (flags == (MAP_FIXED | MAP_PRIVATE | MAP_ANON)) && fd == -1 
-        && (qemu_host_page_size > TARGET_PAGE_SIZE)) {
-        return start;
+    /* Preserve the legacy Wine mapping workarounds when Quicktrans is off.
+     * Quicktrans needs independent shared/private subpages: the widened file
+     * mapping can lose the adjacent dispatcher pointer during writeback. */
+#if defined(CONFIG_LATX_FAST_TRANSLATOR) && defined(TARGET_X86_64)
+    if (!latx_quicktrans_enabled())
+#endif
+    {
+        /* Hacking wine user_shared_data mapping to avoid shadow page */
+        if (start == 0x7ffe0000 && len == 0x1000 && (flags == (MAP_FIXED | MAP_SHARED)) && fd > 0
+            && (qemu_host_page_size > TARGET_PAGE_SIZE)) {
+            len = 0x4000;
+            target_prot |= PROT_WRITE;
+        }
+        /* Hacking wine syscall dispatcher for signal x86_64 */
+        if (start == 0x7ffe1000 && len == 0x1000 && (flags == (MAP_FIXED | MAP_PRIVATE | MAP_ANON)) && fd == -1
+            && (qemu_host_page_size > TARGET_PAGE_SIZE)) {
+            return start;
+        }
     }
 
     if (start && option_mmap_fixed) {
