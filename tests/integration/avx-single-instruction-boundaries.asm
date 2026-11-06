@@ -45,6 +45,39 @@ section .text
     %endif
 %endmacro
 
+%macro CHECK_SCALAR_COPY 1
+    vmovdqu ymm0, [junk]
+    vmovdqu ymm1, [scalar_input]
+    %1 xmm0, xmm1, xmm1
+    vmovdqu [scalar_reference], ymm0
+    vmovdqu ymm1, [scalar_input]
+    %1 xmm1, xmm1, xmm1
+    vmovdqu ymm0, ymm1
+    CHECK scalar_reference, 14
+    vmovdqu ymm1, [scalar_input]
+    %1 xmm1, xmm1, [scalar_input]
+    vmovdqu ymm0, ymm1
+    CHECK scalar_reference, 15
+%endmacro
+
+%macro BLEND 2
+    vmovdqu ymm0, [junk]
+    vmovdqu ymm1, [words2]
+    vmovdqu ymm2, [words3]
+    %if %2 = 1
+        vmovdqu ymm0, ymm1
+        vpblendd xmm0, xmm0, xmm2, %1
+    %elif %2 = 2
+        vmovdqu ymm0, ymm2
+        vpblendd xmm0, xmm1, xmm0, %1
+    %elif %2 = 3
+        vpblendd xmm0, xmm1, [words3], %1
+    %else
+        vpblendd xmm0, xmm1, xmm2, %1
+    %endif
+    CHECK blend_ %+ %1, 16
+%endmacro
+
 _start:
 %assign alias 0
 %rep 3
@@ -52,7 +85,38 @@ _start:
     MADD vpmaddwd, alias, words2, words3, maddwd, ymm
     MADD vpmaddubsw, alias, bytes255, bytes128, maddubsw, xmm
     MADD vpmaddubsw, alias, bytes255, bytes128, maddubsw, ymm
+    MADD vpandn, alias, words2, words3, andnot, xmm
+    MADD vpandn, alias, words2, words3, andnot, ymm
 %assign alias alias + 1
+%endrep
+
+    vmovdqu ymm0, [junk]
+    vpandn xmm0, xmm0, xmm0
+    CHECK zeros, 9
+    vmovdqu ymm1, [words2]
+    vpandn xmm0, xmm1, [words3]
+    CHECK andnot_xmm, 10
+
+    vmovdqu ymm0, [junk]
+    vpbroadcastq ymm0, xmm0
+    CHECK junk, 11
+    vmovdqu ymm1, [broadcast_input]
+    vpbroadcastq ymm0, xmm1
+    CHECK broadcast_q, 12
+    vpbroadcastq ymm0, [broadcast_input]
+    CHECK broadcast_q, 13
+
+    CHECK_SCALAR_COPY vrcpss
+    CHECK_SCALAR_COPY vrsqrtss
+
+%assign blend_mask 0
+%rep 16
+%assign blend_alias 0
+%rep 4
+    BLEND blend_mask, blend_alias
+%assign blend_alias blend_alias + 1
+%endrep
+%assign blend_mask blend_mask + 1
 %endrep
 
     vmovdqu ymm1, [words2]
@@ -94,6 +158,9 @@ maddwd_xmm: times 4 dd 12
 maddubsw: times 16 dw 0x8000
 maddubsw_xmm: times 8 dw 0x8000
     times 8 dw 0
+andnot: times 16 dw 1
+andnot_xmm: times 8 dw 1
+    times 8 dw 0
 zeros: times 4 dq 0
 ones16: times 16 dw 1
 ones32: times 8 dd 1
@@ -102,8 +169,28 @@ count15: dq 15, 0
 count31: dq 31, 0
 count63: dq 63, 0
 count64: dq 64, 0
+broadcast_input: dq 0x0123456789abcdef, 0xfedcba9876543210, 0, -1
+broadcast_q: times 4 dq 0x0123456789abcdef
+scalar_input: dd 0x40800000, 0x11223344, 0x55667788, 0x99aabbcc
+    times 4 dd 0xdeadbeef
+%assign blend_mask 0
+%rep 16
+blend_ %+ blend_mask:
+%assign lane 0
+%rep 4
+    %if blend_mask & (1 << lane)
+        dd 0x00030003
+    %else
+        dd 0x00020002
+    %endif
+%assign lane lane + 1
+%endrep
+    times 4 dd 0
+%assign blend_mask blend_mask + 1
+%endrep
 
 section .bss align=32
 actual: resb 32
+scalar_reference: resb 32
 
 section .note.GNU-stack noalloc noexec nowrite progbits

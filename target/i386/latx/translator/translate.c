@@ -20,6 +20,7 @@
 #include "latx-smc.h"
 #include "jrra.h"
 #include "latx-native-asm.h"
+#include "latx-unwind.h"
 
 extern void *helper_tb_lookup_ptr(CPUArchState *);
 static int ss_generate_match_fail_native_code(void* code_buf);
@@ -1698,38 +1699,38 @@ static bool (*translate_functions[])(IR1_INST *) = {
     TRANS_FUNC_GEN(VCMPGT_OQPS, vcmpgt_oqps),
     TRANS_FUNC_GEN(VCMPTRUE_USPS, vcmptrue_usps),
     TRANS_FUNC_GEN(VCMPSD, vcmpsd),
-    TRANS_FUNC_GEN(VCMPEQSD, vcmpeqsd),
-    TRANS_FUNC_GEN(VCMPLTSD, vcmpltsd),
-    TRANS_FUNC_GEN(VCMPLESD, vcmplesd),
-    TRANS_FUNC_GEN(VCMPUNORDSD, vcmpunordsd),
-    TRANS_FUNC_GEN(VCMPNEQSD, vcmpneqsd),
-    TRANS_FUNC_GEN(VCMPNLTSD, vcmpnltsd),
-    TRANS_FUNC_GEN(VCMPNLESD, vcmpnlesd),
-    TRANS_FUNC_GEN(VCMPORDSD, vcmpordsd),
-    TRANS_FUNC_GEN(VCMPEQ_UQSD, vcmpeq_uqsd),
-    TRANS_FUNC_GEN(VCMPNGESD, vcmpngesd),
-    TRANS_FUNC_GEN(VCMPNGTSD, vcmpngtsd),
-    TRANS_FUNC_GEN(VCMPFALSESD, vcmpfalsesd),
-    TRANS_FUNC_GEN(VCMPNEQ_OQSD, vcmpneq_oqsd),
-    TRANS_FUNC_GEN(VCMPGESD, vcmpgesd),
-    TRANS_FUNC_GEN(VCMPGTSD, vcmpgtsd),
-    TRANS_FUNC_GEN(VCMPTRUESD, vcmptruesd),
-    TRANS_FUNC_GEN(VCMPEQ_OSSD, vcmpeq_ossd),
-    TRANS_FUNC_GEN(VCMPLT_OQSD, vcmplt_oqsd),
-    TRANS_FUNC_GEN(VCMPLE_OQSD, vcmple_oqsd),
-    TRANS_FUNC_GEN(VCMPUNORD_SSD, vcmpunord_ssd),
-    TRANS_FUNC_GEN(VCMPNEQ_USSD, vcmpneq_ussd),
-    TRANS_FUNC_GEN(VCMPNLT_UQSD, vcmpnlt_uqsd),
-    TRANS_FUNC_GEN(VCMPNLE_UQSD, vcmpnle_uqsd),
-    TRANS_FUNC_GEN(VCMPORD_SSD, vcmpord_ssd),
-    TRANS_FUNC_GEN(VCMPEQ_USSD, vcmpeq_ussd),
-    TRANS_FUNC_GEN(VCMPNGE_UQSD, vcmpnge_uqsd),
-    TRANS_FUNC_GEN(VCMPNGT_UQSD, vcmpngt_uqsd),
-    TRANS_FUNC_GEN(VCMPFALSE_OSSD, vcmpfalse_ossd),
-    TRANS_FUNC_GEN(VCMPNEQ_OSSD, vcmpneq_ossd),
-    TRANS_FUNC_GEN(VCMPGE_OQSD, vcmpge_oqsd),
-    TRANS_FUNC_GEN(VCMPGT_OQSD, vcmpgt_oqsd),
-    TRANS_FUNC_GEN(VCMPTRUE_USSD, vcmptrue_ussd),
+    TRANS_FUNC_GEN(VCMPEQSD, vcmpsd),
+    TRANS_FUNC_GEN(VCMPLTSD, vcmpsd),
+    TRANS_FUNC_GEN(VCMPLESD, vcmpsd),
+    TRANS_FUNC_GEN(VCMPUNORDSD, vcmpsd),
+    TRANS_FUNC_GEN(VCMPNEQSD, vcmpsd),
+    TRANS_FUNC_GEN(VCMPNLTSD, vcmpsd),
+    TRANS_FUNC_GEN(VCMPNLESD, vcmpsd),
+    TRANS_FUNC_GEN(VCMPORDSD, vcmpsd),
+    TRANS_FUNC_GEN(VCMPEQ_UQSD, vcmpsd),
+    TRANS_FUNC_GEN(VCMPNGESD, vcmpsd),
+    TRANS_FUNC_GEN(VCMPNGTSD, vcmpsd),
+    TRANS_FUNC_GEN(VCMPFALSESD, vcmpsd),
+    TRANS_FUNC_GEN(VCMPNEQ_OQSD, vcmpsd),
+    TRANS_FUNC_GEN(VCMPGESD, vcmpsd),
+    TRANS_FUNC_GEN(VCMPGTSD, vcmpsd),
+    TRANS_FUNC_GEN(VCMPTRUESD, vcmpsd),
+    TRANS_FUNC_GEN(VCMPEQ_OSSD, vcmpsd),
+    TRANS_FUNC_GEN(VCMPLT_OQSD, vcmpsd),
+    TRANS_FUNC_GEN(VCMPLE_OQSD, vcmpsd),
+    TRANS_FUNC_GEN(VCMPUNORD_SSD, vcmpsd),
+    TRANS_FUNC_GEN(VCMPNEQ_USSD, vcmpsd),
+    TRANS_FUNC_GEN(VCMPNLT_UQSD, vcmpsd),
+    TRANS_FUNC_GEN(VCMPNLE_UQSD, vcmpsd),
+    TRANS_FUNC_GEN(VCMPORD_SSD, vcmpsd),
+    TRANS_FUNC_GEN(VCMPEQ_USSD, vcmpsd),
+    TRANS_FUNC_GEN(VCMPNGE_UQSD, vcmpsd),
+    TRANS_FUNC_GEN(VCMPNGT_UQSD, vcmpsd),
+    TRANS_FUNC_GEN(VCMPFALSE_OSSD, vcmpsd),
+    TRANS_FUNC_GEN(VCMPNEQ_OSSD, vcmpsd),
+    TRANS_FUNC_GEN(VCMPGE_OQSD, vcmpsd),
+    TRANS_FUNC_GEN(VCMPGT_OQSD, vcmpsd),
+    TRANS_FUNC_GEN(VCMPTRUE_USSD, vcmpsd),
     TRANS_FUNC_GEN(VCMPSS, vcmpss),
     TRANS_FUNC_GEN(VCMPEQSS, vcmpeqss),
     TRANS_FUNC_GEN(VCMPLTSS, vcmpltss),
@@ -1924,6 +1925,11 @@ bool ir1_translate(IR1_INST *ir1)
             IR1_OPND *opnd = ir1_get_opnd(ir1, i);
 
             if (ir1_opnd_is_ymm(opnd)) {
+                /* A high insert reads only src1's low 128 bits. */
+                if (i == 1 && ir1_opcode(ir1) == dt_X86_INS_VINSERTF128 &&
+                    (ir1_opnd_uimm(ir1_get_opnd(ir1, 3)) & 1)) {
+                    continue;
+                }
                 flush_pending_ymmh_zero(
                     ra_alloc_xmm(ir1_opnd_base_reg_num(opnd)));
             } else if (ir1_opnd_is_mem(opnd) &&
@@ -2497,6 +2503,11 @@ int tr_ir2_generate(struct TranslationBlock *tb)
     bool reduce_proepo = false;
     bool x87_fcsr_active = false;
     int softfpu_region_end = -1;
+#ifdef CONFIG_LATX_INSTS_PATTERN
+    unsigned flags_recovery = INSTPTN_FLAGS_NONE;
+#endif
+
+    QEMU_BUILD_BUG_ON(CC_OP_NB > LATX_UNWIND_CC_OP_MASK + 1);
 
     lsenv->tr_data->softfpu_region_active = false;
 
@@ -2586,11 +2597,14 @@ int tr_ir2_generate(struct TranslationBlock *tb)
          * at the end of TB translate cache.
          */
         tcg_ctx->gen_insn_data[i][0] = pir1->info->address;
-        /* Preserve logical upper zeros if this instruction faults before
-         * the deferred clears at the normal TB exit have executed.  The
-         * low 16 bits remain the condition-code operation. */
+        /* Persist recovery state with the code, including loaded AOT TBs. */
         tcg_ctx->gen_insn_data[i][1] =
-            (target_ulong)lsenv->tr_data->ymmh_zero_pending << 16;
+            (target_ulong)lsenv->tr_data->ymmh_zero_pending <<
+            LATX_UNWIND_YMMH_SHIFT;
+#ifdef CONFIG_LATX_INSTS_PATTERN
+        tcg_ctx->gen_insn_data[i][1] |=
+            flags_recovery << LATX_UNWIND_INSTPTN_SHIFT;
+#endif
 
 #ifdef CONFIG_LATX_IMM_REG
         imm_cache->curr_ir1_index = i;
@@ -2630,6 +2644,16 @@ int tr_ir2_generate(struct TranslationBlock *tb)
         }
 
         bool translation_success = ir1_translate(pir1);
+#ifdef CONFIG_LATX_INSTS_PATTERN
+        if (translation_success) {
+            unsigned recovery = instptn_flags_recovery(pir1);
+
+            /* A fault in the comparison itself still needs the old flags. */
+            if (recovery != INSTPTN_FLAGS_NONE) {
+                flags_recovery = recovery;
+            }
+        }
+#endif
         if (!translation_success) {
 #ifdef CONFIG_LATX_TU
             tb->s_data->tu_tb_mode = BAD_TB;

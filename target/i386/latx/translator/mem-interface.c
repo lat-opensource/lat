@@ -367,6 +367,24 @@ static IR2_OPND convert_mem_helper(IR1_OPND *opnd1, IR2_OPND *arg_dest_op,
     if (host_off) {
         if (si12_overflow(offset)) {
             *host_off = 0;
+#ifdef TARGET_X86_64
+            bool split_offset = CODEIS64 && ir1_addr_size(pir1) == 64 &&
+                                has_base && !has_index && !has_seg &&
+                                ir1_opnd_size(opnd1) != 80;
+#ifdef CONFIG_LATX_IMM_REG
+            split_offset = split_offset &&
+                           (!option_imm_reg || !option_imm_complex);
+#endif
+            if (split_offset) {
+                longx low = sextract64(offset, 0, 12);
+                longx high = offset - low;
+                if (low && high == (int32_t)high) {
+                    /* Keep the low displacement in the load/store itself. */
+                    *host_off = low;
+                    offset = high;
+                }
+            }
+#endif
         } else {
 #ifdef CONFIG_LATX_IMM_REG
             cache_skip = true;

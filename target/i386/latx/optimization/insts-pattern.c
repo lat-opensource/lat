@@ -443,6 +443,32 @@ bool insts_pattern_scan_jcc_end(TranslationBlock *tb, IR1_INST *pir1, int pir1_i
     IR1_OPND *opnd0 = NULL;
     IR1_OPND *opnd1 = NULL;
     switch (ir1_opcode(pir1)) {
+#ifdef CONFIG_LATX_AVX_OPT
+    case WRAP(VPTEST):
+    case WRAP(VTESTPS):
+    case WRAP(VTESTPD):
+        SCAN_CHECK(scan, 0);
+        ir1_jcc = SCAN_IR1(tb, scan, 0);
+        if (!option_enable_lasx || pir1_index + 1 != SCAN_IDX(scan, 0)) {
+            return false;
+        }
+        switch (ir1_opcode(ir1_jcc)) {
+        case WRAP(JE):
+        case WRAP(JNE):
+        case WRAP(JB):
+        case WRAP(JAE):
+        case WRAP(JBE):
+        case WRAP(JA):
+            instptn_check_test_jcc_0();
+            pir1->instptn.opc = INSTPTN_OPC_TEST_JCC;
+            pir1->instptn.next = ir1_jcc;
+            ir1_jcc->instptn.opc = INSTPTN_OPC_NOP;
+            break;
+        default:
+            break;
+        }
+        return false;
+#endif
         case WRAP(CMP):
         SCAN_CHECK(scan, 0);
         ir1_jcc = SCAN_IR1(tb, scan, 0);

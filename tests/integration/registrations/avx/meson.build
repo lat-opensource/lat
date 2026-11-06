@@ -20,6 +20,14 @@ if 'x86_64-linux-user' in target_dirs
     }]
   endif
   latx_integration_tests += [{
+    'name': 'test-instptn-signal-recovery',
+    'runner': find_program('../../test-avx-regressions.py'),
+    'args': [emulators['latx-x86_64'],
+             files('../../instptn-signal-recovery.S')],
+    'env': {'LATX_SOFTFPU': '0'},
+    'timeout': 120,
+  }]
+  latx_integration_tests += [{
     'name': 'test-ymmh-conditional-save',
     'runner': find_program('../../test-avx-regressions.py'),
     'args': [emulators['latx-x86_64'], files('../../ymmh-conditional-save.asm')],
@@ -43,6 +51,27 @@ if 'x86_64-linux-user' in target_dirs
     'runner': find_program('../../test-avx-regressions.py'),
     'args': [emulators['latx-x86_64'], files('../../vcomis-jcc.S')],
     'timeout': 120,
+  }]
+  latx_integration_tests += [{
+    'name': 'test-vcomis-flag-reduction',
+    'runner': find_program('../../test-avx-regressions.py'),
+    'args': [emulators['latx-x86_64'], files('../../vcomis-flag-reduction.asm')],
+    'env': {'LATX_SOFTFPU': '0'},
+    'timeout': 180,
+  }]
+  latx_integration_tests += [{
+    'name': 'test-avx-test-flags',
+    'runner': find_program('../../test-avx-regressions.py'),
+    'args': [emulators['latx-x86_64'], files('../../avx-test-flags.asm')],
+    'env': {'LATX_SOFTFPU': '0'},
+    'timeout': 180,
+  }]
+  latx_integration_tests += [{
+    'name': 'test-avx-test-jcc',
+    'runner': find_program('../../test-avx-regressions.py'),
+    'args': [emulators['latx-x86_64'], files('../../avx-test-jcc.asm')],
+    'env': {'LATX_SOFTFPU': '0'},
+    'timeout': 180,
   }]
   latx_integration_tests += [{
     'name': 'test-xcomis-patterns',
@@ -74,10 +103,28 @@ if 'x86_64-linux-user' in target_dirs
     'args': [
       emulators['latx-x86_64'],
       files('../../avx-single-instruction-boundaries.asm'),
+      files('../../avx-scalar-double-alias.asm'),
+      files('../../vaddsubpd-lanes.asm'),
+      files('../../vblendpd-xmm-alias.asm'),
+      files('../../vbroadcastsd-memory.asm'),
+      files('../../vinsertf128-alias.asm'),
+      files('../../vinsertf128-high-pending.asm'),
+      files('../../vmovsd-alias.asm'),
+      files('../../vperm2x128-immediate.asm'),
+      files('../../vpermilpd-ymm-immediate.asm'),
+      files('../../vpermilpd-immediate.asm'),
+      files('../../vmovd-xmm-zero.asm'),
+      files('../../vmovss-memory-zero.asm'),
       files('../../avx128-shuffle.S'),
       files('../../avx-ymm-writeback.S'),
       files('../../vpshufd-distinct-regs.S'),
       files('../../vroundps-imm0b.S'),
+      files('../../vroundsd-fixed.asm'),
+      files('../../vroundss-fixed.asm'),
+      files('../../vcvtss2sd-alias.asm'),
+      files('../../vcvtdq2pd-ymm-alias.asm'),
+      files('../../vcvtsi2sd-alias.asm'),
+      files('../../vshufpd-interleave.asm'),
       files('../../avx-regression-extract-alias.S'),
       files('../../avx-regression-narrow-state.S'),
       files('../../avx-regression-fma-alias.S'),
@@ -97,6 +144,14 @@ if 'x86_64-linux-user' in target_dirs
     suite: 'latx-integration',
   )
   foreach cache_option : ['0000', '1100', '1101', '1110', '1111']
+    latx_integration_tests += [{
+      'name': 'test-base-displacement-' + cache_option,
+      'runner': find_program('../../test-avx-regressions.py'),
+      'args': [emulators['latx-x86_64'],
+               files('../../base-displacement.asm')],
+      'env': {'LATX_IMM_REG': cache_option, 'LATX_SOFTFPU': '0'},
+      'timeout': 120,
+    }]
     test(
       'test-rip-relative-cache-' + cache_option,
       find_program('../../test-avx-regressions.py'),
@@ -126,6 +181,14 @@ if 'i386-linux-user' in target_dirs
       'timeout': 120,
     }]
   endif
+  latx_integration_tests += [{
+    'name': 'test-instptn-signal-recovery-i386',
+    'runner': find_program('../../test-avx-regressions.py'),
+    'args': ['--guest-bits', '32', emulators['latx-i386'],
+             files('../../instptn-signal-recovery-i386.S')],
+    'env': {'LATX_SOFTFPU': '0'},
+    'timeout': 120,
+  }]
   latx_integration_tests += [{
     'name': 'test-ymmh-conditional-save-i386',
     'runner': find_program('../../test-avx-regressions.py'),

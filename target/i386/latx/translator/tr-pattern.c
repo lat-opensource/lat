@@ -12,6 +12,7 @@
 #include "insts-pattern.h"
 #include "tu.h"
 #include "hbr.h"
+#include "latx-unwind.h"
 
 #ifdef CONFIG_LATX_INSTS_PATTERN
 
@@ -2379,6 +2380,94 @@ static bool translate_ucomiss_xx_jcc(IR1_INST *pir1)
 #endif
 
 
+#ifdef CONFIG_LATX_AVX_OPT
+static bool translate_avx_test_jcc(IR1_INST *pir1)
+{
+    IR1_INST *next = pir1->instptn.next;
+#ifdef CONFIG_LATX_TU
+    TranslationBlock *tb = lsenv->tr_data->curr_tb;
+    if (tb->s_data->next_tb[TU_TB_INDEX_NEXT] &&
+        tb->s_data->next_tb[TU_TB_INDEX_TARGET]) {
+        switch (ir1_opcode(pir1)) {
+        case WRAP(VPTEST):
+            translate_vptest(pir1);
+            break;
+        case WRAP(VTESTPS):
+            translate_vtestps(pir1);
+            break;
+        case WRAP(VTESTPD):
+            translate_vtestpd(pir1);
+            break;
+        default:
+            lsassert(0);
+        }
+        return translate_jcc(next);
+    }
+#endif
+    IR1_OPND *opnd0 = ir1_get_opnd(pir1, 0);
+    IR1_OPND *opnd1 = ir1_get_opnd(pir1, 1);
+    bool wide = ir1_opnd_is_ymm(opnd0);
+    IR2_OPND dest = wide ? load_freg256_from_ir1(opnd0) :
+                           load_freg128_from_ir1(opnd0);
+    IR2_OPND src = wide ? load_freg256_from_ir1(opnd1) :
+                          load_freg128_from_ir1(opnd1);
+    IR2_OPND flags = ra_alloc_itemp();
+    IR2_OPND cond = ra_alloc_itemp();
+    IR2_OPND target = ra_alloc_label();
+    uint8_t eflags = ir1_get_eflag_def(pir1) &
+                    ~lsenv->tr_data->curr_ir1_skipped_eflags;
+    int mask = ZF_BIT;
+    bool nonzero = true;
+    switch (ir1_opcode(next)) {
+    case WRAP(JNE):
+        nonzero = false;
+        break;
+    case WRAP(JAE):
+        nonzero = false;
+        /* fall through */
+    case WRAP(JB):
+        mask = CF_BIT;
+        break;
+    case WRAP(JA):
+        nonzero = false;
+        /* fall through */
+    case WRAP(JBE):
+        mask = ZF_BIT | CF_BIT;
+        break;
+    case WRAP(JE):
+        break;
+    default:
+        lsassert(0);
+    }
+    generate_avx_test_flags(pir1, dest, src, flags,
+                            eflags | ir1_get_eflag_use(next));
+    if (eflags) {
+        la_x86mtflag(flags, eflags);
+    }
+    if (mask == (ZF_BIT | CF_BIT)) {
+        la_andi(cond, flags, mask);
+        if (nonzero) {
+            la_bne(cond, zero_ir2_opnd, target);
+        } else {
+            la_beq(cond, zero_ir2_opnd, target);
+        }
+    } else {
+        IR2_OPND condition = mask == ZF_BIT ? fcc0_ir2_opnd : fcc1_ir2_opnd;
+        if (nonzero) {
+            la_bcnez(condition, target);
+        } else {
+            la_bceqz(condition, target);
+        }
+    }
+    ra_free_temp(cond);
+    ra_free_temp(flags);
+    tr_generate_exit_tb(next, 0);
+    la_label(target);
+    tr_generate_exit_tb(next, 1);
+    return true;
+}
+#endif
+
 bool try_translate_instptn(IR1_INST *pir1)
 {
     instptn_check_false();
@@ -2392,6 +2481,13 @@ bool try_translate_instptn(IR1_INST *pir1)
     case INSTPTN_OPC_CMP_JCC:
         return translate_cmp_jcc(pir1);
     case INSTPTN_OPC_TEST_JCC:
+#ifdef CONFIG_LATX_AVX_OPT
+        if (ir1_opcode(pir1) == WRAP(VPTEST) ||
+            ir1_opcode(pir1) == WRAP(VTESTPS) ||
+            ir1_opcode(pir1) == WRAP(VTESTPD)) {
+            return translate_avx_test_jcc(pir1);
+        }
+#endif
         return translate_test_jcc(pir1);
     case INSTPTN_OPC_CQO_IDIV:
         return translate_cqo_idiv(pir1);
@@ -2467,195 +2563,206 @@ bool try_translate_instptn(IR1_INST *pir1)
     return false;
 }
 
-void opt_instptn_fix(CPUState *cpu, TranslationBlock *tb, int index)
+unsigned instptn_flags_recovery(IR1_INST *pir1)
 {
-    CPUArchState *env = cpu->env_ptr;
-    // int num_insns = tb->icount;
-    for (int i = 0; i < index; i++) {
-        IR1_INST *pir1 = tb_ir1_inst(tb, i);
-        if (pir1->instptn.opc == INSTPTN_OPC_CMP_XX_JCC ||
-            pir1->instptn.opc == INSTPTN_OPC_TEST_XX_JCC ||
-            pir1->instptn.opc == INSTPTN_OPC_BT_XX_JCC) {
+    unsigned recovery;
 
-            int opnd_size = ir1_opnd_size(ir1_get_opnd(pir1, 0));
-            ucontext_t *uc = env->puc;
-
-            switch (ir1_opcode(pir1))
-            {
-            case WRAP(CMP):
-            {
-                uint64_t a0 = UC_GR(uc)[4];
-                uint64_t a1 = UC_GR(uc)[5];
-                uint64_t eflags = 0;
-                switch (opnd_size)
-                {
-                case 8:
-                    asm volatile (
-                        DEFINE_PARSE_R
-                        "parse_r_%= __src, %[src]  \n\t"
-                        "parse_r_%= __dst, %[dst]  \n\t"
-                        ".word (0x003f0008 | (__src << 10) | (__dst << 5))\n\t" /*x86sub.b*/
-                        "parse_r_%= __flags, %[flags]  \n\t"
-                        ".word (0x005c0000 | (0x3f << 10) | __flags)\n\t"  /*x86mfflag*/
-                        : [dst]"+r"(a0),
-                        [flags]"=r"(eflags)
-                        : [src]"r"(a1)
-                        : "cc"
-                    );
-                break;
-                case 16:
-                    asm volatile (
-                        DEFINE_PARSE_R
-                        "parse_r_%= __src, %[src]  \n\t"
-                        "parse_r_%= __dst, %[dst]  \n\t"
-                        ".word (0x003f0009 | (__src << 10) | (__dst << 5))\n\t" /*x86sub.h*/
-                        "parse_r_%= __flags, %[flags]  \n\t"
-                        ".word (0x005c0000 | (0x3f << 10) | __flags)\n\t"  /*x86mfflag*/
-                        : [dst]"+r"(a0),
-                        [flags]"=r"(eflags)
-                        : [src]"r"(a1)
-                        : "cc"
-                    );
-                break;
-                case 32:
-                    asm volatile (
-                        DEFINE_PARSE_R
-                        "parse_r_%= __src, %[src]  \n\t"
-                        "parse_r_%= __dst, %[dst]  \n\t"
-                        ".word (0x003f000a | (__src << 10) | (__dst << 5))\n\t" /*x86sub.w*/
-                        "parse_r_%= __flags, %[flags]  \n\t"
-                        ".word (0x005c0000 | (0x3f << 10) | __flags)\n\t"  /*x86mfflag*/
-                        : [dst]"+r"(a0),
-                        [flags]"=r"(eflags)
-                        : [src]"r"(a1)
-                        : "cc"
-                    );
-                break;
-                case 64:
-                    asm volatile (
-                        DEFINE_PARSE_R
-                        "parse_r_%= __src, %[src]  \n\t"
-                        "parse_r_%= __dst, %[dst]  \n\t"
-                        ".word (0x003f000b | (__src << 10) | (__dst << 5))\n\t" /*x86sub.d*/
-                        "parse_r_%= __flags, %[flags]  \n\t"
-                        ".word (0x005c0000 | (0x3f << 10) | __flags)\n\t"  /*x86mfflag*/
-                        : [dst]"+r"(a0),
-                        [flags]"=r"(eflags)
-                        : [src]"r"(a1)
-                        : "cc"
-                    );
-                break;
-                default:
-                    break;
-                }
-                env->eflags = env->eflags & ~(0b100011010101);
-                env->eflags = env->eflags | (eflags & 0b100011010101);
-            }
-            break;
-            case WRAP(TEST):
-            {
-                IR1_OPND *opnd0 = ir1_get_opnd(pir1, 0);
-                IR1_OPND *opnd1 = ir1_get_opnd(pir1, 1);
-
-                bool is_same_reg = ir1_opnd_is_same_reg(opnd0, opnd1);
-                uint64_t a0 = UC_GR(uc)[4];
-                uint64_t a1 = is_same_reg ? a0 : UC_GR(uc)[5];
-                uint64_t eflags = 0;
-
-                switch (opnd_size)
-                {
-                case 8:
-                    asm volatile (
-                        DEFINE_PARSE_R
-                        "parse_r_%= __src, %[src]  \n\t"
-                        "parse_r_%= __dst, %[dst]  \n\t"
-                        ".word (0x003f8010 | (__src << 10) | (__dst << 5))\n\t" /*x86and.b*/
-                        "parse_r_%= __flags, %[flags]  \n\t"
-                        ".word (0x005c0000 | (0x3f << 10) | __flags)\n\t"  /*x86mfflag*/
-                        : [dst]"+r"(a0),
-                        [flags]"=r"(eflags)
-                        : [src]"r"(a1)
-                        : "cc"
-                    );
-                break;
-                case 16:
-                    asm volatile (
-                        DEFINE_PARSE_R
-                        "parse_r_%= __src, %[src]  \n\t"
-                        "parse_r_%= __dst, %[dst]  \n\t"
-                        ".word (0x003f8011 | (__src << 10) | (__dst << 5))\n\t" /*x86and.h*/
-                        "parse_r_%= __flags, %[flags]  \n\t"
-                        ".word (0x005c0000 | (0x3f << 10) | __flags)\n\t"  /*x86mfflag*/
-                        : [dst]"+r"(a0),
-                        [flags]"=r"(eflags)
-                        : [src]"r"(a1)
-                        : "cc"
-                    );
-                break;
-                case 32:
-                    asm volatile (
-                        DEFINE_PARSE_R
-                        "parse_r_%= __src, %[src]  \n\t"
-                        "parse_r_%= __dst, %[dst]  \n\t"
-                        ".word (0x003f8012 | (__src << 10) | (__dst << 5))\n\t" /*x86and.w*/
-                        "parse_r_%= __flags, %[flags]  \n\t"
-                        ".word (0x005c0000 | (0x3f << 10) | __flags)\n\t"  /*x86mfflag*/
-                        : [dst]"+r"(a0),
-                        [flags]"=r"(eflags)
-                        : [src]"r"(a1)
-                        : "cc"
-                    );
-                break;
-                case 64:
-                    asm volatile (
-                        DEFINE_PARSE_R
-                        "parse_r_%= __src, %[src]  \n\t"
-                        "parse_r_%= __dst, %[dst]  \n\t"
-                        ".word (0x003f8013 | (__src << 10) | (__dst << 5))\n\t" /*x86and.d*/
-                        "parse_r_%= __flags, %[flags]  \n\t"
-                        ".word (0x005c0000 | (0x3f << 10) | __flags)\n\t"  /*x86mfflag*/
-                        : [dst]"+r"(a0),
-                        [flags]"=r"(eflags)
-                        : [src]"r"(a1)
-                        : "cc"
-                    );
-                break;
-                default:
-                    break;
-                }
-                env->eflags = env->eflags & ~(0b100011000101);
-                env->eflags = env->eflags | (eflags & 0b100011000101);
-            }
-            break;
-            case WRAP(BT):
-            {
-                uint64_t a0 = UC_GR(uc)[4];
-                uint64_t a1 = UC_GR(uc)[5];
-                env->eflags = env->eflags & ~(1); // clear CF
-                env->eflags = env->eflags | ((a0 >> a1) & 1); // set CF
-            }
-            break;
-            case WRAP(JB):
-            case WRAP(JAE):
-            case WRAP(JE):
-            case WRAP(JNE):
-            case WRAP(JBE):
-            case WRAP(JA):
-            case WRAP(JL):
-            case WRAP(JGE):
-            case WRAP(JLE):
-            case WRAP(JG):
-            case WRAP(JS):
-            case WRAP(JNS):
-            case WRAP(JNO):
-            case WRAP(JO):
-            break;
-            default:
-                lsassert(0);
-                break;
-            }
-            return;
+    switch (pir1->instptn.opc) {
+    case INSTPTN_OPC_CMP_XX_JCC:
+        if (ir1_opcode(pir1) != WRAP(CMP)) {
+            return INSTPTN_FLAGS_NONE;
         }
+        recovery = INSTPTN_FLAGS_CMP;
+        break;
+    case INSTPTN_OPC_TEST_XX_JCC:
+        if (ir1_opcode(pir1) != WRAP(TEST)) {
+            return INSTPTN_FLAGS_NONE;
+        }
+        recovery = INSTPTN_FLAGS_TEST;
+        if (ir1_opnd_is_same_reg(ir1_get_opnd(pir1, 0),
+                                ir1_get_opnd(pir1, 1))) {
+            recovery |= INSTPTN_FLAGS_SAME_REG;
+        }
+        break;
+    case INSTPTN_OPC_BT_XX_JCC:
+        if (ir1_opcode(pir1) != WRAP(BT)) {
+            return INSTPTN_FLAGS_NONE;
+        }
+        recovery = INSTPTN_FLAGS_BT;
+        break;
+    default:
+        return INSTPTN_FLAGS_NONE;
+    }
+
+    int size = ir1_opnd_size(ir1_get_opnd(pir1, 0));
+
+    lsassert(size == 8 || size == 16 || size == 32 || size == 64);
+    return recovery | ((__builtin_ctz(size) - 3) << INSTPTN_FLAGS_SIZE_SHIFT);
+}
+
+void opt_instptn_fix(CPUArchState *env, unsigned recovery)
+{
+    int opnd_size = 8 << ((recovery >> INSTPTN_FLAGS_SIZE_SHIFT) &
+                         INSTPTN_FLAGS_SIZE_MASK);
+    ucontext_t *uc = env->puc;
+
+    switch (recovery & INSTPTN_FLAGS_OP_MASK)
+    {
+    case INSTPTN_FLAGS_CMP:
+    {
+        uint64_t a0 = UC_GR(uc)[4];
+        uint64_t a1 = UC_GR(uc)[5];
+        uint64_t eflags = 0;
+        switch (opnd_size)
+        {
+        case 8:
+            asm volatile (
+                DEFINE_PARSE_R
+                "parse_r_%= __src, %[src]  \n\t"
+                "parse_r_%= __dst, %[dst]  \n\t"
+                ".word (0x003f0008 | (__src << 10) | (__dst << 5))\n\t" /*x86sub.b*/
+                "parse_r_%= __flags, %[flags]  \n\t"
+                ".word (0x005c0000 | (0x3f << 10) | __flags)\n\t"  /*x86mfflag*/
+                : [dst]"+r"(a0),
+                [flags]"=r"(eflags)
+                : [src]"r"(a1)
+                : "cc"
+            );
+        break;
+        case 16:
+            asm volatile (
+                DEFINE_PARSE_R
+                "parse_r_%= __src, %[src]  \n\t"
+                "parse_r_%= __dst, %[dst]  \n\t"
+                ".word (0x003f0009 | (__src << 10) | (__dst << 5))\n\t" /*x86sub.h*/
+                "parse_r_%= __flags, %[flags]  \n\t"
+                ".word (0x005c0000 | (0x3f << 10) | __flags)\n\t"  /*x86mfflag*/
+                : [dst]"+r"(a0),
+                [flags]"=r"(eflags)
+                : [src]"r"(a1)
+                : "cc"
+            );
+        break;
+        case 32:
+            asm volatile (
+                DEFINE_PARSE_R
+                "parse_r_%= __src, %[src]  \n\t"
+                "parse_r_%= __dst, %[dst]  \n\t"
+                ".word (0x003f000a | (__src << 10) | (__dst << 5))\n\t" /*x86sub.w*/
+                "parse_r_%= __flags, %[flags]  \n\t"
+                ".word (0x005c0000 | (0x3f << 10) | __flags)\n\t"  /*x86mfflag*/
+                : [dst]"+r"(a0),
+                [flags]"=r"(eflags)
+                : [src]"r"(a1)
+                : "cc"
+            );
+        break;
+        case 64:
+            asm volatile (
+                DEFINE_PARSE_R
+                "parse_r_%= __src, %[src]  \n\t"
+                "parse_r_%= __dst, %[dst]  \n\t"
+                ".word (0x003f000b | (__src << 10) | (__dst << 5))\n\t" /*x86sub.d*/
+                "parse_r_%= __flags, %[flags]  \n\t"
+                ".word (0x005c0000 | (0x3f << 10) | __flags)\n\t"  /*x86mfflag*/
+                : [dst]"+r"(a0),
+                [flags]"=r"(eflags)
+                : [src]"r"(a1)
+                : "cc"
+            );
+        break;
+        default:
+            break;
+        }
+        env->eflags = env->eflags & ~(0b100011010101);
+        env->eflags = env->eflags | (eflags & 0b100011010101);
+    }
+    break;
+    case INSTPTN_FLAGS_TEST:
+    {
+        bool is_same_reg = recovery & INSTPTN_FLAGS_SAME_REG;
+        uint64_t a0 = UC_GR(uc)[4];
+        uint64_t a1 = is_same_reg ? a0 : UC_GR(uc)[5];
+        uint64_t eflags = 0;
+
+        switch (opnd_size)
+        {
+        case 8:
+            asm volatile (
+                DEFINE_PARSE_R
+                "parse_r_%= __src, %[src]  \n\t"
+                "parse_r_%= __dst, %[dst]  \n\t"
+                ".word (0x003f8010 | (__src << 10) | (__dst << 5))\n\t" /*x86and.b*/
+                "parse_r_%= __flags, %[flags]  \n\t"
+                ".word (0x005c0000 | (0x3f << 10) | __flags)\n\t"  /*x86mfflag*/
+                : [dst]"+r"(a0),
+                [flags]"=r"(eflags)
+                : [src]"r"(a1)
+                : "cc"
+            );
+        break;
+        case 16:
+            asm volatile (
+                DEFINE_PARSE_R
+                "parse_r_%= __src, %[src]  \n\t"
+                "parse_r_%= __dst, %[dst]  \n\t"
+                ".word (0x003f8011 | (__src << 10) | (__dst << 5))\n\t" /*x86and.h*/
+                "parse_r_%= __flags, %[flags]  \n\t"
+                ".word (0x005c0000 | (0x3f << 10) | __flags)\n\t"  /*x86mfflag*/
+                : [dst]"+r"(a0),
+                [flags]"=r"(eflags)
+                : [src]"r"(a1)
+                : "cc"
+            );
+        break;
+        case 32:
+            asm volatile (
+                DEFINE_PARSE_R
+                "parse_r_%= __src, %[src]  \n\t"
+                "parse_r_%= __dst, %[dst]  \n\t"
+                ".word (0x003f8012 | (__src << 10) | (__dst << 5))\n\t" /*x86and.w*/
+                "parse_r_%= __flags, %[flags]  \n\t"
+                ".word (0x005c0000 | (0x3f << 10) | __flags)\n\t"  /*x86mfflag*/
+                : [dst]"+r"(a0),
+                [flags]"=r"(eflags)
+                : [src]"r"(a1)
+                : "cc"
+            );
+        break;
+        case 64:
+            asm volatile (
+                DEFINE_PARSE_R
+                "parse_r_%= __src, %[src]  \n\t"
+                "parse_r_%= __dst, %[dst]  \n\t"
+                ".word (0x003f8013 | (__src << 10) | (__dst << 5))\n\t" /*x86and.d*/
+                "parse_r_%= __flags, %[flags]  \n\t"
+                ".word (0x005c0000 | (0x3f << 10) | __flags)\n\t"  /*x86mfflag*/
+                : [dst]"+r"(a0),
+                [flags]"=r"(eflags)
+                : [src]"r"(a1)
+                : "cc"
+            );
+        break;
+        default:
+            break;
+        }
+        env->eflags = env->eflags & ~(0b100011000101);
+        env->eflags = env->eflags | (eflags & 0b100011000101);
+    }
+    break;
+    case INSTPTN_FLAGS_BT:
+    {
+        uint64_t a0 = UC_GR(uc)[4];
+        uint64_t a1 = UC_GR(uc)[5];
+        env->eflags = env->eflags & ~(1); // clear CF
+        env->eflags = env->eflags | ((a0 >> a1) & 1); // set CF
+    }
+    break;
+    case INSTPTN_FLAGS_NONE:
+    break;
+    default:
+        lsassert(0);
+        break;
     }
 }
 #undef WRAP
