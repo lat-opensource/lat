@@ -794,6 +794,17 @@ static void handle_arg_latx_jrra(const char *arg)
     }
 }
 
+static void handle_arg_latx_fast_jmpcache_hash(const char *arg)
+{
+    long value;
+
+    if (qemu_strtol(arg, NULL, 0, &value) || (value != 0 && value != 1)) {
+        fprintf(stderr, "LATX_FAST_JMPCACHE_HASH must be 0 or 1\n");
+        return;
+    }
+    option_fast_jmpcache_hash = value;
+}
+
 static void handle_arg_latx_smc(const char *arg)
 {
     option_smc_opt = strtol(arg, NULL, 0);
@@ -1040,6 +1051,9 @@ static const struct qemu_argument arg_table[] = {
     "",           ""},
     {"latx-jrra",    "LATX_JRRA",     true,  handle_arg_latx_jrra,
     "",           "enable jrra"},
+    {"latx-fast-jmpcache-hash", "LATX_FAST_JMPCACHE_HASH", true,
+    handle_arg_latx_fast_jmpcache_hash,
+    "0|1", "use low PC bits as the TB jump-cache hash"},
     {"latx-imm-reg",    "LATX_IMM_REG",     true,  handle_arg_latx_imm_reg,
     "",           "enable imm reg optimization"},
     {"latx-mem-test",    "LATX_MT",     true,  handle_arg_latx_mem_test,
@@ -1563,6 +1577,12 @@ int main(int argc, char **argv, char **envp)
 
     /* set environment variables */
     options_set(target_argv);
+
+#ifdef CONFIG_LATX
+#if !defined(CONFIG_LATX_FAST_JMPCACHE) || defined(CONFIG_LATX_GLUE_MASK)
+    option_fast_jmpcache_hash = 0;
+#endif
+#endif
 
 #if defined(CONFIG_LATX) && defined(TARGET_I386) && TARGET_ABI_BITS == 32
     if (option_mem_test) {
