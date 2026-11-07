@@ -42,6 +42,10 @@ void aot_exit_entry(CPUState *cpu G_GNUC_UNUSED,
 {
 }
 
+void aot_link_pending_reset(void)
+{
+}
+
 void aot_reset_tb_stats(void)
 {
     g_assert(mmap_locked);
