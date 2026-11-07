@@ -1904,7 +1904,18 @@ void tb_target_set_jmp_pair(uintptr_t jmp_rx, uintptr_t jmp_rw,
     tcg_insn_unit i2 = pair >> 32;
 
 #ifdef CONFIG_LATX_FAST_JMPCACHE
-    if ((i1 >> 26) == OPC_B) {
+    /*
+     * HRAS links NOP+BL over the reset PCADDU18I+JIRL pair. Restore the first
+     * word before JIRL so every transient pair remains executable.
+     */
+    if ((i1 & 0xfe000000) == 0x1e000000 &&
+        (i2 & 0xfc000000) == 0x4c000000 &&
+        qatomic_read((uint32_t *)jmp_rw) == 0x03400000) {
+        qatomic_set((uint32_t *)jmp_rw, i1);
+        flush_idcache_range(jmp_rx, jmp_rw, 4);
+        qatomic_set((uint32_t *)(jmp_rw + 4), i2);
+        flush_idcache_range(jmp_rx + 4, jmp_rw + 4, 4);
+    } else if ((i1 >> 26) == OPC_B) {
         /*
          * Publish only the direct branch.  Keep the old second instruction
          * so a thread that already executed the old first instruction can

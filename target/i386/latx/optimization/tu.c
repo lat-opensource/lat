@@ -148,6 +148,8 @@ void tu_enough_space(CPUState *cpu)
 
 void tu_reset_tb(TranslationBlock *tb)
 {
+    tb->lazypc[0] = 0;
+    tb->lazypc[1] = 0;
     qemu_spin_init(&tb->jmp_lock);
     tb->jmp_dest[0] = (uintptr_t)NULL;
     tb->jmp_dest[1] = (uintptr_t)NULL;

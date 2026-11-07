@@ -19,6 +19,7 @@
 #include "imm-cache.h"
 #include "latx-smc.h"
 #include "jrra.h"
+#include "hardware-ras.h"
 #include "latx-native-asm.h"
 
 extern void *helper_tb_lookup_ptr(CPUArchState *);
@@ -2860,7 +2861,7 @@ int tr_translate_tb(struct TranslationBlock *tb)
  * ra_alloc_dbt_arg2: next x86 ip
  */
 
-static void generate_indirect_goto(void *code_buf)
+static void generate_indirect_goto(void *code_buf, bool is_return)
 {
     /*
      * WARNING!!!
@@ -2906,9 +2907,18 @@ static void generate_indirect_goto(void *code_buf)
     la_alsl_d(next_tb, next_tb, jmp_cache_addr, 3);
     la_ld_d(jmp_entry, next_tb, 0);
     la_bne(jmp_entry, next_x86_addr, label_miss);
-    la_ld_d(next_tb, next_tb, 8);
+    TranslationBlock *return_tb = lsenv->tr_data->curr_tb;
+    if (is_return && option_hw_cache_ras && hras_tb_in_tu(return_tb)) {
+        la_ld_d(ra_ir2_opnd, next_tb, 8);
+        la_jirl(zero_ir2_opnd, ra_ir2_opnd, 0);
+    } else {
+        la_ld_d(next_tb, next_tb, 8);
+        la_jirl(zero_ir2_opnd, next_tb, 0);
+    }
 #endif
+#ifdef CONFIG_LATX_GLUE_MASK
     la_jirl(zero_ir2_opnd, next_tb, 0);
+#endif
 #else
     la_slli_d(next_tb, next_tb, 3);
     la_ldx_d(next_tb, next_tb, jmp_cache_addr);
@@ -3228,7 +3238,8 @@ indirect_jmp:
             IR2_OPND old_jmp_label = ra_alloc_label();
             la_label(old_jmp_label);
             tb->jmp_indirect = ir2_opnd_label_id(&old_jmp_label);
-            generate_indirect_goto((void *)tb->tc.ptr);
+            generate_indirect_goto((void *)tb->tc.ptr,
+                                    opcode == dt_X86_INS_RET);
         } else {
             la_data_li(target, context_switch_native_to_bt_ret_0);
             aot_la_append_ir2_jmp_far(target, base, B_EPILOGUE_RET_0, 0);
@@ -3377,7 +3388,7 @@ static int generate_indirect_jmp_glue(void *code_buf)
     int ins_num;
     tr_init(NULL);
 
-    generate_indirect_goto(code_buf);
+    generate_indirect_goto(code_buf, false);
 
     TRANSLATION_DATA *lat_ctx = lsenv->tr_data;
     label_dispose(NULL, lat_ctx);
@@ -3706,6 +3717,9 @@ void latx_tb_set_jmp_target(TranslationBlock *tb, int n,
 {
     assert(!use_tu_jmp(tb));
     tb_set_jmp_target(tb, n, (uintptr_t)next_tb->tc.ptr);
+    if (n == 0) {
+        hras_link_call(tb, next_tb);
+    }
 #ifdef CONFIG_LATX_LAZYLINK
     if (tb->lazylink[n] != 2) {
         return;
