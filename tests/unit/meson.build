@@ -184,6 +184,22 @@ test(
   suite: 'lat-pr-fast',
 )
 
+pageflags_test_body = custom_target(
+  'pageflags-test-body',
+  input: files('../../accel/tcg/translate-all.c'),
+  output: 'pageflags-test-body.h',
+  command: [python, files('extract-pageflags-test.py'), '@INPUT@', '@OUTPUT@'],
+)
+test_latx_pageflags = executable(
+  'test-latx-pageflags',
+  files('test-latx-pageflags.c') + [pageflags_test_body],
+  include_directories: include_directories('../..'),
+  dependencies: [glib, qemuutil],
+  build_by_default: false,
+)
+test('test-latx-pageflags', test_latx_pageflags,
+     suite: 'lat-pr-fast', timeout: 30)
+
 test_rcu_lazy_thread = executable(
   'test-rcu-lazy-thread',
   files('test-rcu-lazy-thread.c'),

@@ -69,6 +69,7 @@ __thread struct rcu_reader_data rcu_reader;
 /* Protected by rcu_registry_lock.  */
 typedef QLIST_HEAD(, rcu_reader_data) ThreadList;
 static ThreadList registry = QLIST_HEAD_INITIALIZER(registry);
+static unsigned registered_readers;
 
 /* Wait for previous parity/grace period to be empty of readers.  */
 static void wait_for_readers(void)
@@ -300,6 +301,67 @@ void call_rcu1(struct rcu_head *node, void (*func)(struct rcu_head *node))
 }
 
 
+/* rcu_registry_lock excludes a new reader until it sees prior removals. */
+static bool rcu_is_only_reader(void)
+{
+    /* synchronize_rcu() temporarily moves quiescent readers off registry. */
+    return registered_readers == 1 &&
+           QLIST_FIRST(&registry) == &rcu_reader;
+}
+
+static void rcu_flush_deferred(void)
+{
+    struct rcu_head *pending = rcu_reader.deferred;
+    struct rcu_head *ordered = NULL;
+    bool alone;
+
+    assert(rcu_reader.depth == 0);
+    rcu_reader.deferred = NULL;
+    while (pending) {
+        struct rcu_head *next = pending->next;
+
+        pending->next = ordered;
+        ordered = pending;
+        pending = next;
+    }
+    qemu_mutex_lock(&rcu_registry_lock);
+    alone = rcu_is_only_reader();
+    qemu_mutex_unlock(&rcu_registry_lock);
+    while (ordered) {
+        struct rcu_head *next = ordered->next;
+
+        if (alone) {
+            ordered->func(ordered);
+        } else {
+            call_rcu1(ordered, ordered->func);
+        }
+        ordered = next;
+    }
+}
+
+void call_rcu1_lazy(struct rcu_head *node,
+                    void (*func)(struct rcu_head *node))
+{
+    bool alone;
+
+    qemu_mutex_lock(&rcu_registry_lock);
+    alone = rcu_is_only_reader();
+    qemu_mutex_unlock(&rcu_registry_lock);
+    if (!alone) {
+        call_rcu1(node, func);
+        return;
+    }
+    if (!rcu_reader.depth) {
+        func(node);
+        return;
+    }
+    node->func = func;
+    rcu_reader.flush_deferred = rcu_flush_deferred;
+    node->next = rcu_reader.deferred;
+    rcu_reader.deferred = node;
+}
+
+
 struct rcu_drain {
     struct rcu_head rcu;
     QemuEvent drain_complete_event;
@@ -359,13 +421,19 @@ void rcu_register_thread(void)
     assert(rcu_reader.ctr == 0);
     qemu_mutex_lock(&rcu_registry_lock);
     QLIST_INSERT_HEAD(&registry, &rcu_reader, node);
+    registered_readers++;
     qemu_mutex_unlock(&rcu_registry_lock);
 }
 
 void rcu_unregister_thread(void)
 {
+    assert(rcu_reader.depth == 0);
+    if (rcu_reader.deferred) {
+        rcu_flush_deferred();
+    }
     qemu_mutex_lock(&rcu_registry_lock);
     QLIST_REMOVE(&rcu_reader, node);
+    registered_readers--;
     qemu_mutex_unlock(&rcu_registry_lock);
 }
 
@@ -470,6 +538,7 @@ static void rcu_init_child(void)
     }
 
     memset(&registry, 0, sizeof(registry));
+    registered_readers = 0;
     /* The queue lock froze complete links and their pending count at fork.
      * Preserve queued callbacks; callbacks already dispatched are not replayed.
      */

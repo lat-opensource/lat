@@ -349,3 +349,10 @@ if 'i386-linux-user' in target_dirs
     ],
   }]
 endif
+if 'x86_64-linux-user' in target_dirs
+  latx_integration_tests += [{
+    'name': 'test-pageflags-userns',
+    'runner': find_program('../../test-pageflags-userns.sh'),
+    'args': [emulators['latx-x86_64'], files('../../pageflags-userns.S')],
+  }]
+endif

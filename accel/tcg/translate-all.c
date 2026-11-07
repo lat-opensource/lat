@@ -3118,7 +3118,22 @@ void cpu_interrupt(CPUState *cpu, int mask)
 typedef struct PageFlagsNode {
     IntervalTreeNode itree;
     int flags;
+    /* Keep itree and flags offsets used by generated permission checks. */
+    struct rcu_head rcu;
 } PageFlagsNode;
+
+static void pageflags_free_rcu(struct rcu_head *head)
+{
+    PageFlagsNode *p = container_of(head, PageFlagsNode, rcu);
+
+    g_free(p);
+}
+
+static void pageflags_free(PageFlagsNode *p)
+{
+    /* C lookups and translated permission checks can still hold this node. */
+    call_rcu1_lazy(&p->rcu, pageflags_free_rcu);
+}
 
 IntervalTreeRoot pageflags_root;
 #if defined(CONFIG_LATX) && defined(TARGET_I386) && TARGET_ABI_BITS == 32
@@ -3274,6 +3289,8 @@ void page_dump(FILE *f)
 
 target_ulong get_first_page(target_ulong start, target_ulong end)
 {
+    RCU_READ_LOCK_GUARD();
+
     PageFlagsNode *p = pageflags_find(start, end);
 
     /*
@@ -3290,12 +3307,15 @@ target_ulong get_first_page(target_ulong start, target_ulong end)
 
     mmap_lock();
     p = pageflags_find(start, end);
+    start = p ? p->itree.start : 0;
     mmap_unlock();
-    return p ? p->itree.start : 0;
+    return start;
 }
 
 int page_get_flags(target_ulong address)
 {
+    RCU_READ_LOCK_GUARD();
+
     PageFlagsNode *p = pageflags_find(address, address);
 
     /*
@@ -3312,8 +3332,9 @@ int page_get_flags(target_ulong address)
 
     mmap_lock();
     p = pageflags_find(address, address);
+    int flags = p ? p->flags : 0;
     mmap_unlock();
-    return p ? p->flags : 0;
+    return flags;
 }
 
 static bool pageflags_read_remote(pid_t pid, const void *remote_addr,
@@ -3388,6 +3409,8 @@ bool page_get_flags_remote(pid_t pid, target_ulong address, int *flags)
 /* Cut down some code, Maybe have bug. */
 bool test_flags(target_ulong address, int flags)
 {
+    RCU_READ_LOCK_GUARD();
+
 
     IntervalTreeNode *node;
     if (!pageflags_root.rb_root.rb_node) {
@@ -3467,7 +3490,7 @@ static void pageflags_create_merge(target_ulong start, target_ulong last,
     if (prev) {
         if (next) {
             prev->itree.last = next->itree.last;
-            g_free(next);
+            pageflags_free(next);
         } else {
             prev->itree.last = last;
         }
@@ -3510,7 +3533,7 @@ static bool pageflags_unset(target_ulong start, target_ulong last)
             }
         } else if (p_last <= last) {
             /* Range completely covers node -- remove it. */
-            g_free(p);
+            pageflags_free(p);
         } else {
             /* Truncate the node from the start. */
             p->itree.start = last + 1;
@@ -3565,7 +3588,7 @@ bool pageflags_set_clear(target_ulong start, target_ulong last,
             p->flags = merge_flags;
         } else {
             interval_tree_remove(&p->itree, &pageflags_root);
-            g_free(p);
+            pageflags_free(p);
         }
         goto done;
     }
@@ -3610,7 +3633,7 @@ bool pageflags_set_clear(target_ulong start, target_ulong last,
                     p->flags = merge_flags;
                 } else {
                     interval_tree_remove(&p->itree, &pageflags_root);
-                    g_free(p);
+                    pageflags_free(p);
                 }
                 if (p_last < last) {
                     start = p_last + 1;
@@ -3651,7 +3674,7 @@ bool pageflags_set_clear(target_ulong start, target_ulong last,
         p->itree.start = last + 1;
         interval_tree_insert(&p->itree, &pageflags_root);
     } else {
-        g_free(p);
+        pageflags_free(p);
         goto restart;
     }
     if (set_flags) {
@@ -3943,6 +3966,8 @@ void *page_alloc_target_data(target_ulong address, size_t size)
 
 bool page_check_range(target_ulong start, target_ulong len, int flags)
 {
+    RCU_READ_LOCK_GUARD();
+
     target_ulong last;
     int locked;  /* tri-state: =0: unlocked, +1: global, -1: local */
     bool ret;
