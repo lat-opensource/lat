@@ -53,12 +53,15 @@ typedef struct aot_header {
 #define PE_AOT_FILE         2
 #define CACHE_AOT_FILE      4
 #define HASH_AOT_FILE       8
+#define CROSS_PAGE_TU_AOT   0x80
     uint8_t aot_file_type;
 } aot_header;
 
 static inline bool aot_header_policy_matches(const aot_header *header)
 {
-    return header->generation_policy == aot_generation_policy();
+    return header->generation_policy == aot_generation_policy() &&
+           !!(header->aot_file_type & CROSS_PAGE_TU_AOT) ==
+           aot_cross_page_tu_enabled();
 }
 
 
@@ -132,6 +135,8 @@ typedef struct aot_tb {
     uint32_t flags;
     uint32_t cflags;
     uint32_t tu_search_addr_offset;
+    uint32_t tu_cold_offset;
+    uint32_t tu_cold_size;
     int32_t rel_start_index;
     int32_t rel_end_index;
     union {

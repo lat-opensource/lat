@@ -3,10 +3,13 @@
 #include "aot.h"
 #include "aot_lib.h"
 #include "segment.h"
+#include "latx-options.h"
 
 int qemu_loglevel;
 int option_aot_pe_profile;
+int option_aot;
 int option_fast_jmpcache_hash;
+int option_tu = 1;
 int option_load_aot = 1;
 const char *aot_process_profile = "browser";
 
@@ -24,6 +27,21 @@ static void get_cache_name(seg_info *seg, char *name)
     g_assert(segment_get_aot_file_name(seg, name, PATH_MAX) == 0);
 }
 
+static void check_cache_name_ignores_options(seg_info *seg)
+{
+    char plain[PATH_MAX];
+    char configured[PATH_MAX];
+
+    option_tu = 1;
+    get_cache_name(seg, plain);
+    option_tu = 0;
+    get_cache_name(seg, configured);
+    g_assert(strcmp(configured, plain) == 0);
+    option_tu = 1;
+    g_assert(segment_get_aot_file_name(seg, configured, strlen(plain)) ==
+             -ENAMETOOLONG);
+}
+
 static void check_hash_policy(seg_info *seg)
 {
     char names[2][PATH_MAX], configured[PATH_MAX];
@@ -38,6 +56,34 @@ static void check_hash_policy(seg_info *seg)
     }
     g_assert(strcmp(names[0], names[1]) != 0);
     option_fast_jmpcache_hash = 0;
+}
+
+static void check_cross_page_policy(seg_info *seg)
+{
+    char page[PATH_MAX], configured[PATH_MAX], cross[PATH_MAX];
+
+    option_tu = 1;
+    option_aot = 1;
+    get_cache_name(seg, page);
+    for (int mode = 0; mode <= 3; mode++) {
+        option_aot = mode;
+        g_assert(aot_cross_page_tu_enabled() == (mode == 3));
+        g_assert(aot_tu_loading_enabled() == (mode == 3));
+        get_cache_name(seg, configured);
+        g_assert(strcmp(configured, page) == 0);
+    }
+    option_aot = 3;
+    option_load_aot = 0;
+    g_assert(aot_cross_page_tu_enabled());
+    g_assert(!aot_tu_loading_enabled());
+    get_cache_name(seg, cross);
+    g_assert(strcmp(cross, page) == 0);
+    option_tu = 0;
+    g_assert(!aot_cross_page_tu_enabled());
+    g_assert(!aot_tu_loading_enabled());
+    option_load_aot = 1;
+    option_tu = 1;
+    option_aot = 1;
 }
 
 int main(void)
@@ -77,8 +123,12 @@ int main(void)
     g_assert(g_str_has_suffix(first_name, "-140000000"));
     g_assert(strcmp(first_name, colliding_cache_name) != 0);
 
+    check_cache_name_ignores_options(&elf_seg);
+    check_cache_name_ignores_options(&pe_seg);
     check_hash_policy(&elf_seg);
     check_hash_policy(&pe_seg);
+    check_cross_page_policy(&elf_seg);
+    check_cross_page_policy(&pe_seg);
 
     same_page_pe_seg.seg_begin += 0x80;
     get_cache_name(&same_page_pe_seg, second_name);

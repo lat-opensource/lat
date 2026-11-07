@@ -1966,6 +1966,21 @@ bool ir1_translate(IR1_INST *ir1)
             if (ir1_addr_next(ir1) == ir1_target_addr(ir1)) {
                 return translate_callnext(ir1);
             } else if (ht_pc_thunk_lookup(ir1_target_addr(ir1)) >= 0) {
+#ifdef CONFIG_LATX_TU
+                TranslationBlock *tb = lsenv->tr_data->curr_tb;
+
+                /*
+                 * Exploring a callee can discover its PC thunk after this
+                 * caller was decoded. Keep that terminal CALL as a CALL:
+                 * its continuation may already belong to another TU, and
+                 * inlining here would fall through to an unrelated member.
+                 */
+                if (aot_cross_page_tu_enabled() &&
+                    tb->s_data->last_ir1_type == IR1_TYPE_CALL &&
+                    ir1 == tb_ir1_inst_last(tb)) {
+                    return translate_call(ir1);
+                }
+#endif
                 return translate_callthunk(ir1);
             }
         }
@@ -3216,7 +3231,8 @@ direct_jmp:
                 la_pcaddi(a0_ir2_opnd, 0x0);
                 aot_la_append_ir2_jmp_far(target, base, B_EPILOGUE_RET_ID_0, 0);
             } else {
-                aot_la_append_ir2_jmp_epilogue(target, base, JIRL_EPILOGUE_RET_ID_0, 0);
+                aot_la_append_ir2_jmp_epilogue(
+                    target, base, JIRL_EPILOGUE_RET_ID_0, 0);
             }
         }
         break;

@@ -372,6 +372,11 @@ static inline int create_aot_tb(aot_tb *curr_aot_tb, TranslationBlock *tb,
     curr_aot_tb->offset_in_tu = tb->s_data->offset_in_tu;
     if (is_tu_tb(tb)) {
         curr_aot_tb->tu_search_addr_offset = tb->tu_search_addr_offset;
+        curr_aot_tb->tu_cold_offset = tb->tu_cold_offset;
+        curr_aot_tb->tu_cold_size = tb->tu_cold_size;
+    } else {
+        curr_aot_tb->tu_cold_offset = 0;
+        curr_aot_tb->tu_cold_size = 0;
     }
 #endif
     curr_aot_tb->curr_pc = tb->pc;

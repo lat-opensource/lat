@@ -10,6 +10,7 @@
 #include "aot_reader.h"
 #include "file_ctx.h"
 #include "qemu.h"
+#include "latx-options.h"
 
 #ifdef CONFIG_LATX_AOT
 

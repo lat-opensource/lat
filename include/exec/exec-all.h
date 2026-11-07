@@ -631,6 +631,8 @@ struct TranslationBlock {
 #ifdef CONFIG_LATX
 #ifdef CONFIG_LATX_TU
     uint32_t tu_search_addr_offset;
+    uint32_t tu_cold_offset;
+    uint32_t tu_cold_size;
 #endif
 #define TARGET1_ELIMINATE 0x01
 #define OPT_BCC           0x02
@@ -682,7 +684,17 @@ struct TranslationBlock {
     int8_t canlink[2];
     int8_t lazylink[2];
     uint64_t lazylinkinst[2];
-    struct separated_data *s_data;
+    /*
+     * Keep translation metadata through offline AOT serialization. Before a
+     * runtime TU is published, replace it with a circular membership link.
+     * Published TU members must not access s_data again.
+     */
+    union {
+        struct separated_data *s_data;
+#ifdef CONFIG_LATX_TU
+        TranslationBlock *tu_next;
+#endif
+    };
 #endif
 };
 
@@ -704,10 +716,11 @@ static inline int tb_use_smc_opt(TranslationBlock *tb)
 }
 
 #define TB_MAGIC 0xbeefUL
+#define TU_TBM_TABLE_MAGIC 0xbeeeUL
 #define HOST_VIRT_ADDR_SPACE_BITS 48
 typedef struct MagicTBP {
     unsigned short tb_pointer[3]; /* 48 bits are reserved for vadd */
-    unsigned short magic; /* 0xbeef */
+    unsigned short magic; /* TB_MAGIC or TU_TBM_TABLE_MAGIC */
 } MagicTBP;
 
 typedef struct TBMini {

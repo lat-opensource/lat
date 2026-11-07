@@ -76,6 +76,11 @@ inline static TranslationBlock *creat_tb(aot_tb *p_aot_tb, abi_ulong start,
 #ifdef CONFIG_LATX_TU
     if (is_tu_tb(tb)) {
         tb->tu_search_addr_offset = p_aot_tb->tu_search_addr_offset;
+        tb->tu_cold_offset = p_aot_tb->tu_cold_offset;
+        tb->tu_cold_size = p_aot_tb->tu_cold_size;
+    } else {
+        tb->tu_cold_offset = 0;
+        tb->tu_cold_size = 0;
     }
 #endif
     if (use_tu_jmp(tb)) {
@@ -221,8 +226,9 @@ static void recover_tb_range(target_ulong page, struct aot_tb *p_aot_tbs,
         qatomic_set(&tcg_ctx->code_gen_ptr, (void *)
                     ROUND_UP((uintptr_t)tbmini_ptr +
                     sizeof(struct TBMini) * (tb_num_in_tu + 1), qemu_icache_linesize));
-        /* First tbm save tb_num_in_tu and TB_MAGIC. */
-        aot_tbmini_set_pointer((uintptr_t)tbmini_ptr, tb_num_in_tu, TB_MAGIC);
+        /* First TBMini records the member count for a complete TU table. */
+        aot_tbmini_set_pointer((uintptr_t)tbmini_ptr, tb_num_in_tu,
+                               TU_TBM_TABLE_MAGIC);
         for (int k = i; k < j; k++) {
             TranslationBlock *tb = tb_in_order[k - i];
             aot_tbmini_set_pointer((uintptr_t)++tbmini_ptr, (uint64_t)tb, (uint64_t)tb->tc.size);

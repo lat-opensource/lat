@@ -66,6 +66,19 @@ void get_last_info(TranslationBlock *tb, IR1_INST* pir1)
 
 #ifdef CONFIG_LATX_TU
 
+void tu_prepare_restore_tb(TranslationBlock *copy,
+                           struct separated_data *data,
+                           const TranslationBlock *tb)
+{
+    /* Published members keep the membership ring in the s_data union. */
+    *copy = *tb;
+    *data = (struct separated_data) { .tu_tb_mode = TB_GEN_CODE };
+    copy->s_data = data;
+    copy->bool_flags &= ~(IS_TU_TB | IS_TU_JMP);
+    tr_disasm(copy, TCG_MAX_INSNS);
+    ir1_optimization(copy);
+}
+
 static __thread TUControl tu_data_rel;
 __thread TUControl *tu_data;
 
@@ -76,30 +89,47 @@ __thread TUControl *tu_data;
 #define assert_memory_lock() tcg_debug_assert(have_mmap_lock())
 #endif
 
-static gint gpc_cmp(gconstpointer ap, gconstpointer bp)
+static inline uint32_t tu_member_hash(target_ulong pc)
 {
-    const TranslationBlock *a = (TranslationBlock *)ap;
-    const TranslationBlock *b = (TranslationBlock *)bp;
+    uint64_t value = pc;
 
-    return (a->pc < b->pc) ? -1 : (a->pc > b->pc);
+    value ^= value >> 32;
+    value *= 0x9e3779b97f4a7c15ULL;
+    return (uint32_t)(value >> 16) & (TU_MEMBER_INDEX_SIZE - 1);
 }
 
-static inline void tu_trees_init(void)
+TranslationBlock *tu_member_lookup(target_ulong pc)
 {
-    tu_data->tree = g_tree_new(gpc_cmp);
+    uint32_t slot = tu_member_hash(pc);
+
+    while (tu_data->member_index[slot]) {
+        TranslationBlock *tb =
+            tu_data->tb_list[tu_data->member_index[slot] - 1];
+
+        if (tb->pc == pc) {
+            return tb;
+        }
+        slot = (slot + 1) & (TU_MEMBER_INDEX_SIZE - 1);
+    }
+    return NULL;
 }
 
-inline void tu_trees_reset(void)
+static void tu_member_index_insert(uint32_t member)
 {
-    /* Increment the refcount first so that destroy acts as a reset */
-    g_tree_ref(tu_data->tree);
-    g_tree_destroy(tu_data->tree);
-}
+    TranslationBlock *tb = tu_data->tb_list[member];
+    uint32_t slot = tu_member_hash(tb->pc);
 
-TranslationBlock *tu_tree_lookup(target_ulong pc)
-{
-    TranslationBlock key = {.pc = pc};
-    return (TranslationBlock *)g_tree_lookup(tu_data->tree, &key);
+    while (tu_data->member_index[slot]) {
+        TranslationBlock *indexed =
+            tu_data->tb_list[tu_data->member_index[slot] - 1];
+
+        if (indexed->pc == tb->pc) {
+            tu_data->member_index[slot] = member + 1;
+            return;
+        }
+        slot = (slot + 1) & (TU_MEMBER_INDEX_SIZE - 1);
+    }
+    tu_data->member_index[slot] = member + 1;
 }
 
 void tu_control_init(void)
@@ -107,31 +137,137 @@ void tu_control_init(void)
     tu_data = &tu_data_rel;
     tu_data->ir1_num_in_tu = 0;
     tu_data->tb_num = 0;
-    tu_trees_init();
+    tu_data->page_num = 0;
+    tu_data->first_page = 0;
+    tu_data->last_page = 0;
+    memset(tu_data->member_index, 0, sizeof(tu_data->member_index));
 
     return;
 }
 
 void tu_control_destroy(void)
 {
-    if (tu_data && tu_data->tree) {
-        /* TranslationBlocks belong to the code cache, not this index. */
-        g_tree_destroy(tu_data->tree);
-    }
     memset(&tu_data_rel, 0, sizeof(tu_data_rel));
     tu_data = NULL;
 }
 
-inline void tu_push_back(TranslationBlock *tb)
+void tu_build_reset(void)
+{
+    tu_data->ir1_num_in_tu = 0;
+    tu_data->tb_num = 0;
+    tu_data->page_num = 0;
+    tu_data->first_page = 0;
+    tu_data->last_page = 0;
+    if (aot_cross_page_tu_enabled()) {
+        memset(tu_data->member_index, 0, sizeof(tu_data->member_index));
+    }
+}
+
+static bool tu_has_page(target_ulong page)
+{
+    for (uint32_t i = 0; i < tu_data->page_num; i++) {
+        if (tu_data->pages[i] == page) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool tu_page_range_available(target_ulong pc, uint32_t size)
+{
+    target_ulong first_page, last_page, range_first, range_last;
+    uint32_t new_pages = 0;
+    uint32_t page_limit = aot_cross_page_tu_enabled() ? MAX_PAGES_IN_TU : 1;
+    uint32_t span_limit = aot_cross_page_tu_enabled() ? MAX_TU_PAGE_SPAN : 1;
+
+    lsassert(tu_data->page_num <= MAX_PAGES_IN_TU);
+    if (!size || pc + size - 1 < pc) {
+        return false;
+    }
+
+    first_page = pc & TARGET_PAGE_MASK;
+    last_page = (pc + size - 1) & TARGET_PAGE_MASK;
+    range_first = tu_data->page_num ?
+        MIN(first_page, tu_data->first_page) : first_page;
+    range_last = tu_data->page_num ?
+        MAX(last_page, tu_data->last_page) : last_page;
+    if (((range_last - range_first) >> TARGET_PAGE_BITS) + 1 >
+            span_limit) {
+        return false;
+    }
+
+    for (target_ulong page = first_page; ; page += TARGET_PAGE_SIZE) {
+        if (!tu_has_page(page) &&
+                ++new_pages > page_limit - tu_data->page_num) {
+            return false;
+        }
+        if (page == last_page) {
+            break;
+        }
+    }
+    return true;
+}
+
+static void tu_add_page_range(target_ulong pc, uint32_t size)
+{
+    target_ulong first_page = pc & TARGET_PAGE_MASK;
+    target_ulong last_page = (pc + size - 1) & TARGET_PAGE_MASK;
+
+    if (!tu_data->page_num) {
+        tu_data->first_page = first_page;
+        tu_data->last_page = last_page;
+    } else {
+        tu_data->first_page = MIN(tu_data->first_page, first_page);
+        tu_data->last_page = MAX(tu_data->last_page, last_page);
+    }
+    for (target_ulong page = first_page; ; page += TARGET_PAGE_SIZE) {
+        if (!tu_has_page(page)) {
+            lsassert(tu_data->page_num < MAX_PAGES_IN_TU);
+            tu_data->pages[tu_data->page_num++] = page;
+        }
+        if (page == last_page) {
+            break;
+        }
+    }
+}
+
+bool tu_push_back(TranslationBlock *tb)
 {
     if (!tb) {
-        return;
+        return false;
     }
-    TranslationBlock** tb_list = tu_data->tb_list;
+    /* Callers validate the decoded TB range before allocating it. */
+    TranslationBlock **tb_list = tu_data->tb_list;
     uint32_t* tb_num_in_tu = &tu_data->tb_num;
 
-    tb_list[(*tb_num_in_tu)++] = tb;
+    if (*tb_num_in_tu >= MAX_TB_IN_CACHE) {
+        return false;
+    }
+    uint32_t member = (*tb_num_in_tu)++;
+
+    tb_list[member] = tb;
+    if (aot_cross_page_tu_enabled()) {
+        tu_add_page_range(tb->pc, tb->size);
+        tu_member_index_insert(member);
+        if (in_pre_translate) {
+            aot_tb_insert(tb);
+        }
+    }
+    return true;
 }
+
+void tu_link_members(TranslationBlock **tb_list, uint32_t tb_num)
+{
+    if (!aot_cross_page_tu_enabled() || in_pre_translate) {
+        return;
+    }
+    /* Offline members retain s_data until AOT serialization is complete. */
+    for (uint32_t i = 0; i < tb_num; i++) {
+        assert(is_tu_tb(tb_list[i]));
+        tb_list[i]->tu_next = i + 1 < tb_num ? tb_list[i + 1] : tb_list[0];
+    }
+}
+
 
 void tu_enough_space(CPUState *cpu)
 {
@@ -176,6 +312,8 @@ void tu_reset_tb(TranslationBlock *tb)
 #endif
 #ifdef CONFIG_LATX_TU
     tb->s_data->offset_in_tu = 0;
+    tb->tu_cold_offset = 0;
+    tb->tu_cold_size = 0;
     tb->s_data->next_pc = 0;
     tb->s_data->target_pc = 0;
     tb->s_data->tu_id = 0;
@@ -213,6 +351,11 @@ TranslationBlock* tb_create(CPUState *cpu, target_ulong pc,
     if (unlikely(pc == 0)) {
 	return NULL;
     }
+
+    /*
+     * TODO: JIT-created cross-page TUs need SMC page protection. AOT
+     * generation runs after guest execution, so this path does not.
+     */
 
     /* todo: now check 16bit(should 15bit for x86) */
     uint32_t check_zero = cpu_lduw_code((CPUArchState *)cpu->env_ptr, pc);
@@ -269,6 +412,10 @@ TranslationBlock* tb_create(CPUState *cpu, target_ulong pc,
 			|| tb->s_data->tu_tb_mode == BAD_TB) {
         return NULL;
     }
+    if (aot_cross_page_tu_enabled() &&
+        !tu_page_range_available(tb->pc, tb->size)) {
+        return NULL;
+    }
     tb = tcg_tb_alloc_full(tcg_ctx);
     if (unlikely(!tb)) {
         qemu_log_mask(LAT_LOG_AOT, "tb flush in tu translate\n");
@@ -283,7 +430,9 @@ TranslationBlock* tb_create(CPUState *cpu, target_ulong pc,
     tu_tb_tmp.s_data = tb->s_data;
     memcpy(tb, &tu_tb_tmp, sizeof(TranslationBlock));
     memcpy(tb->s_data, &tmp_s_data, sizeof(struct separated_data));
-    aot_tb_insert(tb);
+    if (!aot_cross_page_tu_enabled()) {
+        aot_tb_insert(tb);
+    }
 
     return tb;
 }
@@ -403,12 +552,36 @@ static bool tu_split_tb(TranslationBlock *pre_tb, TranslationBlock *tb)
     return spilt_success;
 }
 
-static inline void get_tu_queue(CPUState *cpu,
+static TranslationBlock *tu_get_or_create_tb(CPUState *cpu, target_ulong pc,
+        target_ulong cs_base, uint32_t flags, int cflags, int max_insns,
+        TU_TB_START_TYPE mode)
+{
+    TranslationBlock *tb = tu_member_lookup(pc);
+
+    if (tb) {
+        return tb;
+    }
+    /*
+     * An already published TB belongs to another TU.  Keep this edge as a
+     * dispatcher exit instead of turning it into an internal TU b.
+     */
+    if (tb_htable_lookup(cpu, pc, cs_base, flags, cflags)) {
+        return NULL;
+    }
+
+    tb = tb_create(cpu, pc, cs_base, flags, cflags, max_insns, CODEIS64, mode);
+    if (!tu_push_back(tb)) {
+        return NULL;
+    }
+    return tb;
+}
+
+static inline void get_tu_queue_page(CPUState *cpu,
 		 target_ulong cs_base, uint32_t flags,
 		 int cflags, int max_insns)
 {
     ADDRX ir1_next_pc, ir1_target_pc;
-    TranslationBlock** tb_list = tu_data->tb_list;
+    TranslationBlock **tb_list = tu_data->tb_list;
     uint32_t *tb_num_in_tu = &tu_data->tb_num;
     TranslationBlock *next_tb, *target_tb, *tb;
     for (int i = 0; i <  *tb_num_in_tu && *tb_num_in_tu < MAX_TB_IN_TU; i++) {
@@ -420,7 +593,7 @@ static inline void get_tu_queue(CPUState *cpu,
             /* Jcc next tb should be translated without checking */
             lsassert(ir1_next_pc);
             if (get_page(tb->pc) == get_page(ir1_next_pc)) {
-                next_tb = tu_tree_lookup(ir1_next_pc);
+                next_tb = tu_member_lookup(ir1_next_pc);
                 if (!next_tb) {
                     next_tb = tb_htable_lookup(cpu,
                         ir1_next_pc, cs_base, flags, cflags);
@@ -442,9 +615,9 @@ static inline void get_tu_queue(CPUState *cpu,
             }
 
             lsassert(ir1_target_pc);
-            /* Jcc target tb should not be translated if the distance is too far */
+            /* Bound the target TB by the TU page budget. */
             if (get_page(tb->pc) == get_page(ir1_target_pc)) {
-                target_tb = tu_tree_lookup(ir1_target_pc);
+                target_tb = tu_member_lookup(ir1_target_pc);
                 if (!target_tb) {
                     target_tb = tb_htable_lookup(cpu,
                         ir1_target_pc, cs_base, flags, cflags);
@@ -467,9 +640,9 @@ static inline void get_tu_queue(CPUState *cpu,
             }
             break;
         case IR1_TYPE_JUMP:
-            /* JMP target tb should not be translated if the distance is too far */
+            /* Bound the target TB by the TU page budget. */
             if (get_page(tb->pc) == get_page(ir1_target_pc)) {
-                target_tb = tu_tree_lookup(ir1_target_pc);
+                target_tb = tu_member_lookup(ir1_target_pc);
                 if (!target_tb) {
                     target_tb = tb_htable_lookup(cpu,
                         ir1_target_pc, cs_base, flags, cflags);
@@ -490,7 +663,7 @@ static inline void get_tu_queue(CPUState *cpu,
         case IR1_TYPE_SYSCALL:
             lsassert(ir1_next_pc);
             if (get_page(tb->pc) == get_page(ir1_next_pc)) {
-                next_tb = tu_tree_lookup(ir1_next_pc);
+                next_tb = tu_member_lookup(ir1_next_pc);
                 if (!next_tb) {
                     next_tb = tb_htable_lookup(cpu,
                         ir1_next_pc, cs_base, flags, cflags);
@@ -504,6 +677,66 @@ static inline void get_tu_queue(CPUState *cpu,
             } else {
                 tb->s_data->next_tb[TU_TB_INDEX_NEXT] = NULL;
             }
+            break;
+        case IR1_TYPE_JUMPIN:
+        case IR1_TYPE_RET:
+            break;
+        default:
+            lsassert(0);
+        }
+    }
+
+/* Note: *tb_num_in_tu maybe greater than MAX_TB_IN_TU. */
+    if (*tb_num_in_tu > MAX_TB_IN_TU + 1) {
+        lsassert(0);
+    }
+}
+
+static inline void get_tu_queue(CPUState *cpu,
+                 target_ulong cs_base, uint32_t flags,
+                 int cflags, int max_insns)
+{
+    if (!aot_cross_page_tu_enabled()) {
+        get_tu_queue_page(cpu, cs_base, flags, cflags, max_insns);
+        return;
+    }
+
+    ADDRX ir1_next_pc, ir1_target_pc;
+    TranslationBlock **tb_list = tu_data->tb_list;
+    uint32_t *tb_num_in_tu = &tu_data->tb_num;
+    TranslationBlock *next_tb, *target_tb, *tb;
+    for (int i = 0; i <  *tb_num_in_tu && *tb_num_in_tu < MAX_TB_IN_TU; i++) {
+        tb = tb_list[i];
+        ir1_next_pc = tb->s_data->next_pc;
+        ir1_target_pc = tb->s_data->target_pc;
+        switch (tb->s_data->last_ir1_type) {
+        case IR1_TYPE_BRANCH:
+            /* Jcc next tb should be translated without checking */
+            lsassert(ir1_next_pc);
+            next_tb = tu_get_or_create_tb(cpu, ir1_next_pc, cs_base, flags,
+                    cflags, max_insns, TU_TB_START_NORMAL);
+            tb->s_data->next_tb[TU_TB_INDEX_NEXT] = next_tb;
+
+            lsassert(ir1_target_pc);
+            /* Bound the target TB by the TU page budget. */
+            target_tb = tu_get_or_create_tb(cpu, ir1_target_pc, cs_base,
+                    flags, cflags, max_insns, TU_TB_START_JMP);
+            tb->s_data->next_tb[TU_TB_INDEX_TARGET] = target_tb;
+            break;
+        case IR1_TYPE_JUMP:
+            /* Bound the target TB by the TU page budget. */
+            target_tb = tu_get_or_create_tb(cpu, ir1_target_pc, cs_base,
+                    flags, cflags, max_insns, TU_TB_START_JMP);
+            tb->s_data->next_tb[TU_TB_INDEX_TARGET] = target_tb;
+            break;
+        case IR1_TYPE_CALLIN:
+        case IR1_TYPE_CALL:
+        case IR1_TYPE_NORMAL:
+        case IR1_TYPE_SYSCALL:
+            lsassert(ir1_next_pc);
+            next_tb = tu_get_or_create_tb(cpu, ir1_next_pc, cs_base, flags,
+                    cflags, max_insns, TU_TB_START_NORMAL);
+            tb->s_data->next_tb[TU_TB_INDEX_NEXT] = next_tb;
             break;
         case IR1_TYPE_JUMPIN:
         case IR1_TYPE_RET:
@@ -601,9 +834,8 @@ static TranslationBlock *tb_explore(CPUState *cpu,
                               target_ulong pc, target_ulong cs_base,
                               uint32_t flags, int cflags)
 {
-    TranslationBlock** tb_list = tu_data->tb_list;
+    TranslationBlock **tb_list = tu_data->tb_list;
     uint32_t *tb_num_in_tu = &tu_data->tb_num;
-    uint32_t *ir1_num_in_tu = &tu_data->ir1_num_in_tu;
     int max_insns;
 
     max_insns = cflags & CF_COUNT_MASK;
@@ -616,15 +848,16 @@ static TranslationBlock *tb_explore(CPUState *cpu,
     if (cpu->singlestep_enabled || singlestep) {
         max_insns = 1;
     }
-    *tb_num_in_tu = 0;
-    *ir1_num_in_tu = 0;
+    tu_build_reset();
 
     tu_enough_space(cpu);
 
     /* the entry used as return value*/
     TranslationBlock *entry = tb_create(cpu, pc, cs_base,
-            flags, cflags, max_insns, 0 , TU_TB_START_ENTRY);
-    tu_push_back(entry);
+            flags, cflags, max_insns, 0, TU_TB_START_ENTRY);
+    if (!tu_push_back(entry)) {
+        return NULL;
+    }
 
     /* search all tbs we can get */
     get_tu_queue(cpu, cs_base, flags, cflags, max_insns);
@@ -917,8 +1150,13 @@ static void mov_unlink_stub_to_end(uint32_t tb_num_in_tu, TranslationBlock **tb_
     uintptr_t tmp_buffer_size = 0;
     uintptr_t curr_pos;
     TranslationBlock *tb;
+    size_t cold_sizes[tb_num_in_tu];
+
+    memset(cold_sizes, 0, sizeof(cold_sizes));
     for (int i = 0; i < tb_num_in_tu; i++) {
         tb = tb_list[i];
+        tb->tu_cold_offset = 0;
+        tb->tu_cold_size = 0;
         if (use_tu_jmp(tb)) {
 #ifdef CONFIG_LATX_INSTS_PATTERN
             tb->eflags_target_arg[0] = TB_JMP_RESET_OFFSET_INVALID;
@@ -937,6 +1175,7 @@ static void mov_unlink_stub_to_end(uint32_t tb_num_in_tu, TranslationBlock **tb_
                 assert(0);
             }
             tb->tu_unlink.stub_offset = tmp_buffer_size;
+            cold_sizes[i] = unlink_stub_size;
             tmp_buffer_size += unlink_stub_size;
             tb->tc.size -= unlink_stub_size;
         }
@@ -960,6 +1199,8 @@ static void mov_unlink_stub_to_end(uint32_t tb_num_in_tu, TranslationBlock **tb_
         if (use_tu_jmp(tb)) {
             tb->tu_unlink.stub_offset = curr_pos  + tb->tu_unlink.stub_offset
                 - (uintptr_t)tb->tc.ptr;
+            tb->tu_cold_offset = tb->tu_unlink.stub_offset;
+            tb->tu_cold_size = cold_sizes[i];
             /* relocate pcaddi in unlink stub */
             relocate_tu_unlink_stub(tb);
         }
@@ -1022,6 +1263,9 @@ void translate_tu(uint32 tb_num_in_tu, TranslationBlock **tb_list)
     uintptr_t last_tbmini_ptr = tbmini_ptr +
                 sizeof(struct TBMini) * (tb_num_in_tu + 1);
     qatomic_set(&tcg_ctx->code_gen_ptr, (void *)ROUND_UP(last_tbmini_ptr, qemu_icache_linesize));
+    qatomic_set((uint64_t *)tbmini_ptr,
+                (uint64_t)tb_num_in_tu |
+                ((uint64_t)TU_TBM_TABLE_MAGIC << HOST_VIRT_ADDR_SPACE_BITS));
 
 #else
     qatomic_set(&tcg_ctx->code_gen_ptr, (void *)
@@ -1096,12 +1340,25 @@ retry:
 }
 
 static void register_tu(uint32 tb_num_in_tu, TranslationBlock **tb_list,
-		CPUState *cpu, int cflags)
+        CPUState *cpu, int cflags)
 {
+    TranslationBlock *members[MAX_TB_IN_CACHE];
+    uint32_t member_count = 0;
+
     for (int i = 0; i < tb_num_in_tu; i++) {
         TranslationBlock *tb = tb_list[i];
         if (tb->s_data->tu_tb_mode != TU_TB_MODE_BROKEN
-				&& tb->s_data->tu_tb_mode != BAD_TB) {
+                && tb->s_data->tu_tb_mode != BAD_TB) {
+            members[member_count++] = tb;
+        }
+    }
+
+    tu_link_members(members, member_count);
+    tcg_tb_insert_tu(members, member_count);
+
+    for (uint32_t i = 0; i < member_count; i++) {
+        TranslationBlock *tb = members[i];
+        {
             CPUArchState *env = cpu->env_ptr;
             tb_page_addr_t phys_pc;
             tb_page_addr_t phys_page2;
@@ -1132,7 +1389,7 @@ TranslationBlock *tu_gen_code(CPUState *cpu,
                               target_ulong pc, target_ulong cs_base,
                               uint32_t flags, int cflags)
 {
-    TranslationBlock** tb_list = tu_data->tb_list;
+    TranslationBlock **tb_list = tu_data->tb_list;
     uint32_t *tb_num_in_tu = &tu_data->tb_num;
 
     /* TODO: profilea support */
@@ -1157,8 +1414,6 @@ TranslationBlock *tu_gen_code(CPUState *cpu,
 
     translate_tu(*tb_num_in_tu, tb_list);
     register_tu(*tb_num_in_tu, tb_list, cpu, cflags);
-    tu_trees_reset();
-
     return entry;
 }
 

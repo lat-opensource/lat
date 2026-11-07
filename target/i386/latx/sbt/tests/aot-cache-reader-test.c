@@ -98,7 +98,8 @@ static void write_cache(const char *name, size_t header_size, bool has_footer,
     g_autofree uint8_t *contents = NULL;
     aot_header header = {
         .generation_policy = aot_generation_policy(),
-        .aot_file_type = CACHE_AOT_FILE,
+        .aot_file_type = CACHE_AOT_FILE |
+            (aot_cross_page_tu_enabled() ? CROSS_PAGE_TU_AOT : 0),
         .parallel_tb_num = 11,
         .unparallel_tb_num = 7,
     };
