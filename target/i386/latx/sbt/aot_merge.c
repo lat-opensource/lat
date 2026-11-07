@@ -465,7 +465,8 @@ static bool merge_aot_generate(void)
     char *curr_name = aot_x86_lib_names;
     uint8_t aot_file_type = get_file_type(merge_seg_info_vector[0]->file_name);
     p_header->generation_policy = aot_generation_policy();
-    p_header->aot_file_type = aot_file_type;
+    p_header->aot_file_type = aot_file_type |
+        (aot_cross_page_tu_enabled() ? CROSS_PAGE_TU_AOT : 0);
     int page_index = 0;
     for (int i = 0; i < seg_info_num; i++) {
         seg_info *curr_seg_info = merge_seg_info_vector[i]->s_info;
@@ -532,7 +533,14 @@ static bool merge_aot_generate(void)
 		            }
                 }
                 memcpy(curr_aot_tb, cur_aot_tb_vector[j], sizeof(aot_tb));
+#ifdef CONFIG_LATX_TU
+                if (!aot_cross_page_tu_enabled() ||
+                    curr_aot_tb->is_first_tb) {
+                    total_code_cache_size += curr_aot_tb->tu_size;
+                }
+#else
                 total_code_cache_size += curr_aot_tb->tu_size;
+#endif
                 fill_page_table(curr_seg, p_header, curr_aot_tb);
                 curr_aot_tb++;
             }
@@ -552,15 +560,47 @@ static bool merge_aot_generate(void)
     insn_buffer = (uint32_t *)malloc(total_code_cache_size);
     assert(insn_buffer && "insn_buffer malloc failed!");
 
-    uint64_t two_buffer_off = (void *)insn_buffer - (void *)p_insn;
     uint32_t *curr_insn = insn_buffer;
-    /* Fixup all tb_cache_offset. */
-    for (struct aot_tb *p = p_aot_tbs; p < curr_aot_tb; ++p) {
-        memcpy(curr_insn, p->tb_cache_addr, p->tu_size);
-        /* TODO! unlink this TB. */
-        p->tb_cache_offset =
-            (uintptr_t)curr_insn - two_buffer_off - (uintptr_t)p_header;
-        curr_insn += p->tu_size >> 2;
+#ifdef CONFIG_LATX_TU
+    if (aot_cross_page_tu_enabled()) {
+        GHashTable *tu_first = g_hash_table_new_full(aot_tu_key_hash,
+                aot_tu_key_equal, g_free, NULL);
+
+        /* Fix up every TB's code offset within its complete TU allocation. */
+        for (struct aot_tb *p = p_aot_tbs; p < curr_aot_tb; ++p) {
+            if (p->is_first_tb) {
+                memcpy(curr_insn, p->tb_cache_addr, p->tu_size);
+                p->tb_cache_offset = (uintptr_t)curr_insn -
+                    (uintptr_t)insn_buffer + (uintptr_t)p_insn -
+                    (uintptr_t)p_header;
+                curr_insn += p->tu_size >> 2;
+                AOTTUKey *key = g_new(AOTTUKey, 1);
+
+                *key = aot_tu_key(p_header, p);
+                lsassert(!g_hash_table_lookup(tu_first, key));
+                g_hash_table_insert(tu_first, key, p);
+            }
+        }
+        for (struct aot_tb *p = p_aot_tbs; p < curr_aot_tb; ++p) {
+            if (!p->is_first_tb) {
+                AOTTUKey key = aot_tu_key(p_header, p);
+                struct aot_tb *first = g_hash_table_lookup(tu_first, &key);
+
+                lsassert(first);
+                p->tb_cache_offset = first->tb_cache_offset + p->offset_in_tu;
+            }
+        }
+        g_hash_table_destroy(tu_first);
+    } else
+#endif
+    {
+
+        for (struct aot_tb *p = p_aot_tbs; p < curr_aot_tb; ++p) {
+            memcpy(curr_insn, p->tb_cache_addr, p->tu_size);
+            p->tb_cache_offset = (uintptr_t)curr_insn - (uintptr_t)insn_buffer
+                + (uintptr_t)p_insn - (uintptr_t)p_header;
+            curr_insn += p->tu_size >> 2;
+        }
     }
     assert((void *)curr_insn - (void *)insn_buffer == total_code_cache_size);
     if (total_code_cache_size == 0) {

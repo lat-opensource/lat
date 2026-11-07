@@ -56,6 +56,32 @@ static int tb_cmp(const void *a, const void *b)
     return a_cflags > b_cflags ? 1 : (a_cflags < b_cflags ? -1 : 0);
 }
 
+/*
+ * AOT page-table ranges require records from one segment/page/cflags group
+ * to be contiguous.  TU members may still interleave; code offsets are fixed
+ * in a separate pass below.
+ */
+static int aot_tb_cmp(const void *a, const void *b)
+{
+    TranslationBlock *pa = *(TranslationBlock **)a;
+    TranslationBlock *pb = *(TranslationBlock **)b;
+    seg_info *sa = segment_tree_lookup(pa->pc);
+    seg_info *sb = segment_tree_lookup(pb->pc);
+
+    if (sa && sb && sa->seg_begin != sb->seg_begin) {
+        return sa->seg_begin < sb->seg_begin ? -1 : 1;
+    }
+    if (sa != sb) {
+        return sa ? -1 : 1;
+    }
+    uint32_t a_cflags = pa->cflags & CF_PARALLEL;
+    uint32_t b_cflags = pb->cflags & CF_PARALLEL;
+    if (a_cflags != b_cflags) {
+        return a_cflags < b_cflags ? -1 : 1;
+    }
+    return pa->pc < pb->pc ? -1 : pa->pc > pb->pc;
+}
+
 /* Segment info vector with @seg_num@ elements. */
 seg_info **seg_info_vector;
 static int seg_info_num;
@@ -299,7 +325,7 @@ static struct aot_header *get_aot_buffer(int first_seg_in_lib,
 static void fill_seg_table(int seg_info_begin, int seg_info_end,
         struct aot_header *p_header, struct aot_segment *p_segments)
 {
-    uint8_t aot_file_type = p_header->aot_file_type;
+    uint8_t aot_file_type = p_header->aot_file_type & ~CROSS_PAGE_TU_AOT;
     int seg_num_in_file = seg_info_end - seg_info_begin;
     p_header->segments_num = seg_num_in_file;
     p_header->segment_table_offset =
@@ -368,7 +394,9 @@ static inline int create_aot_tb(aot_tb *curr_aot_tb, TranslationBlock *tb,
         aot_segment *curr_seg, aot_segment *p_segments)
 {
 #ifdef CONFIG_LATX_TU
-    curr_aot_tb->tu_id = tb->s_data->tu_id;
+    curr_aot_tb->tu_id = aot_cross_page_tu_enabled() ?
+        (is_tu_tb(tb) ? tb->s_data->tu_id : tb->pc) -
+            curr_seg->details.seg_begin : tb->s_data->tu_id;
     curr_aot_tb->offset_in_tu = tb->s_data->offset_in_tu;
     if (is_tu_tb(tb)) {
         curr_aot_tb->tu_search_addr_offset = tb->tu_search_addr_offset;
@@ -401,22 +429,22 @@ static inline int create_aot_tb(aot_tb *curr_aot_tb, TranslationBlock *tb,
         curr_aot_tb->jmp_reset_offset[1] = tb->jmp_reset_offset[1];
         curr_aot_tb->jmp_stub_reset_offset[0] = tb->jmp_stub_reset_offset[0];
         curr_aot_tb->jmp_stub_reset_offset[1] = tb->jmp_stub_reset_offset[1];
-        if (!use_indirect_jmp(tb)) {
-            uint8_t last_ir1_type = tb->s_data->last_ir1_type;
-            if ((last_ir1_type == IR1_TYPE_BRANCH)
-                    && tb->s_data->next_pc < curr_seg->details.seg_end
-                    && tb->s_data->next_pc >= curr_seg->details.seg_begin) {
-                curr_aot_tb->next_tb_pc_offset =
-                    tb->s_data->next_pc - curr_seg->details.seg_begin;
-            }
-            if ((last_ir1_type == IR1_TYPE_BRANCH
-                        || last_ir1_type == IR1_TYPE_CALL
-                        || last_ir1_type == IR1_TYPE_JUMP)
-                    && tb->s_data->target_pc < curr_seg->details.seg_end
-                    && tb->s_data->target_pc >= curr_seg->details.seg_begin) {
-                curr_aot_tb->target_tb_pc_offset =
-                    tb->s_data->target_pc - curr_seg->details.seg_begin;
-            }
+    }
+    if (!use_indirect_jmp(tb)) {
+        uint8_t last_ir1_type = tb->s_data->last_ir1_type;
+        if ((last_ir1_type == IR1_TYPE_BRANCH)
+                && tb->s_data->next_pc < curr_seg->details.seg_end
+                && tb->s_data->next_pc >= curr_seg->details.seg_begin) {
+            curr_aot_tb->next_tb_pc_offset =
+                tb->s_data->next_pc - curr_seg->details.seg_begin;
+        }
+        if ((last_ir1_type == IR1_TYPE_BRANCH
+                    || last_ir1_type == IR1_TYPE_CALL
+                    || last_ir1_type == IR1_TYPE_JUMP)
+                && tb->s_data->target_pc < curr_seg->details.seg_end
+                && tb->s_data->target_pc >= curr_seg->details.seg_begin) {
+            curr_aot_tb->target_tb_pc_offset =
+                tb->s_data->target_pc - curr_seg->details.seg_begin;
         }
     }
 
@@ -638,9 +666,57 @@ static void fill_rel_table(aot_header *p_header)
 /* we now write tranlsation code cache to memory. First we use
  * another buffer to store code cache, and fixup all @tb_cache_offset of
  * Tbs. Then we write aot_buffer and insn_buffer into aot file. */
-static uint32_t *fill_ins_buff(uint64_t insn_table_offset, aot_tb *p_aot_tbs, 
+#ifdef CONFIG_LATX_TU
+static uint32_t *fill_ins_buff_cross(aot_header *header,
+        uint64_t insn_table_offset, aot_tb *p_aot_tbs,
         uintptr_t tb_table_end, unsigned long total_code_cache_size)
 {
+    uint32_t *insn_buffer = malloc(total_code_cache_size);
+    uint32_t *new_pos = insn_buffer;
+    GHashTable *tu_first = g_hash_table_new_full(aot_tu_key_hash,
+            aot_tu_key_equal, g_free, NULL);
+
+    assert(insn_buffer && "insn_buffer malloc failed!");
+    /* A mode-3 TU's members can interleave with other TUs in the PC table. */
+    for (aot_tb *p = p_aot_tbs; p < (aot_tb *)tb_table_end; ++p) {
+        if (p->is_first_tb) {
+            AOTTUKey *key = g_new(AOTTUKey, 1);
+
+            memcpy(new_pos, p->tb_cache_addr, p->tu_size);
+            p->tb_cache_offset = (uintptr_t)new_pos - (uintptr_t)insn_buffer +
+                                 insn_table_offset;
+            new_pos += p->tu_size >> 2;
+            *key = aot_tu_key(header, p);
+            lsassert(!g_hash_table_lookup(tu_first, key));
+            g_hash_table_insert(tu_first, key, p);
+        }
+    }
+    for (aot_tb *p = p_aot_tbs; p < (aot_tb *)tb_table_end; ++p) {
+        if (!p->is_first_tb) {
+            AOTTUKey key = aot_tu_key(header, p);
+            aot_tb *first = g_hash_table_lookup(tu_first, &key);
+
+            lsassert(first);
+            p->tb_cache_offset = first->tb_cache_offset + p->offset_in_tu;
+        }
+    }
+    g_hash_table_destroy(tu_first);
+    assert((void *)new_pos - (void *)insn_buffer == total_code_cache_size);
+    return insn_buffer;
+}
+#endif
+
+static uint32_t *fill_ins_buff(aot_header *header, uint64_t insn_table_offset,
+                               aot_tb *p_aot_tbs,
+        uintptr_t tb_table_end, unsigned long total_code_cache_size)
+{
+#ifdef CONFIG_LATX_TU
+    if (aot_cross_page_tu_enabled()) {
+        return fill_ins_buff_cross(header, insn_table_offset, p_aot_tbs,
+                                   tb_table_end, total_code_cache_size);
+    }
+#endif
+
     uint32_t *insn_buffer = (uint32_t *)malloc(total_code_cache_size);
     assert(insn_buffer && "insn_buffer malloc failed!");
     uint32_t *curr_insn = insn_buffer;
@@ -655,7 +731,7 @@ static uint32_t *fill_ins_buff(uint64_t insn_table_offset, aot_tb *p_aot_tbs,
             memcpy(curr_insn, p->tb_cache_addr, p->tu_size);
             new_pos += p->tu_size >> 2;
         }
-        p->tb_cache_offset = (uintptr_t)curr_insn - (uintptr_t)insn_buffer 
+        p->tb_cache_offset = (uintptr_t)curr_insn - (uintptr_t)insn_buffer
             + insn_table_offset + p->offset_in_tu;
 #else
         memcpy(curr_insn, p->tb_cache_addr, p->tu_size);
@@ -802,7 +878,8 @@ int do_generate_aot(int first_seg_in_lib, int end_seg_in_lib)
 
     p_header->generation_policy = aot_generation_policy();
     p_header->aot_file_type =
-        seg_info_vector[first_seg_in_lib]->aot_file_type;
+        seg_info_vector[first_seg_in_lib]->aot_file_type |
+        (aot_cross_page_tu_enabled() ? CROSS_PAGE_TU_AOT : 0);
 
     if (p_header->aot_file_type & (ELF_AOT_FILE | PE_AOT_FILE)) {
         struct stat statbuf;
@@ -824,6 +901,11 @@ int do_generate_aot(int first_seg_in_lib, int end_seg_in_lib)
         p_header->last_modify_time = statbuf.st_mtim;
     }
 
+#ifdef CONFIG_LATX_TU
+    if (aot_cross_page_tu_enabled()) {
+        qsort(tb_vector, tb_num, sizeof(TranslationBlock *), aot_tb_cmp);
+    }
+#endif
     struct aot_segment *p_segments;
     p_segments =
         (struct aot_segment *)ROUND_UP((uintptr_t)(p_header + 1), 8);
@@ -844,7 +926,8 @@ int do_generate_aot(int first_seg_in_lib, int end_seg_in_lib)
     fill_rel_table(p_header);
     /* fill ins buffer */
     uint32_t *p_insn = (uint32_t *)ROUND_UP(table_end_addr, 8);
-    uint32_t *insn_buffer = fill_ins_buff((void *)p_insn - (void *)p_header,
+    uint32_t *insn_buffer = fill_ins_buff(p_header,
+        (void *)p_insn - (void *)p_header,
             p_aot_tbs, tb_table_end, total_code_cache_size);
 
     /* fill ir1 buffer */
@@ -1007,11 +1090,57 @@ static bool rename_aot_file(char *lib_name)
     return true;
 }
 
+/*
+ * Keep the whole-library SMC guard disabled: get_tb() already filters TBs
+ * whose entry page is SMC, so one SMC page should not suppress AOT generation
+ * for the entire library. Old-cache PCs can still be reintroduced by merging,
+ * but no instance of this causing a problem has been observed in applications.
+ * Revisit filtering on that path if a concrete case appears.
+ */
+#if 0
+static bool aot_lib_has_smc(int first_seg_id, int end_seg_id)
+{
+    /*
+     * TU merging pretranslates the union of old and new PCs against the
+     * current mapping.  Do not let private self-modified bytes replace the
+     * persistent cache for the original file.
+     */
+    for (int i = first_seg_id; i < end_seg_id; i++) {
+        seg_info *seg = seg_info_vector[i];
+
+        if (seg->seg_end <= seg->seg_begin) {
+            continue;
+        }
+
+        target_ulong page = seg->seg_begin & TARGET_PAGE_MASK;
+        target_ulong last = (seg->seg_end - 1) & TARGET_PAGE_MASK;
+
+        for (;;) {
+            if (page_get_page_state(page) == PAGE_SMC) {
+                return true;
+            }
+            if (page == last) {
+                break;
+            }
+            page += TARGET_PAGE_SIZE;
+        }
+    }
+    return false;
+}
+
+#endif
+
 static inline void gen_aot_by_lib(int first_seg_id, int end_seg_id,
 		CPUState *cpu, uint32_t tb_count)
 {
     char tmp_file_path[PATH_MAX];
     AOTMergeResult merge_result;
+#if 0 /* See the deferred SMC guard above. */
+    if (aot_cross_page_tu_enabled() &&
+        aot_lib_has_smc(first_seg_id, end_seg_id)) {
+        return;
+    }
+#endif
     int lockfd = -1;
 
     curr_lib_name = seg_info_vector[first_seg_id]->file_name;

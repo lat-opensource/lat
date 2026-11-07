@@ -25,6 +25,8 @@ void __wrap_free(void *ptr);
 __thread CPUState *thread_cpu;
 int qemu_loglevel;
 int option_fast_jmpcache_hash;
+int option_tu;
+int option_aot;
 int option_debug_aot;
 time_t aot_st_ctime;
 aot_file_info *aot_buffer_all;

@@ -2424,6 +2424,9 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
     }
 #ifdef CONFIG_LATX_AOT
     aot_mark_dynamic_tb(tb);
+    if (aot_cross_page_tu_enabled()) {
+        aot_resolve_pending_links(cpu, tb);
+    }
 #endif
     return tb;
 }
@@ -2461,6 +2464,10 @@ void aot_tb_register(TranslationBlock *tb, AOTTBOrigin origin)
     } else {
         g_assert(origin == AOT_TB_DYNAMIC);
         aot_mark_dynamic_tb(tb);
+    }
+    if (aot_cross_page_tu_enabled()) {
+        aot_resolve_pending_links(thread_cpu,
+                                  existing_tb == tb ? tb : existing_tb);
     }
 }
 

@@ -105,6 +105,13 @@ test(
   suite: 'lat-pr-fast',
 )
 
+test(
+  'test-latx-aot-page-recovery',
+  python,
+  args: [files('test-latx-aot-page-recovery.py'), project_source_root],
+  suite: 'lat-pr-fast',
+)
+
 # Each index fixture is compiled separately; give each case its own timeout.
 foreach backend : ['mini', 'tree']
   foreach mode : ['protocol', 'threaded']
@@ -116,6 +123,13 @@ foreach backend : ['mini', 'tree']
     )
   endforeach
 endforeach
+
+test(
+  'test-latx-tu-member-sort',
+  python,
+  args: [files('test-latx-tu-member-sort.py'), project_source_root],
+  suite: 'lat-pr-fast',
+)
 
 test(
   'test-latx-tu-members',

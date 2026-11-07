@@ -39,6 +39,33 @@ extern  const char *aot_left_file_minsize_optarg;
  * |  code caches |
  * +--------------+
  */
+#ifdef CONFIG_LATX_TU
+typedef struct AOTTUKey {
+    uint32_t segment_idx;
+    uint32_t flags;
+    uint32_t cflags;
+    uint32_t tu_id;
+} AOTTUKey;
+
+static inline guint aot_tu_key_hash(gconstpointer data)
+{
+    const AOTTUKey *key = data;
+
+    return key->tu_id ^ key->cflags ^ key->flags * 2246822519U ^
+           key->segment_idx * 2654435761U;
+}
+
+static inline gboolean aot_tu_key_equal(gconstpointer a, gconstpointer b)
+{
+    const AOTTUKey *left = a;
+    const AOTTUKey *right = b;
+
+    return left->segment_idx == right->segment_idx &&
+           left->flags == right->flags && left->cflags == right->cflags &&
+           left->tu_id == right->tu_id;
+}
+
+#endif
 typedef struct aot_header {
     uint32_t generation_policy;
     uint32_t lib_size;
@@ -121,7 +148,7 @@ typedef struct aot_tb {
     int32_t next_tb_pc_offset;
     int32_t target_tb_pc_offset;
 #ifdef CONFIG_LATX_TU
-    /*tu_id is the first tb pc in TU */
+    /* Mode 3: first TB offset in its segment. Page mode: original TU PC. */
     uint32_t tu_id;
     uint32_t offset_in_tu;
 #endif
@@ -159,6 +186,33 @@ typedef struct aot_tb {
     uint64_t profile_nr_code;
 #endif
 } aot_tb;
+
+#ifdef CONFIG_LATX_TU
+static inline AOTTUKey aot_tu_key(const aot_header *header,
+                                const struct aot_tb *tb)
+{
+    const aot_segment *segments = (const void *)header +
+                                  header->segment_table_offset;
+    uint32_t segment_idx;
+
+    for (segment_idx = 0; segment_idx < header->segments_num; segment_idx++) {
+        const aot_segment *segment = &segments[segment_idx];
+        const aot_tb *first = (const void *)header +
+                              segment->segment_tbs_offset;
+
+        if (tb >= first && tb < first + segment->segment_tbs_num) {
+            break;
+        }
+    }
+    lsassert(segment_idx < header->segments_num);
+    return (AOTTUKey) {
+        .segment_idx = segment_idx,
+        .flags = tb->flags,
+        .cflags = tb->cflags,
+        .tu_id = tb->tu_id,
+    };
+}
+#endif
 
 typedef enum aot_rel_kind {
 

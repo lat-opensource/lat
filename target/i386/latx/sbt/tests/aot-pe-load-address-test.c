@@ -86,6 +86,38 @@ static void check_cross_page_policy(seg_info *seg)
     option_aot = 1;
 }
 
+#ifdef CONFIG_LATX_TU
+typedef struct AOTKeyTestData {
+    aot_header header;
+    aot_segment segment;
+    aot_tb tbs[2];
+} AOTKeyTestData;
+
+static void check_tu_key_includes_flags(void)
+{
+    AOTKeyTestData data = { 0 };
+    AOTTUKey first, second;
+    GHashTable *table;
+
+    data.header.segment_table_offset = offsetof(AOTKeyTestData, segment);
+    data.header.segments_num = 1;
+    data.segment.segment_tbs_offset = offsetof(AOTKeyTestData, tbs);
+    data.segment.segment_tbs_num = G_N_ELEMENTS(data.tbs);
+    data.tbs[0].tu_id = data.tbs[1].tu_id = 0x1234;
+    data.tbs[0].cflags = data.tbs[1].cflags = 0;
+    data.tbs[0].flags = 0x100;
+    data.tbs[1].flags = 0x200;
+    first = aot_tu_key(&data.header, &data.tbs[0]);
+    second = aot_tu_key(&data.header, &data.tbs[1]);
+
+    g_assert(!aot_tu_key_equal(&first, &second));
+    table = g_hash_table_new(aot_tu_key_hash, aot_tu_key_equal);
+    g_hash_table_insert(table, &first, GINT_TO_POINTER(1));
+    g_assert(g_hash_table_lookup(table, &second) == NULL);
+    g_hash_table_destroy(table);
+}
+#endif
+
 int main(void)
 {
     char elf_name[] = "/tmp/libexample.so";
@@ -129,6 +161,9 @@ int main(void)
     check_hash_policy(&pe_seg);
     check_cross_page_policy(&elf_seg);
     check_cross_page_policy(&pe_seg);
+#ifdef CONFIG_LATX_TU
+    check_tu_key_includes_flags();
+#endif
 
     same_page_pe_seg.seg_begin += 0x80;
     get_cache_name(&same_page_pe_seg, second_name);

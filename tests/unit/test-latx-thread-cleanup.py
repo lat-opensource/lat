@@ -48,7 +48,6 @@ PRELUDE = r'''
 #define QEMU_NORETURN __attribute__((noreturn))
 #define OBJECT(x) (x)
 #define FUTEX_WAKE 1
-#define TU_MEMBER_INDEX_SIZE 2048
 #define BUFF_4K 4096
 #define BUFF_16K 16384
 #define TARGET_GDT_ENTRIES 9
@@ -56,12 +55,7 @@ typedef long abi_long;
 typedef struct { void *bucket; } IMM_CACHE;
 typedef struct { void *ir2_inst_array; IMM_CACHE *imm_cache; } TRANSLATION_DATA;
 typedef struct { unsigned long pc; unsigned marker; } TranslationBlock;
-typedef struct {
-    uint16_t member_index[2048];
-    unsigned tb_num, ir1_num_in_tu, page_num;
-    TranslationBlock *tb_list[510];
-    uintptr_t first_page, last_page;
-} TUControl;
+typedef struct { GTree *tree; unsigned tb_num, ir1_num_in_tu; } TUControl;
 typedef struct { void *cpu_state; TRANSLATION_DATA *tr_data; } ENV;
 typedef struct {
     unsigned child_tidptr;
@@ -146,7 +140,6 @@ static void check_empty(void) {
     CHECK(!lsenv && !tr_data_real.ir2_inst_array && !tr_data_real.imm_cache);
 #ifdef CONFIG_LATX_TU
     CHECK(!tu_data && trees == 0);
-    CHECK(!tu_data_rel.tb_num && !tu_data_rel.member_index[0]);
 #endif
     CHECK(!smc_retrans_tree && trees == 0);
 }
@@ -161,8 +154,7 @@ static void thread_exit_case(int mode) {
     lsenv->tr_data = &tr_data_real;
 #ifdef CONFIG_LATX_TU
     tu_control_init();
-    tu_data->tb_list[tu_data->tb_num++] = &shared_tb;
-    tu_data->member_index[0] = 1;
+    g_tree_insert(tu_data->tree, &shared_tb, &shared_tb);
 #endif
     smc_retrans_tree_init();
     CHECK(smc_retrans_insert(&shared_tb));
@@ -181,7 +173,7 @@ static void thread_exit_case(int mode) {
         exit_guest_thread_locked(&env);
     }
     CHECK(thread_cpu == NULL);
-    CHECK(shared_tb.marker == 0xfeed); /* TU indexes do not own shared TBs. */
+    CHECK(shared_tb.marker == 0xfeed); /* TU trees do not own shared TBs. */
     check_empty();
     latx_smc_thread_cleanup();
     latx_smc_thread_cleanup();
@@ -457,7 +449,8 @@ def main():
         common = (PRELUDE + reset + set_buffer + smc_functions
                   + function(syscall, "static void cleanup_guest_seccomp(", optional=True))
         tu_functions = "".join(function(tu, signature) for signature in (
-            "void tu_control_init(",)) + tu_destroy
+            "static gint gpc_cmp(", "static inline void tu_trees_init(",
+            "void tu_control_init(")) + tu_destroy
         exit_body = function(syscall, "static void QEMU_NORETURN exit_guest_thread_locked(")
         define_destroy = "#define HAVE_LATX_DESTROY 1\n" if destroy else ""
         cases["thread-no-tu"] = common + define_destroy + destroy + exit_body + MAIN

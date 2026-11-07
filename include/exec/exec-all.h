@@ -62,6 +62,10 @@ void set_tb_relink_flag(TranslationBlock *tb, int index);
 void clear_signal_link_flag(TranslationBlock *tb, int index);
 
 void tb_reset_jump(TranslationBlock *tb, int n);
+#ifdef CONFIG_LATX_AOT
+void tb_add_jump_aot(TranslationBlock *tb, int n,
+                     TranslationBlock *tb_next);
+#endif
 void restore_state_to_opc(CPUArchState *env, TranslationBlock *tb,
                           target_ulong *data);
 int encode_search(TranslationBlock *tb, uint8_t *block);
