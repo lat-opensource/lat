@@ -25,7 +25,6 @@
 #include "exec/fasttb.h"
 #endif
 
-/* static GTree *ts_tree; */
 static __thread tb_tmp_message *dynamic_tb_message_vector;
 static __thread uint32 dynamic_tb_num;
 static __thread tb_tmp_message *curr_tb_message_vector;
@@ -482,12 +481,19 @@ static TranslationBlock* create_static_tb(CPUState *cpu, target_ulong pc,
 
     target_disasm(tb, max_insns);
 
+    if (aot_cross_page_tu_enabled() &&
+        !tu_page_range_available(tb->pc, tb->size)) {
+        free(tb->s_data);
+        free(tb);
+        return NULL;
+    }
+
     tb->s_data->tu_tb_mode = TU_TB_MODE_STATIC;
     save_static_tb(tb, cpu);
     return tb;
 }
 
-static inline void get_next_tb(TranslationBlock *curr_tb, CPUState *cpu,
+static inline void get_next_tb_page(TranslationBlock *curr_tb, CPUState *cpu,
         target_ulong cs_base, uint32_t flags, int cflags, int max_insns)
 {
     ADDRX next_tb_pc = curr_tb->s_data->next_pc;
@@ -503,7 +509,7 @@ static inline void get_next_tb(TranslationBlock *curr_tb, CPUState *cpu,
     if (tb_id >= 0) {
         /* Get dynamic tb. */
         next_tb = aot_tb_lookup(next_tb_pc, cflags);
-        if (!next_tb) {
+        if (!next_tb && tu_data->tb_num < MAX_TB_IN_TS) {
             next_tb = tb_create(cpu, next_tb_pc, cs_base, flags, cflags, max_insns,
                     curr_tb_message_vector[tb_id].bool_flags, TU_TB_START_NORMAL);
             if (is_bad_tb(next_tb)) {
@@ -519,7 +525,7 @@ static inline void get_next_tb(TranslationBlock *curr_tb, CPUState *cpu,
     } else {
         /* Get static tb. */
         next_tb = lookup_static_tb(next_tb_pc, cflags, cpu);
-        if (!next_tb) {
+        if (!next_tb && tu_data->tb_num < MAX_TB_IN_TS) {
             next_tb = create_static_tb(cpu, next_tb_pc,
                     cs_base, flags, cflags, max_insns);
             if (next_tb) {
@@ -531,7 +537,66 @@ static inline void get_next_tb(TranslationBlock *curr_tb, CPUState *cpu,
     curr_tb->s_data->next_tb[TU_TB_INDEX_NEXT] = next_tb;
 }
 
-static inline void get_target_tb(TranslationBlock *curr_tb, CPUState *cpu,
+static inline void get_next_tb(TranslationBlock *curr_tb, CPUState *cpu,
+        target_ulong cs_base, uint32_t flags, int cflags, int max_insns)
+{
+    if (!aot_cross_page_tu_enabled()) {
+        get_next_tb_page(curr_tb, cpu, cs_base, flags, cflags, max_insns);
+        return;
+    }
+
+    ADDRX next_tb_pc = curr_tb->s_data->next_pc;
+    lsassert(next_tb_pc);
+    curr_tb->s_data->next_tb[TU_TB_INDEX_NEXT] = NULL;
+    curr_tb->tu_jmp[TU_TB_INDEX_NEXT] = TB_JMP_RESET_OFFSET_INVALID;
+    int tb_id = get_tb_id(next_tb_pc, cflags);
+    TranslationBlock *next_tb = tu_member_lookup(next_tb_pc);
+
+    if (next_tb) {
+        curr_tb->s_data->next_tb[TU_TB_INDEX_NEXT] = next_tb;
+        return;
+    }
+    if (tu_data->tb_num >= MAX_TB_IN_TS ||
+            !tu_page_range_available(next_tb_pc, 1) ||
+            next_tb_pc < curr_seg->seg_begin ||
+            next_tb_pc >= curr_seg->seg_end) {
+        return;
+    }
+    if (tb_id >= 0) {
+        /* Get dynamic tb. */
+        next_tb = aot_tb_lookup(next_tb_pc, cflags);
+        if (next_tb) {
+            /*
+             * Already translated by another TU: leave a dispatcher
+             * exit.
+             */
+            return;
+        }
+        next_tb = tb_create(cpu, next_tb_pc, cs_base, flags,
+                cflags, max_insns, curr_tb_message_vector[tb_id].bool_flags,
+                TU_TB_START_NORMAL);
+        if (is_bad_tb(next_tb) || !tu_push_back(next_tb)) {
+            next_tb = NULL;
+        }
+    } else {
+        /* Get static tb. */
+        next_tb = lookup_static_tb(next_tb_pc, cflags, cpu);
+        if (next_tb) {
+            return;
+        }
+        next_tb = create_static_tb(cpu, next_tb_pc,
+                cs_base, flags, cflags, max_insns);
+        if (next_tb) {
+            next_tb->bool_flags |= (curr_tb->bool_flags & IS_CODE64);
+            if (!tu_push_back(next_tb)) {
+                next_tb = NULL;
+            }
+        }
+    }
+    curr_tb->s_data->next_tb[TU_TB_INDEX_NEXT] = next_tb;
+}
+
+static inline void get_target_tb_page(TranslationBlock *curr_tb, CPUState *cpu,
         target_ulong cs_base, uint32_t flags, int cflags, int max_insns)
 {
     curr_tb->tu_jmp[TU_TB_INDEX_TARGET] = TB_JMP_RESET_OFFSET_INVALID;
@@ -547,7 +612,7 @@ static inline void get_target_tb(TranslationBlock *curr_tb, CPUState *cpu,
     if (tb_id >= 0) {
         /* Get dynamic tb. */
         target_tb = aot_tb_lookup(target_tb_pc, cflags);
-        if (!target_tb) {
+        if (!target_tb && tu_data->tb_num < MAX_TB_IN_TS) {
             target_tb = tb_create(cpu, target_tb_pc, cs_base, flags, cflags, max_insns,
                     curr_tb_message_vector[tb_id].bool_flags, TU_TB_START_NORMAL);
             if (is_bad_tb(target_tb)) {
@@ -563,7 +628,7 @@ static inline void get_target_tb(TranslationBlock *curr_tb, CPUState *cpu,
     } else {
         /* Get static tb. */
         target_tb = lookup_static_tb(target_tb_pc, cflags, cpu);
-        if (!target_tb) {
+        if (!target_tb && tu_data->tb_num < MAX_TB_IN_TS) {
             target_tb = create_static_tb(cpu, target_tb_pc,
                     cs_base, flags, cflags, max_insns);
             if (target_tb) {
@@ -575,20 +640,131 @@ static inline void get_target_tb(TranslationBlock *curr_tb, CPUState *cpu,
     curr_tb->s_data->next_tb[TU_TB_INDEX_TARGET] = target_tb;
 }
 
+static inline void get_target_tb(TranslationBlock *curr_tb, CPUState *cpu,
+        target_ulong cs_base, uint32_t flags, int cflags, int max_insns)
+{
+    if (!aot_cross_page_tu_enabled()) {
+        get_target_tb_page(curr_tb, cpu, cs_base, flags, cflags, max_insns);
+        return;
+    }
+
+    curr_tb->tu_jmp[TU_TB_INDEX_TARGET] = TB_JMP_RESET_OFFSET_INVALID;
+    curr_tb->s_data->next_tb[TU_TB_INDEX_TARGET] = NULL;
+    ADDRX target_tb_pc = curr_tb->s_data->target_pc;
+    lsassert(target_tb_pc);
+    int tb_id = get_tb_id(target_tb_pc, cflags);
+    TranslationBlock *target_tb = tu_member_lookup(target_tb_pc);
+
+    if (target_tb) {
+        curr_tb->s_data->next_tb[TU_TB_INDEX_TARGET] = target_tb;
+        return;
+    }
+    if (tu_data->tb_num >= MAX_TB_IN_TS ||
+            !tu_page_range_available(target_tb_pc, 1) ||
+            target_tb_pc < curr_seg->seg_begin ||
+            target_tb_pc >= curr_seg->seg_end) {
+        return;
+    }
+    if (tb_id >= 0) {
+        /* Get dynamic tb. */
+        target_tb = aot_tb_lookup(target_tb_pc, cflags);
+        if (target_tb) {
+            /*
+             * Already translated by another TU: leave a dispatcher
+             * exit.
+             */
+            return;
+        }
+        target_tb = tb_create(cpu, target_tb_pc, cs_base, flags,
+                cflags, max_insns, curr_tb_message_vector[tb_id].bool_flags,
+                TU_TB_START_NORMAL);
+        if (is_bad_tb(target_tb) || !tu_push_back(target_tb)) {
+            target_tb = NULL;
+        }
+    } else {
+        /* Get static tb. */
+        target_tb = lookup_static_tb(target_tb_pc, cflags, cpu);
+        if (target_tb) {
+            return;
+        }
+        target_tb = create_static_tb(cpu, target_tb_pc,
+                cs_base, flags, cflags, max_insns);
+        if (target_tb) {
+            target_tb->bool_flags |= (curr_tb->bool_flags & IS_CODE64);
+            if (!tu_push_back(target_tb)) {
+                target_tb = NULL;
+            }
+        }
+    }
+    curr_tb->s_data->next_tb[TU_TB_INDEX_TARGET] = target_tb;
+}
+
 static int untr_tb_id;
+
+static bool get_ts_outgoing(CPUState *cpu, target_ulong cs_base,
+        uint32_t flags, int cflags, int max_insns)
+{
+    TranslationBlock **tb_list = tu_data->tb_list;
+    uint32_t *tb_num_in_tu = &tu_data->tb_num;
+    uint32_t tb_id = 0;
+
+    /* At capacity, still resolve edges between admitted members. */
+    while (tb_id < *tb_num_in_tu) {
+        TranslationBlock *tb = tb_list[tb_id++];
+
+#ifdef CONFIG_LATX_DEBUG
+        if (get_tb_id(tb->pc, tb->cflags) < 0) {
+            continue;
+        }
+#endif
+        if (tu_data->ir1_num_in_tu + 2 * max_insns >= MAX_IR1_IN_TU) {
+            fprintf(stderr, "WARNING too many ir1 %d\n",
+                    tu_data->ir1_num_in_tu);
+            return false;
+        }
+        if (is_bad_tb(tb)) {
+            continue;
+        }
+        switch (tb->s_data->last_ir1_type) {
+        case IR1_TYPE_BRANCH:
+            if (get_tb_id(tb->s_data->target_pc, cflags) < 0 ||
+                    get_tb_id(tb->s_data->next_pc, cflags) < 0) {
+                break;
+            }
+            get_next_tb(tb, cpu, cs_base, flags, cflags, max_insns);
+            get_target_tb(tb, cpu, cs_base, flags, cflags, max_insns);
+            break;
+        case IR1_TYPE_CALLIN:
+        case IR1_TYPE_CALL:
+        case IR1_TYPE_NORMAL:
+        case IR1_TYPE_SYSCALL:
+            get_next_tb(tb, cpu, cs_base, flags, cflags, max_insns);
+            break;
+        case IR1_TYPE_JUMP:
+            get_target_tb(tb, cpu, cs_base, flags, cflags, max_insns);
+            break;
+        case IR1_TYPE_JUMPIN:
+        case IR1_TYPE_RET:
+            break;
+        default:
+            lsassert(0);
+        }
+    }
+    return true;
+}
 
 static inline void get_ts_queue(CPUState *cpu, target_ulong cs_base,
         uint32_t flags, int cflags, int max_insns, target_ulong curr_page)
 {
-    TranslationBlock** tb_list = tu_data->tb_list;
     uint32_t *tb_num_in_tu = &tu_data->tb_num;
     target_ulong curr_tb_pc, curr_tb_cflags;
     TranslationBlock *tb;
-    uint32_t tb_id = 0;
     while (untr_tb_id <= curr_seg->last_tb_id && *tb_num_in_tu < MAX_TB_IN_TS) {
         curr_tb_pc = curr_tb_message_vector[untr_tb_id].pc;
         curr_tb_cflags = curr_tb_message_vector[untr_tb_id].cflags;
-        if (get_page(curr_tb_pc) != curr_page || curr_tb_cflags != cflags) {
+        if (curr_tb_cflags != cflags ||
+            (!aot_cross_page_tu_enabled() &&
+             get_page(curr_tb_pc) != curr_page)) {
             break;
         }
 	if(curr_tb_message_vector[untr_tb_id].tb) {
@@ -598,45 +774,7 @@ static inline void get_ts_queue(CPUState *cpu, target_ulong cs_base,
                 curr_tb_message_vector[untr_tb_id].bool_flags , TU_TB_START_ENTRY);
         tu_push_back(tb);
         untr_tb_id++;
-        for (; tb_id <  *tb_num_in_tu && *tb_num_in_tu < MAX_TB_IN_TS;  tb_id++) {
-#ifdef CONFIG_LATX_DEBUG
-            if (get_tb_id(tb->pc, tb->cflags) < 0) {
-                continue;
-            }
-#endif
-            if (tu_data->ir1_num_in_tu + 2 * max_insns >= MAX_IR1_IN_TU) {
-                fprintf(stderr, "WARNING too many ir1 %d\n", tu_data->ir1_num_in_tu);
-                return;
-            }
-            tb = tb_list[tb_id];
-            if (is_bad_tb(tb)) {
-                continue;
-            }
-            switch (tb->s_data->last_ir1_type) {
-                case IR1_TYPE_BRANCH:
-                    if (get_tb_id(tb->s_data->target_pc, cflags) < 0 ||
-                            get_tb_id(tb->s_data->next_pc, cflags) < 0) {
-                        break;
-                    }
-                    get_next_tb(tb, cpu, cs_base, flags, cflags, max_insns);
-                    get_target_tb(tb, cpu, cs_base, flags, cflags, max_insns);
-                    break;
-                case IR1_TYPE_CALLIN:
-                case IR1_TYPE_NORMAL:
-                case IR1_TYPE_SYSCALL:
-                case IR1_TYPE_CALL:
-                    get_next_tb(tb, cpu, cs_base, flags, cflags, max_insns);
-                    break;
-                case IR1_TYPE_JUMP:
-                    get_target_tb(tb, cpu, cs_base, flags, cflags, max_insns);
-                    break;
-                case IR1_TYPE_JUMPIN:
-                case IR1_TYPE_RET:
-                    break;
-                default:
-                    lsassert(0);
-            }
-        }
+        get_ts_outgoing(cpu, cs_base, flags, cflags, max_insns);
         /* Big TU have bug, so break in there. */
         break;
     }
@@ -645,7 +783,8 @@ static inline void get_ts_queue(CPUState *cpu, target_ulong cs_base,
 
 /* static int max_tb_num; */
 
-static void delet_static_tb(TranslationBlock **tb_list, uint32_t *tb_num_in_tu)
+static void delet_static_tb(CPUState *cpu, TranslationBlock **tb_list,
+        uint32_t *tb_num_in_tu)
 {
     TranslationBlock *tb, *target_tb, *next_tb;
     /* Make next_tb or target_tb do not point to static tb. */
@@ -667,6 +806,20 @@ static void delet_static_tb(TranslationBlock **tb_list, uint32_t *tb_num_in_tu)
         tb = tb_list[i];
         assert(tb);
         if (tb->s_data->tu_tb_mode == TU_TB_MODE_STATIC) {
+            uint32_t hash = tb_jmp_cache_hash_func(tb->pc);
+
+            /*
+             * Static TBs exist only while constructing this TU.  Do not
+             * leave a freed pointer in either jump cache after discarding
+             * one.  A colliding, newer TB owns the slot and must survive.
+             */
+            if (aot_cross_page_tu_enabled() &&
+                qatomic_read(&cpu->tb_jmp_cache[hash]) == tb) {
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+                latx_fast_jmp_cache_clear(cpu, hash);
+#endif
+                qatomic_set(&cpu->tb_jmp_cache[hash], NULL);
+            }
             free(tb->s_data);
             free(tb);
             tb = NULL;
@@ -682,7 +835,6 @@ static void ts_tb_explore(CPUState *cpu, target_ulong cs_base,
 {
     TranslationBlock** tb_list = tu_data->tb_list;
     uint32_t *tb_num_in_tu = &tu_data->tb_num;
-    uint32_t *ir1_num_in_tu = &tu_data->ir1_num_in_tu;
     int max_insns;
 
     max_insns = cflags & CF_COUNT_MASK;
@@ -695,8 +847,7 @@ static void ts_tb_explore(CPUState *cpu, target_ulong cs_base,
     if (cpu->singlestep_enabled || singlestep) {
         max_insns = 1;
     }
-    *tb_num_in_tu = 0;
-    *ir1_num_in_tu = 0;
+    tu_build_reset();
     while(untr_tb_id <= curr_seg->last_tb_id &&
         curr_tb_message_vector[untr_tb_id].tb) {
 	untr_tb_id++;
@@ -704,9 +855,11 @@ static void ts_tb_explore(CPUState *cpu, target_ulong cs_base,
     if (untr_tb_id > curr_seg->last_tb_id) {
 	return;
     }
-    target_ulong curr_page = get_page(curr_tb_message_vector[untr_tb_id].pc);
     cflags = curr_tb_message_vector[untr_tb_id].cflags;
     cpu->tcg_cflags = cflags;
+
+    target_ulong curr_page = curr_tb_message_vector[untr_tb_id].pc &
+                             TARGET_PAGE_MASK;
 
     get_ts_queue(cpu, cs_base, flags, cflags, max_insns, curr_page);
     if (*tb_num_in_tu == 0) {
@@ -720,17 +873,18 @@ static void ts_tb_explore(CPUState *cpu, target_ulong cs_base,
     qsort(tb_list, *tb_num_in_tu, sizeof(TranslationBlock *), tb_sort_cmp);
     solve_tb_overlap(*tb_num_in_tu, tb_list, max_insns);
     tu_ir1_optimization(tb_list, *tb_num_in_tu);
-    delet_static_tb(tb_list, tb_num_in_tu);
+    delet_static_tb(cpu, tb_list, tb_num_in_tu);
 
     for (int i = 0; i < *tb_num_in_tu; i++) {
         tb_list[i]->s_data->tu_id = tb_list[0]->pc;
         assert((tb_list[i]->cflags & CF_PARALLEL) == (cflags & CF_PARALLEL));
-        assert(get_page(tb_list[i]->pc) == get_page(tb_list[0]->pc));
+        assert(tu_data->page_num <= MAX_PAGES_IN_TU);
     }
 }
 
 static void save_tu_to_ts(void) {
     TranslationBlock** tb_list = tu_data->tb_list;
+
     for (int i = 0; i < tu_data->tb_num; i++){
 	ts_push_back(tb_list[i]);
     }
@@ -844,4 +998,3 @@ uint64 translate_lib(seg_info **seg_info_vector, int begin_id,
     in_pre_translate = 0;
     return tb_num_in_ts;
 }
-

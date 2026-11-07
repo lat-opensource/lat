@@ -47,6 +47,7 @@ PRELUDE = r'''
 #define PAGE_ANON 128
 TB_FLAGS
 #define TARGET_HAS_PRECISE_SMC 1
+static bool aot_cross_page_tu_enabled(void) { return false; }
 #define CONFIG_LATX_SMC_OPT 1
 #define CONFIG_LOONGARCH_NEW_WORLD 1
 #define HOST_PAGE_ALIGN(x) (((x) + qemu_host_page_size - 1) & qemu_host_page_mask)
@@ -362,6 +363,9 @@ def main():
         'bool page_is_shadow_not_shmm(', 'static inline int smc_shmm_check_page_anon(',
         'static int smc_create_shadow_page_shmm(', 'void create_shadow_page_chunk('))
     bodies += function(source, 'static inline bool tb_is_covered(')
+    if 'static bool tb_same_tu(' in source:
+        fallback = source[source.index('#else\nstatic bool tb_same_tu('):]
+        bodies += function(fallback, 'static bool tb_same_tu(')
     bodies += '#define tb_invalidate_phys_page_unwind production_tb_invalidate_phys_page_unwind\n'
     bodies += function(source, 'bool tb_invalidate_phys_page_unwind(')
     bodies += '#undef tb_invalidate_phys_page_unwind\n'

@@ -79,6 +79,26 @@ static inline uint32_t aot_generation_policy(void)
 {
     return 0x100U | !!option_fast_jmpcache_hash;
 }
+
+/* Generation and cache identity must not depend on whether loading is on. */
+static inline bool aot_cross_page_tu_enabled(void)
+{
+#if defined(CONFIG_LATX_AOT) && defined(CONFIG_LATX_TU)
+    return option_tu && option_aot == 3;
+#else
+    return false;
+#endif
+}
+
+static inline bool aot_tu_loading_enabled(void)
+{
+#if defined(CONFIG_LATX_AOT) && defined(CONFIG_LATX_TU)
+    return aot_cross_page_tu_enabled() && option_load_aot;
+#else
+    return false;
+#endif
+}
+
 extern int option_debug_aot;
 extern char ** latx_aot_wine_pefiles_cache;
 extern char *option_wine_pe_fixed_base;

@@ -86,7 +86,7 @@
 #include "exec/fasttb.h"
 #endif
 #ifdef CONFIG_LATX_TU
-void tu_reset_tb(TranslationBlock *tb);
+#include "tu.h"
 #endif
 #include "linux/memfd.h"
 /* #define DEBUG_TB_INVALIDATE */
@@ -480,6 +480,16 @@ static int cpu_restore_state_from_tb(CPUState *cpu, TranslationBlock *tb,
         cpu_neg(cpu)->icount_decr.u16.low += num_insns - i;
     }
     restore_state_to_opc(env, tb, data);
+#if defined(CONFIG_LATX_TU) && (defined(CONFIG_LATX_OPT_PUSH_POP) || \
+                              defined(CONFIG_LATX_INSTS_PATTERN))
+    TranslationBlock restore_tb;
+    struct separated_data restore_data;
+
+    if (is_tu_tb(tb)) {
+        tu_prepare_restore_tb(&restore_tb, &restore_data, tb);
+        tb = &restore_tb;
+    }
+#endif
 #ifdef CONFIG_LATX_OPT_PUSH_POP
     uint32_t parallel = cpu->tcg_cflags & CF_PARALLEL;
     if (!parallel) {
@@ -1783,10 +1793,56 @@ static void do_tb_phys_invalidate(TranslationBlock *tb, bool rm_from_page_list)
     jrra_install_smc_sentinel(tb);
 }
 
+#if defined(CONFIG_LATX_TU) && defined(CONFIG_USER_ONLY)
+static bool tb_same_tu(TranslationBlock *a, TranslationBlock *b)
+{
+    if (a == b) {
+        return true;
+    }
+    if (!aot_cross_page_tu_enabled() ||
+        !a || !b || !is_tu_tb(a) || !is_tu_tb(b)) {
+        return false;
+    }
+    for (TranslationBlock *member = a->tu_next;
+         member && member != a; member = member->tu_next) {
+        if (member == b) {
+            return true;
+        }
+    }
+    return false;
+}
+#else
+static bool tb_same_tu(TranslationBlock *a, TranslationBlock *b)
+{
+    return a == b;
+}
+#endif
+
+static void do_tb_group_invalidate(TranslationBlock *tb,
+                                   bool rm_from_page_list)
+{
+#if defined(CONFIG_LATX_TU) && defined(CONFIG_USER_ONLY)
+    if (aot_cross_page_tu_enabled() && is_tu_tb(tb)) {
+        TranslationBlock *member = tb;
+
+        do {
+            TranslationBlock *next = member->tu_next;
+
+            if (!(tb_cflags(member) & CF_INVALID)) {
+                do_tb_phys_invalidate(member, rm_from_page_list);
+            }
+            member = next;
+        } while (member && member != tb);
+        return;
+    }
+#endif
+    do_tb_phys_invalidate(tb, rm_from_page_list);
+}
+
 static void tb_phys_invalidate__locked(TranslationBlock *tb)
 {
     qemu_thread_jit_write();
-    do_tb_phys_invalidate(tb, true);
+    do_tb_group_invalidate(tb, true);
     qemu_thread_jit_execute();
 }
 
@@ -1798,10 +1854,14 @@ void tb_phys_invalidate(TranslationBlock *tb, tb_page_addr_t page_addr)
 {
     if (page_addr == -1 && tb_page_addr0(tb) != -1) {
         page_lock_tb(tb);
-        do_tb_phys_invalidate(tb, true);
+        do_tb_group_invalidate(tb, true);
         page_unlock_tb(tb);
     } else {
-        do_tb_phys_invalidate(tb, false);
+#ifdef CONFIG_USER_ONLY
+        do_tb_group_invalidate(tb, aot_cross_page_tu_enabled());
+#else
+        do_tb_group_invalidate(tb, false);
+#endif
     }
 }
 
@@ -2419,8 +2479,29 @@ void tb_invalidate_phys_range(tb_page_addr_t start, tb_page_addr_t end)
 
     assert_memory_lock();
 
-    PAGE_FOR_EACH_TB(start, end, unused, tb, n) {
-        tb_phys_invalidate__locked(tb);
+    if (!aot_cross_page_tu_enabled()) {
+        PAGE_FOR_EACH_TB(start, end, unused, tb, n) {
+            tb_phys_invalidate__locked(tb);
+        }
+    } else {
+        /*
+         * A TU invalidation removes several interval-tree nodes.  Restart the
+         * iterator after every group instead of retaining a pointer into it.
+         */
+        for (;;) {
+            TranslationBlock *victim = NULL;
+
+            PAGE_FOR_EACH_TB(start, end, unused, tb, n) {
+                if (!(tb_cflags(tb) & CF_INVALID)) {
+                    victim = tb;
+                    break;
+                }
+            }
+            if (!victim) {
+                break;
+            }
+            tb_phys_invalidate__locked(victim);
+        }
     }
 
 #ifdef CONFIG_LATX_AOT
@@ -2510,36 +2591,88 @@ bool tb_invalidate_phys_page_unwind(tb_page_addr_t addr, uintptr_t pc, int *tbco
         }
 
 foreach_tb_start:
-
-        PAGE_FOR_EACH_TB(addr, addr + TARGET_PAGE_SIZE, unused, tb, n) {
-            if (tbcount && !tb_is_covered(tb, smcaddr, smcsize)) {
-                // this TB is not affected, mark it and continue
-                *tbcount |= 0x1;
-                continue;
-            }
-            if (current_tb == tb &&
-                (tb_cflags(current_tb) & CF_COUNT_MASK) != 1) {
-                /*
-                 * If we are modifying the current TB, we must stop its
-                 * execution. We could be more precise by checking that
-                 * the modification is after the current PC, but it would
-                 * require a specialized function to partially restore
-                 * the CPU state.
-                 */
-                current_tb_modified = true;
-                cpu_restore_state_from_tb(current_cpu, current_tb, pc, true);
-            }
-            bool inst_saved = jrra_preserve_current_tb_head(tb, current_tb,
-                                    current_tb_modified, &inst);
-            tb_phys_invalidate__locked(tb);
+        if (!aot_cross_page_tu_enabled()) {
+            PAGE_FOR_EACH_TB(addr, addr + TARGET_PAGE_SIZE, unused, tb, n) {
+                if (tbcount && !tb_is_covered(tb, smcaddr, smcsize)) {
+                    /* This TB is unaffected; record that code remains. */
+                    *tbcount |= 0x1;
+                    continue;
+                }
+                if (current_tb == tb &&
+                    (tb_cflags(current_tb) & CF_COUNT_MASK) != 1) {
+                    /*
+                     * If we are modifying the current TB, we must stop its
+                     * execution. We could be more precise by checking that
+                     * the modification is after the current PC, but it would
+                     * require a specialized function to partially restore
+                     * the CPU state.
+                     */
+                    current_tb_modified = true;
+                    cpu_restore_state_from_tb(current_cpu, current_tb, pc,
+                                              true);
+                }
+                bool inst_saved = jrra_preserve_current_tb_head(tb, current_tb,
+                                        current_tb_modified, &inst);
+                tb_phys_invalidate__locked(tb);
 #ifdef CONFIG_LATX_FAST_JMPCACHE
-            if (current_tb != tb) {
-                qatomic_set((uint32_t *)tb->tc.ptr, FASTTB_ILLINST_MAGIC);
-            }
+                if (current_tb != tb) {
+                    qatomic_set((uint32_t *)tb->tc.ptr, FASTTB_ILLINST_MAGIC);
+                }
 #endif
-            if (inst_saved) {
-                jrra_restore_current_tb_head(tb, current_tb,
-                                    current_tb_modified, inst);
+                if (inst_saved) {
+                    jrra_restore_current_tb_head(tb, current_tb,
+                                        current_tb_modified, inst);
+                }
+            }
+        } else {
+            for (;;) {
+                TranslationBlock *victim = NULL;
+
+                PAGE_FOR_EACH_TB(addr, addr + TARGET_PAGE_SIZE, unused, tb, n) {
+                    if (tb_cflags(tb) & CF_INVALID) {
+                        continue;
+                    }
+                    if (tbcount && !tb_is_covered(tb, smcaddr, smcsize)) {
+                        /* This TB is not affected; record that code remains. */
+                        *tbcount |= 0x1;
+                        continue;
+                    }
+                    victim = tb;
+                    break;
+                }
+                if (!victim) {
+                    break;
+                }
+                bool invalidates_current = tb_same_tu(current_tb, victim);
+
+                if (invalidates_current &&
+                    (tb_cflags(current_tb) & CF_COUNT_MASK) != 1) {
+                    /*
+                     * If we are modifying the current TB, we must stop its
+                     * execution. We could be more precise by checking that
+                     * the modification is after the current PC, but it would
+                     * require a specialized function to partially restore
+                     * the CPU state.
+                     */
+                    current_tb_modified = true;
+                    cpu_restore_state_from_tb(current_cpu, current_tb, pc,
+                                              true);
+                }
+                bool inst_saved = jrra_preserve_current_tb_head(
+                    invalidates_current ? current_tb : victim,
+                                        current_tb,
+                                        current_tb_modified, &inst);
+                tb_phys_invalidate__locked(victim);
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+                if (!invalidates_current) {
+                    qatomic_set((uint32_t *)victim->tc.ptr,
+                                FASTTB_ILLINST_MAGIC);
+                }
+#endif
+                if (inst_saved) {
+                    jrra_restore_current_tb_head(current_tb, current_tb,
+                                        current_tb_modified, inst);
+                }
             }
         }
 

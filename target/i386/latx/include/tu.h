@@ -11,13 +11,16 @@
  */
 #ifndef __TU_H_
 #define __TU_H_
-#include <gmodule.h>
 #include "reg-map.h"
 #include "ir1.h"
 
 void get_last_info(TranslationBlock *tb, IR1_INST *pir1);
 
 #ifdef CONFIG_LATX_TU
+void tu_prepare_restore_tb(TranslationBlock *copy,
+                           struct separated_data *data,
+                           const TranslationBlock *tb);
+
 /*
  * The reason why MAX_TB_IN_CACHE > MAX_TB_IN_TU is
  * TBs in TU sometimes need to translate next guest_pc
@@ -27,6 +30,21 @@ void get_last_info(TranslationBlock *tb, IR1_INST *pir1);
 #define MAX_TB_IN_TU 50
 #define MAX_TB_IN_TS (500)
 #define MAX_TB_IN_CACHE (MAX_TB_IN_TS + 10)
+/* Fixed-size PC index; keep it a power of two and above MAX_TB_IN_CACHE. */
+#define TU_MEMBER_INDEX_SIZE 2048
+#if (TU_MEMBER_INDEX_SIZE & (TU_MEMBER_INDEX_SIZE - 1)) != 0
+#error TU_MEMBER_INDEX_SIZE must be a power of two
+#endif
+#if MAX_TB_IN_CACHE >= TU_MEMBER_INDEX_SIZE
+#error TU_MEMBER_INDEX_SIZE must exceed MAX_TB_IN_CACHE
+#endif
+/* Count only pages that contain TU members. */
+#define MAX_PAGES_IN_TU 16
+/* Keep sparse direct branches from expanding a TU across a whole segment. */
+#define MAX_TU_PAGE_SPAN 64
+#if MAX_TU_PAGE_SPAN < MAX_PAGES_IN_TU
+#error MAX_TU_PAGE_SPAN must cover all dependency pages
+#endif
 #define MAX_TB_SIZE 5120
 #define MAX_IR1_IN_TU (TARGET_PAGE_SIZE * 4)
 /* Max TU gen code size. */
@@ -75,8 +93,16 @@ typedef struct TUControl {
     uint32_t ir1_num_in_tu;
     /* all TB pointer in current TU  */
     TranslationBlock *tb_list[MAX_TB_IN_CACHE];
-    /* Search GPC to TB in current TU  */
-    GTree *tree;
+    /* Open-addressed TB index; zero means empty, otherwise tb_list[] + 1. */
+    uint16_t member_index[TU_MEMBER_INDEX_SIZE];
+
+    /* Guest pages that contain at least one member of the current TU. */
+    target_ulong pages[MAX_PAGES_IN_TU];
+    uint32_t page_num;
+
+    /* Inclusive address window; holes do not consume pages[]. */
+    target_ulong first_page;
+    target_ulong last_page;
 
 } TUControl;
 
@@ -90,14 +116,16 @@ typedef enum TU_TB_START_TYPE {
 extern __thread TUControl *tu_data;
 
 void tu_enough_space(CPUState *cpu);
-void tu_trees_reset(void);
-TranslationBlock *tu_tree_lookup(target_ulong pc);
+TranslationBlock *tu_member_lookup(target_ulong pc);
 void tu_control_init(void);
 void tu_control_destroy(void);
 TranslationBlock* tb_create(CPUState *cpu, target_ulong pc,
         target_ulong cs_base, uint32_t flags, int cflags,
         int max_insns, uint16_t bool_flags, TU_TB_START_TYPE mode);
-void tu_push_back(TranslationBlock *tb);
+void tu_build_reset(void);
+bool tu_page_range_available(target_ulong pc, uint32_t size);
+bool tu_push_back(TranslationBlock *tb);
+void tu_link_members(TranslationBlock **tb_list, uint32_t tb_num);
 TranslationBlock *tu_gen_code(CPUState *cpu, target_ulong pc,
                               target_ulong cs_base, uint32_t flags,
                               int cflags);

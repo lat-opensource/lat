@@ -92,6 +92,27 @@ test(
 )
 
 test(
+  'test-latx-tu-restore',
+  python,
+  args: [files('test-latx-tu-restore.py'), project_source_root],
+  suite: 'lat-pr-fast',
+)
+
+test(
+  'test-latx-tb-index',
+  python,
+  args: [files('test-latx-tb-index.py'), project_source_root],
+  suite: 'lat-pr-fast',
+)
+
+test(
+  'test-latx-tu-members',
+  python,
+  args: [files('test-latx-tu-members.py'), project_source_root],
+  suite: 'lat-pr-fast',
+)
+
+test(
   'test-latx-smc-fallback',
   python,
   args: [files('test-latx-smc-fallback.py'), project_source_root],
