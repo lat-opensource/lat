@@ -32,4 +32,11 @@ void tb_exit_to_qemu(CPUArchState *env, ucontext_t *uc);
 extern __thread volatile sig_atomic_t latx_lookup_lock_active;
 extern __thread volatile uintptr_t latx_lookup_pending_page;
 void latx_lookup_drain_notification(void);
+/* Only while an exclusive full flush is guaranteed to complete.
+ * All existing translations are discarded before the guard is cleared. */
+extern __thread volatile sig_atomic_t latx_tb_flush_active;
+static inline bool latx_tb_flush_covers_ptrace(uintptr_t page)
+{
+    return page && latx_tb_flush_active;
+}
 #endif /* _LATX_SIGNAL_H_ */

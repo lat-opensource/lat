@@ -232,4 +232,18 @@ void qht_statistics_init(const struct qht *ht, struct qht_stats *stats);
  */
 void qht_statistics_destroy(struct qht_stats *stats);
 
+/**
+ * qht_try_reset_exclusive - clear a quiescent table without bucket locks
+ * @ht: the table to clear
+ * @n_elems: requested capacity, interpreted as for qht_reset_size()
+ *
+ * The caller must exclude every table reader and writer, including signal
+ * handlers and callbacks. Holding an external recursive writer lock alone
+ * is insufficient. This does not replace the concurrent qht_reset_size().
+ *
+ * Returns true if cleared. Returns false without changing the table when
+ * its bucket capacity differs, so the caller can use qht_reset_size().
+ */
+bool qht_try_reset_exclusive(struct qht *ht, size_t n_elems);
+
 #endif /* QEMU_QHT_H */
