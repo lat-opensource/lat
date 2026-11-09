@@ -910,7 +910,23 @@ static void qht_do_resize_reset(struct qht *ht, struct qht_map *new, bool reset)
     }
 
     if (new == NULL) {
+#if defined(__loongarch__) && !defined(CONFIG_TSAN)
+        size_t i;
+
+        /*
+         * All protected writes precede this fence. Each relaxed atomic
+         * unlock publishes those writes to the next acquiring owner.
+         * No protected data may be modified inside this release loop.
+         * Keep the regular lock API for thread-sanitizer annotations.
+         */
+        __atomic_thread_fence(__ATOMIC_RELEASE);
+        for (i = 0; i < old->n_buckets; i++) {
+            __atomic_store_n(&old->buckets[i].lock.value, 0,
+                             __ATOMIC_RELAXED);
+        }
+#else
         qht_map_unlock_buckets(old);
+#endif
         return;
     }
 
