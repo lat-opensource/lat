@@ -179,6 +179,16 @@ int target_latx_host(CPUArchState *env, struct TranslationBlock *tb,
             tb->bool_flags |= IS_QUICKTRANS_TB;
             return code_size + search_size;
         }
+        /* Recovery-table encoding returns -1 only when the code region
+         * is full. Re-enter the existing region allocation/flush path;
+         * this is not an unsupported instruction in strict mode. */
+        if (search_size < 0 &&
+            quicktrans_failure.stage == QUICKTRANS_FAILURE_STAGE_EXIT &&
+            quicktrans_failure.reason == QUICKTRANS_FAILURE_REASON_SEARCH_ENCODE) {
+            qatomic_set(&tcg_ctx->code_gen_ptr,
+                        tcg_ctx->code_gen_highwater + 1);
+            return -1;
+        }
         quicktrans_fallback = true;
         if ((quicktrans_options & 2)) {
             latx_quicktrans_report_failure(&quicktrans_failure, "not-run");
