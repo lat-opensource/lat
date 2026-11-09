@@ -24,6 +24,7 @@
 #endif
 #if defined(CONFIG_LATX_KZT)
 #include "wrappertbbridge.h"
+extern bool kzt_is_registered_onebridge(uintptr_t addr);
 #endif
 
 #if defined(CONFIG_LATX_FAST_TRANSLATOR) && defined(TARGET_X86_64)
@@ -175,13 +176,23 @@ int target_latx_host(CPUArchState *env, struct TranslationBlock *tb,
         max_insns = 1;
     }
     bool is_tbbridge = false;
+#if defined(CONFIG_LATX_FAST_TRANSLATOR) && defined(TARGET_X86_64)
+    bool is_onebridge = false;
+#endif
 #if defined(CONFIG_LATX_KZT)
-    is_tbbridge = latx_kzt_runtime_enabled() &&
-                  kzt_tbbridge_contains(tb->pc);
+    if (latx_kzt_runtime_enabled()) {
+        is_tbbridge = kzt_tbbridge_contains(tb->pc);
+#if defined(CONFIG_LATX_FAST_TRANSLATOR) && defined(TARGET_X86_64)
+        /* Registered INT3 stubs are native-call bridges, not guest traps.
+         * Keep their decoding and state transitions in the bridge translator. */
+        is_onebridge = quicktrans_enabled && !is_tbbridge &&
+                       kzt_is_registered_onebridge(tb->pc);
+#endif
+    }
 #endif
 #if defined(CONFIG_LATX_FAST_TRANSLATOR) && defined(TARGET_X86_64)
     tb->bool_flags &= ~IS_QUICKTRANS_TB;
-    if (quicktrans_enabled && !is_tbbridge) {
+    if (quicktrans_enabled && !is_tbbridge && !is_onebridge) {
         int code_size = 0;
         int search_size = 0;
 
