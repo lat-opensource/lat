@@ -21,10 +21,15 @@
 #include "exec/fasttb.h"
 #endif
 
+#if defined(CONFIG_USER_ONLY) && defined(CONFIG_LATX)
+#include "latx-signal.h"
+#endif
+
 /* Might cause an exception, so have a longjmp destination ready */
-static inline TranslationBlock *tb_lookup(CPUState *cpu, target_ulong pc,
+static inline TranslationBlock *tb_lookup_internal(CPUState *cpu, target_ulong pc,
                                           target_ulong cs_base,
-                                          uint32_t flags, uint32_t cflags)
+                                          uint32_t flags, uint32_t cflags,
+                                          bool use_tb_lock)
 {
     TranslationBlock *tb;
     uint32_t hash;
@@ -52,6 +57,48 @@ static inline TranslationBlock *tb_lookup(CPUState *cpu, target_ulong pc,
 #endif
         return tb;
     }
+#if defined(CONFIG_USER_ONLY) && defined(CONFIG_LATX)
+    /*
+     * Only tb_find inside cpu_exec's RCU read-side section enables this path.
+     * RCU protects the QHT lookup; exclusive CPU work protects full TB resets.
+     * Match invalidation's jmp_lock before publishing either jump-cache entry.
+     * Never acquire mmap_lock while holding jmp_lock.
+     */
+    /* AOT and non-Quicktrans/TU blocks retain the original locked lookup. */
+    if (use_tb_lock && !option_aot) {
+        tb = tb_htable_lookup(cpu, pc, cs_base, flags, cflags);
+        if (tb && tb_page_addr1(tb) == -1 &&
+            (qatomic_read(&tb->bool_flags) &
+             (IS_QUICKTRANS_TB | IS_AOT_TB | IS_TU_TB | IS_TU_JMP |
+              IS_TU_SPLIT | IS_TUNNEL_LIB)) == IS_QUICKTRANS_TB) {
+            /* Also defer notifications while waiting for the block lock. */
+            latx_lookup_lock_active = 1;
+            qemu_spin_lock(&tb->jmp_lock);
+            if (tb_cflags(tb) == cflags) {
+#ifdef CONFIG_LATX_FAST_JMPCACHE
+                latx_fast_jmp_cache_add(cpu, hash, tb);
+#endif
+                qatomic_set(&cpu->tb_jmp_cache[hash], tb);
+                qemu_spin_unlock(&tb->jmp_lock);
+                latx_lookup_lock_active = 0;
+                if (latx_lookup_pending_page) {
+                    latx_lookup_drain_notification();
+                    /* The notification may have invalidated this very TB. */
+                    return NULL;
+                }
+                return tb;
+            }
+            qemu_spin_unlock(&tb->jmp_lock);
+            latx_lookup_lock_active = 0;
+            if (latx_lookup_pending_page) {
+                latx_lookup_drain_notification();
+                return NULL;
+            }
+        }
+    }
+#else
+    (void)use_tb_lock;
+#endif
     mmap_lock();
     tb = tb_htable_lookup(cpu, pc, cs_base, flags, cflags);
     if (tb == NULL) {
@@ -67,6 +114,19 @@ static inline TranslationBlock *tb_lookup(CPUState *cpu, target_ulong pc,
     qatomic_inc(&prof->qht_count);
 #endif
     return tb;
+}
+
+static inline TranslationBlock *tb_lookup(CPUState *cpu, target_ulong pc,
+                                         target_ulong cs_base, uint32_t flags,
+                                         uint32_t cflags)
+{
+    return tb_lookup_internal(cpu, pc, cs_base, flags, cflags, false);
+}
+static inline TranslationBlock *tb_lookup_rcu(CPUState *cpu, target_ulong pc,
+                                             target_ulong cs_base,
+                                             uint32_t flags, uint32_t cflags)
+{
+    return tb_lookup_internal(cpu, pc, cs_base, flags, cflags, true);
 }
 
 #endif /* EXEC_TB_LOOKUP_H */

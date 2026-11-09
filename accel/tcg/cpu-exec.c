@@ -779,7 +779,7 @@ static inline TranslationBlock *tb_find(CPUState *cpu,
 
     cpu_get_tb_cpu_state(env, &pc, &cs_base, &flags);
 
-    tb = tb_lookup(cpu, pc, cs_base, flags, cflags);
+    tb = tb_lookup_rcu(cpu, pc, cs_base, flags, cflags);
 #if defined(TARGET_X86_64) && defined(CONFIG_LATX_JRRA)
     if (tb == NULL) {
         target_ulong guest_pc;
