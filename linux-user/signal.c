@@ -1088,6 +1088,7 @@ static void Emulate_FTZ(ucontext_t *uc)
 
 /* Ptrace notifications deferred across the current thread's lookup lock. */
 __thread volatile sig_atomic_t latx_lookup_lock_active;
+__thread volatile sig_atomic_t latx_tb_flush_active;
 __thread volatile uintptr_t latx_lookup_pending_page;
 
 void latx_lookup_drain_notification(void)
@@ -1217,6 +1218,11 @@ static void host_signal_handler(int host_signum, siginfo_t *info,
     /* #define LA_HOOK_PTRACE SIGSEGV */
     if (host_signum == LA_HOOK_PTRACE && info->si_code == SI_QUEUE) {
         void *trace_page = info->si_value.sival_ptr;
+        /* No guest execution or TB insertion can occur in this interval.
+         * The ongoing exclusive full flush covers this invalidation. */
+        if (latx_tb_flush_covers_ptrace((uintptr_t)trace_page)) {
+            return;
+        }
         /* Invalidation takes jmp_lock and cannot reenter a locked lookup. */
         if (latx_lookup_lock_active && trace_page) {
             uintptr_t page = (uintptr_t)trace_page;
