@@ -17,7 +17,8 @@ Use a LoongArch build host with the normal LATU build dependencies installed.
 The `-f` option compiles Quicktrans into `build64/latx-x86_64`. Do not use
 `git submodule update --remote` when reproducing a pinned build.
 
-Quicktrans is disabled at runtime by default. To select it:
+Quicktrans and strict mode are enabled at runtime by default when built in.
+To select it explicitly:
 
 ```sh
 LATX_FAST_TRANSLATOR=1 ./build64/latx-x86_64 /path/to/x86_64-program
