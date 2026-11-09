@@ -47,7 +47,7 @@ static unsigned int latx_quicktrans_options(void)
     if (g_once_init_enter(&options)) {
         gsize value = 8; /* Nonzero even when all options are disabled. */
 
-        if (latx_env_enabled("LATX_FAST_TRANSLATOR", false)) {
+        if (latx_env_enabled("LATX_FAST_TRANSLATOR", true)) {
             value |= 1;
         }
         if (latx_env_enabled("LATX_FAST_TRANSLATOR_STRICT", true)) {
