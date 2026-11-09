@@ -116,6 +116,16 @@ void *qht_lookup_custom(const struct qht *ht, const void *userp, uint32_t hash,
  * Calls qht_lookup_custom() using @ht's default comparison function.
  */
 void *qht_lookup(const struct qht *ht, const void *userp, uint32_t hash);
+struct qht_miss_snapshot {
+    const struct qht_map *map;
+    const struct qht_bucket *bucket;
+    unsigned int version;
+};
+void *qht_lookup_miss_snapshot(const struct qht *, const void *, uint32_t,
+                             qht_lookup_func_t, struct qht_miss_snapshot *);
+bool qht_miss_snapshot_unchanged(const struct qht *,
+                                 const struct qht_miss_snapshot *);
+
 
 /**
  * qht_remove - remove a pointer from the hash table
