@@ -542,6 +542,12 @@ struct separated_data{
 #endif
 };
 
+/* Compact only LATU x86-64 metadata with TBMini host-PC lookup. */
+#if defined(CONFIG_USER_ONLY) && defined(CONFIG_LATX) && \
+    defined(TARGET_X86_64) && defined(CONFIG_LATX_TBMINI_ENABLE)
+#define LATX_COMPACT_TB_METADATA 1
+#endif
+
 struct TranslationBlock {
     /*
      * Each TB has a NULL-terminated list (jmp_list_head) of incoming jumps.
@@ -570,8 +576,15 @@ struct TranslationBlock {
     };
 
     union {
+#ifdef LATX_COMPACT_TB_METADATA
+        /* Labels during translation, then byte offsets within generated code.
+         * Keep both aliases the same width; neither contains a host pointer. */
+        uint32_t jmp_stub_target_arg[2];
+        uint32_t jmp_indirect;
+#else
         uintptr_t jmp_stub_target_arg[2];
         uintptr_t jmp_indirect;
+#endif
     };
 
     struct tb_tc tc;
@@ -680,11 +693,21 @@ struct TranslationBlock {
 #define TBSMC_COUNT_MASK        0xffff
 #define TBSMC_OPT_THRESHOLD     0xff
 #define TBSMC_OPTED_MASK        (0x1 << 16)
+#ifdef LATX_COMPACT_TB_METADATA
+    uint32_t smc_data;
+#else
     unsigned long smc_data;
 #endif
+#endif
+#ifdef LATX_COMPACT_TB_METADATA
+    int8_t canlink[2];
+    int8_t lazylink[2];
+    int64_t lazypc[2];
+#else
     int64_t lazypc[2];
     int8_t canlink[2];
     int8_t lazylink[2];
+#endif
     uint64_t lazylinkinst[2];
     struct separated_data *s_data;
 #endif
