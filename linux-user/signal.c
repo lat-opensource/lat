@@ -1086,6 +1086,25 @@ static void Emulate_FTZ(ucontext_t *uc)
     UC_PC(uc) += 4;
 }
 
+/* Ptrace notifications deferred across the current thread's lookup lock. */
+__thread volatile sig_atomic_t latx_lookup_lock_active;
+__thread volatile uintptr_t latx_lookup_pending_page;
+
+void latx_lookup_drain_notification(void)
+{
+    uintptr_t page = latx_lookup_pending_page;
+    latx_lookup_pending_page = 0;
+    if (page == (uintptr_t)-1) {
+        tb_flush(thread_cpu);
+        /* Flush is queued: do not execute an old TB before that work runs. */
+        cpu_loop_exit_noexc(thread_cpu);
+    } else if (page) {
+        mmap_lock();
+        tb_invalidate_phys_page(page);
+        mmap_unlock();
+    }
+}
+
 static void host_signal_handler(int host_signum, siginfo_t *info,
                                 void *puc)
 {
@@ -1198,6 +1217,15 @@ static void host_signal_handler(int host_signum, siginfo_t *info,
     /* #define LA_HOOK_PTRACE SIGSEGV */
     if (host_signum == LA_HOOK_PTRACE && info->si_code == SI_QUEUE) {
         void *trace_page = info->si_value.sival_ptr;
+        /* Invalidation takes jmp_lock and cannot reenter a locked lookup. */
+        if (latx_lookup_lock_active && trace_page) {
+            uintptr_t page = (uintptr_t)trace_page;
+            if (latx_lookup_pending_page && latx_lookup_pending_page != page) {
+                page = (uintptr_t)-1;
+            }
+            latx_lookup_pending_page = page;
+            return;
+        }
         if (trace_page == (void *)-1) {
             tb_flush(cpu);
 #ifdef CONFIG_PTRACE_DEBUG
