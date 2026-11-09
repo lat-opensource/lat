@@ -23,6 +23,10 @@ int target_latx_emit_fixed_callback_bridge(
     uintptr_t return_addr, uintptr_t target);
 #endif
 
+#if defined(CONFIG_LATX_FAST_TRANSLATOR) && defined(TARGET_X86_64)
+bool latx_quicktrans_compact_tb_enabled(void);
+#endif
+
 int target_latx_host(CPUArchState *env, struct TranslationBlock *tb, int max_insns);
 int target_latx_prologue(void *code_buf_addr);
 void latx_interpret_glue_init(void);

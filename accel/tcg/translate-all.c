@@ -70,6 +70,7 @@
 #ifdef CONFIG_LATX
 #include "qemu/cacheflush.h"
 #include "latx-options.h"
+#include "latx-config.h"
 #include "aot.h"
 #include "aot_merge.h"
 #include "reg-map.h"
@@ -1979,7 +1980,20 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
     /* set TBMini */
     uint64_t *tbm = (uint64_t *)gen_code_buf;
     tbmini_set_pointer(tbm, (uint64_t)tb);
-    gen_code_buf = (tcg_insn_unit *)(ROUND_UP((uintptr_t)gen_code_buf + sizeof(struct TBMini), qemu_icache_linesize));
+    uintptr_t code_align = qemu_icache_linesize;
+#if defined(CONFIG_USER_ONLY) && defined(CONFIG_LATX_FAST_TRANSLATOR) && \
+    defined(TARGET_X86_64)
+    if (option_split_tb && !option_aot &&
+        latx_quicktrans_compact_tb_enabled()) {
+        /* Keep TBMini at the allocator-aligned address, but start code
+         * immediately after it. Lookup rounds (pc - 4) down to the scan
+         * boundary, so it still finds this header for the first instruction.
+         * QT exit padding uses the actual address to preserve patch pairs. */
+        code_align = sizeof(struct TBMini);
+    }
+#endif
+    gen_code_buf = (tcg_insn_unit *)ROUND_UP(
+        (uintptr_t)gen_code_buf + sizeof(struct TBMini), code_align);
 #endif
 
     tb->tc.ptr = tcg_splitwx_to_rx(gen_code_buf);
