@@ -1004,3 +1004,22 @@ void qht_statistics_destroy(struct qht_stats *stats)
     qdist_destroy(&stats->occupancy);
     qdist_destroy(&stats->chain);
 }
+
+/* The caller excludes all readers, writers, and signal reentry.  Keep
+ * sequence updates so pre-existing miss snapshots become invalid. */
+bool qht_try_reset_exclusive(struct qht *ht, size_t n_elems)
+{
+    struct qht_map *map;
+    size_t i;
+    qht_lock(ht);
+    map = ht->map;
+    if (map->n_buckets != qht_elems_to_buckets(n_elems)) {
+        qht_unlock(ht);
+        return false;
+    }
+    for (i = 0; i < map->n_buckets; i++) {
+        qht_bucket_reset__locked(&map->buckets[i]);
+    }
+    qht_unlock(ht);
+    return true;
+}
