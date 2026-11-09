@@ -1439,12 +1439,20 @@ static inline void invalidate_page_bitmap(PageDesc *p)
  * and because the two pages of a TranslationBlock are always contiguous,
  * use a single data structure to record all TranslationBlocks.
  */
+#ifdef CONFIG_LATX
+#include "tb-page-index.h"
+#else
 static IntervalTreeRoot tb_root;
+#endif
 
 void tb_flush_remove_all(void)
 {
     assert_memory_lock();
+#ifdef CONFIG_LATX
+    tb_index_clear();
+#else
     memset(&tb_root, 0, sizeof(tb_root));
+#endif
 #ifdef CONFIG_LATX_AOT
     page_flush_page_state(0, 0);
 #endif
@@ -1475,14 +1483,22 @@ static void tb_record(TranslationBlock *tb, PageDesc *p1, PageDesc *p2)
 
 #endif
 
+#ifdef CONFIG_LATX
+    tb_index_insert(tb);
+#else
     interval_tree_insert(&tb->itree, &tb_root);
+#endif
 }
 
 /* Call with mmap_lock held. */
 static void tb_remove(TranslationBlock *tb)
 {
     assert_memory_lock();
+#ifdef CONFIG_LATX
+    tb_index_remove(tb);
+#else
     interval_tree_remove(&tb->itree, &tb_root);
+#endif
 }
 
 /* TODO: For now, still shared with translate-all.c for system mode. */
@@ -1497,14 +1513,21 @@ typedef TranslationBlock *PageForEachNext;
 static PageForEachNext foreach_tb_first(tb_page_addr_t start,
                                         tb_page_addr_t end)
 {
+#ifdef CONFIG_LATX
+    return tb_index_first(start, end);
+#else
     IntervalTreeNode *n = interval_tree_iter_first(&tb_root, start, end - 1);
     return n ? container_of(n, TranslationBlock, itree) : NULL;
+#endif
 }
 
 static PageForEachNext foreach_tb_next(PageForEachNext tb,
                                        tb_page_addr_t start,
                                        tb_page_addr_t end)
 {
+#ifdef CONFIG_LATX
+    return tb ? tb_index_next(tb, start, end) : NULL;
+#else
     IntervalTreeNode *n;
 
     if (tb) {
