@@ -1452,12 +1452,14 @@ void tb_flush_remove_all(void)
 /* Call with mmap_lock held. */
 static void tb_record(TranslationBlock *tb, PageDesc *p1, PageDesc *p2)
 {
-    target_ulong addr;
-    int flags __attribute__((unused));
-
     assert_memory_lock();
 
     tb->itree.last = tb->itree.start + tb->size - 1;
+
+    /* These queries only support assertions; omit them in release builds. */
+#ifndef NDEBUG
+    target_ulong addr;
+    int flags;
 
     /* translator_loop() must have made all TB pages non-writable */
     addr = tb_page_addr0(tb);
@@ -1469,6 +1471,8 @@ static void tb_record(TranslationBlock *tb, PageDesc *p1, PageDesc *p2)
         flags = page_get_flags(addr);
         assert(!(flags & PAGE_WRITE));
     }
+
+#endif
 
     interval_tree_insert(&tb->itree, &tb_root);
 }
