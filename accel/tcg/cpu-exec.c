@@ -741,7 +741,7 @@ inline void tb_add_jump(TranslationBlock *tb, int n,
     }
 
 #ifdef CONFIG_LATX_TU
-    if (use_tu_jmp(tb)) {
+    if ((tb->bool_flags & IS_TU_JMP)) {
         assert(tb->tu_jmp[TU_TB_INDEX_TARGET] != TB_JMP_RESET_OFFSET_INVALID);
         tu_relink(tb);
         goto out_unlock_next;
@@ -753,14 +753,14 @@ inline void tb_add_jump(TranslationBlock *tb, int n,
                           (uintptr_t)tb_next);
     if (old) {
         /* The signal handler reset the code but kept the jump list intact. */
-        if (old == (uintptr_t)tb_next && tb_need_relink(tb, n)) {
+        if (old == (uintptr_t)tb_next && (tb->bool_flags & (n == 0 ? SIGNAL_RELINK0 : SIGNAL_RELINK1))) {
             clear_signal_link_flag(tb, n);
             latx_tb_set_jmp_target(tb, n, tb_next);
         }
         goto out_unlock_next;
     }
 
-    if (tb_need_relink(tb, n)) {
+    if ((tb->bool_flags & (n == 0 ? SIGNAL_RELINK0 : SIGNAL_RELINK1))) {
         clear_signal_link_flag(tb, n);
     }
 
