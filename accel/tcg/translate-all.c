@@ -1537,6 +1537,7 @@ static PageForEachNext foreach_tb_next(PageForEachNext tb,
         }
     }
     return NULL;
+#endif
 }
 
 #else
@@ -2024,12 +2025,15 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
     /* tb->cs_base = cs_base; */
     tb->flags = flags;
     tb->cflags = cflags;
+#ifndef CONFIG_LATX_TU
     tb->jmp_target_arg[0] = TB_JMP_RESET_OFFSET_INVALID;
     tb->jmp_target_arg[1] = TB_JMP_RESET_OFFSET_INVALID;
+#endif
     tcg_ctx->tb_cflags = cflags;
 #ifndef CONFIG_LATX
  tb_overflow:
 #else
+#ifndef CONFIG_LATX_TU
     tb->bool_flags = OPT_BCC;
     tb->s_data->_top_out = -1;
     tb->s_data->_top_in = -1;
@@ -2037,10 +2041,13 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
     tb->s_data->rel_start = -1;
     tb->s_data->rel_end = -1;
 #endif
+#endif
 #ifdef CONFIG_LATX_PROFILER
     CLN_TB_PROFILE(tb);
 #endif
+#ifndef CONFIG_LATX_TU
     jrra_tb_reset(tb);
+#endif
 #ifdef CONFIG_LATX_TU
     tu_reset_tb(tb);
     tb->s_data->tu_tb_mode = TB_GEN_CODE;
