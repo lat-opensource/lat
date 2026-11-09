@@ -15,6 +15,10 @@
 
 #include "exec/exec-all.h"
 #include "exec/tb-hash.h"
+#if defined(CONFIG_USER_ONLY) && defined(CONFIG_LATX)
+#include "exec/tb-context.h"
+TranslationBlock *tb_htable_lookup_snapshot(CPUState *, target_ulong, target_ulong, uint32_t, uint32_t, struct qht_miss_snapshot *);
+#endif
 #include "latx-options.h"
 
 #ifdef CONFIG_LATX_FAST_JMPCACHE
@@ -32,6 +36,10 @@ static inline TranslationBlock *tb_lookup_internal(CPUState *cpu, target_ulong p
                                           bool use_tb_lock)
 {
     TranslationBlock *tb;
+#if defined(CONFIG_USER_ONLY) && defined(CONFIG_LATX)
+    struct qht_miss_snapshot miss = {0};
+    uint32_t miss_trace = 0;
+#endif
     uint32_t hash;
 #ifdef CONFIG_LATX_PROFILER
     TCGProfile *prof = &tcg_ctx->prof;
@@ -66,7 +74,12 @@ static inline TranslationBlock *tb_lookup_internal(CPUState *cpu, target_ulong p
      */
     /* AOT and non-Quicktrans/TU blocks retain the original locked lookup. */
     if (use_tb_lock && !option_aot) {
-        tb = tb_htable_lookup(cpu, pc, cs_base, flags, cflags);
+        if (!option_smc_reload) {
+            miss_trace = *cpu->trace_dstate;
+            tb = tb_htable_lookup_snapshot(cpu, pc, cs_base, flags, cflags, &miss);
+        } else {
+            tb = tb_htable_lookup(cpu, pc, cs_base, flags, cflags);
+        }
         if (tb && tb_page_addr1(tb) == -1 &&
             (qatomic_read(&tb->bool_flags) &
              (IS_QUICKTRANS_TB | IS_AOT_TB | IS_TU_TB | IS_TU_JMP |
@@ -100,6 +113,13 @@ static inline TranslationBlock *tb_lookup_internal(CPUState *cpu, target_ulong p
     (void)use_tb_lock;
 #endif
     mmap_lock();
+#if defined(CONFIG_USER_ONLY) && defined(CONFIG_LATX)
+    if (*cpu->trace_dstate == miss_trace &&
+        qht_miss_snapshot_unchanged(&tb_ctx.htable, &miss)) {
+        mmap_unlock();
+        return NULL;
+    }
+#endif
     tb = tb_htable_lookup(cpu, pc, cs_base, flags, cflags);
     if (tb == NULL) {
         mmap_unlock();

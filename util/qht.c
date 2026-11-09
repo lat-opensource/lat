@@ -548,6 +548,34 @@ void *qht_lookup_custom(const struct qht *ht, const void *userp, uint32_t hash,
     return qht_lookup__slowpath(b, func, userp, hash);
 }
 
+void *qht_lookup_miss_snapshot(const struct qht *ht, const void *userp,
+                              uint32_t hash, qht_lookup_func_t func,
+                              struct qht_miss_snapshot *snapshot)
+{
+    const struct qht_map *map = qatomic_rcu_read(&ht->map);
+    const struct qht_bucket *b = qht_map_to_bucket(map, hash);
+    unsigned int version = seqlock_read_begin(&b->sequence);
+    void *ret = qht_do_lookup(b, func, userp, hash);
+    snapshot->map = NULL;
+    if (unlikely(seqlock_read_retry(&b->sequence, version))) {
+        return qht_lookup__slowpath(b, func, userp, hash);
+    }
+    if (!ret) {
+        snapshot->bucket = b;
+        snapshot->version = version;
+        snapshot->map = map;
+    }
+    return ret;
+}
+
+bool qht_miss_snapshot_unchanged(const struct qht *ht,
+                               const struct qht_miss_snapshot *snapshot)
+{
+    /* Caller retains RCU protection and serializes all writers here. */
+    return snapshot->map && qatomic_rcu_read(&ht->map) == snapshot->map &&
+        !seqlock_read_retry(&snapshot->bucket->sequence, snapshot->version);
+}
+
 void *qht_lookup(const struct qht *ht, const void *userp, uint32_t hash)
 {
     return qht_lookup_custom(ht, userp, hash, ht->cmp);

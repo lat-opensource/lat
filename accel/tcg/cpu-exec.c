@@ -541,6 +541,32 @@ TranslationBlock *tb_htable_lookup(CPUState *cpu, target_ulong pc,
     return qht_lookup_custom(&tb_ctx.htable, &desc, h, tb_lookup_cmp);
 }
 
+#if defined(CONFIG_USER_ONLY) && defined(CONFIG_LATX)
+TranslationBlock *tb_htable_lookup_snapshot(CPUState *cpu, target_ulong pc,
+                                   target_ulong cs_base, uint32_t flags,
+                                   uint32_t cflags, struct qht_miss_snapshot *snapshot)
+{
+    tb_page_addr_t phys_pc;
+    struct tb_desc desc;
+    uint32_t h;
+
+    desc.env = (CPUArchState *)cpu->env_ptr;
+    desc.cs_base = cs_base;
+    desc.flags = flags;
+    desc.cflags = cflags;
+    desc.trace_vcpu_dstate = *cpu->trace_dstate;
+    desc.pc = pc;
+    phys_pc = get_page_addr_code(desc.env, pc);
+    if (phys_pc == -1) {
+        return NULL;
+    }
+    desc.page_addr0 = phys_pc;
+    h = tb_hash_func(phys_pc, pc, flags, cflags, *cpu->trace_dstate);
+    return qht_lookup_miss_snapshot(&tb_ctx.htable, &desc, h, tb_lookup_cmp, snapshot);
+}
+
+#endif
+
 #ifdef CONFIG_LATX_INSTS_PATTERN
 static void update_inst(TranslationBlock *tb, int n, uint32_t insn)
 {
