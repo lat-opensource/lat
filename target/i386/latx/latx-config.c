@@ -60,6 +60,18 @@ static unsigned int latx_quicktrans_options(void)
     return options;
 }
 
+/* Compact TB headers are validated only for strict, non-bridge QT code.
+ * Reuse the process-wide option cache; do not read the environment per TB. */
+bool latx_quicktrans_compact_tb_enabled(void)
+{
+#ifdef CONFIG_LATX_KZT
+    if (latx_kzt_runtime_enabled()) {
+        return false;
+    }
+#endif
+    return (latx_quicktrans_options() & 3) == 3;
+}
+
 static void latx_quicktrans_report_failure(const QuickTransFailure *failure,
                                            const char *old_decode)
 {
