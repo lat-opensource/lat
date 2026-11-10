@@ -6,6 +6,8 @@
 
 int qemu_loglevel;
 int option_aot_pe_profile;
+int option_hw_cache_ras;
+int option_tu = 1;
 const char *aot_process_profile = "browser";
 
 int qemu_log(const char *fmt G_GNUC_UNUSED, ...)
@@ -20,6 +22,27 @@ void print_stack_trace(void)
 static void get_cache_name(seg_info *seg, char *name)
 {
     g_assert(segment_get_aot_file_name(seg, name, PATH_MAX) == 0);
+}
+
+static void check_cache_name_ignores_options(seg_info *seg)
+{
+    char plain[PATH_MAX];
+    char configured[PATH_MAX];
+
+    option_tu = 1;
+    option_hw_cache_ras = 0;
+    get_cache_name(seg, plain);
+    option_hw_cache_ras = 1;
+    get_cache_name(seg, configured);
+    g_assert(strcmp(configured, plain) == 0);
+    option_hw_cache_ras = 0;
+
+    option_tu = 0;
+    get_cache_name(seg, configured);
+    g_assert(strcmp(configured, plain) == 0);
+    option_tu = 1;
+    g_assert(segment_get_aot_file_name(seg, configured, strlen(plain)) ==
+             -ENAMETOOLONG);
 }
 
 int main(void)
@@ -58,6 +81,9 @@ int main(void)
     g_assert(g_str_has_prefix(first_name, "v2-02-"));
     g_assert(g_str_has_suffix(first_name, "-140000000"));
     g_assert(strcmp(first_name, colliding_cache_name) != 0);
+
+    check_cache_name_ignores_options(&elf_seg);
+    check_cache_name_ignores_options(&pe_seg);
 
     same_page_pe_seg.seg_begin += 0x80;
     get_cache_name(&same_page_pe_seg, second_name);

@@ -333,15 +333,13 @@ char is_bad_tb(TranslationBlock *tb)
     return false;
 }
 
-#ifndef CONFIG_LATX_TU
-
 static inline void create_dynamic_tb(seg_info *seg, CPUState *cpu,
         target_ulong cs_base, uint32_t flags, int cflags)
 {
     TranslationBlock *tb;
     for (int i = seg->first_tb_id; i <= seg->last_tb_id; i++) {
-        target_ulong pc = dynamic_tb_message_vector[i].pc;
-        int cflags = dynamic_tb_message_vector[i].cflags;
+        target_ulong pc = curr_tb_message_vector[i].pc;
+        int cflags = curr_tb_message_vector[i].cflags;
         cpu->tcg_cflags = cflags;
         assert(pc >= seg->seg_begin && pc < seg->seg_end);
         if (aot_tb_lookup(pc, cflags)) {
@@ -416,7 +414,7 @@ static inline void translate_by_tb(seg_info *seg, CPUState *cpu,
             sizeof(TranslationBlock *), tb_sort_cmp);
 }
 
-#else
+#ifdef CONFIG_LATX_TU
 
 static inline unsigned int tb_jmp_cache_hash_func(target_ulong pc)
 {
@@ -805,10 +803,14 @@ static void translate_seg(seg_info *seg, CPUState *cpu,
     for (int i = curr_seg->first_tb_id; i <= curr_seg->last_tb_id; i++) {
         curr_tb_message_vector[i].tb = NULL;
     }
-#ifndef CONFIG_LATX_TU
+#if !defined(CONFIG_LATX_TU)
     translate_by_tb(seg, cpu, cs_base, flags, cflags);
 #else
-    translate_by_tu(cpu, cs_base, flags, cflags);
+    if (option_tu) {
+        translate_by_tu(cpu, cs_base, flags, cflags);
+    } else {
+        translate_by_tb(seg, cpu, cs_base, flags, cflags);
+    }
 #endif
     for (int i = curr_seg->first_tb_id; i < curr_seg->last_tb_id; i++) {
         TranslationBlock *tb = curr_tb_message_vector[i].tb;
