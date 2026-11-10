@@ -1,0 +1,12 @@
+{
+  my_*;
+  myx_*;
+  my3_*;
+
+  /* Entrypoints used by the KZT integration probes. */
+  latx_run_guest_callback_with_libc;
+  kzt_libc_semantic_enter_current;
+  kzt_libc_semantic_leave_current;
+  thread_cpu;
+  tb_flush;
+};

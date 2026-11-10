@@ -115,8 +115,15 @@ configure_file(output: 'latx-version.h', configuration: latx_version_data)
 # grandfathered in from the QEMU Makefiles.
 add_project_arguments(config_host['GLIB_CFLAGS'].split(),
                       native: false, language: ['c', 'cpp', 'objc'])
+glib_link_deps = []
+if config_host['GLIB_CFLAGS'].contains('/third_party/glib')
+  glib_link_deps += [cc.find_library('latx-glib',
+                                    dirs: project_source_root / 'build-glib/glib',
+                                    static: true)]
+endif
 glib = declare_dependency(compile_args: config_host['GLIB_CFLAGS'].split(),
-                          link_args: config_host['GLIB_LIBS'].split())
+                          link_args: config_host['GLIB_LIBS'].split(),
+                          dependencies: glib_link_deps)
 # override glib dep with the configure results (for subprojects)
 meson.override_dependency('glib-2.0', glib)
 
@@ -791,14 +798,13 @@ foreach target : target_dirs
         'test-latx-aot-merge-memory' + variant,
         files(
           'target/i386/latx/sbt/tests/aot-merge-memory-test.c',
-          'target/i386/latx/sbt/file_ctx.c'
+          'target/i386/latx/sbt/tests/aot-file-ctx-test-wrapper.c'
         ) + genh + tcg_trace_genh + [syscall_nr_generated, latx_aot_build_id],
         c_args: smc_reload_test_c_args +
                 (variant == '' ? [] : ['-DAOT_MERGE_TEST_NO_TU']),
         dependencies: [glib],
         include_directories: target_inc + [include_directories('target/i386/latx')],
         link_args: smc_reload_test_link_args + [
-          '-Wl,--wrap=malloc', '-Wl,--wrap=free',
           '-Wl,--wrap=get_aot_path', '-Wl,--wrap=opendir'
         ]
       )
@@ -814,6 +820,10 @@ foreach target : target_dirs
     }]
   foreach exe: execs
     exe_name = exe['name']
+    latx_link_depends = exe.get('link_depends', [])
+    if 'CONFIG_LATX' in config_host
+      latx_link_depends += files('latx-dynamic-symbols.list')
+    endif
 
     emulator = executable(exe_name, exe['sources'],
                install: true,
@@ -821,7 +831,7 @@ foreach target : target_dirs
                dependencies: arch_deps + deps + exe['dependencies'],
                objects: lib.extract_all_objects(recursive: true),
                link_language: link_language,
-               link_depends: exe.get('link_depends', []),
+               link_depends: latx_link_depends,
                link_args: link_args)
 
     emulators += {exe['name']: emulator}
@@ -837,6 +847,15 @@ foreach target : target_dirs
         suite: 'lat-pr-fast',
         timeout: 300,
       )
+      if config_host['GLIB_CFLAGS'].contains('/third_party/glib')
+        test(
+          target + '-bundled-glib',
+          python,
+          args: [files('tests/runtime/test-bundled-glib.py'), emulator],
+          depends: emulator,
+          suite: 'lat-pr-fast',
+        )
+      endif
     endif
 
   endforeach
