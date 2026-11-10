@@ -406,6 +406,8 @@ void cpu_exec_step_atomic(CPUState *cpu)
     uint32_t cflags = (curr_cflags(cpu) & ~CF_PARALLEL) | 1;
     int tb_exit;
 
+    /* Translated permission checks also run during an atomic retry. */
+    rcu_read_lock();
     if (sigsetjmp(cpu->jmp_env, 0) == 0) {
         start_exclusive();
         g_assert(cpu == current_cpu);
@@ -450,6 +452,7 @@ void cpu_exec_step_atomic(CPUState *cpu)
     g_assert(cpu_in_exclusive_context(cpu));
     cpu->running = false;
     end_exclusive();
+    rcu_read_unlock();
 }
 
 struct tb_desc {
