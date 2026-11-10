@@ -120,6 +120,16 @@ void get_dynamic_message(TranslationBlock **tb_list, int tb_num,
         dynamic_tb_message_vector[dynamic_tb_num].pc = tb_list[i]->pc;
         dynamic_tb_message_vector[dynamic_tb_num].cflags = tb_list[i]->cflags;
         dynamic_tb_message_vector[dynamic_tb_num].bool_flags = tb_list[i]->bool_flags;
+#ifdef CONFIG_LATX_FAST_TRANSLATOR
+        /* Quicktrans uses the architectural TB flags for decode mode and
+         * does not populate the legacy decoder's IS_CODE64 bookkeeping. */
+        if (tb_list[i]->bool_flags & IS_QUICKTRANS_TB) {
+            dynamic_tb_message_vector[dynamic_tb_num].bool_flags &= ~IS_CODE64;
+            if (tb_list[i]->flags & HF_CS64_MASK) {
+                dynamic_tb_message_vector[dynamic_tb_num].bool_flags |= IS_CODE64;
+            }
+        }
+#endif
         while (j < *seg_info_num &&
                 seg_info_vector[j]->seg_end <= tb_list[i]->pc) {
 #ifdef CONFIG_LATX_DEBUG
