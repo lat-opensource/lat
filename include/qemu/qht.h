@@ -116,6 +116,16 @@ void *qht_lookup_custom(const struct qht *ht, const void *userp, uint32_t hash,
  * Calls qht_lookup_custom() using @ht's default comparison function.
  */
 void *qht_lookup(const struct qht *ht, const void *userp, uint32_t hash);
+struct qht_miss_snapshot {
+    const struct qht_map *map;
+    const struct qht_bucket *bucket;
+    unsigned int version;
+};
+void *qht_lookup_miss_snapshot(const struct qht *, const void *, uint32_t,
+                             qht_lookup_func_t, struct qht_miss_snapshot *);
+bool qht_miss_snapshot_unchanged(const struct qht *,
+                                 const struct qht_miss_snapshot *);
+
 
 /**
  * qht_remove - remove a pointer from the hash table
@@ -221,5 +231,19 @@ void qht_statistics_init(const struct qht *ht, struct qht_stats *stats);
  * See also: qht_statistics_init().
  */
 void qht_statistics_destroy(struct qht_stats *stats);
+
+/**
+ * qht_try_reset_exclusive - clear a quiescent table without bucket locks
+ * @ht: the table to clear
+ * @n_elems: requested capacity, interpreted as for qht_reset_size()
+ *
+ * The caller must exclude every table reader and writer, including signal
+ * handlers and callbacks. Holding an external recursive writer lock alone
+ * is insufficient. This does not replace the concurrent qht_reset_size().
+ *
+ * Returns true if cleared. Returns false without changing the table when
+ * its bucket capacity differs, so the caller can use qht_reset_size().
+ */
+bool qht_try_reset_exclusive(struct qht *ht, size_t n_elems);
 
 #endif /* QEMU_QHT_H */

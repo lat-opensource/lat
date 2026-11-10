@@ -548,6 +548,34 @@ void *qht_lookup_custom(const struct qht *ht, const void *userp, uint32_t hash,
     return qht_lookup__slowpath(b, func, userp, hash);
 }
 
+void *qht_lookup_miss_snapshot(const struct qht *ht, const void *userp,
+                              uint32_t hash, qht_lookup_func_t func,
+                              struct qht_miss_snapshot *snapshot)
+{
+    const struct qht_map *map = qatomic_rcu_read(&ht->map);
+    const struct qht_bucket *b = qht_map_to_bucket(map, hash);
+    unsigned int version = seqlock_read_begin(&b->sequence);
+    void *ret = qht_do_lookup(b, func, userp, hash);
+    snapshot->map = NULL;
+    if (unlikely(seqlock_read_retry(&b->sequence, version))) {
+        return qht_lookup__slowpath(b, func, userp, hash);
+    }
+    if (!ret) {
+        snapshot->bucket = b;
+        snapshot->version = version;
+        snapshot->map = map;
+    }
+    return ret;
+}
+
+bool qht_miss_snapshot_unchanged(const struct qht *ht,
+                               const struct qht_miss_snapshot *snapshot)
+{
+    /* Caller retains RCU protection and serializes all writers here. */
+    return snapshot->map && qatomic_rcu_read(&ht->map) == snapshot->map &&
+        !seqlock_read_retry(&snapshot->bucket->sequence, snapshot->version);
+}
+
 void *qht_lookup(const struct qht *ht, const void *userp, uint32_t hash)
 {
     return qht_lookup_custom(ht, userp, hash, ht->cmp);
@@ -882,7 +910,23 @@ static void qht_do_resize_reset(struct qht *ht, struct qht_map *new, bool reset)
     }
 
     if (new == NULL) {
+#if defined(__loongarch__) && !defined(CONFIG_TSAN)
+        size_t i;
+
+        /*
+         * All protected writes precede this fence. Each relaxed atomic
+         * unlock publishes those writes to the next acquiring owner.
+         * No protected data may be modified inside this release loop.
+         * Keep the regular lock API for thread-sanitizer annotations.
+         */
+        __atomic_thread_fence(__ATOMIC_RELEASE);
+        for (i = 0; i < old->n_buckets; i++) {
+            __atomic_store_n(&old->buckets[i].lock.value, 0,
+                             __ATOMIC_RELAXED);
+        }
+#else
         qht_map_unlock_buckets(old);
+#endif
         return;
     }
 
@@ -975,4 +1019,23 @@ void qht_statistics_destroy(struct qht_stats *stats)
 {
     qdist_destroy(&stats->occupancy);
     qdist_destroy(&stats->chain);
+}
+
+/* The caller excludes all readers, writers, and signal reentry.  Keep
+ * sequence updates so pre-existing miss snapshots become invalid. */
+bool qht_try_reset_exclusive(struct qht *ht, size_t n_elems)
+{
+    struct qht_map *map;
+    size_t i;
+    qht_lock(ht);
+    map = ht->map;
+    if (map->n_buckets != qht_elems_to_buckets(n_elems)) {
+        qht_unlock(ht);
+        return false;
+    }
+    for (i = 0; i < map->n_buckets; i++) {
+        qht_bucket_reset__locked(&map->buckets[i]);
+    }
+    qht_unlock(ht);
+    return true;
 }

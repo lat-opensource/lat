@@ -278,15 +278,29 @@ cpu_tb_exec(CPUState *cpu, TranslationBlock *itb, int *tb_exit)
     if (rettb) {
         uint64_t lazypc = 0;
         if (tbexit) {
+#ifdef CONFIG_LATX_FAST_TRANSLATOR
+            if (!latx_tb_exit_resolve_pc(rettb->canlink[1], rettb->pc,
+                                         rettb->lazypc[1], &lazypc)) {
+                goto latx_skip_lazypc_update;
+            }
+#else
+            lazypc = rettb->pc + rettb->lazypc[1];
+#endif
             if (rettb->canlink[1]) {
                 ret |= (uint64_t)rettb;
             }
-            lazypc = rettb->pc + rettb->lazypc[1];
         } else {
+#ifdef CONFIG_LATX_FAST_TRANSLATOR
+            if (!latx_tb_exit_resolve_pc(rettb->canlink[0], rettb->pc,
+                                         rettb->lazypc[0], &lazypc)) {
+                goto latx_skip_lazypc_update;
+            }
+#else
+            lazypc = rettb->pc + rettb->lazypc[0];
+#endif
             if (rettb->canlink[0]) {
                 ret |= (uint64_t)rettb;
             }
-            lazypc = rettb->pc + rettb->lazypc[0];
 #if defined(CONFIG_LATX_KZT)
             if (latx_kzt_runtime_enabled() && lazypc >= reserved_va) {
                 uintptr_t alt_pc = (uintptr_t)getAlternate((void *)(uintptr_t)lazypc);
@@ -297,6 +311,10 @@ cpu_tb_exec(CPUState *cpu, TranslationBlock *itb, int *tb_exit)
 #endif
         }
         env->eip = lazypc;
+#ifdef CONFIG_LATX_FAST_TRANSLATOR
+latx_skip_lazypc_update:
+        ;
+#endif
     }
 
 #ifdef CONFIG_LATX_MONITOR_SHARED_MEM
@@ -336,6 +354,16 @@ cpu_tb_exec(CPUState *cpu, TranslationBlock *itb, int *tb_exit)
         last_tb = tcg_splitwx_to_rw((void *)(ret & ~TB_EXIT_MASK));
     }
     *tb_exit = ret & TB_EXIT_MASK;
+
+#ifdef LATX_QUICKTRANS_X87_SIGNAL_ABI
+    if (last_tb && (last_tb->bool_flags & IS_QUICKTRANS_TB) &&
+        !option_softfpu) {
+        /* Normal exits saved all physical low64 slots in the shared glue. */
+        env->qt_hard_signal_protocol_enabled = true;
+        env->qt_x87_env_format = env->mode_fpu ? QT_X87_ENV_HARD64 :
+                                                          QT_X87_ENV_MMX64;
+    }
+#endif
 
     trace_exec_tb_exit(last_tb, *tb_exit);
     if (last_tb) {
@@ -513,6 +541,32 @@ TranslationBlock *tb_htable_lookup(CPUState *cpu, target_ulong pc,
     return qht_lookup_custom(&tb_ctx.htable, &desc, h, tb_lookup_cmp);
 }
 
+#if defined(CONFIG_USER_ONLY) && defined(CONFIG_LATX)
+TranslationBlock *tb_htable_lookup_snapshot(CPUState *cpu, target_ulong pc,
+                                   target_ulong cs_base, uint32_t flags,
+                                   uint32_t cflags, struct qht_miss_snapshot *snapshot)
+{
+    tb_page_addr_t phys_pc;
+    struct tb_desc desc;
+    uint32_t h;
+
+    desc.env = (CPUArchState *)cpu->env_ptr;
+    desc.cs_base = cs_base;
+    desc.flags = flags;
+    desc.cflags = cflags;
+    desc.trace_vcpu_dstate = *cpu->trace_dstate;
+    desc.pc = pc;
+    phys_pc = get_page_addr_code(desc.env, pc);
+    if (phys_pc == -1) {
+        return NULL;
+    }
+    desc.page_addr0 = phys_pc;
+    h = tb_hash_func(phys_pc, pc, flags, cflags, *cpu->trace_dstate);
+    return qht_lookup_miss_snapshot(&tb_ctx.htable, &desc, h, tb_lookup_cmp, snapshot);
+}
+
+#endif
+
 #ifdef CONFIG_LATX_INSTS_PATTERN
 static void update_inst(TranslationBlock *tb, int n, uint32_t insn)
 {
@@ -687,7 +741,7 @@ inline void tb_add_jump(TranslationBlock *tb, int n,
     }
 
 #ifdef CONFIG_LATX_TU
-    if (use_tu_jmp(tb)) {
+    if ((tb->bool_flags & IS_TU_JMP)) {
         assert(tb->tu_jmp[TU_TB_INDEX_TARGET] != TB_JMP_RESET_OFFSET_INVALID);
         tu_relink(tb);
         goto out_unlock_next;
@@ -699,14 +753,14 @@ inline void tb_add_jump(TranslationBlock *tb, int n,
                           (uintptr_t)tb_next);
     if (old) {
         /* The signal handler reset the code but kept the jump list intact. */
-        if (old == (uintptr_t)tb_next && tb_need_relink(tb, n)) {
+        if (old == (uintptr_t)tb_next && (tb->bool_flags & (n == 0 ? SIGNAL_RELINK0 : SIGNAL_RELINK1))) {
             clear_signal_link_flag(tb, n);
             latx_tb_set_jmp_target(tb, n, tb_next);
         }
         goto out_unlock_next;
     }
 
-    if (tb_need_relink(tb, n)) {
+    if ((tb->bool_flags & (n == 0 ? SIGNAL_RELINK0 : SIGNAL_RELINK1))) {
         clear_signal_link_flag(tb, n);
     }
 
@@ -751,7 +805,7 @@ static inline TranslationBlock *tb_find(CPUState *cpu,
 
     cpu_get_tb_cpu_state(env, &pc, &cs_base, &flags);
 
-    tb = tb_lookup(cpu, pc, cs_base, flags, cflags);
+    tb = tb_lookup_rcu(cpu, pc, cs_base, flags, cflags);
 #if defined(TARGET_X86_64) && defined(CONFIG_LATX_JRRA)
     if (tb == NULL) {
         target_ulong guest_pc;

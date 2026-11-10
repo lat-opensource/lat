@@ -70,6 +70,7 @@
 #ifdef CONFIG_LATX
 #include "qemu/cacheflush.h"
 #include "latx-options.h"
+#include "latx-config.h"
 #include "aot.h"
 #include "aot_merge.h"
 #include "reg-map.h"
@@ -482,12 +483,15 @@ static int cpu_restore_state_from_tb(CPUState *cpu, TranslationBlock *tb,
     restore_state_to_opc(env, tb, data);
 #ifdef CONFIG_LATX_OPT_PUSH_POP
     uint32_t parallel = cpu->tcg_cflags & CF_PARALLEL;
-    if (!parallel) {
+    /* Quicktrans commits RSP directly and does not use legacy stack scheduling. */
+    if (!parallel && !(tb->bool_flags & IS_QUICKTRANS_TB)) {
         ir2_opt_push_pop_fix(tb, cpu, (searched_pc - (uintptr_t)tb->tc.ptr) / 4);
     }
 #endif
 #ifdef CONFIG_LATX_INSTS_PATTERN
-    opt_instptn_fix(cpu, tb, i);
+    if (tb->s_data && tb->s_data->ir1) {
+        opt_instptn_fix(cpu, tb, i);
+    }
 #endif
 #ifdef CONFIG_PROFILER
     qatomic_set(&prof->restore_time,
@@ -1435,12 +1439,20 @@ static inline void invalidate_page_bitmap(PageDesc *p)
  * and because the two pages of a TranslationBlock are always contiguous,
  * use a single data structure to record all TranslationBlocks.
  */
+#ifdef CONFIG_LATX
+#include "tb-page-index.h"
+#else
 static IntervalTreeRoot tb_root;
+#endif
 
 void tb_flush_remove_all(void)
 {
     assert_memory_lock();
+#ifdef CONFIG_LATX
+    tb_index_clear();
+#else
     memset(&tb_root, 0, sizeof(tb_root));
+#endif
 #ifdef CONFIG_LATX_AOT
     page_flush_page_state(0, 0);
 #endif
@@ -1449,12 +1461,14 @@ void tb_flush_remove_all(void)
 /* Call with mmap_lock held. */
 static void tb_record(TranslationBlock *tb, PageDesc *p1, PageDesc *p2)
 {
-    target_ulong addr;
-    int flags __attribute__((unused));
-
     assert_memory_lock();
 
     tb->itree.last = tb->itree.start + tb->size - 1;
+
+    /* These queries only support assertions; omit them in release builds. */
+#ifndef NDEBUG
+    target_ulong addr;
+    int flags;
 
     /* translator_loop() must have made all TB pages non-writable */
     addr = tb_page_addr0(tb);
@@ -1467,14 +1481,24 @@ static void tb_record(TranslationBlock *tb, PageDesc *p1, PageDesc *p2)
         assert(!(flags & PAGE_WRITE));
     }
 
+#endif
+
+#ifdef CONFIG_LATX
+    tb_index_insert(tb);
+#else
     interval_tree_insert(&tb->itree, &tb_root);
+#endif
 }
 
 /* Call with mmap_lock held. */
 static void tb_remove(TranslationBlock *tb)
 {
     assert_memory_lock();
+#ifdef CONFIG_LATX
+    tb_index_remove(tb);
+#else
     interval_tree_remove(&tb->itree, &tb_root);
+#endif
 }
 
 /* TODO: For now, still shared with translate-all.c for system mode. */
@@ -1489,14 +1513,21 @@ typedef TranslationBlock *PageForEachNext;
 static PageForEachNext foreach_tb_first(tb_page_addr_t start,
                                         tb_page_addr_t end)
 {
+#ifdef CONFIG_LATX
+    return tb_index_first(start, end);
+#else
     IntervalTreeNode *n = interval_tree_iter_first(&tb_root, start, end - 1);
     return n ? container_of(n, TranslationBlock, itree) : NULL;
+#endif
 }
 
 static PageForEachNext foreach_tb_next(PageForEachNext tb,
                                        tb_page_addr_t start,
                                        tb_page_addr_t end)
 {
+#ifdef CONFIG_LATX
+    return tb ? tb_index_next(tb, start, end) : NULL;
+#else
     IntervalTreeNode *n;
 
     if (tb) {
@@ -1506,6 +1537,7 @@ static PageForEachNext foreach_tb_next(PageForEachNext tb,
         }
     }
     return NULL;
+#endif
 }
 
 #else
@@ -1972,7 +2004,20 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
     /* set TBMini */
     uint64_t *tbm = (uint64_t *)gen_code_buf;
     tbmini_set_pointer(tbm, (uint64_t)tb);
-    gen_code_buf = (tcg_insn_unit *)(ROUND_UP((uintptr_t)gen_code_buf + sizeof(struct TBMini), qemu_icache_linesize));
+    uintptr_t code_align = qemu_icache_linesize;
+#if defined(CONFIG_USER_ONLY) && defined(CONFIG_LATX_FAST_TRANSLATOR) && \
+    defined(TARGET_X86_64)
+    if (option_split_tb && !option_aot &&
+        latx_quicktrans_compact_tb_enabled()) {
+        /* Keep TBMini at the allocator-aligned address, but start code
+         * immediately after it. Lookup rounds (pc - 4) down to the scan
+         * boundary, so it still finds this header for the first instruction.
+         * QT exit padding uses the actual address to preserve patch pairs. */
+        code_align = sizeof(struct TBMini);
+    }
+#endif
+    gen_code_buf = (tcg_insn_unit *)ROUND_UP(
+        (uintptr_t)gen_code_buf + sizeof(struct TBMini), code_align);
 #endif
 
     tb->tc.ptr = tcg_splitwx_to_rx(gen_code_buf);
@@ -1980,12 +2025,15 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
     /* tb->cs_base = cs_base; */
     tb->flags = flags;
     tb->cflags = cflags;
+#ifndef CONFIG_LATX_TU
     tb->jmp_target_arg[0] = TB_JMP_RESET_OFFSET_INVALID;
     tb->jmp_target_arg[1] = TB_JMP_RESET_OFFSET_INVALID;
+#endif
     tcg_ctx->tb_cflags = cflags;
 #ifndef CONFIG_LATX
  tb_overflow:
 #else
+#ifndef CONFIG_LATX_TU
     tb->bool_flags = OPT_BCC;
     tb->s_data->_top_out = -1;
     tb->s_data->_top_in = -1;
@@ -1993,10 +2041,13 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
     tb->s_data->rel_start = -1;
     tb->s_data->rel_end = -1;
 #endif
+#endif
 #ifdef CONFIG_LATX_PROFILER
     CLN_TB_PROFILE(tb);
 #endif
+#ifndef CONFIG_LATX_TU
     jrra_tb_reset(tb);
+#endif
 #ifdef CONFIG_LATX_TU
     tu_reset_tb(tb);
     tb->s_data->tu_tb_mode = TB_GEN_CODE;
@@ -2234,7 +2285,21 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
      * To handle segv case, every insn has encode data at the end of tb
      * Calculate the search_size and set the new gen_code_buf
      */
-    search_size = encode_search(tb, (void *)gen_code_buf + gen_code_size);
+#if defined(CONFIG_LATX_FAST_TRANSLATOR) && defined(TARGET_X86_64)
+    if (tb->bool_flags & IS_QUICKTRANS_TB) {
+        /* Quicktrans already appended the search table and returned the
+         * combined size. Its final instruction end includes the TB exit.
+         * Restore the code/table boundary instead of appending a second
+         * table: cpu_restore_state_from_tb reads at tc.ptr + tc.size. */
+        int qt_code_size = tcg_ctx->gen_insn_end_off[tb->icount - 1];
+        assert(qt_code_size > 0 && qt_code_size <= gen_code_size);
+        search_size = gen_code_size - qt_code_size;
+        gen_code_size = qt_code_size;
+    } else
+#endif
+    {
+        search_size = encode_search(tb, (void *)gen_code_buf + gen_code_size);
+    }
     if (unlikely(search_size < 0)) {
         qatomic_set(&tcg_ctx->code_gen_ptr, tcg_ctx->code_gen_highwater + 1);
         goto buffer_overflow;
@@ -3245,6 +3310,36 @@ int walk_memory_regions(void *priv, walk_memory_regions_fn fn)
         }
     }
     mmap_unlock();
+
+    return rc;
+}
+
+int walk_memory_regions_range_locked(void *priv, target_ulong start,
+                                     target_ulong end,
+                                     walk_memory_regions_fn fn)
+{
+    PageFlagsNode *p;
+    target_ulong last;
+    int rc = 0;
+
+    assert_memory_lock();
+    if (start >= end) {
+        return 0;
+    }
+
+    last = end - 1;
+    for (p = pageflags_find(start, last);
+         p != NULL;
+         p = pageflags_next(p, start, last)) {
+        target_ulong region_start = MAX(start, p->itree.start);
+        target_ulong region_end = p->itree.last >= last
+                                  ? end : p->itree.last + 1;
+
+        rc = fn(priv, region_start, region_end, p->flags);
+        if (rc != 0) {
+            break;
+        }
+    }
 
     return rc;
 }
