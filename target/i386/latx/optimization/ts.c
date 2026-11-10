@@ -62,6 +62,28 @@ static int get_tb_id(ADDRX pc, int cflags)
     return -1;
 }
 
+static int get_tb_lower_bound(ADDRX pc, int cflags)
+{
+    int left = curr_seg->first_tb_id;
+    int right = curr_seg->last_tb_id + 1;
+    uint32_t parallel = cflags & CF_PARALLEL;
+
+    while (left < right) {
+        int middle = left + (right - left) / 2;
+        uint32_t message_parallel =
+            curr_tb_message_vector[middle].cflags & CF_PARALLEL;
+
+        if (message_parallel < parallel ||
+                (message_parallel == parallel &&
+                 curr_tb_message_vector[middle].pc < pc)) {
+            left = middle + 1;
+        } else {
+            right = middle;
+        }
+    }
+    return left;
+}
+
 TranslationBlock *aot_tb_lookup(target_ulong pc, int cflags)
 {
     int tb_id = get_tb_id(pc, cflags);
@@ -100,6 +122,42 @@ static inline ADDRX get_page(ADDRX pc)
     return pc & TARGET_PAGE_MASK;
 }
 
+#ifdef CONFIG_LATX_TU
+static target_ulong ts_tb_fallthrough_pc(const TranslationBlock *tb)
+{
+    target_ulong pc = tb->pc;
+    unsigned int remaining = tb->size;
+    struct la_dt_insn storage;
+    IR1_INST ir1 = { 0 };
+
+    if (!remaining) {
+        return 0;
+    }
+
+    while (remaining) {
+        uint8_t code[16] = { 0 };
+        unsigned int len = MIN(remaining, 15);
+        int count;
+
+        if (cpu_memory_rw_debug(thread_cpu, pc, code, len, false)) {
+            return 0;
+        }
+        count = la_disa_v1(code, len, pc, 1, &ir1.info, 0, &storage,
+                           !!(tb->bool_flags & IS_CODE64));
+        if (count != 1 || !ir1.info || !ir1.info->size ||
+                ir1.info->size > remaining) {
+            return 0;
+        }
+        remaining -= ir1.info->size;
+        pc += ir1.info->size;
+    }
+    if (ir1_is_jump(&ir1) || ir1_is_return(&ir1)) {
+        return 0;
+    }
+    return pc;
+}
+#endif
+
 void get_dynamic_message(TranslationBlock **tb_list, int tb_num,
         seg_info **seg_info_vector, int *seg_info_num)
 {
@@ -116,9 +174,20 @@ void get_dynamic_message(TranslationBlock **tb_list, int tb_num,
                     == (tb_list[i - 1]->cflags & CF_PARALLEL))) {
             continue;
         }
-        dynamic_tb_message_vector[dynamic_tb_num].pc = tb_list[i]->pc;
-        dynamic_tb_message_vector[dynamic_tb_num].cflags = tb_list[i]->cflags;
-        dynamic_tb_message_vector[dynamic_tb_num].bool_flags = tb_list[i]->bool_flags;
+        tb_tmp_message *message = &dynamic_tb_message_vector[dynamic_tb_num];
+
+        memset(message, 0, sizeof(*message));
+        message->pc = tb_list[i]->pc;
+        message->cflags = tb_list[i]->cflags;
+        message->bool_flags = tb_list[i]->bool_flags;
+#ifdef CONFIG_LATX_TU
+        if (aot_cross_page_tu_enabled()) {
+            target_ulong next_pc = ts_tb_fallthrough_pc(tb_list[i]);
+
+            message->fallthrough_offset =
+                tb_fallthrough_offset(message->pc, next_pc);
+        }
+#endif
         while (j < *seg_info_num &&
                 seg_info_vector[j]->seg_end <= tb_list[i]->pc) {
 #ifdef CONFIG_LATX_DEBUG
@@ -701,6 +770,48 @@ static inline void get_target_tb(TranslationBlock *curr_tb, CPUState *cpu,
 
 static int untr_tb_id;
 
+static tb_tmp_message *ts_find_fallthrough_predecessor(target_ulong anchor,
+        int cflags, target_ulong before)
+{
+    target_ulong first = anchor > MAX_TB_SIZE ? anchor - MAX_TB_SIZE : 0;
+    int upper = get_tb_lower_bound(before, cflags);
+    int lower = get_tb_lower_bound(first, cflags);
+
+    QEMU_BUILD_BUG_ON(MAX_TB_SIZE > UINT16_MAX);
+    for (int id = upper - 1; id >= lower; id--) {
+        tb_tmp_message *message = &curr_tb_message_vector[id];
+
+        if (message->cflags == cflags && message->fallthrough_offset &&
+                anchor - message->pc == message->fallthrough_offset) {
+            return message;
+        }
+    }
+    return NULL;
+}
+
+static void get_ts_fallthrough_predecessor(TranslationBlock *tb,
+        CPUState *cpu, target_ulong cs_base, uint32_t flags, int cflags,
+        int max_insns)
+{
+    if (tu_data->tb_num >= MAX_TB_IN_TS ||
+            tu_data->ir1_num_in_tu + 2 * max_insns >= MAX_IR1_IN_TU) {
+        return;
+    }
+
+    tb_tmp_message *message =
+        ts_find_fallthrough_predecessor(tb->pc, cflags, tb->pc);
+
+    if (!message || message->tb) {
+        return;
+    }
+    tb = tb_create(cpu, message->pc, cs_base, flags, cflags, max_insns,
+                   message->bool_flags, TU_TB_START_NORMAL);
+    if (!is_bad_tb(tb)) {
+        /* Admission publishes message->tb and appends work to tb_list. */
+        tu_push_back(tb);
+    }
+}
+
 static bool get_ts_outgoing(CPUState *cpu, target_ulong cs_base,
         uint32_t flags, int cflags, int max_insns)
 {
@@ -712,6 +823,10 @@ static bool get_ts_outgoing(CPUState *cpu, target_ulong cs_base,
     while (tb_id < *tb_num_in_tu) {
         TranslationBlock *tb = tb_list[tb_id++];
 
+        if (aot_cross_page_tu_enabled()) {
+            get_ts_fallthrough_predecessor(tb, cpu, cs_base, flags, cflags,
+                                           max_insns);
+        }
 #ifdef CONFIG_LATX_DEBUG
         if (get_tb_id(tb->pc, tb->cflags) < 0) {
             continue;
@@ -753,6 +868,76 @@ static bool get_ts_outgoing(CPUState *cpu, target_ulong cs_base,
     return true;
 }
 
+/* solve_tb_overlap() must see the new prefix immediately before its tail. */
+static bool ts_prefix_range_free(target_ulong pc, target_ulong tail_pc)
+{
+    for (uint32_t i = 0; i < tu_data->tb_num; i++) {
+        const TranslationBlock *member = tu_data->tb_list[i];
+
+        if (member->pc < tail_pc &&
+            (member->pc >= pc || member->s_data->next_pc > pc)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static void ts_add_shared_call_prefixes(CPUState *cpu, target_ulong cs_base,
+                                       int max_insns)
+{
+    uint32_t initial_members = tu_data->tb_num;
+
+    /*
+     * Once exploration is complete, a second entry into the same CALL can
+     * reuse the admitted suffix. It adds no outgoing edge other than the
+     * edge to that suffix, so the existing member order stays fixed here.
+     */
+    for (uint32_t i = 0; i < initial_members; i++) {
+        TranslationBlock *tail = tu_data->tb_list[i];
+        int type = tail->s_data->last_ir1_type;
+        int cflags = tail->cflags;
+        target_ulong end = tail->s_data->next_pc;
+        TranslationBlock *next;
+        tb_tmp_message *message;
+
+        if ((type != IR1_TYPE_CALL && type != IR1_TYPE_CALLIN) ||
+            tail->s_data->tu_tb_mode == TU_TB_MODE_STATIC) {
+            continue;
+        }
+        if (type == IR1_TYPE_CALL &&
+            tu_member_lookup(tail->s_data->target_pc)) {
+            /* The usual single-slot path already covers this CALLEE. */
+            continue;
+        }
+        next = tu_member_lookup(end);
+        if (!next || next->s_data->tu_tb_mode == TU_TB_MODE_STATIC ||
+            next->flags != tail->flags || next->cflags != cflags) {
+            continue;
+        }
+        message = ts_find_fallthrough_predecessor(end, cflags, end);
+        if (!message || message->tb != tail) {
+            continue;
+        }
+        while (tu_data->tb_num < MAX_TB_IN_TS &&
+               tu_data->ir1_num_in_tu + 2 * max_insns < MAX_IR1_IN_TU) {
+            message = ts_find_fallthrough_predecessor(end, cflags, tail->pc);
+            if (!message || message->tb ||
+                ((message->bool_flags ^ tail->bool_flags) &
+                 (IS_CODE64 | TBSMC_OPTED)) ||
+                !ts_prefix_range_free(message->pc, tail->pc)) {
+                break;
+            }
+            TranslationBlock *prefix = tu_create_fallthrough_prefix(cpu,
+                message->pc, cs_base, max_insns, message->bool_flags, tail);
+
+            if (!prefix || !tu_push_back(prefix)) {
+                break;
+            }
+            tail = prefix;
+        }
+    }
+}
+
 static inline void get_ts_queue(CPUState *cpu, target_ulong cs_base,
         uint32_t flags, int cflags, int max_insns, target_ulong curr_page)
 {
@@ -775,6 +960,9 @@ static inline void get_ts_queue(CPUState *cpu, target_ulong cs_base,
         tu_push_back(tb);
         untr_tb_id++;
         get_ts_outgoing(cpu, cs_base, flags, cflags, max_insns);
+        if (aot_cross_page_tu_enabled()) {
+            ts_add_shared_call_prefixes(cpu, cs_base, max_insns);
+        }
         /* Big TU have bug, so break in there. */
         break;
     }

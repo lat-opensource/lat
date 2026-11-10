@@ -333,6 +333,69 @@ static void test_merge_tree_lifetime(void)
     g_assert_cmpuint(live_bytes, ==, 0);
 }
 
+#ifdef CONFIG_LATX_TU
+static void test_branch_message_recovery(void)
+{
+    aot_tb tb = {
+        .size = 4,
+        .last_ir1_type = IR1_TYPE_BRANCH,
+    };
+    tb_tmp_message message;
+    seg_info seg = {
+        .seg_begin = 0x10000,
+        .seg_end = 0x11000,
+    };
+
+    tb.offset_in_segment = 0x100;
+    tb.next_tb_pc_offset = 0x120;
+    set_tb_message(&message, &tb, &seg);
+    g_assert(message.fallthrough_offset == 0x20);
+
+    /* Old cross-page caches only retained the relative fallthrough PC. */
+    tb.next_tb_pc_offset = -1;
+    tb.lazypc[0] = 7;
+    set_tb_message(&message, &tb, &seg);
+    g_assert(message.fallthrough_offset == 7);
+
+    /* A distant edge must not alias a nearby PC after narrowing. */
+    seg.seg_end = 0x30000;
+    tb.next_tb_pc_offset = 0x10120;
+    set_tb_message(&message, &tb, &seg);
+    g_assert(message.fallthrough_offset == 0);
+
+    /* A backward edge must not become a forward predecessor. */
+    tb.next_tb_pc_offset = 0x80;
+    set_tb_message(&message, &tb, &seg);
+    g_assert(message.fallthrough_offset == 0);
+
+    /* A record without guest bytes cannot establish a predecessor. */
+    tb.size = 0;
+    tb.next_tb_pc_offset = 0x120;
+    set_tb_message(&message, &tb, &seg);
+    g_assert(message.fallthrough_offset == 0);
+    tb.size = 4;
+
+    tb.last_ir1_type = IR1_TYPE_RET;
+    set_tb_message(&message, &tb, &seg);
+    g_assert(message.fallthrough_offset == 0);
+    tb.last_ir1_type = IR1_TYPE_JUMP;
+    set_tb_message(&message, &tb, &seg);
+    g_assert(message.fallthrough_offset == 0);
+    tb.last_ir1_type = IR1_TYPE_BRANCH;
+
+#if TARGET_ABI_BITS == 64
+    seg.seg_begin = UINT64_C(0x100000000) + 0x1000;
+    seg.seg_end = seg.seg_begin + 0x1000;
+    tb.offset_in_segment = 0x200;
+    tb.next_tb_pc_offset = -1;
+    tb.lazypc[0] = 5;
+    set_tb_message(&message, &tb, &seg);
+    g_assert(message.pc == UINT64_C(0x100000000) + 0x1200);
+    g_assert(message.fallthrough_offset == 5);
+#endif
+}
+#endif
+
 static void test_cache_directory_failure(void)
 {
     fail_opendir = true;
@@ -360,6 +423,10 @@ int main(int argc, char **argv)
     g_test_add_func("/aot-merge/tree-lifetime", test_merge_tree_lifetime);
     g_test_add_func("/aot-merge/cache-directory-failure",
                     test_cache_directory_failure);
+#ifdef CONFIG_LATX_TU
+    g_test_add_func("/aot-merge/branch-message-recovery",
+                    test_branch_message_recovery);
+#endif
     result = g_test_run();
     g_assert_cmpint(g_rmdir(test_dir), ==, 0);
     g_free(test_dir);

@@ -343,9 +343,10 @@ static __thread uint8_t search_buff[MAX_TB_IN_CACHE * TCG_MAX_INSNS];
 static __thread uint32_t search_buff_offset[MAX_TB_IN_CACHE];
 
 #include<sys/syscall.h>
-TranslationBlock* tb_create(CPUState *cpu, target_ulong pc,
+static TranslationBlock *tb_create_internal(CPUState *cpu, target_ulong pc,
         target_ulong cs_base, uint32_t flags, int cflags,
-        int max_insns, uint16_t bool_flags, TU_TB_START_TYPE mode)
+        int max_insns, uint16_t bool_flags, TU_TB_START_TYPE mode,
+        const TranslationBlock *tail)
 {
     TranslationBlock* tb;
     if (unlikely(pc == 0)) {
@@ -406,14 +407,19 @@ TranslationBlock* tb_create(CPUState *cpu, target_ulong pc,
 #endif
     tb->flags = flags;
 
+    uint32_t ir1_start = tu_data->ir1_num_in_tu;
+
     target_disasm(tb, max_insns);
 
-    if (tb->icount == 0 || tb->s_data->tu_tb_mode == TU_TB_MODE_BROKEN
-			|| tb->s_data->tu_tb_mode == BAD_TB) {
-        return NULL;
-    }
-    if (aot_cross_page_tu_enabled() &&
-        !tu_page_range_available(tb->pc, tb->size)) {
+    if (tb->icount == 0 || tb->s_data->tu_tb_mode == TU_TB_MODE_BROKEN ||
+        tb->s_data->tu_tb_mode == BAD_TB ||
+        (aot_cross_page_tu_enabled() &&
+         !tu_page_range_available(tb->pc, tb->size)) ||
+        (tail && !tu_shares_fallthrough_tail(tb, tail, max_insns))) {
+        if (tail) {
+            /* Discard this tentative decode before allocating a TB. */
+            tu_data->ir1_num_in_tu = ir1_start;
+        }
         return NULL;
     }
     tb = tcg_tb_alloc_full(tcg_ctx);
@@ -435,6 +441,22 @@ TranslationBlock* tb_create(CPUState *cpu, target_ulong pc,
     }
 
     return tb;
+}
+
+TranslationBlock *tb_create(CPUState *cpu, target_ulong pc,
+        target_ulong cs_base, uint32_t flags, int cflags,
+        int max_insns, uint16_t bool_flags, TU_TB_START_TYPE mode)
+{
+    return tb_create_internal(cpu, pc, cs_base, flags, cflags, max_insns,
+                              bool_flags, mode, NULL);
+}
+
+TranslationBlock *tu_create_fallthrough_prefix(CPUState *cpu, target_ulong pc,
+        target_ulong cs_base, int max_insns, uint16_t bool_flags,
+        const TranslationBlock *tail)
+{
+    return tb_create_internal(cpu, pc, cs_base, tail->flags, tail->cflags,
+                              max_insns, bool_flags, TU_TB_START_NORMAL, tail);
 }
 
 static inline ADDRX get_page(ADDRX pc)

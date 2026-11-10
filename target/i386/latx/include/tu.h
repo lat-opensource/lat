@@ -113,6 +113,42 @@ typedef enum TU_TB_START_TYPE {
     TU_TB_START_ENTRY
 } TU_TB_START_TYPE;
 
+/*
+ * Both blocks were decoded from the same protected guest bytes. Only reuse
+ * the tail if the decoded boundaries and execution modes agree.
+ */
+static inline bool tu_shares_fallthrough_tail(const TranslationBlock *tb,
+        const TranslationBlock *tail, int max_insns)
+{
+    target_ulong end = tail->s_data->next_pc;
+    const IR1_INST *a = tb->s_data->ir1;
+    const IR1_INST *b = tail->s_data->ir1;
+
+    if (tb->flags != tail->flags || tb->cflags != tail->cflags ||
+        ((tb->bool_flags ^ tail->bool_flags) & (IS_CODE64 | TBSMC_OPTED)) ||
+        tb->pc >= tail->pc || tail->pc >= end ||
+        tb->s_data->next_pc != end || tb->size != end - tb->pc ||
+        tail->size != end - tail->pc ||
+        tb->s_data->last_ir1_type != tail->s_data->last_ir1_type ||
+        !tail->icount || tb->icount <= tail->icount ||
+        tb->icount >= max_insns) {
+        return false;
+    }
+
+    a += tb->icount - tail->icount;
+    if (a->info->address != tail->pc) {
+        return false;
+    }
+    for (unsigned int i = 0; i < tail->icount; i++) {
+        if (a[i].info->address != b[i].info->address ||
+            a[i].info->size != b[i].info->size ||
+            a[i].info->id != b[i].info->id) {
+            return false;
+        }
+    }
+    return true;
+}
+
 extern __thread TUControl *tu_data;
 
 void tu_enough_space(CPUState *cpu);
@@ -122,6 +158,9 @@ void tu_control_destroy(void);
 TranslationBlock* tb_create(CPUState *cpu, target_ulong pc,
         target_ulong cs_base, uint32_t flags, int cflags,
         int max_insns, uint16_t bool_flags, TU_TB_START_TYPE mode);
+TranslationBlock *tu_create_fallthrough_prefix(CPUState *cpu, target_ulong pc,
+        target_ulong cs_base, int max_insns, uint16_t bool_flags,
+        const TranslationBlock *tail);
 void tu_build_reset(void);
 bool tu_page_range_available(target_ulong pc, uint32_t size);
 bool tu_push_back(TranslationBlock *tb);
