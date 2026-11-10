@@ -372,7 +372,7 @@ seg_info *segment_tree_lookup(target_ulong pc)
 
 seg_info *segment_tree_lookup2(target_ulong begin, target_ulong end)
 {
-    if (option_aot) {
+    if (option_aot || option_quicktrans_aot_collect) {
         seg_info key = {.file_name = NULL, .file_offset = 0,
                         .seg_begin = begin, .seg_end = end};
         return (seg_info *)g_tree_lookup(segment_tree, &key);
