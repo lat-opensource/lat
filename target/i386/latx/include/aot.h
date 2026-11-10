@@ -311,6 +311,7 @@ int add_rel_entry(aot_rel_kind kind, uint32_t **tc_offset,
 typedef enum AOTExitReason {
     AOT_EXIT_THREAD,
     AOT_EXIT_FINAL,
+    AOT_EXIT_NORMAL,
 } AOTExitReason;
 
 void aot_exit_entry(CPUState *cpu, AOTExitReason reason);

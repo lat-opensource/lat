@@ -15637,8 +15637,12 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
         pthread_mutex_unlock(&clone_lock);
         preexit_cleanup(cpu_env, arg1);
 
-        /* dump basic block here. TODO */
-
+        /* The last thread is leaving through the normal exit syscall. */
+#ifdef CONFIG_LATX_AOT
+        if (option_quicktrans_aot_collect) {
+            aot_exit_entry(cpu, AOT_EXIT_NORMAL);
+        }
+#endif
         _exit(arg1);
         return 0; /* avoid warning */
     case TARGET_NR_read:
@@ -18439,7 +18443,7 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
         preexit_cleanup(cpu_env, arg1);
         /* dump basic block here. TODO */
 #ifdef CONFIG_LATX_AOT
-        aot_exit_entry(cpu, AOT_EXIT_FINAL);
+        aot_exit_entry(cpu, AOT_EXIT_NORMAL);
 #endif
         return get_errno(exit_group(arg1));
 #endif

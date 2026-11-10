@@ -281,6 +281,12 @@ static int target_mprotect_internal(abi_ulong start, abi_ulong len,
     }
 
     page_set_flags_tb_reload(start, start + len, page_flags, true);
+#ifdef CONFIG_LATX_AOT
+    if (option_quicktrans_aot_collect) {
+        /* Do not compile a mapping whose guest permissions changed. */
+        segment_tree_remove_range(start, start + len);
+    }
+#endif
 
 #if defined(CONFIG_LATX) && defined(TARGET_I386) && TARGET_ABI_BITS == 32
     if (option_minke_16k_page_check && (target_prot & PROT_EXEC)) {
@@ -1196,18 +1202,22 @@ abi_long target_mmap(abi_ulong start, abi_ulong len, int target_prot,
 #ifdef CONFIG_LATX_AOT
     wine_sec_info * wine_sec = NULL;
     uint64_t aot_offset = offset;
-    if (option_aot) {
+    if (option_aot || option_quicktrans_aot_collect) {
         segment_tree_remove_range(start, start + len);
     }
     if (option_aot_wine && option_aot) {
         wine_dll_track_sections(start, len, offset, fd);
         wine_sec = wine_sec_tree_lookup(start);
     }
-    if (option_aot && ((fd > 2 && (target_prot & PROT_EXEC)) || wine_sec)) {
+    if ((option_aot || (option_quicktrans_aot_collect &&
+                        !(target_prot & PROT_WRITE))) &&
+        ((fd > 2 && (target_prot & PROT_EXEC)) || wine_sec)) {
         char buf[PATH_MAX];
         aot_offset = deal_seg(wine_sec, false, aot_offset, buf, fd,
                 target_prot, len, start);
-        recover_aot_tb(buf, aot_offset, start, len);
+        if (option_aot) {
+            recover_aot_tb(buf, aot_offset, start, len);
+        }
     }
 #endif
 #if defined(CONFIG_LATX_KZT) && defined(TARGET_X86_64)
@@ -1336,7 +1346,7 @@ int target_munmap(abi_ulong start, abi_ulong len, int rlimit_as_account)
 
     if (ret == 0) {
 #ifdef CONFIG_LATX_AOT
-        if (option_aot) {
+        if (option_aot || option_quicktrans_aot_collect) {
             segment_tree_remove_range(start, start + len);
         }
 #endif
@@ -1708,7 +1718,7 @@ mremap_done:
                        prot | PAGE_VALID | PAGE_RESET);
 
 #ifdef CONFIG_LATX_AOT
-        if (option_aot) {
+        if (option_aot || option_quicktrans_aot_collect) {
             if (!keep_old || (flags & MREMAP_DONTUNMAP)) {
                 segment_tree_remove_range(old_addr, old_addr + old_size);
             }

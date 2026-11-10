@@ -953,6 +953,26 @@ static void handle_arg_latx_aot(const char *arg)
     }
 }
 
+static void handle_arg_latx_aot_load(const char *arg)
+{
+    long value;
+    if (qemu_strtol(arg, NULL, 0, &value) < 0 || value < 0 || value > 1) {
+        fprintf(stderr, "LATX_LOAD_AOT must be 0 or 1\n");
+        exit(EXIT_FAILURE);
+    }
+    option_load_aot = value;
+}
+
+static void handle_arg_latx_quicktrans_aot_collect(const char *arg)
+{
+    long value;
+    if (qemu_strtol(arg, NULL, 0, &value) < 0 || value < 0 || value > 1) {
+        fprintf(stderr, "LATX_QUICKTRANS_AOT_COLLECT must be 0 or 1\n");
+        exit(EXIT_FAILURE);
+    }
+    option_quicktrans_aot_collect = value;
+}
+
 static void handle_arg_latx_aot_generate(const char *arg)
 {
     long value;
@@ -1102,6 +1122,11 @@ static const struct qemu_argument arg_table[] = {
 #ifdef CONFIG_LATX_AOT
     {"latx-aot",    "LATX_AOT",     true,  handle_arg_latx_aot,
     "",           "enable aot"},
+    {"latx-aot-load", "LATX_LOAD_AOT", true,
+    handle_arg_latx_aot_load, "0|1", "load existing AOT when AOT is enabled"},
+    {"latx-quicktrans-aot-collect", "LATX_QUICKTRANS_AOT_COLLECT", true,
+    handle_arg_latx_quicktrans_aot_collect, "0|1",
+    "experimental: generate legacy AOT after normal Quicktrans exit"},
     {"latx-aot-generate", "LATX_AOT_GENERATE", true,
     handle_arg_latx_aot_generate, "",
     "AOT generation: auto (-1), off (0), or force (1)"},

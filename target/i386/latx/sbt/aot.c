@@ -15,6 +15,7 @@
 #include "aot.h"
 #include "aot-version.h"
 #include "aot_exit.h"
+#include "latx-config.h"
 #include <stdlib.h>
 #include <math.h>
 #include "latx-options.h"
@@ -1713,13 +1714,24 @@ void aot_exit_entry(CPUState *cpu, AOTExitReason reason)
     bool daemonize = aot_exit_worker_should_daemonize(
         ts && ts->ipc_namespace_isolated);
 
-    if (!option_aot) {
+    bool collect = option_quicktrans_aot_collect;
+    if (collect && reason != AOT_EXIT_NORMAL) {
         return;
     }
-    if (option_aot_generate == 0) {
+    if (reason == AOT_EXIT_NORMAL) {
+        reason = AOT_EXIT_FINAL;
+    }
+    if (!option_aot && !collect) {
         return;
     }
-    if (option_aot_generate < 0 && !aot_should_generate()) {
+    /* The experimental worker is waited for only at final process exit. */
+    if (collect) {
+        daemonize = false;
+    }
+    if (!collect && option_aot_generate == 0) {
+        return;
+    }
+    if (!collect && option_aot_generate < 0 && !aot_should_generate()) {
         return;
     }
     if (in_pre_translate) {
@@ -1782,7 +1794,19 @@ void aot_exit_entry(CPUState *cpu, AOTExitReason reason)
     pid_t pid = fork();
     if (pid) {
         if (pid > 0) {
-            waitpid(pid, NULL, 0);
+            if (collect) {
+                int status;
+                pid_t waited;
+                do {
+                    waited = waitpid(pid, &status, 0);
+                } while (waited < 0 && errno == EINTR);
+                if (waited != pid || !WIFEXITED(status) || WEXITSTATUS(status)) {
+                    fprintf(stderr, "Quicktrans AOT worker failed; "
+                            "guest exit status is unchanged\n");
+                }
+            } else {
+                waitpid(pid, NULL, 0);
+            }
             if (old_sa.sa_handler != SIG_DFL) {
                 sigaction(signum, &old_sa, NULL);
             }
@@ -1808,6 +1832,17 @@ parent_exit:
         close_all_fd();
     }
 
+    if (collect) {
+        /* These settings change only in the forked generator. */
+        option_aot = 1;
+        option_load_aot = 0;
+        option_aot_generate = 1;
+        option_quicktrans_aot_collect = 0;
+        aot_link_tree_init();
+        merge_segment_tree_init();
+        lib_tree_init();
+        page_tree_init();
+    }
     aot_generate(cpu);
     _exit(EXIT_SUCCESS);
 }
@@ -1862,7 +1897,20 @@ void aot_reset_tb_stats(void)
 
 void aot_init(void)
 {
-    if (!option_aot) {
+    if (option_quicktrans_aot_collect) {
+#if defined(CONFIG_LATX_FAST_TRANSLATOR) && defined(TARGET_X86_64) && defined(CONFIG_LATX_TU)
+        if (!latx_quicktrans_compact_tb_enabled() || option_aot || option_load_aot ||
+            option_softfpu || option_mem_test || option_aot_wine) {
+            fprintf(stderr, "Quicktrans AOT collection requires strict Quicktrans, "
+                    "AOT off, and hard floating point without Wine/KZT\n");
+            exit(EXIT_FAILURE);
+        }
+#else
+        fprintf(stderr, "Quicktrans AOT collection is unavailable in this build\n");
+        exit(EXIT_FAILURE);
+#endif
+    }
+    if (!option_aot && !option_quicktrans_aot_collect) {
         return;
     }
     segment_tree_init();

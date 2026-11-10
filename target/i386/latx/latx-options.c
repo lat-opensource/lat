@@ -77,6 +77,7 @@ int option_trace_ir1;
 int option_latx_disassemble_trace_cmp;
 int option_debug_lative;
 int option_aot;
+int option_quicktrans_aot_collect;
 int option_load_aot;
 int option_aot_generate;
 int option_aot_wine;
