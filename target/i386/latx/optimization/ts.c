@@ -1058,10 +1058,16 @@ static void ts_tb_explore(CPUState *cpu, target_ulong cs_base,
     hbr_opt(tb_list, *tb_num_in_tu);
 #endif
 
+    if (aot_cross_page_tu_enabled()) {
+        tu_ir1_optimization(tb_list, *tb_num_in_tu);
+        delet_static_tb(cpu, tb_list, tb_num_in_tu);
+    }
     qsort(tb_list, *tb_num_in_tu, sizeof(TranslationBlock *), tb_sort_cmp);
     solve_tb_overlap(*tb_num_in_tu, tb_list, max_insns);
-    tu_ir1_optimization(tb_list, *tb_num_in_tu);
-    delet_static_tb(cpu, tb_list, tb_num_in_tu);
+    if (!aot_cross_page_tu_enabled()) {
+        tu_ir1_optimization(tb_list, *tb_num_in_tu);
+        delet_static_tb(cpu, tb_list, tb_num_in_tu);
+    }
 
     for (int i = 0; i < *tb_num_in_tu; i++) {
         tb_list[i]->s_data->tu_id = tb_list[0]->pc;
