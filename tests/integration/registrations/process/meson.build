@@ -349,3 +349,15 @@ if 'i386-linux-user' in target_dirs
     ],
   }]
 endif
+
+foreach entry_target : [['i386', '32'], ['x86_64', '64']]
+  if entry_target[0] + '-linux-user' in target_dirs
+    latx_integration_tests += [{
+      'name': 'test-entry-signal-' + entry_target[0],
+      'runner': find_program('../../../latx/test-tu-runtime.sh'),
+      'args': [emulators['latx-' + entry_target[0]],
+               entry_target[1], 'entry-signal'],
+      'timeout': 180,
+    }]
+  endif
+endforeach
