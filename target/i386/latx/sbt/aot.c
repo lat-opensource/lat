@@ -1633,6 +1633,7 @@ void recover_aot_tb(char *lib_name, uint64_t aot_offset, abi_long start,
         seg->buffer = curr_aot_buffer;
         seg->p_segment = p_segment;
         seg->seg_flag |= SEG_AOT_LOADED;
+        qatomic_set(&aot_cache_has_been_loaded, true);
         aot_test_mark_loaded(lib_name);
     }
     if (p_segment->aot_file_type & ELF_AOT_FILE) {

@@ -18,6 +18,8 @@ int load_page(target_ulong pc, uint32_t cflags, seg_info *info);
 int load_page_4(target_ulong pc, uint32_t cflags, seg_info *info);
 int load_aot(target_ulong pc, uint32_t cflags);
 #ifdef CONFIG_LATX_AOT
+/* Sticky after publication; unloading must not hide another loaded module. */
+extern bool aot_cache_has_been_loaded;
 int smc_page_reload(target_ulong page_addr, uint32_t cflags);
 #endif
 /* void print_tb(TranslationBlock *tb); */

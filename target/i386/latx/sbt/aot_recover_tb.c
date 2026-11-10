@@ -394,13 +394,20 @@ inline int load_page(target_ulong pc, uint32_t cflags, seg_info *info)
     return 1;
 }
 
+bool aot_cache_has_been_loaded;
+
 int load_aot(target_ulong pc, uint32_t cflags)
 {
     if (in_pre_translate) {
         return 0;
     }
 
-    seg_info *info = segment_tree_lookup(pc);
+    seg_info *info = NULL;
+    /* An empty cache cannot supply a TB, but SMC recovery and page-state
+     * updates below still apply. A later mapping enables normal lookup. */
+    if (qatomic_read(&aot_cache_has_been_loaded)) {
+        info = segment_tree_lookup(pc);
+    }
     if (info == NULL || info->buffer == NULL) {
         if (smc_page_reload(pc & TARGET_PAGE_MASK, cflags)) {
             return 1;
