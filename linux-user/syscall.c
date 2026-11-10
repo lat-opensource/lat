@@ -12218,6 +12218,9 @@ static int open_other_cmdline(void *cpu_env, int fd, const char *oldpath)
     while(!feof(f)) {
         size_t ret = fread(buf, 1, sizeof(buf), f);
         if (ret == 0 && !strlen(buf)&&feof(f)) {// /proc/%d/cmdline is nil
+            /* A zombie/empty cmdline must not leak the host /proc fd. */
+            fclose(f);
+            free(argv);
             return 0;
         }
         if (ret > 0) {

@@ -433,46 +433,44 @@ bool translate_vmaskmovpx(IR1_INST * pir1) {
     if (!option_enable_lasx) {
         return translate_vmaskmovpx_lsx(pir1);
     }
-    IR1_OPND * opnd0 = ir1_get_opnd(pir1, 0);
-    IR2_OPND src1 = load_freg256_from_ir1(ir1_get_opnd(pir1, 1));
-    IR2_OPND src2 = load_freg256_from_ir1(ir1_get_opnd(pir1, 2));
-    IR2_OPND mask = ra_alloc_ftemp();
-    IR2_OPND temp;
-    IR2_INST * ( * tr_slt)(IR2_OPND, IR2_OPND, int);
-    IR1_OPCODE op = ir1_opcode(pir1);
-    switch (op) {
-        case dt_X86_INS_VMASKMOVPS:
-            tr_slt = la_xvslti_w;
-            break;
-        case dt_X86_INS_VMASKMOVPD:
-            tr_slt = la_xvslti_d;
-            break;
-        default:
-            tr_slt = NULL;
-            lsassert(0);
-            break;
-    }
-    if (ir1_opnd_is_xmm(opnd0) || ir1_opnd_is_ymm(opnd0)) {
-        IR2_OPND dest = load_freg256_from_ir1(opnd0);
-        tr_slt(mask, src1, 0);
-        la_xvand_v(dest, src2, mask);
-        if (ir1_opnd_is_xmm(opnd0)) {
-            set_high128_xreg_to_zero(dest);
-        }
-    } else if (ir1_opnd_is_mem(opnd0)) {
-        temp = load_freg256_from_ir1(opnd0);
-        tr_slt(mask, src1, 0);
-        la_xvbitsel_v(temp, temp, src2, mask);
-        if (ir1_opnd_size(opnd0) == 128)
-            store_freg128_to_ir1_mem(temp, opnd0);
-        else if (ir1_opnd_size(opnd0) == 256)
-            store_freg256_to_ir1_mem(temp, opnd0);
-        else {
-            lsassert(0);
-        }
+
+    IR1_OPND *opnd0 = ir1_get_opnd(pir1, 0);
+    IR1_OPND *mask_opnd = ir1_get_opnd(pir1, 1);
+    IR1_OPND *value_opnd = ir1_get_opnd(pir1, 2);
+    bool is_pd = ir1_opcode(pir1) == dt_X86_INS_VMASKMOVPD;
+    bool store = ir1_opnd_is_mem(opnd0);
+    IR1_OPND *mem = store ? opnd0 : value_opnd;
+    bool ymm = store ? ir1_opnd_size(mem) == 256 : ir1_opnd_is_ymm(opnd0);
+    int elem_bits = is_pd ? 64 : 32;
+    int lanes = ymm ? (is_pd ? 4 : 8) : (is_pd ? 2 : 4);
+    int bits = ymm ? 256 : 128;
+    IR2_OPND address;
+    IR2_OPND mask;
+
+    lsassert(ir1_opcode(pir1) == dt_X86_INS_VMASKMOVPS || is_pd);
+    lsassert(ir1_opnd_is_mem(opnd0) ||
+             ir1_opnd_is_xmm(opnd0) || ir1_opnd_is_ymm(opnd0));
+
+    address = convert_mem_to_itemp(mem);
+    mask = load_freg256_from_ir1(mask_opnd);
+    if (store) {
+        IR2_OPND value = load_freg256_from_ir1(value_opnd);
+
+        latx_masked_mem_op_256(address, mask, value, elem_bits, lanes, bits,
+                               0, true);
     } else {
-        lsassert(0);
+        IR2_OPND dest = load_freg256_from_ir1(opnd0);
+        IR2_OPND result = ra_alloc_ftemp();
+
+        latx_masked_mem_op_256(address, mask, result, elem_bits, lanes, bits,
+                               0, false);
+        la_xvor_v(dest, result, result);
+        if (!ymm) {
+            cancel_pending_ymmh_zero(dest);
+        }
+        ra_free_temp(result);
     }
+    ra_free_temp(address);
     return true;
 }
 
