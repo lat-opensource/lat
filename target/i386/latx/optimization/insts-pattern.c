@@ -339,6 +339,11 @@ static int inst_pattern(TranslationBlock *tb,
         ir1 = SCAN_IR1(tb, scan, 0);
         switch (ir1_opcode(ir1)) {
         case WRAP(SETA):
+            /* A fused store has no separate SETA fault boundary. */
+            if (!ir1_opnd_is_gpr(ir1_get_opnd(ir1, 0))) {
+                ir1_set_eflag_def(pir1, 0x3f);
+                return 0;
+            }
             pir1->instptn.opc  = INSTPTN_OPC_UCOMISD_SETA;
             pir1->instptn.next = ir1;
             ir1->instptn.opc  = INSTPTN_OPC_NOP;

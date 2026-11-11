@@ -45,6 +45,13 @@ if 'x86_64-linux-user' in target_dirs
     'timeout': 120,
   }]
   latx_integration_tests += [{
+    'name': 'test-ucomisd-seta-fault',
+    'runner': find_program('../../test-avx-regressions.py'),
+    'args': [emulators['latx-x86_64'], files('../../ucomisd-seta-fault.asm')],
+    'env': {'LATX_SOFTFPU': '0'},
+    'timeout': 180,
+  }]
+  latx_integration_tests += [{
     'name': 'test-vcomis-flag-reduction',
     'runner': find_program('../../test-avx-regressions.py'),
     'args': [emulators['latx-x86_64'], files('../../vcomis-flag-reduction.asm')],
