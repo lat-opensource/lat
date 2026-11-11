@@ -1896,6 +1896,7 @@ bool translate_vcmpps(IR1_INST * pir1) {
     return true;
 }
 
+/* Scalar double compares read src1's high lane after writing the mask. */
 bool translate_vcmpeqsd(IR1_INST * pir1) {
     if (!option_enable_lasx) {
         return translate_vcmpsd_lsx(pir1);
@@ -1908,17 +1909,20 @@ bool translate_vcmpeqsd(IR1_INST * pir1) {
     IR2_OPND src2 = load_freg128_from_ir1(ir1_get_opnd(pir1, 2));
     IR2_OPND temp1 = ra_alloc_ftemp();
     IR2_OPND temp2 = ra_alloc_ftemp();
-    IR2_OPND dest_temp = ra_alloc_ftemp();
+    bool can_write_dest = !ir2_opnd_cmp(&dest, &src1);
+    IR2_OPND result = can_write_dest ? dest : ra_alloc_ftemp();
     la_vreplve_d(temp1, src1, zero_ir2_opnd);
     la_vreplve_d(temp2, src2, zero_ir2_opnd);
-    la_vfcmp_cond_d(dest_temp, temp1, temp2, X86_FCMP_COND_EQ);
-    la_vshuf4i_d(dest_temp, src1, 0xc);
-    la_xvori_b(dest, dest_temp, 0);
+    la_vfcmp_cond_d(result, temp1, temp2, X86_FCMP_COND_EQ);
+    la_vshuf4i_d(result, src1, 0xc);
+    if (!can_write_dest) {
+        la_xvori_b(dest, result, 0);
+        ra_free_temp(result);
+    }
     set_high128_xreg_to_zero(dest);
 
     ra_free_temp(temp1);
     ra_free_temp(temp2);
-    ra_free_temp(dest_temp);
     return true;
 }
 
@@ -1934,17 +1938,20 @@ bool translate_vcmpltsd(IR1_INST * pir1) {
     IR2_OPND src2 = load_freg128_from_ir1(ir1_get_opnd(pir1, 2));
     IR2_OPND temp1 = ra_alloc_ftemp();
     IR2_OPND temp2 = ra_alloc_ftemp();
-    IR2_OPND dest_temp = ra_alloc_ftemp();
+    bool can_write_dest = !ir2_opnd_cmp(&dest, &src1);
+    IR2_OPND result = can_write_dest ? dest : ra_alloc_ftemp();
     la_vreplve_d(temp1, src1, zero_ir2_opnd);
     la_vreplve_d(temp2, src2, zero_ir2_opnd);
-    la_vfcmp_cond_d(dest_temp, temp1, temp2, X86_FCMP_COND_LT);
-    la_vshuf4i_d(dest_temp, src1, 0xc);
-    la_xvori_b(dest, dest_temp, 0);
+    la_vfcmp_cond_d(result, temp1, temp2, X86_FCMP_COND_LT);
+    la_vshuf4i_d(result, src1, 0xc);
+    if (!can_write_dest) {
+        la_xvori_b(dest, result, 0);
+        ra_free_temp(result);
+    }
     set_high128_xreg_to_zero(dest);
 
     ra_free_temp(temp1);
     ra_free_temp(temp2);
-    ra_free_temp(dest_temp);
     return true;
 }
 
@@ -1960,17 +1967,20 @@ bool translate_vcmplesd(IR1_INST * pir1) {
     IR2_OPND src2 = load_freg128_from_ir1(ir1_get_opnd(pir1, 2));
     IR2_OPND temp1 = ra_alloc_ftemp();
     IR2_OPND temp2 = ra_alloc_ftemp();
-    IR2_OPND dest_temp = ra_alloc_ftemp();
+    bool can_write_dest = !ir2_opnd_cmp(&dest, &src1);
+    IR2_OPND result = can_write_dest ? dest : ra_alloc_ftemp();
     la_vreplve_d(temp1, src1, zero_ir2_opnd);
     la_vreplve_d(temp2, src2, zero_ir2_opnd);
-    la_vfcmp_cond_d(dest_temp, temp1, temp2, X86_FCMP_COND_LE);
-    la_vshuf4i_d(dest_temp, src1, 0xc);
-    la_xvori_b(dest, dest_temp, 0);
+    la_vfcmp_cond_d(result, temp1, temp2, X86_FCMP_COND_LE);
+    la_vshuf4i_d(result, src1, 0xc);
+    if (!can_write_dest) {
+        la_xvori_b(dest, result, 0);
+        ra_free_temp(result);
+    }
     set_high128_xreg_to_zero(dest);
 
     ra_free_temp(temp1);
     ra_free_temp(temp2);
-    ra_free_temp(dest_temp);
     return true;
 }
 
@@ -1986,17 +1996,20 @@ bool translate_vcmpunordsd(IR1_INST * pir1) {
     IR2_OPND src2 = load_freg128_from_ir1(ir1_get_opnd(pir1, 2));
     IR2_OPND temp1 = ra_alloc_ftemp();
     IR2_OPND temp2 = ra_alloc_ftemp();
-    IR2_OPND dest_temp = ra_alloc_ftemp();
+    bool can_write_dest = !ir2_opnd_cmp(&dest, &src1);
+    IR2_OPND result = can_write_dest ? dest : ra_alloc_ftemp();
     la_vreplve_d(temp1, src1, zero_ir2_opnd);
     la_vreplve_d(temp2, src2, zero_ir2_opnd);
-    la_vfcmp_cond_d(dest_temp, temp1, temp2, X86_FCMP_COND_UNORD);
-    la_vshuf4i_d(dest_temp, src1, 0xc);
-    la_xvori_b(dest, dest_temp, 0);
+    la_vfcmp_cond_d(result, temp1, temp2, X86_FCMP_COND_UNORD);
+    la_vshuf4i_d(result, src1, 0xc);
+    if (!can_write_dest) {
+        la_xvori_b(dest, result, 0);
+        ra_free_temp(result);
+    }
     set_high128_xreg_to_zero(dest);
 
     ra_free_temp(temp1);
     ra_free_temp(temp2);
-    ra_free_temp(dest_temp);
     return true;
 }
 
@@ -2012,17 +2025,20 @@ bool translate_vcmpneqsd(IR1_INST * pir1) {
     IR2_OPND src2 = load_freg128_from_ir1(ir1_get_opnd(pir1, 2));
     IR2_OPND temp1 = ra_alloc_ftemp();
     IR2_OPND temp2 = ra_alloc_ftemp();
-    IR2_OPND dest_temp = ra_alloc_ftemp();
+    bool can_write_dest = !ir2_opnd_cmp(&dest, &src1);
+    IR2_OPND result = can_write_dest ? dest : ra_alloc_ftemp();
     la_vreplve_d(temp1, src1, zero_ir2_opnd);
     la_vreplve_d(temp2, src2, zero_ir2_opnd);
-    la_vfcmp_cond_d(dest_temp, temp1, temp2, X86_FCMP_COND_NEQ);
-    la_vshuf4i_d(dest_temp, src1, 0xc);
-    la_xvori_b(dest, dest_temp, 0);
+    la_vfcmp_cond_d(result, temp1, temp2, X86_FCMP_COND_NEQ);
+    la_vshuf4i_d(result, src1, 0xc);
+    if (!can_write_dest) {
+        la_xvori_b(dest, result, 0);
+        ra_free_temp(result);
+    }
     set_high128_xreg_to_zero(dest);
 
     ra_free_temp(temp1);
     ra_free_temp(temp2);
-    ra_free_temp(dest_temp);
     return true;
 }
 
@@ -2038,17 +2054,20 @@ bool translate_vcmpnltsd(IR1_INST * pir1) {
     IR2_OPND src2 = load_freg128_from_ir1(ir1_get_opnd(pir1, 2));
     IR2_OPND temp1 = ra_alloc_ftemp();
     IR2_OPND temp2 = ra_alloc_ftemp();
-    IR2_OPND dest_temp = ra_alloc_ftemp();
+    bool can_write_dest = !ir2_opnd_cmp(&dest, &src1);
+    IR2_OPND result = can_write_dest ? dest : ra_alloc_ftemp();
     la_vreplve_d(temp1, src1, zero_ir2_opnd);
     la_vreplve_d(temp2, src2, zero_ir2_opnd);
-    la_vfcmp_cond_d(dest_temp, temp2, temp1, X86_FCMP_COND_NLT);
-    la_vshuf4i_d(dest_temp, src1, 0xc);
-    la_xvori_b(dest, dest_temp, 0);
+    la_vfcmp_cond_d(result, temp2, temp1, X86_FCMP_COND_NLT);
+    la_vshuf4i_d(result, src1, 0xc);
+    if (!can_write_dest) {
+        la_xvori_b(dest, result, 0);
+        ra_free_temp(result);
+    }
     set_high128_xreg_to_zero(dest);
 
     ra_free_temp(temp1);
     ra_free_temp(temp2);
-    ra_free_temp(dest_temp);
     return true;
 }
 
@@ -2064,17 +2083,20 @@ bool translate_vcmpnlesd(IR1_INST * pir1) {
     IR2_OPND src2 = load_freg128_from_ir1(ir1_get_opnd(pir1, 2));
     IR2_OPND temp1 = ra_alloc_ftemp();
     IR2_OPND temp2 = ra_alloc_ftemp();
-    IR2_OPND dest_temp = ra_alloc_ftemp();
+    bool can_write_dest = !ir2_opnd_cmp(&dest, &src1);
+    IR2_OPND result = can_write_dest ? dest : ra_alloc_ftemp();
     la_vreplve_d(temp1, src1, zero_ir2_opnd);
     la_vreplve_d(temp2, src2, zero_ir2_opnd);
-    la_vfcmp_cond_d(dest_temp, temp2, temp1, X86_FCMP_COND_NLE);
-    la_vshuf4i_d(dest_temp, src1, 0xc);
-    la_xvori_b(dest, dest_temp, 0);
+    la_vfcmp_cond_d(result, temp2, temp1, X86_FCMP_COND_NLE);
+    la_vshuf4i_d(result, src1, 0xc);
+    if (!can_write_dest) {
+        la_xvori_b(dest, result, 0);
+        ra_free_temp(result);
+    }
     set_high128_xreg_to_zero(dest);
 
     ra_free_temp(temp1);
     ra_free_temp(temp2);
-    ra_free_temp(dest_temp);
     return true;
 }
 
@@ -2090,17 +2112,20 @@ bool translate_vcmpordsd(IR1_INST * pir1) {
     IR2_OPND src2 = load_freg128_from_ir1(ir1_get_opnd(pir1, 2));
     IR2_OPND temp1 = ra_alloc_ftemp();
     IR2_OPND temp2 = ra_alloc_ftemp();
-    IR2_OPND dest_temp = ra_alloc_ftemp();
+    bool can_write_dest = !ir2_opnd_cmp(&dest, &src1);
+    IR2_OPND result = can_write_dest ? dest : ra_alloc_ftemp();
     la_vreplve_d(temp1, src1, zero_ir2_opnd);
     la_vreplve_d(temp2, src2, zero_ir2_opnd);
-    la_vfcmp_cond_d(dest_temp, temp1, temp2, X86_FCMP_COND_ORD);
-    la_vshuf4i_d(dest_temp, src1, 0xc);
-    la_xvori_b(dest, dest_temp, 0);
+    la_vfcmp_cond_d(result, temp1, temp2, X86_FCMP_COND_ORD);
+    la_vshuf4i_d(result, src1, 0xc);
+    if (!can_write_dest) {
+        la_xvori_b(dest, result, 0);
+        ra_free_temp(result);
+    }
     set_high128_xreg_to_zero(dest);
 
     ra_free_temp(temp1);
     ra_free_temp(temp2);
-    ra_free_temp(dest_temp);
     return true;
 }
 
@@ -2116,17 +2141,20 @@ bool translate_vcmpeq_uqsd(IR1_INST * pir1) {
     IR2_OPND src2 = load_freg128_from_ir1(ir1_get_opnd(pir1, 2));
     IR2_OPND temp1 = ra_alloc_ftemp();
     IR2_OPND temp2 = ra_alloc_ftemp();
-    IR2_OPND dest_temp = ra_alloc_ftemp();
+    bool can_write_dest = !ir2_opnd_cmp(&dest, &src1);
+    IR2_OPND result = can_write_dest ? dest : ra_alloc_ftemp();
     la_vreplve_d(temp1, src1, zero_ir2_opnd);
     la_vreplve_d(temp2, src2, zero_ir2_opnd);
-    la_vfcmp_cond_d(dest_temp, temp1, temp2, X86_FCMP_COND_EQ_UQ);
-    la_vshuf4i_d(dest_temp, src1, 0xc);
-    la_xvori_b(dest, dest_temp, 0);
+    la_vfcmp_cond_d(result, temp1, temp2, X86_FCMP_COND_EQ_UQ);
+    la_vshuf4i_d(result, src1, 0xc);
+    if (!can_write_dest) {
+        la_xvori_b(dest, result, 0);
+        ra_free_temp(result);
+    }
     set_high128_xreg_to_zero(dest);
 
     ra_free_temp(temp1);
     ra_free_temp(temp2);
-    ra_free_temp(dest_temp);
     return true;
 }
 
@@ -2142,17 +2170,20 @@ bool translate_vcmpngesd(IR1_INST * pir1) {
     IR2_OPND src2 = load_freg128_from_ir1(ir1_get_opnd(pir1, 2));
     IR2_OPND temp1 = ra_alloc_ftemp();
     IR2_OPND temp2 = ra_alloc_ftemp();
-    IR2_OPND dest_temp = ra_alloc_ftemp();
+    bool can_write_dest = !ir2_opnd_cmp(&dest, &src1);
+    IR2_OPND result = can_write_dest ? dest : ra_alloc_ftemp();
     la_vreplve_d(temp1, src1, zero_ir2_opnd);
     la_vreplve_d(temp2, src2, zero_ir2_opnd);
-    la_vfcmp_cond_d(dest_temp, temp1, temp2, X86_FCMP_COND_NGE);
-    la_vshuf4i_d(dest_temp, src1, 0xc);
-    la_xvori_b(dest, dest_temp, 0);
+    la_vfcmp_cond_d(result, temp1, temp2, X86_FCMP_COND_NGE);
+    la_vshuf4i_d(result, src1, 0xc);
+    if (!can_write_dest) {
+        la_xvori_b(dest, result, 0);
+        ra_free_temp(result);
+    }
     set_high128_xreg_to_zero(dest);
 
     ra_free_temp(temp1);
     ra_free_temp(temp2);
-    ra_free_temp(dest_temp);
     return true;
 }
 
@@ -2168,17 +2199,20 @@ bool translate_vcmpngtsd(IR1_INST * pir1) {
     IR2_OPND src2 = load_freg128_from_ir1(ir1_get_opnd(pir1, 2));
     IR2_OPND temp1 = ra_alloc_ftemp();
     IR2_OPND temp2 = ra_alloc_ftemp();
-    IR2_OPND dest_temp = ra_alloc_ftemp();
+    bool can_write_dest = !ir2_opnd_cmp(&dest, &src1);
+    IR2_OPND result = can_write_dest ? dest : ra_alloc_ftemp();
     la_vreplve_d(temp1, src1, zero_ir2_opnd);
     la_vreplve_d(temp2, src2, zero_ir2_opnd);
-    la_vfcmp_cond_d(dest_temp, temp1, temp2, X86_FCMP_COND_NGT);
-    la_vshuf4i_d(dest_temp, src1, 0xc);
-    la_xvori_b(dest, dest_temp, 0);
+    la_vfcmp_cond_d(result, temp1, temp2, X86_FCMP_COND_NGT);
+    la_vshuf4i_d(result, src1, 0xc);
+    if (!can_write_dest) {
+        la_xvori_b(dest, result, 0);
+        ra_free_temp(result);
+    }
     set_high128_xreg_to_zero(dest);
 
     ra_free_temp(temp1);
     ra_free_temp(temp2);
-    ra_free_temp(dest_temp);
     return true;
 }
 
@@ -2194,17 +2228,20 @@ bool translate_vcmpfalsesd(IR1_INST * pir1) {
     IR2_OPND src2 = load_freg128_from_ir1(ir1_get_opnd(pir1, 2));
     IR2_OPND temp1 = ra_alloc_ftemp();
     IR2_OPND temp2 = ra_alloc_ftemp();
-    IR2_OPND dest_temp = ra_alloc_ftemp();
+    bool can_write_dest = !ir2_opnd_cmp(&dest, &src1);
+    IR2_OPND result = can_write_dest ? dest : ra_alloc_ftemp();
     la_vreplve_d(temp1, src1, zero_ir2_opnd);
     la_vreplve_d(temp2, src2, zero_ir2_opnd);
-    la_vfcmp_cond_d(dest_temp, temp1, temp2, X86_FCMP_COND_FALSE);
-    la_vshuf4i_d(dest_temp, src1, 0xc);
-    la_xvori_b(dest, dest_temp, 0);
+    la_vfcmp_cond_d(result, temp1, temp2, X86_FCMP_COND_FALSE);
+    la_vshuf4i_d(result, src1, 0xc);
+    if (!can_write_dest) {
+        la_xvori_b(dest, result, 0);
+        ra_free_temp(result);
+    }
     set_high128_xreg_to_zero(dest);
 
     ra_free_temp(temp1);
     ra_free_temp(temp2);
-    ra_free_temp(dest_temp);
     return true;
 }
 
@@ -2220,17 +2257,20 @@ bool translate_vcmpneq_oqsd(IR1_INST * pir1) {
     IR2_OPND src2 = load_freg128_from_ir1(ir1_get_opnd(pir1, 2));
     IR2_OPND temp1 = ra_alloc_ftemp();
     IR2_OPND temp2 = ra_alloc_ftemp();
-    IR2_OPND dest_temp = ra_alloc_ftemp();
+    bool can_write_dest = !ir2_opnd_cmp(&dest, &src1);
+    IR2_OPND result = can_write_dest ? dest : ra_alloc_ftemp();
     la_vreplve_d(temp1, src1, zero_ir2_opnd);
     la_vreplve_d(temp2, src2, zero_ir2_opnd);
-    la_vfcmp_cond_d(dest_temp, temp1, temp2, X86_FCMP_COND_NEQ_OQ);
-    la_vshuf4i_d(dest_temp, src1, 0xc);
-    la_xvori_b(dest, dest_temp, 0);
+    la_vfcmp_cond_d(result, temp1, temp2, X86_FCMP_COND_NEQ_OQ);
+    la_vshuf4i_d(result, src1, 0xc);
+    if (!can_write_dest) {
+        la_xvori_b(dest, result, 0);
+        ra_free_temp(result);
+    }
     set_high128_xreg_to_zero(dest);
 
     ra_free_temp(temp1);
     ra_free_temp(temp2);
-    ra_free_temp(dest_temp);
     return true;
 }
 
@@ -2246,17 +2286,20 @@ bool translate_vcmpgesd(IR1_INST * pir1) {
     IR2_OPND src2 = load_freg128_from_ir1(ir1_get_opnd(pir1, 2));
     IR2_OPND temp1 = ra_alloc_ftemp();
     IR2_OPND temp2 = ra_alloc_ftemp();
-    IR2_OPND dest_temp = ra_alloc_ftemp();
+    bool can_write_dest = !ir2_opnd_cmp(&dest, &src1);
+    IR2_OPND result = can_write_dest ? dest : ra_alloc_ftemp();
     la_vreplve_d(temp1, src1, zero_ir2_opnd);
     la_vreplve_d(temp2, src2, zero_ir2_opnd);
-    la_vfcmp_cond_d(dest_temp, temp2, temp1, X86_FCMP_COND_GE);
-    la_vshuf4i_d(dest_temp, src1, 0xc);
-    la_xvori_b(dest, dest_temp, 0);
+    la_vfcmp_cond_d(result, temp2, temp1, X86_FCMP_COND_GE);
+    la_vshuf4i_d(result, src1, 0xc);
+    if (!can_write_dest) {
+        la_xvori_b(dest, result, 0);
+        ra_free_temp(result);
+    }
     set_high128_xreg_to_zero(dest);
 
     ra_free_temp(temp1);
     ra_free_temp(temp2);
-    ra_free_temp(dest_temp);
     return true;
 }
 
@@ -2272,17 +2315,20 @@ bool translate_vcmpgtsd(IR1_INST * pir1) {
     IR2_OPND src2 = load_freg128_from_ir1(ir1_get_opnd(pir1, 2));
     IR2_OPND temp1 = ra_alloc_ftemp();
     IR2_OPND temp2 = ra_alloc_ftemp();
-    IR2_OPND dest_temp = ra_alloc_ftemp();
+    bool can_write_dest = !ir2_opnd_cmp(&dest, &src1);
+    IR2_OPND result = can_write_dest ? dest : ra_alloc_ftemp();
     la_vreplve_d(temp1, src1, zero_ir2_opnd);
     la_vreplve_d(temp2, src2, zero_ir2_opnd);
-    la_vfcmp_cond_d(dest_temp, temp2, temp1, X86_FCMP_COND_GT);
-    la_vshuf4i_d(dest_temp, src1, 0xc);
-    la_xvori_b(dest, dest_temp, 0);
+    la_vfcmp_cond_d(result, temp2, temp1, X86_FCMP_COND_GT);
+    la_vshuf4i_d(result, src1, 0xc);
+    if (!can_write_dest) {
+        la_xvori_b(dest, result, 0);
+        ra_free_temp(result);
+    }
     set_high128_xreg_to_zero(dest);
 
     ra_free_temp(temp1);
     ra_free_temp(temp2);
-    ra_free_temp(dest_temp);
     return true;
 }
 
@@ -2298,18 +2344,21 @@ bool translate_vcmptruesd(IR1_INST * pir1) {
     IR2_OPND src2 = load_freg128_from_ir1(ir1_get_opnd(pir1, 2));
     IR2_OPND temp1 = ra_alloc_ftemp();
     IR2_OPND temp2 = ra_alloc_ftemp();
-    IR2_OPND dest_temp = ra_alloc_ftemp();
+    bool can_write_dest = !ir2_opnd_cmp(&dest, &src1);
+    IR2_OPND result = can_write_dest ? dest : ra_alloc_ftemp();
     la_vreplve_d(temp1, src1, zero_ir2_opnd);
     la_vreplve_d(temp2, src2, zero_ir2_opnd);
-    la_vfcmp_cond_d(dest_temp, temp1, temp2, X86_FCMP_COND_TRUE);
-    la_xvori_b(dest_temp, dest_temp, 0xff);
-    la_vshuf4i_d(dest_temp, src1, 0xc);
-    la_xvori_b(dest, dest_temp, 0);
+    la_vfcmp_cond_d(result, temp1, temp2, X86_FCMP_COND_TRUE);
+    la_xvori_b(result, result, 0xff);
+    la_vshuf4i_d(result, src1, 0xc);
+    if (!can_write_dest) {
+        la_xvori_b(dest, result, 0);
+        ra_free_temp(result);
+    }
     set_high128_xreg_to_zero(dest);
 
     ra_free_temp(temp1);
     ra_free_temp(temp2);
-    ra_free_temp(dest_temp);
     return true;
 }
 
@@ -2325,17 +2374,20 @@ bool translate_vcmpeq_ossd(IR1_INST * pir1) {
     IR2_OPND src2 = load_freg128_from_ir1(ir1_get_opnd(pir1, 2));
     IR2_OPND temp1 = ra_alloc_ftemp();
     IR2_OPND temp2 = ra_alloc_ftemp();
-    IR2_OPND dest_temp = ra_alloc_ftemp();
+    bool can_write_dest = !ir2_opnd_cmp(&dest, &src1);
+    IR2_OPND result = can_write_dest ? dest : ra_alloc_ftemp();
     la_vreplve_d(temp1, src1, zero_ir2_opnd);
     la_vreplve_d(temp2, src2, zero_ir2_opnd);
-    la_vfcmp_cond_d(dest_temp, temp1, temp2, X86_FCMP_COND_EQ_OS);
-    la_vshuf4i_d(dest_temp, src1, 0xc);
-    la_xvori_b(dest, dest_temp, 0);
+    la_vfcmp_cond_d(result, temp1, temp2, X86_FCMP_COND_EQ_OS);
+    la_vshuf4i_d(result, src1, 0xc);
+    if (!can_write_dest) {
+        la_xvori_b(dest, result, 0);
+        ra_free_temp(result);
+    }
     set_high128_xreg_to_zero(dest);
 
     ra_free_temp(temp1);
     ra_free_temp(temp2);
-    ra_free_temp(dest_temp);
     return true;
 }
 
@@ -2351,17 +2403,20 @@ bool translate_vcmplt_oqsd(IR1_INST * pir1) {
     IR2_OPND src2 = load_freg128_from_ir1(ir1_get_opnd(pir1, 2));
     IR2_OPND temp1 = ra_alloc_ftemp();
     IR2_OPND temp2 = ra_alloc_ftemp();
-    IR2_OPND dest_temp = ra_alloc_ftemp();
+    bool can_write_dest = !ir2_opnd_cmp(&dest, &src1);
+    IR2_OPND result = can_write_dest ? dest : ra_alloc_ftemp();
     la_vreplve_d(temp1, src1, zero_ir2_opnd);
     la_vreplve_d(temp2, src2, zero_ir2_opnd);
-    la_vfcmp_cond_d(dest_temp, temp1, temp2, X86_FCMP_COND_LT_OQ);
-    la_vshuf4i_d(dest_temp, src1, 0xc);
-    la_xvori_b(dest, dest_temp, 0);
+    la_vfcmp_cond_d(result, temp1, temp2, X86_FCMP_COND_LT_OQ);
+    la_vshuf4i_d(result, src1, 0xc);
+    if (!can_write_dest) {
+        la_xvori_b(dest, result, 0);
+        ra_free_temp(result);
+    }
     set_high128_xreg_to_zero(dest);
 
     ra_free_temp(temp1);
     ra_free_temp(temp2);
-    ra_free_temp(dest_temp);
     return true;
 }
 
@@ -2377,17 +2432,20 @@ bool translate_vcmple_oqsd(IR1_INST * pir1) {
     IR2_OPND src2 = load_freg128_from_ir1(ir1_get_opnd(pir1, 2));
     IR2_OPND temp1 = ra_alloc_ftemp();
     IR2_OPND temp2 = ra_alloc_ftemp();
-    IR2_OPND dest_temp = ra_alloc_ftemp();
+    bool can_write_dest = !ir2_opnd_cmp(&dest, &src1);
+    IR2_OPND result = can_write_dest ? dest : ra_alloc_ftemp();
     la_vreplve_d(temp1, src1, zero_ir2_opnd);
     la_vreplve_d(temp2, src2, zero_ir2_opnd);
-    la_vfcmp_cond_d(dest_temp, temp1, temp2, X86_FCMP_COND_LE_OQ);
-    la_vshuf4i_d(dest_temp, src1, 0xc);
-    la_xvori_b(dest, dest_temp, 0);
+    la_vfcmp_cond_d(result, temp1, temp2, X86_FCMP_COND_LE_OQ);
+    la_vshuf4i_d(result, src1, 0xc);
+    if (!can_write_dest) {
+        la_xvori_b(dest, result, 0);
+        ra_free_temp(result);
+    }
     set_high128_xreg_to_zero(dest);
 
     ra_free_temp(temp1);
     ra_free_temp(temp2);
-    ra_free_temp(dest_temp);
     return true;
 }
 
@@ -2403,17 +2461,20 @@ bool translate_vcmpunord_ssd(IR1_INST * pir1) {
     IR2_OPND src2 = load_freg128_from_ir1(ir1_get_opnd(pir1, 2));
     IR2_OPND temp1 = ra_alloc_ftemp();
     IR2_OPND temp2 = ra_alloc_ftemp();
-    IR2_OPND dest_temp = ra_alloc_ftemp();
+    bool can_write_dest = !ir2_opnd_cmp(&dest, &src1);
+    IR2_OPND result = can_write_dest ? dest : ra_alloc_ftemp();
     la_vreplve_d(temp1, src1, zero_ir2_opnd);
     la_vreplve_d(temp2, src2, zero_ir2_opnd);
-    la_vfcmp_cond_d(dest_temp, temp1, temp2, X86_FCMP_COND_UNORD_S);
-    la_vshuf4i_d(dest_temp, src1, 0xc);
-    la_xvori_b(dest, dest_temp, 0);
+    la_vfcmp_cond_d(result, temp1, temp2, X86_FCMP_COND_UNORD_S);
+    la_vshuf4i_d(result, src1, 0xc);
+    if (!can_write_dest) {
+        la_xvori_b(dest, result, 0);
+        ra_free_temp(result);
+    }
     set_high128_xreg_to_zero(dest);
 
     ra_free_temp(temp1);
     ra_free_temp(temp2);
-    ra_free_temp(dest_temp);
     return true;
 }
 
@@ -2429,17 +2490,20 @@ bool translate_vcmpneq_ussd(IR1_INST * pir1) {
     IR2_OPND src2 = load_freg128_from_ir1(ir1_get_opnd(pir1, 2));
     IR2_OPND temp1 = ra_alloc_ftemp();
     IR2_OPND temp2 = ra_alloc_ftemp();
-    IR2_OPND dest_temp = ra_alloc_ftemp();
+    bool can_write_dest = !ir2_opnd_cmp(&dest, &src1);
+    IR2_OPND result = can_write_dest ? dest : ra_alloc_ftemp();
     la_vreplve_d(temp1, src1, zero_ir2_opnd);
     la_vreplve_d(temp2, src2, zero_ir2_opnd);
-    la_vfcmp_cond_d(dest_temp, temp1, temp2, X86_FCMP_COND_NEQ_US);
-    la_vshuf4i_d(dest_temp, src1, 0xc);
-    la_xvori_b(dest, dest_temp, 0);
+    la_vfcmp_cond_d(result, temp1, temp2, X86_FCMP_COND_NEQ_US);
+    la_vshuf4i_d(result, src1, 0xc);
+    if (!can_write_dest) {
+        la_xvori_b(dest, result, 0);
+        ra_free_temp(result);
+    }
     set_high128_xreg_to_zero(dest);
 
     ra_free_temp(temp1);
     ra_free_temp(temp2);
-    ra_free_temp(dest_temp);
     return true;
 }
 
@@ -2455,17 +2519,20 @@ bool translate_vcmpnlt_uqsd(IR1_INST * pir1) {
     IR2_OPND src2 = load_freg128_from_ir1(ir1_get_opnd(pir1, 2));
     IR2_OPND temp1 = ra_alloc_ftemp();
     IR2_OPND temp2 = ra_alloc_ftemp();
-    IR2_OPND dest_temp = ra_alloc_ftemp();
+    bool can_write_dest = !ir2_opnd_cmp(&dest, &src1);
+    IR2_OPND result = can_write_dest ? dest : ra_alloc_ftemp();
     la_vreplve_d(temp1, src1, zero_ir2_opnd);
     la_vreplve_d(temp2, src2, zero_ir2_opnd);
-    la_vfcmp_cond_d(dest_temp, temp2, temp1, X86_FCMP_COND_NLT_UQ);
-    la_vshuf4i_d(dest_temp, src1, 0xc);
-    la_xvori_b(dest, dest_temp, 0);
+    la_vfcmp_cond_d(result, temp2, temp1, X86_FCMP_COND_NLT_UQ);
+    la_vshuf4i_d(result, src1, 0xc);
+    if (!can_write_dest) {
+        la_xvori_b(dest, result, 0);
+        ra_free_temp(result);
+    }
     set_high128_xreg_to_zero(dest);
 
     ra_free_temp(temp1);
     ra_free_temp(temp2);
-    ra_free_temp(dest_temp);
     return true;
 }
 
@@ -2481,17 +2548,20 @@ bool translate_vcmpnle_uqsd(IR1_INST * pir1) {
     IR2_OPND src2 = load_freg128_from_ir1(ir1_get_opnd(pir1, 2));
     IR2_OPND temp1 = ra_alloc_ftemp();
     IR2_OPND temp2 = ra_alloc_ftemp();
-    IR2_OPND dest_temp = ra_alloc_ftemp();
+    bool can_write_dest = !ir2_opnd_cmp(&dest, &src1);
+    IR2_OPND result = can_write_dest ? dest : ra_alloc_ftemp();
     la_vreplve_d(temp1, src1, zero_ir2_opnd);
     la_vreplve_d(temp2, src2, zero_ir2_opnd);
-    la_vfcmp_cond_d(dest_temp, temp2, temp1, X86_FCMP_COND_NLE_UQ);
-    la_vshuf4i_d(dest_temp, src1, 0xc);
-    la_xvori_b(dest, dest_temp, 0);
+    la_vfcmp_cond_d(result, temp2, temp1, X86_FCMP_COND_NLE_UQ);
+    la_vshuf4i_d(result, src1, 0xc);
+    if (!can_write_dest) {
+        la_xvori_b(dest, result, 0);
+        ra_free_temp(result);
+    }
     set_high128_xreg_to_zero(dest);
 
     ra_free_temp(temp1);
     ra_free_temp(temp2);
-    ra_free_temp(dest_temp);
     return true;
 }
 
@@ -2507,17 +2577,20 @@ bool translate_vcmpord_ssd(IR1_INST * pir1) {
     IR2_OPND src2 = load_freg128_from_ir1(ir1_get_opnd(pir1, 2));
     IR2_OPND temp1 = ra_alloc_ftemp();
     IR2_OPND temp2 = ra_alloc_ftemp();
-    IR2_OPND dest_temp = ra_alloc_ftemp();
+    bool can_write_dest = !ir2_opnd_cmp(&dest, &src1);
+    IR2_OPND result = can_write_dest ? dest : ra_alloc_ftemp();
     la_vreplve_d(temp1, src1, zero_ir2_opnd);
     la_vreplve_d(temp2, src2, zero_ir2_opnd);
-    la_vfcmp_cond_d(dest_temp, temp1, temp2, X86_FCMP_COND_ORD_S);
-    la_vshuf4i_d(dest_temp, src1, 0xc);
-    la_xvori_b(dest, dest_temp, 0);
+    la_vfcmp_cond_d(result, temp1, temp2, X86_FCMP_COND_ORD_S);
+    la_vshuf4i_d(result, src1, 0xc);
+    if (!can_write_dest) {
+        la_xvori_b(dest, result, 0);
+        ra_free_temp(result);
+    }
     set_high128_xreg_to_zero(dest);
 
     ra_free_temp(temp1);
     ra_free_temp(temp2);
-    ra_free_temp(dest_temp);
     return true;
 }
 
@@ -2533,17 +2606,20 @@ bool translate_vcmpeq_ussd(IR1_INST * pir1) {
     IR2_OPND src2 = load_freg128_from_ir1(ir1_get_opnd(pir1, 2));
     IR2_OPND temp1 = ra_alloc_ftemp();
     IR2_OPND temp2 = ra_alloc_ftemp();
-    IR2_OPND dest_temp = ra_alloc_ftemp();
+    bool can_write_dest = !ir2_opnd_cmp(&dest, &src1);
+    IR2_OPND result = can_write_dest ? dest : ra_alloc_ftemp();
     la_vreplve_d(temp1, src1, zero_ir2_opnd);
     la_vreplve_d(temp2, src2, zero_ir2_opnd);
-    la_vfcmp_cond_d(dest_temp, temp1, temp2, X86_FCMP_COND_EQ_US);
-    la_vshuf4i_d(dest_temp, src1, 0xc);
-    la_xvori_b(dest, dest_temp, 0);
+    la_vfcmp_cond_d(result, temp1, temp2, X86_FCMP_COND_EQ_US);
+    la_vshuf4i_d(result, src1, 0xc);
+    if (!can_write_dest) {
+        la_xvori_b(dest, result, 0);
+        ra_free_temp(result);
+    }
     set_high128_xreg_to_zero(dest);
 
     ra_free_temp(temp1);
     ra_free_temp(temp2);
-    ra_free_temp(dest_temp);
     return true;
 }
 
@@ -2559,17 +2635,20 @@ bool translate_vcmpnge_uqsd(IR1_INST * pir1) {
     IR2_OPND src2 = load_freg128_from_ir1(ir1_get_opnd(pir1, 2));
     IR2_OPND temp1 = ra_alloc_ftemp();
     IR2_OPND temp2 = ra_alloc_ftemp();
-    IR2_OPND dest_temp = ra_alloc_ftemp();
+    bool can_write_dest = !ir2_opnd_cmp(&dest, &src1);
+    IR2_OPND result = can_write_dest ? dest : ra_alloc_ftemp();
     la_vreplve_d(temp1, src1, zero_ir2_opnd);
     la_vreplve_d(temp2, src2, zero_ir2_opnd);
-    la_vfcmp_cond_d(dest_temp, temp1, temp2, X86_FCMP_COND_NGE_UQ);
-    la_vshuf4i_d(dest_temp, src1, 0xc);
-    la_xvori_b(dest, dest_temp, 0);
+    la_vfcmp_cond_d(result, temp1, temp2, X86_FCMP_COND_NGE_UQ);
+    la_vshuf4i_d(result, src1, 0xc);
+    if (!can_write_dest) {
+        la_xvori_b(dest, result, 0);
+        ra_free_temp(result);
+    }
     set_high128_xreg_to_zero(dest);
 
     ra_free_temp(temp1);
     ra_free_temp(temp2);
-    ra_free_temp(dest_temp);
     return true;
 }
 
@@ -2585,17 +2664,20 @@ bool translate_vcmpngt_uqsd(IR1_INST * pir1) {
     IR2_OPND src2 = load_freg128_from_ir1(ir1_get_opnd(pir1, 2));
     IR2_OPND temp1 = ra_alloc_ftemp();
     IR2_OPND temp2 = ra_alloc_ftemp();
-    IR2_OPND dest_temp = ra_alloc_ftemp();
+    bool can_write_dest = !ir2_opnd_cmp(&dest, &src1);
+    IR2_OPND result = can_write_dest ? dest : ra_alloc_ftemp();
     la_vreplve_d(temp1, src1, zero_ir2_opnd);
     la_vreplve_d(temp2, src2, zero_ir2_opnd);
-    la_vfcmp_cond_d(dest_temp, temp1, temp2, X86_FCMP_COND_NGT_UQ);
-    la_vshuf4i_d(dest_temp, src1, 0xc);
-    la_xvori_b(dest, dest_temp, 0);
+    la_vfcmp_cond_d(result, temp1, temp2, X86_FCMP_COND_NGT_UQ);
+    la_vshuf4i_d(result, src1, 0xc);
+    if (!can_write_dest) {
+        la_xvori_b(dest, result, 0);
+        ra_free_temp(result);
+    }
     set_high128_xreg_to_zero(dest);
 
     ra_free_temp(temp1);
     ra_free_temp(temp2);
-    ra_free_temp(dest_temp);
     return true;
 }
 
@@ -2611,17 +2693,20 @@ bool translate_vcmpfalse_ossd(IR1_INST * pir1) {
     IR2_OPND src2 = load_freg128_from_ir1(ir1_get_opnd(pir1, 2));
     IR2_OPND temp1 = ra_alloc_ftemp();
     IR2_OPND temp2 = ra_alloc_ftemp();
-    IR2_OPND dest_temp = ra_alloc_ftemp();
+    bool can_write_dest = !ir2_opnd_cmp(&dest, &src1);
+    IR2_OPND result = can_write_dest ? dest : ra_alloc_ftemp();
     la_vreplve_d(temp1, src1, zero_ir2_opnd);
     la_vreplve_d(temp2, src2, zero_ir2_opnd);
-    la_vfcmp_cond_d(dest_temp, temp1, temp2, X86_FCMP_COND_FALSE_OS);
-    la_vshuf4i_d(dest_temp, src1, 0xc);
-    la_xvori_b(dest, dest_temp, 0);
+    la_vfcmp_cond_d(result, temp1, temp2, X86_FCMP_COND_FALSE_OS);
+    la_vshuf4i_d(result, src1, 0xc);
+    if (!can_write_dest) {
+        la_xvori_b(dest, result, 0);
+        ra_free_temp(result);
+    }
     set_high128_xreg_to_zero(dest);
 
     ra_free_temp(temp1);
     ra_free_temp(temp2);
-    ra_free_temp(dest_temp);
     return true;
 }
 
@@ -2637,17 +2722,20 @@ bool translate_vcmpneq_ossd(IR1_INST * pir1) {
     IR2_OPND src2 = load_freg128_from_ir1(ir1_get_opnd(pir1, 2));
     IR2_OPND temp1 = ra_alloc_ftemp();
     IR2_OPND temp2 = ra_alloc_ftemp();
-    IR2_OPND dest_temp = ra_alloc_ftemp();
+    bool can_write_dest = !ir2_opnd_cmp(&dest, &src1);
+    IR2_OPND result = can_write_dest ? dest : ra_alloc_ftemp();
     la_vreplve_d(temp1, src1, zero_ir2_opnd);
     la_vreplve_d(temp2, src2, zero_ir2_opnd);
-    la_vfcmp_cond_d(dest_temp, temp1, temp2, X86_FCMP_COND_NEQ_OS);
-    la_vshuf4i_d(dest_temp, src1, 0xc);
-    la_xvori_b(dest, dest_temp, 0);
+    la_vfcmp_cond_d(result, temp1, temp2, X86_FCMP_COND_NEQ_OS);
+    la_vshuf4i_d(result, src1, 0xc);
+    if (!can_write_dest) {
+        la_xvori_b(dest, result, 0);
+        ra_free_temp(result);
+    }
     set_high128_xreg_to_zero(dest);
 
     ra_free_temp(temp1);
     ra_free_temp(temp2);
-    ra_free_temp(dest_temp);
     return true;
 }
 
@@ -2663,17 +2751,20 @@ bool translate_vcmpge_oqsd(IR1_INST * pir1) {
     IR2_OPND src2 = load_freg128_from_ir1(ir1_get_opnd(pir1, 2));
     IR2_OPND temp1 = ra_alloc_ftemp();
     IR2_OPND temp2 = ra_alloc_ftemp();
-    IR2_OPND dest_temp = ra_alloc_ftemp();
+    bool can_write_dest = !ir2_opnd_cmp(&dest, &src1);
+    IR2_OPND result = can_write_dest ? dest : ra_alloc_ftemp();
     la_vreplve_d(temp1, src1, zero_ir2_opnd);
     la_vreplve_d(temp2, src2, zero_ir2_opnd);
-    la_vfcmp_cond_d(dest_temp, temp2, temp1, X86_FCMP_COND_GE_OQ);
-    la_vshuf4i_d(dest_temp, src1, 0xc);
-    la_xvori_b(dest, dest_temp, 0);
+    la_vfcmp_cond_d(result, temp2, temp1, X86_FCMP_COND_GE_OQ);
+    la_vshuf4i_d(result, src1, 0xc);
+    if (!can_write_dest) {
+        la_xvori_b(dest, result, 0);
+        ra_free_temp(result);
+    }
     set_high128_xreg_to_zero(dest);
 
     ra_free_temp(temp1);
     ra_free_temp(temp2);
-    ra_free_temp(dest_temp);
     return true;
 }
 
@@ -2689,17 +2780,20 @@ bool translate_vcmpgt_oqsd(IR1_INST * pir1) {
     IR2_OPND src2 = load_freg128_from_ir1(ir1_get_opnd(pir1, 2));
     IR2_OPND temp1 = ra_alloc_ftemp();
     IR2_OPND temp2 = ra_alloc_ftemp();
-    IR2_OPND dest_temp = ra_alloc_ftemp();
+    bool can_write_dest = !ir2_opnd_cmp(&dest, &src1);
+    IR2_OPND result = can_write_dest ? dest : ra_alloc_ftemp();
     la_vreplve_d(temp1, src1, zero_ir2_opnd);
     la_vreplve_d(temp2, src2, zero_ir2_opnd);
-    la_vfcmp_cond_d(dest_temp, temp2, temp1, X86_FCMP_COND_GT_OQ);
-    la_vshuf4i_d(dest_temp, src1, 0xc);
-    la_xvori_b(dest, dest_temp, 0);
+    la_vfcmp_cond_d(result, temp2, temp1, X86_FCMP_COND_GT_OQ);
+    la_vshuf4i_d(result, src1, 0xc);
+    if (!can_write_dest) {
+        la_xvori_b(dest, result, 0);
+        ra_free_temp(result);
+    }
     set_high128_xreg_to_zero(dest);
 
     ra_free_temp(temp1);
     ra_free_temp(temp2);
-    ra_free_temp(dest_temp);
     return true;
 }
 
@@ -2715,18 +2809,21 @@ bool translate_vcmptrue_ussd(IR1_INST * pir1) {
     IR2_OPND src2 = load_freg128_from_ir1(ir1_get_opnd(pir1, 2));
     IR2_OPND temp1 = ra_alloc_ftemp();
     IR2_OPND temp2 = ra_alloc_ftemp();
-    IR2_OPND dest_temp = ra_alloc_ftemp();
+    bool can_write_dest = !ir2_opnd_cmp(&dest, &src1);
+    IR2_OPND result = can_write_dest ? dest : ra_alloc_ftemp();
     la_vreplve_d(temp1, src1, zero_ir2_opnd);
     la_vreplve_d(temp2, src2, zero_ir2_opnd);
-    la_vfcmp_cond_d(dest_temp, temp1, temp2, X86_FCMP_COND_TRUE_US);
-    la_xvori_b(dest_temp, dest_temp, 0xff);
-    la_vshuf4i_d(dest_temp, src1, 0xc);
-    la_xvori_b(dest, dest_temp, 0);
+    la_vfcmp_cond_d(result, temp1, temp2, X86_FCMP_COND_TRUE_US);
+    la_xvori_b(result, result, 0xff);
+    la_vshuf4i_d(result, src1, 0xc);
+    if (!can_write_dest) {
+        la_xvori_b(dest, result, 0);
+        ra_free_temp(result);
+    }
     set_high128_xreg_to_zero(dest);
 
     ra_free_temp(temp1);
     ra_free_temp(temp2);
-    ra_free_temp(dest_temp);
     return true;
 }
 

@@ -10,6 +10,13 @@ if 'x86_64-linux-user' in target_dirs
   endforeach
   if 'CONFIG_LATX_AVX_OPT' in config_host
     latx_integration_tests += [{
+      'name': 'test-vcmpsd-writeback',
+      'runner': find_program('../../test-avx-regressions.py'),
+      'args': [emulators['latx-x86_64'], files('../../vcmpsd-writeback.asm')],
+      'env': {'LATX_SOFTFPU': '0'},
+      'timeout': 120,
+    }]
+    latx_integration_tests += [{
       'name': 'test-f16c-memory-boundary',
       'runner': find_program('../../test-avx-regressions.py'),
       'args': [emulators['latx-x86_64'], files('../../f16c-memory-boundary.asm')],
