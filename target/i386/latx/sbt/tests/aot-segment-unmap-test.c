@@ -7,6 +7,7 @@
 #include "aot_lib.h"
 #include "segment.h"
 #include "aot-shm-syscall-test.h"
+#include "aot-segment-unmap-test.h"
 
 /* Exercise the actual guest mmap/munmap paths with real host mappings. */
 #include "../../../../../linux-user/mmap.c"
@@ -44,6 +45,17 @@ QemuLogFile *qemu_logfile;
 unsigned long rcu_gp_ctr;
 QemuEvent rcu_gp_event;
 __thread struct rcu_reader_data rcu_reader;
+
+static bool force_truncated_readlink;
+
+ssize_t __wrap_readlink(const char *path, char *buf, size_t bufsiz)
+{
+    if (force_truncated_readlink && strstr(path, "/proc/self/fd/")) {
+        memset(buf, 'x', bufsiz);
+        return bufsiz;
+    }
+    return __real_readlink(path, buf, bufsiz);
+}
 
 /* This test exercises AOT segment ownership, not KZT mmap bridging. */
 #if defined(CONFIG_LATX_KZT) && defined(TARGET_X86_64)
@@ -468,6 +480,68 @@ static void test_shm_disabled(void)
     option_aot = 1;
 }
 
+static void write_pe_image(int fd, uint16_t magic, uint16_t optional_size,
+                           uint32_t signature, size_t file_size)
+{
+    enum {
+        TEST_FILE_SIZE = 4096,
+        TEST_NT_OFFSET = 0x80,
+        TEST_SECTION_COUNT_OFFSET = 6,
+        TEST_OPTIONAL_SIZE_OFFSET = 20,
+        TEST_TEXT_RVA = 0x300,
+        TEST_TEXT_SIZE = 0x100,
+    };
+    unsigned char image[TEST_FILE_SIZE] = {0};
+    unsigned char *nt_header = image + TEST_NT_OFFSET;
+    wine_dos_mz_head dos = {.e_magic = IMAGE_DOS_SIGNATURE,
+                            .e_lfanew = TEST_NT_OFFSET};
+    uint16_t sections = 1;
+    wine_sec_head section = {.VirtualSize = TEST_TEXT_SIZE,
+                             .VirtualAddress = TEST_TEXT_RVA,
+                             .SizeOfRawData = TEST_TEXT_SIZE};
+    size_t section_offset = TEST_NT_OFFSET + WINE_PE_H_SEC_POS + optional_size;
+
+    g_assert(file_size <= sizeof(image));
+    memcpy(image, &dos, sizeof(dos));
+    memcpy(nt_header, &signature, sizeof(signature));
+    memcpy(nt_header + TEST_SECTION_COUNT_OFFSET, &sections, sizeof(sections));
+    memcpy(nt_header + TEST_OPTIONAL_SIZE_OFFSET,
+           &optional_size, sizeof(optional_size));
+    memcpy(nt_header + WINE_PE_H_SEC_POS, &magic, sizeof(magic));
+    if (section_offset + sizeof(section) <= sizeof(image)) {
+        memcpy(section.Name, ".text", sizeof(".text"));
+        memcpy(image + section_offset, &section, sizeof(section));
+    }
+    g_assert(ftruncate(fd, 0) == 0);
+    g_assert(pwrite(fd, image, file_size, 0) == file_size);
+}
+
+static void test_wine_pe_path_validation(void)
+{
+    enum { VALID_PE_SIGNATURE = 0x00004550 };
+    char short_name[] = "x";
+    char path[] = "/tmp/latx-pe-path-XXXXXX.dll";
+    int fd = mkstemps(path, sizeof(".dll") - 1);
+    void *mapped;
+    abi_ulong base;
+
+    g_assert(fd >= 0);
+    write_pe_image(fd, IMAGE_NT_OPTIONAL_HDR32_MAGIC, 224,
+                   VALID_PE_SIGNATURE, 4096);
+    mapped = mmap(NULL, 4096, PROT_READ, MAP_PRIVATE, fd, 0);
+    g_assert(mapped != MAP_FAILED);
+    base = (abi_ulong)(uintptr_t)mapped;
+    g_assert(!wine_dll_handle(short_name, 1, 0, base, 4096, 0, fd));
+
+    force_truncated_readlink = true;
+    g_assert(!wine_dll_handle(path, strlen(path), 0, base, 4096, 0, fd));
+    force_truncated_readlink = false;
+
+    munmap(mapped, 4096);
+    close(fd);
+    unlink(path);
+}
+
 int main(int argc, char **argv)
 {
     char path[] = "/tmp/latx-segment-unmap-XXXXXX";
@@ -486,6 +560,7 @@ int main(int argc, char **argv)
     page_flags = g_hash_table_new(g_direct_hash, g_direct_equal);
     segment_tree_init();
     lib_tree_init();
+    wine_sec_tree_init();
     fd = mkstemp(path);
     g_assert(fd >= 0);
     close(fd);
@@ -521,6 +596,7 @@ int main(int argc, char **argv)
 #if MAP_FIXED_NOREPLACE != 0
     test_mmap_late_segment(path, MAP_FIXED_NOREPLACE);
 #endif
+    test_wine_pe_path_validation();
     guest = mmap(NULL, stride * 5, PROT_READ | PROT_WRITE,
                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     g_assert(guest != MAP_FAILED);

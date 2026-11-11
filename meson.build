@@ -776,7 +776,7 @@ foreach target : target_dirs
       c_args: smc_reload_test_c_args + ['-fdata-sections'],
       dependencies: [glib],
       include_directories: target_inc,
-      link_args: smc_reload_test_link_args
+      link_args: smc_reload_test_link_args + ['-Wl,--wrap=readlink']
     )
     test('latx-aot-segment-unmap', aot_segment_unmap_test,
          suite: 'lat-pr-fast')
