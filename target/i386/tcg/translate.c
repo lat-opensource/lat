@@ -8828,11 +8828,10 @@ void restore_state_to_opc(CPUX86State *env, TranslationBlock *tb,
 #endif
     restore_extcontext(env, uc, restore_fpr);
 #ifdef LATX_QUICKTRANS_X87_SIGNAL_ABI
-    /* Legacy AOT keeps TOP in the host LBT register until a normal exit.
-     * A fault bypasses that exit, while QT signal frames consume env->fpstt.
-     * Limit this bridge to AOT in a process using the QT signal protocol. */
-    if ((tb->bool_flags & IS_AOT_TB) &&
-        env->qt_hard_signal_protocol_enabled && !option_softfpu) {
+    /* Legacy JIT and AOT keep TOP in LBT until a normal exit.
+     * Faults bypass that save; signal frames require the current TOP. */
+    if (!(tb->bool_flags & IS_QUICKTRANS_TB) && !option_softfpu) {
+        env->qt_hard_signal_protocol_enabled = true;
 #ifdef CONFIG_LOONGARCH_NEW_WORLD
         struct extctx_layout extctx = { 0 };
         parse_extcontext(uc, &extctx);

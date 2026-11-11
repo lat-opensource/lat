@@ -346,9 +346,9 @@ latx_skip_lazypc_update:
     *tb_exit = ret & TB_EXIT_MASK;
 
 #ifdef LATX_QUICKTRANS_X87_SIGNAL_ABI
-    if (last_tb && (last_tb->bool_flags & IS_QUICKTRANS_TB) &&
-        !option_softfpu) {
-        /* Normal exits saved all physical low64 slots in the shared glue. */
+    if (last_tb && !option_softfpu) {
+        /* Both backends save physical hard64 slots in the shared exit glue.
+         * The signal frame needs the same conversion protocol for either. */
         env->qt_hard_signal_protocol_enabled = true;
         env->qt_x87_env_format = env->mode_fpu ? QT_X87_ENV_HARD64 :
                                                           QT_X87_ENV_MMX64;
