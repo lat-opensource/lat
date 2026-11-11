@@ -8827,6 +8827,30 @@ void restore_state_to_opc(CPUX86State *env, TranslationBlock *tb,
     }
 #endif
     restore_extcontext(env, uc, restore_fpr);
+#ifdef LATX_QUICKTRANS_X87_SIGNAL_ABI
+    /* Legacy AOT keeps TOP in the host LBT register until a normal exit.
+     * A fault bypasses that exit, while QT signal frames consume env->fpstt.
+     * Limit this bridge to AOT in a process using the QT signal protocol. */
+    if ((tb->bool_flags & IS_AOT_TB) &&
+        env->qt_hard_signal_protocol_enabled && !option_softfpu) {
+#ifdef CONFIG_LOONGARCH_NEW_WORLD
+        struct extctx_layout extctx = { 0 };
+        parse_extcontext(uc, &extctx);
+        if (UC_LBT(&extctx)) {
+            env->fpstt = UC_GET_FTOP(&extctx, uint32_t) & 7;
+        }
+#else
+        /* The old-world signal ABI does not save TOP in ucontext.
+         * The kernel preserves it across entry to the host C handler,
+         * which has not re-entered guest code at this point. */
+        unsigned long top;
+        __asm__ volatile ("x86mftop %0" : "=r" (top));
+        env->fpstt = top & 7;
+#endif
+        env->qt_x87_env_format = env->mode_fpu ? QT_X87_ENV_HARD64 :
+                                                          QT_X87_ENV_MMX64;
+    }
+#endif
     /* The saved host registers can still contain stale upper halves for
      * completed VEX.128 instructions whose clears were deferred. */
     if (option_enable_lasx) {
