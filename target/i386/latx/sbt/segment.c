@@ -279,53 +279,109 @@ static bool wine_dll_is_code(char * type)
 
 static bool wine_dll_inset_sec(abi_ulong map_start, abi_ulong map_len, int map_fd)
 {
-    wine_dos_mz_head *dos_head = NULL;
-    wine_pe_nt_head *pe_head = NULL;
+    wine_dos_mz_head dos_head;
+    wine_pe_nt_head pe_head;
     wine_sec_head sec[WINE_PE_H_SEC_MAX_NUMS];
-    if (WINE_HEAD_MIN_SIZE >= map_len) {
+    struct stat st;
+    uint32_t signature;
+    off_t nt_offset, sec_offset;
+    size_t optional_min;
+    size_t section_bytes;
+    char path[PATH_MAX], buf[PATH_MAX];
+    int pathname_len;
+    bool has_code_section = false;
+
+    if (fstat(map_fd, &st) < 0 || st.st_size < sizeof(dos_head) ||
+        pread(map_fd, &dos_head, sizeof(dos_head), 0) != sizeof(dos_head)) {
         return false;
     }
-    dos_head = (wine_dos_mz_head *)(uintptr_t)map_start;
-    if (dos_head->e_magic != IMAGE_DOS_SIGNATURE) {
-        qemu_log_mask(LAT_LOG_AOT, "err magic %x \n", dos_head->e_magic);
+    if (dos_head.e_magic != IMAGE_DOS_SIGNATURE) {
+        qemu_log_mask(LAT_LOG_AOT, "err magic %x\n", dos_head.e_magic);
         return false;
     }
-    pe_head = (wine_pe_nt_head *)(uintptr_t)(map_start + dos_head->e_lfanew);
-    if (pe_head->Magic != IMAGE_NT_OPTIONAL_HDR32_MAGIC) {
+    nt_offset = dos_head.e_lfanew;
+    if (nt_offset < 0 || nt_offset > st.st_size ||
+        st.st_size - nt_offset < sizeof(pe_head) ||
+        (off_t)nt_offset > map_len ||
+        sizeof(pe_head) > map_len - nt_offset ||
+        pread(map_fd, &signature, sizeof(signature), nt_offset) !=
+            sizeof(signature) ||
+        pread(map_fd, &pe_head, sizeof(pe_head), nt_offset) !=
+            sizeof(pe_head) ||
+        signature != IMAGE_NT_SIGNATURE) {
         return false;
     }
-    if (pe_head->NumberOfSections <= 0 ||
-        pe_head->NumberOfSections > WINE_PE_H_SEC_MAX_NUMS) {
+    if (pe_head.NumberOfSections == 0 ||
+        pe_head.NumberOfSections > WINE_PE_H_SEC_MAX_NUMS) {
         return false;
     }
-    memcpy(&sec,((char *)pe_head +
-        pe_head->sec_pos + WINE_PE_H_SEC_POS),
-        pe_head->NumberOfSections * sizeof(wine_sec_head));
-    for (int i = 0; i < pe_head->NumberOfSections; i++) {
+    section_bytes = pe_head.NumberOfSections;
+    section_bytes *= sizeof(wine_sec_head);
+    if (pe_head.Magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC) {
+        optional_min = WINE_PE_H_OPT32_SIZE;
+    } else if (pe_head.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC) {
+        optional_min = WINE_PE_H_OPT64_SIZE;
+    } else {
+        return false;
+    }
+    if (pe_head.SizeOfOptionalHeader < optional_min) {
+        return false;
+    }
+    sec_offset = nt_offset + PE_OPTIONAL_HEADER_OFFSET +
+                 pe_head.SizeOfOptionalHeader;
+    if (sec_offset < nt_offset || sec_offset > st.st_size ||
+        sec_offset > map_len ||
+        section_bytes > st.st_size - sec_offset ||
+        section_bytes > map_len - sec_offset) {
+        return false;
+    }
+    if (pread(map_fd, sec, section_bytes, sec_offset) != section_bytes) {
+        return false;
+    }
+    for (int i = 0; i < pe_head.NumberOfSections; i++) {
         if (wine_dll_is_code(sec[i].Name)) {
-            char path[PATH_MAX],buf[PATH_MAX];
-            int pathname_len;
+            if (sec[i].VirtualAddress > (abi_ulong)-1 - map_start) {
+                return false;
+            }
+            has_code_section = true;
+        }
+    }
+    if (!has_code_section) {
+        return true;
+    }
+    if (snprintf(path, sizeof(path), "/proc/self/fd/%d", map_fd) >=
+        sizeof(path)) {
+        return false;
+    }
+    pathname_len = readlink(path, buf, sizeof(buf) - 1);
+    if (pathname_len < 0 || pathname_len == sizeof(buf) - 1) {
+        return false;
+    }
+    buf[pathname_len] = '\0';
+    for (int i = 0; i < pe_head.NumberOfSections; i++) {
+        if (wine_dll_is_code(sec[i].Name)) {
             wine_sec_info info = {0};
             info.addr = map_start + sec[i].VirtualAddress;
             info.offset = sec[i].VirtualAddress;
-            sprintf(path, "/proc/self/fd/%d", map_fd);
-            pathname_len = readlink(path, buf, PATH_MAX);
-            assert(pathname_len >= 0 && pathname_len + 1 <= PATH_MAX);
-            buf[pathname_len] = '\0';
             wine_sec_tree_insert(info.addr, info.offset, buf);
         }
     }
     return true;
 }
 
+enum { WINE_PE_SUFFIX_LEN = sizeof(".dll") - 1 };
+
 bool wine_dll_handle(char *file_name, int name_len, int target_prot,
     abi_ulong map_start, abi_ulong map_len, int map_offset, int map_fd)
 {
-    char name_type [5] = {0};
+    char name_type[WINE_PE_SUFFIX_LEN + 1] = {0};
     const char * pe_file [] = {".dll", ".exe", ".sys", ".drv"};
     bool is_pe = false;
-    for (int i = 0; i < 4; i++) {
-        name_type[i] = tolower(file_name[name_len - 4 + i]);
+    if (name_len < WINE_PE_SUFFIX_LEN) {
+        return false;
+    }
+    for (int i = 0; i < WINE_PE_SUFFIX_LEN; i++) {
+        name_type[i] = tolower(file_name[name_len - WINE_PE_SUFFIX_LEN + i]);
     }
     for (int i = 0; i < sizeof(pe_file) / sizeof(const char *); i++) {
         if(strstr(name_type, pe_file[i])) {
@@ -352,7 +408,7 @@ bool wine_dll_track_sections(abi_ulong map_start, abi_ulong map_len,
     }
     snprintf(path, sizeof(path), "/proc/self/fd/%d", map_fd);
     name_len = readlink(path, file_name, sizeof(file_name) - 1);
-    if (name_len <= 4) {
+    if (name_len <= WINE_PE_SUFFIX_LEN) {
         return false;
     }
     file_name[name_len] = '\0';

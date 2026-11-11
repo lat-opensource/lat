@@ -7,6 +7,7 @@
 #include "aot_lib.h"
 #include "segment.h"
 #include "aot-shm-syscall-test.h"
+#include "aot-segment-unmap-test.h"
 
 /* Exercise the actual guest mmap/munmap paths with real host mappings. */
 #include "../../../../../linux-user/mmap.c"
@@ -44,6 +45,17 @@ QemuLogFile *qemu_logfile;
 unsigned long rcu_gp_ctr;
 QemuEvent rcu_gp_event;
 __thread struct rcu_reader_data rcu_reader;
+
+static bool force_truncated_readlink;
+
+ssize_t __wrap_readlink(const char *path, char *buf, size_t bufsiz)
+{
+    if (force_truncated_readlink && strstr(path, "/proc/self/fd/")) {
+        memset(buf, 'x', bufsiz);
+        return bufsiz;
+    }
+    return __real_readlink(path, buf, bufsiz);
+}
 
 /* This test exercises AOT segment ownership, not KZT mmap bridging. */
 #if defined(CONFIG_LATX_KZT) && defined(TARGET_X86_64)
@@ -468,6 +480,150 @@ static void test_shm_disabled(void)
     option_aot = 1;
 }
 
+enum {
+    PE_TEST_FILE_SIZE = 4096,
+    PE_TEST_NT_OFFSET = 0x80,
+    PE_TEST_COFF_SECTION_COUNT_OFFSET = 6,
+    PE_TEST_TEXT_RVA = 0x300,
+    PE_TEST_TEXT_SIZE = 0x100,
+    PE_TEST_IMAGE_STRIDE = 0x10000,
+    PE_TEST_NONSTANDARD_OPT_SIZE = 256,
+    PE_TEST_UNKNOWN_MAGIC = 0x1234,
+};
+
+static void write_pe_image(int fd, uint16_t magic, uint16_t optional_size,
+                           uint32_t signature, size_t file_size,
+                           uint16_t section_count, uint32_t first_rva,
+                           uint32_t second_rva)
+{
+    unsigned char image[PE_TEST_FILE_SIZE] = {0};
+    unsigned char *nt_header = image + PE_TEST_NT_OFFSET;
+    wine_dos_mz_head dos = {.e_magic = IMAGE_DOS_SIGNATURE,
+                            .e_lfanew = PE_TEST_NT_OFFSET};
+    wine_sec_head sections[] = {
+        {.VirtualSize = PE_TEST_TEXT_SIZE,
+         .VirtualAddress = first_rva,
+         .SizeOfRawData = PE_TEST_TEXT_SIZE},
+        {.VirtualSize = PE_TEST_TEXT_SIZE,
+         .VirtualAddress = second_rva,
+         .SizeOfRawData = PE_TEST_TEXT_SIZE},
+    };
+    size_t section_offset = PE_TEST_NT_OFFSET + PE_OPTIONAL_HEADER_OFFSET +
+                            optional_size;
+
+    g_assert(file_size <= sizeof(image));
+    g_assert(section_count > 0 && section_count <= G_N_ELEMENTS(sections));
+    memcpy(image, &dos, sizeof(dos));
+    memcpy(nt_header, &signature, sizeof(signature));
+    memcpy(nt_header + PE_TEST_COFF_SECTION_COUNT_OFFSET,
+           &section_count, sizeof(section_count));
+    memcpy(nt_header + PE_COFF_OPTIONAL_HEADER_SIZE_OFFSET,
+           &optional_size, sizeof(optional_size));
+    memcpy(nt_header + PE_OPTIONAL_HEADER_OFFSET, &magic, sizeof(magic));
+    if (section_offset + section_count * sizeof(wine_sec_head) <=
+        sizeof(image)) {
+        for (int i = 0; i < section_count; i++) {
+            memcpy(sections[i].Name, ".text", sizeof(".text"));
+        }
+        memcpy(image + section_offset, sections,
+               section_count * sizeof(wine_sec_head));
+    }
+    g_assert(ftruncate(fd, 0) == 0);
+    g_assert(pwrite(fd, image, file_size, 0) == file_size);
+}
+
+static void test_wine_pe_path_validation(void)
+{
+    char short_name[] = "x";
+    char path[] = "/tmp/latx-pe-path-XXXXXX.dll";
+    int fd = mkstemps(path, sizeof(".dll") - 1);
+    void *mapped;
+    abi_ulong base;
+
+    g_assert(fd >= 0);
+    write_pe_image(fd, IMAGE_NT_OPTIONAL_HDR32_MAGIC, WINE_PE_H_OPT32_SIZE,
+                   IMAGE_NT_SIGNATURE, PE_TEST_FILE_SIZE, 1,
+                   PE_TEST_TEXT_RVA, 0);
+    mapped = mmap(NULL, PE_TEST_FILE_SIZE, PROT_READ, MAP_PRIVATE, fd, 0);
+    g_assert(mapped != MAP_FAILED);
+    base = (abi_ulong)(uintptr_t)mapped;
+    g_assert(!wine_dll_handle(short_name, 1, 0, base, PE_TEST_FILE_SIZE,
+                              0, fd));
+
+    force_truncated_readlink = true;
+    g_assert(!wine_dll_handle(path, strlen(path), 0, base,
+                              PE_TEST_FILE_SIZE, 0, fd));
+    force_truncated_readlink = false;
+
+    munmap(mapped, PE_TEST_FILE_SIZE);
+    close(fd);
+    unlink(path);
+}
+
+static void test_wine_pe_headers(void)
+{
+    char path[] = "/tmp/latx-pe-XXXXXX.dll";
+    int fd = mkstemps(path, sizeof(".dll") - 1);
+    target_ulong base = 0x20000000;
+    uint16_t magics[] = {IMAGE_NT_OPTIONAL_HDR32_MAGIC,
+                         IMAGE_NT_OPTIONAL_HDR64_MAGIC};
+    uint16_t sizes[] = {WINE_PE_H_OPT32_SIZE, WINE_PE_H_OPT64_SIZE};
+    const size_t truncated_pe64_size = PE_TEST_NT_OFFSET +
+        PE_OPTIONAL_HEADER_OFFSET + WINE_PE_H_OPT64_SIZE +
+        sizeof(wine_sec_head) - 1;
+
+    g_assert(fd >= 0);
+    for (unsigned int i = 0; i < G_N_ELEMENTS(magics);
+         i++, base += PE_TEST_IMAGE_STRIDE) {
+        write_pe_image(fd, magics[i], sizes[i], IMAGE_NT_SIGNATURE,
+                       PE_TEST_FILE_SIZE, 1, PE_TEST_TEXT_RVA, 0);
+        g_assert(wine_dll_track_sections(base, PE_TEST_FILE_SIZE, 0, fd));
+        g_assert(wine_sec_tree_lookup(base + PE_TEST_TEXT_RVA) != NULL);
+    }
+
+    write_pe_image(fd, IMAGE_NT_OPTIONAL_HDR64_MAGIC,
+                   PE_TEST_NONSTANDARD_OPT_SIZE, IMAGE_NT_SIGNATURE,
+                   PE_TEST_FILE_SIZE, 1, PE_TEST_TEXT_RVA, 0);
+    g_assert(wine_dll_track_sections(base, PE_TEST_FILE_SIZE, 0, fd));
+    g_assert(wine_sec_tree_lookup(base + PE_TEST_TEXT_RVA) != NULL);
+    base += PE_TEST_IMAGE_STRIDE;
+
+    write_pe_image(fd, IMAGE_NT_OPTIONAL_HDR32_MAGIC, WINE_PE_H_OPT32_SIZE,
+                   IMAGE_NT_SIGNATURE ^ 1U, PE_TEST_FILE_SIZE, 1,
+                   PE_TEST_TEXT_RVA, 0);
+    g_assert(!wine_dll_track_sections(base, PE_TEST_FILE_SIZE, 0, fd));
+    g_assert(wine_sec_tree_lookup(base + PE_TEST_TEXT_RVA) == NULL);
+    write_pe_image(fd, PE_TEST_UNKNOWN_MAGIC, WINE_PE_H_OPT32_SIZE,
+                   IMAGE_NT_SIGNATURE, PE_TEST_FILE_SIZE, 1,
+                   PE_TEST_TEXT_RVA, 0);
+    g_assert(!wine_dll_track_sections(base, PE_TEST_FILE_SIZE, 0, fd));
+    write_pe_image(fd, IMAGE_NT_OPTIONAL_HDR32_MAGIC, sizeof(uint16_t),
+                   IMAGE_NT_SIGNATURE, PE_TEST_FILE_SIZE, 1,
+                   PE_TEST_TEXT_RVA, 0);
+    g_assert(!wine_dll_track_sections(base, PE_TEST_FILE_SIZE, 0, fd));
+    write_pe_image(fd, IMAGE_NT_OPTIONAL_HDR64_MAGIC, WINE_PE_H_OPT64_SIZE,
+                   IMAGE_NT_SIGNATURE, PE_TEST_FILE_SIZE, 1,
+                   PE_TEST_TEXT_RVA, 0);
+    g_assert(!wine_dll_track_sections(base, truncated_pe64_size, 0, fd));
+    write_pe_image(fd, IMAGE_NT_OPTIONAL_HDR64_MAGIC, WINE_PE_H_OPT64_SIZE,
+                   IMAGE_NT_SIGNATURE, truncated_pe64_size, 1,
+                   PE_TEST_TEXT_RVA, 0);
+    g_assert(!wine_dll_track_sections(base, PE_TEST_FILE_SIZE, 0, fd));
+    write_pe_image(fd, IMAGE_NT_OPTIONAL_HDR32_MAGIC, WINE_PE_H_OPT32_SIZE,
+                   IMAGE_NT_SIGNATURE, sizeof(wine_dos_mz_head) - 1, 1,
+                   PE_TEST_TEXT_RVA, 0);
+    g_assert(!wine_dll_track_sections(base, PE_TEST_FILE_SIZE, 0, fd));
+
+    write_pe_image(fd, IMAGE_NT_OPTIONAL_HDR64_MAGIC, WINE_PE_H_OPT64_SIZE,
+                   IMAGE_NT_SIGNATURE, PE_TEST_FILE_SIZE, 2, 0, 0x20);
+    base = (abi_ulong)-1 - 0x10;
+    g_assert(!wine_dll_track_sections(base, PE_TEST_FILE_SIZE, 0, fd));
+    g_assert(wine_sec_tree_lookup(base) == NULL);
+
+    close(fd);
+    unlink(path);
+}
+
 int main(int argc, char **argv)
 {
     char path[] = "/tmp/latx-segment-unmap-XXXXXX";
@@ -486,6 +642,7 @@ int main(int argc, char **argv)
     page_flags = g_hash_table_new(g_direct_hash, g_direct_equal);
     segment_tree_init();
     lib_tree_init();
+    wine_sec_tree_init();
     fd = mkstemp(path);
     g_assert(fd >= 0);
     close(fd);
@@ -521,6 +678,8 @@ int main(int argc, char **argv)
 #if MAP_FIXED_NOREPLACE != 0
     test_mmap_late_segment(path, MAP_FIXED_NOREPLACE);
 #endif
+    test_wine_pe_path_validation();
+    test_wine_pe_headers();
     guest = mmap(NULL, stride * 5, PROT_READ | PROT_WRITE,
                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     g_assert(guest != MAP_FAILED);
