@@ -205,6 +205,13 @@ int target_latx_host(CPUArchState *env, struct TranslationBlock *tb,
                 env, tb, max_insns, &code_size, &search_size,
                 &quicktrans_failure)) {
             tb->bool_flags |= IS_QUICKTRANS_TB;
+#ifdef CONFIG_LATX_INSTS_PATTERN
+            /* Quicktrans does not export block-entry flag liveness to the
+             * legacy linker. Preserve incoming arithmetic flags rather than
+             * treating the zero-initialized metadata as proof they are dead. */
+            tb->eflag_use = CF_USEDEF_BIT | PF_USEDEF_BIT | AF_USEDEF_BIT |
+                            ZF_USEDEF_BIT | SF_USEDEF_BIT | OF_USEDEF_BIT;
+#endif
             return code_size + search_size;
         }
         /* Recovery-table encoding returns -1 only when the code region
