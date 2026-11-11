@@ -149,7 +149,7 @@ static int denied_access(unsigned char *p, int crossing)
         if (SC(mprotect, page, 4096, crossing ? 0 : 1)) {
             SC(exit, 41, 0, 0);
         }
-        unsigned short *q = (void *)(p + (crossing ? 4095 : 18));
+        unsigned short *q = (void *)(p + (crossing ? 4095 : 17));
         __asm__ volatile("lock addw $1,%0" : "+m"(*q) : : "cc", "memory");
         SC(exit, 42, 0, 0);
         __builtin_unreachable();
@@ -174,7 +174,7 @@ __attribute__((used)) int test_main(long *sp)
     unsigned char *p = (void *)addr;
     int end_offset = 23;
     for (int h = 0; h < 2; h++) {
-        for (int off = 16; off < end_offset; off += h ? 2 : 1) {
+        for (int off = 16; off < end_offset; off++) {
             for (int j = 0; j < 40; j++) {
                 p[j] = 0x5a;
             }
@@ -193,7 +193,7 @@ __attribute__((used)) int test_main(long *sp)
             return ret;
         }
     }
-    for (int crossing = 0; crossing < 1; crossing++) {
+    for (int crossing = 0; crossing < 2; crossing++) {
         int ret = denied_access(p, crossing);
         if (ret) {
             return ret;

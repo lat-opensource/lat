@@ -1357,12 +1357,34 @@ int cpu_signal_handler(int host_signum, void *pinfo,
 
     mmap_lock();
 
+    /* Unaligned B/H AMADD and AMSWAP may fault before the shadow access. */
+    bool small_atomic = (insn >> 15) >= 0x70b8 &&
+                        (insn >> 15) <= 0x70bf;
+    if (info->si_signo == SIGBUS && small_atomic) {
+        /* Some kernels report SI_KERNEL with no fault address for AMOs. */
+        info->si_addr = (void *)UC_GR(uc)[(insn >> 5) & 0x1f];
+    }
     if (page_get_target_data((uint64_t)info->si_addr) &&
-        info->si_signo == SIGSEGV) {
+        (info->si_signo == SIGSEGV ||
+         (info->si_signo == SIGBUS && small_atomic))) {
         int ret = shared_private_interpret(info, uc);
         if (!ret) {
             mmap_unlock();
             return 1;
+        }
+        /* lock_interpret cannot relocate a fragmented shadow mapping. */
+        if (info->si_signo == SIGBUS && small_atomic) {
+            ShadowPageDesc *spd =
+                page_get_target_data((uint64_t)info->si_addr);
+
+            if (ret == LOCKINT_SEGV ||
+                (spd && spd->is_shmm && latx_smc_inv_tb() &&
+                 latx_smc_shmm())) {
+                /* Let page_unprotect handle a writable SMC backing. */
+                info->si_signo = SIGSEGV;
+                info->si_code = SEGV_ACCERR;
+            }
+            goto shadow_atomic_fault;
         }
     }
     if (info->si_signo == SIGBUS) {
@@ -1399,6 +1421,7 @@ int cpu_signal_handler(int host_signum, void *pinfo,
         }
     }
 #endif
+shadow_atomic_fault:
     mmap_unlock();
 #endif
 
