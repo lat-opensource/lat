@@ -247,7 +247,11 @@ struct kvm_run;
 struct hax_vcpu_state;
 
 #ifdef CONFIG_LATX
+#ifdef CONFIG_LATX_LOW_MEM_0
+#define TB_JMP_CACHE_BITS 14
+#else
 #define TB_JMP_CACHE_BITS 16
+#endif
 #else
 #define TB_JMP_CACHE_BITS 12
 #endif
