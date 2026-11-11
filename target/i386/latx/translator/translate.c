@@ -23,6 +23,9 @@
 
 extern void *helper_tb_lookup_ptr(CPUArchState *);
 static int ss_generate_match_fail_native_code(void* code_buf);
+#ifdef CONFIG_LATX_TU
+static void tr_generate_pc_thunk_exit(IR1_INST *ir1);
+#endif
 #if defined(CONFIG_LATX_KZT)
 uintptr_t kzt_get_alternate_pc(uintptr_t addr)
 {
@@ -1970,15 +1973,17 @@ bool ir1_translate(IR1_INST *ir1)
                 TranslationBlock *tb = lsenv->tr_data->curr_tb;
 
                 /*
-                 * Exploring a callee can discover its PC thunk after this
-                 * caller was decoded. Keep that terminal CALL as a CALL:
-                 * its continuation may already belong to another TU, and
-                 * inlining here would fall through to an unrelated member.
+                 * A late-discovered thunk still has a terminal CALL boundary.
+                 * Inline it, then leave a linkable exit when its continuation
+                 * is outside this TU instead of falling into another member.
                  */
                 if (aot_cross_page_tu_enabled() &&
                     tb->s_data->last_ir1_type == IR1_TYPE_CALL &&
-                    ir1 == tb_ir1_inst_last(tb)) {
-                    return translate_call(ir1);
+                    ir1 == tb_ir1_inst_last(tb) &&
+                    !tb->s_data->next_tb[TU_TB_INDEX_NEXT]) {
+                    translate_callthunk(ir1);
+                    tr_generate_pc_thunk_exit(ir1);
+                    return true;
                 }
 #endif
                 return translate_callthunk(ir1);
@@ -3081,6 +3086,37 @@ void tr_generate_exit_tb_to_next(IR1_INST *ir1)
     la_data_li(target, context_switch_native_to_bt_ret_0);
     aot_la_append_ir2_jmp_far(target, base, B_EPILOGUE_RET_0, 0);
 }
+
+#ifdef CONFIG_LATX_TU
+static void tr_generate_pc_thunk_exit(IR1_INST *ir1)
+{
+    TranslationBlock *tb = lsenv->tr_data->curr_tb;
+
+    if (tb->flags & HF_TF_MASK) {
+        tr_generate_exit_tb_to_next(ir1);
+        return;
+    }
+
+    emit_ymmh_zeros();
+    IR2_OPND base = ra_alloc_data();
+    IR2_OPND target = ra_alloc_data();
+
+    la_data_li(base, (ADDR)tb->tc.ptr);
+    la_code_accl(base, 2, 0x03400000);
+    set_jmp_reset_offset(tb, NULL, NULL, 0);
+#ifndef CONFIG_LATX_LAZYLINK
+    la_b(imm_zero_ir2_opnd);
+#ifdef CONFIG_LATX_LARGE_CC
+    la_nop();
+#endif
+#endif
+    /* Slot zero resumes after the inlined CALL; no guest stack or RAS entry. */
+    tb->lazypc[0] = ir1_addr_next(ir1) - tb->pc;
+    set_tb_canlink(ir1, 0, ir1_addr_next(ir1));
+    la_data_li(target, context_switch_native_to_bt_ret_id_0);
+    aot_la_append_ir2_jmp_epilogue(target, base, JIRL_EPILOGUE_RET_ID_0, 0);
+}
+#endif
 
 #ifdef CONFIG_LATX_XCOMISX_OPT
 inline
