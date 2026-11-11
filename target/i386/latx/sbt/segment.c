@@ -308,9 +308,14 @@ static bool wine_dll_inset_sec(abi_ulong map_start, abi_ulong map_len, int map_f
             wine_sec_info info = {0};
             info.addr = map_start + sec[i].VirtualAddress;
             info.offset = sec[i].VirtualAddress;
-            sprintf(path, "/proc/self/fd/%d", map_fd);
-            pathname_len = readlink(path, buf, PATH_MAX);
-            assert(pathname_len >= 0 && pathname_len + 1 <= PATH_MAX);
+            if (snprintf(path, sizeof(path), "/proc/self/fd/%d", map_fd) >=
+                sizeof(path)) {
+                return false;
+            }
+            pathname_len = readlink(path, buf, sizeof(buf) - 1);
+            if (pathname_len < 0 || pathname_len == sizeof(buf) - 1) {
+                return false;
+            }
             buf[pathname_len] = '\0';
             wine_sec_tree_insert(info.addr, info.offset, buf);
         }
@@ -318,14 +323,19 @@ static bool wine_dll_inset_sec(abi_ulong map_start, abi_ulong map_len, int map_f
     return true;
 }
 
+enum { WINE_PE_SUFFIX_LEN = sizeof(".dll") - 1 };
+
 bool wine_dll_handle(char *file_name, int name_len, int target_prot,
     abi_ulong map_start, abi_ulong map_len, int map_offset, int map_fd)
 {
-    char name_type [5] = {0};
+    char name_type[WINE_PE_SUFFIX_LEN + 1] = {0};
     const char * pe_file [] = {".dll", ".exe", ".sys", ".drv"};
     bool is_pe = false;
-    for (int i = 0; i < 4; i++) {
-        name_type[i] = tolower(file_name[name_len - 4 + i]);
+    if (name_len < WINE_PE_SUFFIX_LEN) {
+        return false;
+    }
+    for (int i = 0; i < WINE_PE_SUFFIX_LEN; i++) {
+        name_type[i] = tolower(file_name[name_len - WINE_PE_SUFFIX_LEN + i]);
     }
     for (int i = 0; i < sizeof(pe_file) / sizeof(const char *); i++) {
         if(strstr(name_type, pe_file[i])) {
@@ -352,7 +362,7 @@ bool wine_dll_track_sections(abi_ulong map_start, abi_ulong map_len,
     }
     snprintf(path, sizeof(path), "/proc/self/fd/%d", map_fd);
     name_len = readlink(path, file_name, sizeof(file_name) - 1);
-    if (name_len <= 4) {
+    if (name_len <= WINE_PE_SUFFIX_LEN) {
         return false;
     }
     file_name[name_len] = '\0';
