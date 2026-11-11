@@ -5223,6 +5223,39 @@ void smc_set_interpret_glue_code(void *uc, unsigned int inst, int rj)
 }
 #endif
 
+/*
+ * A shadow mapping can also be accessed by other guest threads or processes.
+ * The mmap lock therefore cannot make an interpreted read/modify/write atomic.
+ * Use a masked, lock-free CAS on the containing doubleword, preserving its
+ * other bytes.  A doubleword is wholly within one guest page, so translating
+ * the original address also translates the containing doubleword.
+ */
+static bool shadow_small_atomic(int64_t addr, int size, uint64_t input,
+                                bool exchange, uint64_t *old_value)
+{
+    unsigned int shift = (addr & 7) * 8;
+    uint64_t mask = size == 1 ? UINT8_MAX : UINT16_MAX;
+    uint64_t *ptr = (uint64_t *)(uintptr_t)(addr & ~INT64_C(7));
+    uint64_t old, expected, value, updated;
+
+    if (shift + size * 8 > 64) {
+        return false;
+    }
+
+    old = qatomic_read(ptr);
+    do {
+        expected = old;
+        value = (expected >> shift) & mask;
+        updated = exchange ? input : value + input;
+        updated = (expected & ~(mask << shift)) |
+                  ((updated & mask) << shift);
+        old = qatomic_cmpxchg(ptr, expected, updated);
+    } while (old != expected);
+
+    *old_value = value;
+    return true;
+}
+
 int shared_private_interpret(siginfo_t *info, ucontext_t *uc)
 {
     /* fd: fd/vd/xd */
@@ -6085,6 +6118,32 @@ int shared_private_interpret(siginfo_t *info, ucontext_t *uc)
       }
       goto end;
 #endif
+    case 0x70b8: /* amswap.b */
+    case 0x70b9: /* amswap.h */
+    case 0x70bc: /* amswap.db.b */
+    case 0x70bd: /* amswap.db.h */
+    case 0x70ba: /* amadd.b */
+    case 0x70bb: /* amadd.h */
+    case 0x70be: /* amadd.db.b */
+    case 0x70bf: /* amadd.db.h */
+    {
+        unsigned int opcode = inst >> 15;
+        int size = (opcode & 1) + 1;
+        uint64_t old_value;
+
+        SMC_SHMM_INTERPRET_FALLBACK(shadow_pd);
+        if (no_right(real_guest_addr, size, PAGE_WRITE, &siaddr)) {
+            info->si_addr = (void *)siaddr;
+            return LOCKINT_SEGV;
+        }
+        if (!shadow_small_atomic(mem_addr, size, new_value,
+                                 !(opcode & 2), &old_value)) {
+            return 1;
+        }
+        UC_GR(uc)[rd] = size == 1 ? (int64_t)(int8_t)old_value :
+                                   (int64_t)(int16_t)old_value;
+        break;
+    }
     case 0x70b0: /* amcas.b */
     case 0x70b4: /* amcas.db.b */
         SMC_SHMM_INTERPRET_FALLBACK(shadow_pd);

@@ -380,3 +380,21 @@ test(
   args: [files('../ci/test_lat_ci_matrix.py'), 'MatrixSelectionTest'],
   suite: 'lat-pr-fast',
 )
+
+if 'CONFIG_LATX' in config_host
+  test(
+    'test-shadow-small-atomic',
+    python,
+    args: [files('test-shadow-small-atomic.py'), project_source_root],
+    suite: 'lat-pr-fast',
+  )
+endif
+
+if 'CONFIG_LATX' in config_host
+  test(
+    'test-shadow-atomic-runner',
+    python,
+    args: [files('test-shadow-atomic-runner.py'), project_source_root],
+    suite: 'lat-pr-fast',
+  )
+endif

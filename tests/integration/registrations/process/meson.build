@@ -349,3 +349,15 @@ if 'i386-linux-user' in target_dirs
     ],
   }]
 endif
+
+if 'x86_64-linux-user' in target_dirs
+  latx_integration_tests += [{
+    'name': 'test-shadow-small-atomic-x86_64',
+    'runner': find_program('../../test-shadow-small-atomic.sh'),
+    'args': [
+      emulators['latx-x86_64'],
+      files('../../shadow-small-atomic-x86_64.c'),
+    ],
+    'timeout': 60,
+  }]
+endif
