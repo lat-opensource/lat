@@ -48,6 +48,9 @@ static inline bool ir1_can_pattern(IR1_INST *pir1)
     case WRAP(CDQ):
     case WRAP(TEST):
     case WRAP(UCOMISD):
+#ifdef CONFIG_LATX_AVX_OPT
+    case WRAP(VUCOMISD):
+#endif
 #ifdef CONFIG_LATX_SMC_OPT
     case WRAP(MOVAPS):
     case WRAP(MOVDQA):
@@ -101,6 +104,9 @@ static inline bool ir1_is_pattern_head(IR1_INST *pir1)
     case WRAP(CDQ):
     case WRAP(TEST):
     case WRAP(UCOMISD):
+#ifdef CONFIG_LATX_AVX_OPT
+    case WRAP(VUCOMISD):
+#endif
 #ifdef CONFIG_LATX_SMC_OPT
     case WRAP(MOVAPS):
     case WRAP(MOVDQA):
@@ -333,12 +339,24 @@ static int inst_pattern(TranslationBlock *tb,
             return 0;
         }
     case WRAP(UCOMISD):
+#ifdef CONFIG_LATX_AVX_OPT
+    case WRAP(VUCOMISD):
+#endif
         SCAN_CHECK(scan, 0);
         instptn_check_ucomisd_seta_0();
 
         ir1 = SCAN_IR1(tb, scan, 0);
         switch (ir1_opcode(ir1)) {
         case WRAP(SETA):
+#ifdef CONFIG_LATX_AVX_OPT
+            if (ir1_opcode(pir1) == WRAP(VUCOMISD)) {
+                /* A later fault must expose all flags of the comparison. */
+                if (ir1_addr_next(pir1) == ir1_addr(ir1)) {
+                    ir1_set_eflag_def(pir1, 0x3f);
+                }
+                return 0;
+            }
+#endif
             /* A fused store has no separate SETA fault boundary. */
             if (!ir1_opnd_is_gpr(ir1_get_opnd(ir1, 0))) {
                 ir1_set_eflag_def(pir1, 0x3f);
