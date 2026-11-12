@@ -27,6 +27,7 @@ case "$kind" in
         sources=(tu-signal-fault.c tu-signal-fault.S tu-signal-fault.h)
         name=tu-signal-fault ;;
     hras-call) sources=(tu-hras-call.S); name=tu-hras-call ;;
+    indirect-cold) sources=(tu-indirect-cold.S); name=tu-indirect-cold ;;
     late-thunk) sources=(tu-late-thunk.S); name=tu-late-thunk ;;
     *) exit 2 ;;
 esac
@@ -109,7 +110,9 @@ fi
 case "$bits" in 32) arch='Intel 80386';; 64) arch=x86-64;; *) exit 2;; esac
 file "$guest" | grep -q "ELF $bits-bit.*$arch"
 # All result/cache directories survive in TMPDIR for debugging and evidence.
-if [[ "$kind" == boundary || "$kind" == mode-cache ||
+if [[ "$kind" == indirect-cold ]]; then
+    bash "$tests/run-codegen-fixture.sh" "$binary" "$guest" "$kind"
+elif [[ "$kind" == boundary || "$kind" == mode-cache ||
         "$kind" == hash-cache ]]; then
     bash "$tests/run-tu-$kind.sh" "$(dirname "$binary")" "$guest"
 else

@@ -425,6 +425,16 @@ int label_dispose(TranslationBlock *tb, TRANSLATION_DATA *lat_ctx)
             if (label_id != TB_JMP_RESET_OFFSET_INVALID) {
                 tb->jmp_indirect = ir2_label[label_id];
             }
+#if defined(CONFIG_LATX_FAST_JMPCACHE) && \
+    !defined(CONFIG_LATX_GLUE_MASK)
+#ifdef CONFIG_LATX_TU
+            if (in_pre_translate && aot_cross_page_tu_enabled() &&
+                tb->s_data->indirect_miss_offset) {
+                label_id = tb->s_data->indirect_miss_offset - 1;
+                tb->s_data->indirect_miss_offset = ir2_label[label_id];
+            }
+#endif
+#endif
         } else if (!use_tu_jmp(tb)) {
             for (i = 0; i < 2; ++i) {
                 label_id = tb->jmp_reset_offset[i];
@@ -2979,6 +2989,26 @@ static void generate_indirect_goto(void *code_buf)
 
 #endif
     la_label(label_miss);
+#if defined(CONFIG_LATX_TU) && defined(CONFIG_LATX_KZT) && \
+    defined(CONFIG_LATX_FAST_JMPCACHE) && !defined(CONFIG_LATX_GLUE_MASK)
+    /*
+     * Keep the lookup and its JIRL unchanged. TU compaction may replace the
+     * first miss instruction with a B and move the complete miss tail out of
+     * the hot member stream. A signal-unlinked JIRL then still falls through
+     * into an ordinary dispatcher exit.
+     *
+     * Only offline AOT TU generation records this offset; standalone/JIT exits
+     * retain the original inline tail.
+     */
+    TranslationBlock *tu_tb = lsenv->tr_data->curr_tb;
+
+    if (tu_tb && in_pre_translate && aot_cross_page_tu_enabled() &&
+        tu_tb->s_data->tu_id) {
+        /* Use label + 1 until label_dispose() resolves the byte offset. */
+        tu_tb->s_data->indirect_miss_offset =
+            ir2_opnd_label_id(&label_miss) + 1;
+    }
+#endif
 #if defined(CONFIG_LATX_KZT)
     {
         IR2_OPND label_skip = ra_alloc_label();

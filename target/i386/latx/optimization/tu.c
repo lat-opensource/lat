@@ -1099,13 +1099,17 @@ void bcc_ins_recover(TranslationBlock *tb) {
 #endif
 
 #ifdef CONFIG_LATX_AOT
-static void fix_rel_table(uint32_t tb_num_in_tu, TranslationBlock **tb_list)
+static void fix_rel_table(uint32_t tb_num_in_tu, TranslationBlock **tb_list,
+                          const size_t *indirect_delta)
 {
     TranslationBlock *tb;
     for (int i = 0; i < tb_num_in_tu; i++) {
         tb = tb_list[i];
         for (int j = tb->s_data->rel_start; j != -1 && j <= tb->s_data->rel_end; j++) {
-            if (rel_table[j].tc_offset >= tb->tc.size) {
+            if (indirect_delta[i] &&
+                rel_table[j].tc_offset >= tb->s_data->indirect_miss_offset) {
+                rel_table[j].tc_offset += indirect_delta[i];
+            } else if (rel_table[j].tc_offset >= tb->tc.size) {
                 rel_table[j].tc_offset += tb->tu_unlink.stub_offset - tb->tc.size;
             }
         }
@@ -1168,17 +1172,52 @@ static void mov_unlink_stub_to_end(uint32_t tb_num_in_tu, TranslationBlock **tb_
     qatomic_set(&tcg_ctx->code_gen_ptr, (void *)
             ROUND_UP((uintptr_t)tcg_ctx->code_gen_ptr, CODE_GEN_ALIGN));
     uint32_t *tmp_buffer = (uint32_t *)tcg_ctx->code_gen_ptr;
-    assert(tb_list[0]->s_data->tu_size % 4 == 0);
+    g_autofree uint32_t *cold_tmp_buffer = NULL;
+    size_t tu_size = tb_list[0]->s_data->tu_size;
+    size_t indirect_reserve = tb_num_in_tu * sizeof(uint32_t);
+    size_t reserve = indirect_reserve + CODE_GEN_ALIGN;
+    size_t indirect_stubs[tb_num_in_tu];
+    size_t cold_sizes[tb_num_in_tu];
+    bool outline_indirect = in_pre_translate && aot_cross_page_tu_enabled() &&
+        tcg_ctx->code_gen_ptr + reserve < tcg_ctx->code_gen_highwater &&
+        tb_target_jmp_in_range((uintptr_t)tb_list[0]->tc.ptr,
+            (uintptr_t)tcg_splitwx_to_rx(tcg_ctx->code_gen_ptr) + reserve);
+    bool has_indirect_tail = false;
+
+    assert(tu_size % 4 == 0);
+    memset(indirect_stubs, 0, sizeof(indirect_stubs));
+    memset(cold_sizes, 0, sizeof(cold_sizes));
+    for (int i = 0; i < tb_num_in_tu; i++) {
+        TranslationBlock *tb = tb_list[i];
+        size_t miss = tb->s_data->indirect_miss_offset;
+
+        tb->tu_cold_offset = 0;
+        tb->tu_cold_size = 0;
+        if (outline_indirect && miss && miss + sizeof(uint32_t) < tb->tc.size) {
+            indirect_stubs[i] = 1;
+            cold_sizes[i] = tb->tc.size - miss;
+            has_indirect_tail = true;
+        }
+    }
+    if (has_indirect_tail) {
+        cold_tmp_buffer = g_malloc(tu_size);
+        tmp_buffer = cold_tmp_buffer;
+    }
     uintptr_t tmp_buffer_size = 0;
     uintptr_t curr_pos;
     TranslationBlock *tb;
-    size_t cold_sizes[tb_num_in_tu];
-
-    memset(cold_sizes, 0, sizeof(cold_sizes));
     for (int i = 0; i < tb_num_in_tu; i++) {
         tb = tb_list[i];
-        tb->tu_cold_offset = 0;
-        tb->tu_cold_size = 0;
+        if (indirect_stubs[i]) {
+            size_t miss = tb->s_data->indirect_miss_offset;
+            size_t cold_size = tb->tc.size - miss;
+
+            memcpy((char *)tmp_buffer + tmp_buffer_size,
+                   (const char *)tb->tc.ptr + miss, cold_size);
+            indirect_stubs[i] = tmp_buffer_size + 1;
+            tb->tc.size = miss + sizeof(uint32_t);
+            tmp_buffer_size += cold_size;
+        }
         if (use_tu_jmp(tb)) {
 #ifdef CONFIG_LATX_INSTS_PATTERN
             tb->eflags_target_arg[0] = TB_JMP_RESET_OFFSET_INVALID;
@@ -1218,7 +1257,18 @@ static void mov_unlink_stub_to_end(uint32_t tb_num_in_tu, TranslationBlock **tb_
 
     for (int i = 0; i < tb_num_in_tu; i++) {
         tb = tb_list[i];
-        if (use_tu_jmp(tb)) {
+        if (indirect_stubs[i]) {
+            uintptr_t slot = (uintptr_t)tb->tc.ptr +
+                             tb->s_data->indirect_miss_offset;
+            uintptr_t cold = curr_pos + indirect_stubs[i] - 1;
+
+            /* The local B and the tail move together when AOT is loaded. */
+            assert(tb_target_jmp_in_range(slot, cold));
+            b_to_addr(slot, slot - tcg_splitwx_diff, cold);
+            indirect_stubs[i] = cold - slot;
+            tb->tu_cold_offset = cold - (uintptr_t)tb->tc.ptr;
+            tb->tu_cold_size = cold_sizes[i];
+        } else if (use_tu_jmp(tb)) {
             tb->tu_unlink.stub_offset = curr_pos  + tb->tu_unlink.stub_offset
                 - (uintptr_t)tb->tc.ptr;
             tb->tu_cold_offset = tb->tu_unlink.stub_offset;
@@ -1229,7 +1279,7 @@ static void mov_unlink_stub_to_end(uint32_t tb_num_in_tu, TranslationBlock **tb_
     }
 
 #ifdef CONFIG_LATX_AOT
-    fix_rel_table(tb_num_in_tu, tb_list);
+    fix_rel_table(tb_num_in_tu, tb_list, indirect_stubs);
 #endif
 }
 
@@ -1297,6 +1347,7 @@ void translate_tu(uint32 tb_num_in_tu, TranslationBlock **tb_list)
 retry:
     for (uint32_t i = 0; i < tb_num_in_tu; i++) {
         tb = tb_list[i];
+        tb->s_data->indirect_miss_offset = 0;
         if (tb->bool_flags & IS_CODE64) {
             CODEIS64 = 1;
         } else {

@@ -522,6 +522,7 @@ struct separated_data{
     };
 #ifdef CONFIG_LATX_TU
     tu_tb_mode_type tu_tb_mode;
+    uint32_t indirect_miss_offset; /* Offline TU layout, 0 if absent. */
     size_t offset_in_tu;
     target_ulong tu_id;
 #endif
