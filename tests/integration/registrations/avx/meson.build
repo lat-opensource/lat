@@ -141,6 +141,10 @@ foreach guest : [['x86_64', '64'], ['i386', '32']]
     foreach mode : [['hard', '0', '0'], ['soft', '1', '0'],
                     ['strict', '2', '0'], ['fast', '2', '1']]
       mxcsr_cases = ['mxcsr-mmx-preserve']
+      if mode[0] != 'fast'
+        # FAST x87 flags still share FCSR; do not treat them as SSE flags.
+        mxcsr_cases += ['mxcsr-exceptions']
+      endif
       mxcsr_args = [emulators['latx-' + guest[0]], '--guest-bits', guest[1]]
       if mode[0] != 'hard'
         # handle_arg_latx_softfpu disables AOT for all softfpu modes.
@@ -161,3 +165,6 @@ foreach guest : [['x86_64', '64'], ['i386', '32']]
     endforeach
   endif
 endforeach
+
+test('test-mxcsr-fcsr-model', find_program('python3'),
+     args: files('../../test-mxcsr-fcsr-model.py'), suite: 'lat-pr-fast')
