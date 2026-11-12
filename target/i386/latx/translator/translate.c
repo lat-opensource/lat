@@ -1890,6 +1890,18 @@ static void reset_aes_table_cache_for_non_aes(IR1_INST *ir1)
     }
 }
 
+static bool ir1_is_x87_insn(IR1_OPCODE opcode)
+{
+    return (opcode >= dt_X86_INS_F2XM1 &&
+            opcode <= dt_X86_INS_FYL2XP1) ||
+           (opcode >= dt_X86_INS_FABS && opcode <= dt_X86_INS_FXCH) ||
+           opcode == dt_X86_INS_FXRSTOR64 ||
+           opcode == dt_X86_INS_FXSAVE64 ||
+           opcode == dt_X86_INS_FSTPNCE ||
+           opcode == dt_X86_INS_FDISI8087_NOP ||
+           opcode == dt_X86_INS_FENI8087_NOP;
+}
+
 bool ir1_translate(IR1_INST *ir1)
 {
     /* Pattern translators also overwrite the cached table's temporary GPR. */
@@ -2581,6 +2593,8 @@ int tr_ir2_generate(struct TranslationBlock *tb)
     }
 #endif
     for (i = 0; i < ir1_nr; ++i) {
+        bool is_x87 = ir1_is_x87_insn(ir1_opcode(pir1));
+
         /*
          * handle segv scenario, store host pc to gen_insn_data and encode to a BYTE
          * at the end of TB translate cache.
@@ -2597,6 +2611,10 @@ int tr_ir2_generate(struct TranslationBlock *tb)
         imm_cache->curr_ir2_index = lsenv->tr_data->ir2_inst_num_current;
 #endif
         tr_init_for_each_ir1_in_tb(pir1, ir1_nr, i);
+        if (is_x87 &&
+            (i == 0 || !ir1_is_x87_insn(ir1_opcode(pir1 - 1)))) {
+            begin_x87_fcsr_access();
+        }
 #if defined(CONFIG_LATX_DEBUG) && defined(TARGET_X86_64) && \
     defined(CONFIG_LATX_RUNTIME_TRACE_RANGE)
         if (pir1->info->address == option_begin_trace_addr) {
@@ -2643,6 +2661,12 @@ int tr_ir2_generate(struct TranslationBlock *tb)
             reduce_proepo = false;
             lsenv->tr_data->softfpu_region_active = false;
             gen_softfpu_helper_epilogue(pir1);
+        }
+
+        if (is_x87 &&
+            (i + 1 == ir1_nr ||
+             !ir1_is_x87_insn(ir1_opcode(pir1 + 1)))) {
+            end_x87_fcsr_access();
         }
 
 #ifdef CONFIG_LATX_IMM_REG
