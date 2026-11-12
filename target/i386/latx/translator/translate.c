@@ -19,6 +19,7 @@
 #include "imm-cache.h"
 #include "latx-smc.h"
 #include "jrra.h"
+#include "hardware-ras.h"
 #include "latx-native-asm.h"
 
 extern void *helper_tb_lookup_ptr(CPUArchState *);
@@ -434,6 +435,17 @@ int label_dispose(TranslationBlock *tb, TRANSLATION_DATA *lat_ctx)
                 tb->s_data->indirect_miss_offset = ir2_label[label_id];
             }
 #endif
+            if (tb->s_data->last_ir1_type == IR1_TYPE_CALLIN &&
+                tb->jmp_target_arg[0] != TB_JMP_RESET_OFFSET_INVALID &&
+                tb->jmp_target_arg[1] != TB_JMP_RESET_OFFSET_INVALID &&
+                tb->jmp_reset_offset[1] != TB_JMP_RESET_OFFSET_INVALID) {
+                label_id = tb->jmp_target_arg[0];
+                tb->jmp_target_arg[0] = ir2_label[label_id];
+                label_id = tb->jmp_target_arg[1];
+                tb->jmp_target_arg[1] = ir2_label[label_id];
+                label_id = tb->jmp_reset_offset[1];
+                tb->jmp_reset_offset[1] = ir2_label[label_id];
+            }
 #endif
         } else if (!use_tu_jmp(tb)) {
             for (i = 0; i < 2; ++i) {
@@ -2897,7 +2909,7 @@ int tr_translate_tb(struct TranslationBlock *tb)
  * ra_alloc_dbt_arg2: next x86 ip
  */
 
-static void generate_indirect_goto(void *code_buf)
+static void generate_indirect_goto(void *code_buf, bool is_return, bool is_call)
 {
     /*
      * WARNING!!!
@@ -2914,6 +2926,10 @@ static void generate_indirect_goto(void *code_buf)
     IR2_OPND jmp_cache_addr = ra_alloc_static0();
 
     IR2_OPND next_tb = V0_RENAME_OPND;
+    IR2_OPND call_jirl_label = {0};
+    IR2_OPND call_bne_label = {0};
+    TranslationBlock *tb = lsenv->tr_data->curr_tb;
+    bool hras_callin_layout = false;
     /*
      * lookup HASH_JMP_CACHE
      * Step 1: calculate HASH = (x86_addr >> 12) ^ (x86_addr & 0xfff)
@@ -2947,13 +2963,38 @@ static void generate_indirect_goto(void *code_buf)
     la_masknez(next_tb, next_tb, jmp_entry);
     la_maskeqz(epi_addr, epi_addr, jmp_entry);
     la_or(next_tb, next_tb, epi_addr);
+    la_jirl(zero_ir2_opnd, next_tb, 0);
 #else
     la_alsl_d(next_tb, next_tb, jmp_cache_addr, 3);
     la_ld_d(jmp_entry, next_tb, 0);
+    if (is_call && option_hw_cache_ras && hras_tb_in_tu(tb)) {
+        target_ulong continuation;
+
+        hras_callin_layout = hras_unpack_call_offset(tb->lazypc[1], tb->pc,
+                                                     &continuation);
+    }
+    if (hras_callin_layout) {
+        call_bne_label = ra_alloc_label();
+        call_jirl_label = ra_alloc_label();
+        tb->jmp_target_arg[0] = ir2_opnd_label_id(&label_miss);
+        tb->jmp_target_arg[1] = ir2_opnd_label_id(&call_jirl_label);
+        tb->jmp_reset_offset[1] = ir2_opnd_label_id(&call_bne_label);
+        la_label(call_bne_label);
+    }
     la_bne(jmp_entry, next_x86_addr, label_miss);
-    la_ld_d(next_tb, next_tb, 8);
+    if (is_return && option_hw_cache_ras && hras_tb_in_tu(tb)) {
+        la_ld_d(ra_ir2_opnd, next_tb, 8);
+        la_jirl(zero_ir2_opnd, ra_ir2_opnd, 0);
+    } else {
+        la_ld_d(next_tb, next_tb, 8);
+        if (hras_callin_layout) {
+            la_label(call_jirl_label);
+            la_jirl(zero_ir2_opnd, next_tb, 0);
+        } else {
+            la_jirl(zero_ir2_opnd, next_tb, 0);
+        }
+    }
 #endif
-    la_jirl(zero_ir2_opnd, next_tb, 0);
 #else
     la_slli_d(next_tb, next_tb, 3);
     la_ldx_d(next_tb, next_tb, jmp_cache_addr);
@@ -3000,12 +3041,10 @@ static void generate_indirect_goto(void *code_buf)
      * Only offline AOT TU generation records this offset; standalone/JIT exits
      * retain the original inline tail.
      */
-    TranslationBlock *tu_tb = lsenv->tr_data->curr_tb;
-
-    if (tu_tb && in_pre_translate && aot_cross_page_tu_enabled() &&
-        tu_tb->s_data->tu_id) {
+    if (tb && in_pre_translate && aot_cross_page_tu_enabled() &&
+        !hras_callin_layout && tb->s_data->tu_id) {
         /* Use label + 1 until label_dispose() resolves the byte offset. */
-        tu_tb->s_data->indirect_miss_offset =
+        tb->s_data->indirect_miss_offset =
             ir2_opnd_label_id(&label_miss) + 1;
     }
 #endif
@@ -3325,7 +3364,9 @@ indirect_jmp:
             IR2_OPND old_jmp_label = ra_alloc_label();
             la_label(old_jmp_label);
             tb->jmp_indirect = ir2_opnd_label_id(&old_jmp_label);
-            generate_indirect_goto((void *)tb->tc.ptr);
+            generate_indirect_goto((void *)tb->tc.ptr,
+                                    opcode == dt_X86_INS_RET,
+                                    opcode == dt_X86_INS_CALL);
         } else {
             la_data_li(target, context_switch_native_to_bt_ret_0);
             aot_la_append_ir2_jmp_far(target, base, B_EPILOGUE_RET_0, 0);
@@ -3474,7 +3515,7 @@ static int generate_indirect_jmp_glue(void *code_buf)
     int ins_num;
     tr_init(NULL);
 
-    generate_indirect_goto(code_buf);
+    generate_indirect_goto(code_buf, false, false);
 
     TRANSLATION_DATA *lat_ctx = lsenv->tr_data;
     label_dispose(NULL, lat_ctx);
@@ -3803,6 +3844,9 @@ void latx_tb_set_jmp_target(TranslationBlock *tb, int n,
 {
     assert(!use_tu_jmp(tb));
     tb_set_jmp_target(tb, n, (uintptr_t)next_tb->tc.ptr);
+    if (n == 0) {
+        hras_link_call(tb, next_tb);
+    }
 #ifdef CONFIG_LATX_LAZYLINK
     if (tb->lazylink[n] != 2) {
         return;

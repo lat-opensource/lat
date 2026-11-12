@@ -49,44 +49,51 @@ wait_cache() {
     echo "FAIL: no current AOT artifact for $guest" >&2
     exit 1
 }
-for mode in 0 1 3; do
-    hashes=(0)
-    if [[ "$kind" == indirect-cold && "$mode" == 3 ]]; then
-        hashes+=(1)
-    fi
-    for hash in "${hashes[@]}"; do
-        export LATX_FAST_JMPCACHE_HASH=$hash
-        cache="$work/cache-aot-$mode-hash-$hash"
-        mkdir "$cache"
-        export LATX_AOT=$mode LATX_AOT_GENERATE=1
-        run_guest "$binary" "$guest"
-        [[ "$mode" != 0 ]] || continue
-        wait_cache
-        export LATX_AOT_GENERATE=0
-        marker="$work/loaded-aot-$mode-hash-$hash"
-        run_guest env LATX_TEST_AOT_LOAD_MARKER="$marker" \
-            "$binary" "$guest"
-        grep -Fx "$guest" "$marker" >/dev/null || {
-            echo "FAIL: current guest artifact was not accepted" >&2
-            exit 1
-        }
+hras_values=(0)
+if [[ "$kind" == indirect-cold ]]; then
+    hras_values+=(1)
+fi
+for hras in "${hras_values[@]}"; do
+    export LATX_HRAS=$hras
+    for mode in 0 1 3; do
+        hashes=(0)
         if [[ "$kind" == indirect-cold && "$mode" == 3 ]]; then
-            for kzt in 0 1; do
-                export LATX_KZT=$kzt
-                log="$work/gdb-kzt-$kzt-hash-$hash.log"
-                run_guest gdb -nx -q -batch \
-                    -x "$tests/tu-indirect-cold-gdb.py" -ex 'quit 1' \
-                    --args "$binary" "$guest" > "$log" 2>&1 || {
-                    cat "$log"; exit 1;
-                }
-                restored='AOT restored cold tail executed after signal '
-                restored+='unlink/relink PASS'
-                grep -F "$restored" "$log"
-                grep -F 'AOT moved KZT helper relocation executed PASS' \
-                    "$log"
-            done
+            hashes+=(1)
         fi
-        export LATX_KZT=0
+        for hash in "${hashes[@]}"; do
+            export LATX_FAST_JMPCACHE_HASH=$hash
+            cache="$work/cache-hras-$hras-aot-$mode-hash-$hash"
+            mkdir "$cache"
+            export LATX_AOT=$mode LATX_AOT_GENERATE=1
+            run_guest "$binary" "$guest"
+            [[ "$mode" != 0 ]] || continue
+            wait_cache
+            export LATX_AOT_GENERATE=0
+            marker="$work/loaded-hras-$hras-aot-$mode-hash-$hash"
+            run_guest env LATX_TEST_AOT_LOAD_MARKER="$marker" \
+                "$binary" "$guest"
+            grep -Fx "$guest" "$marker" >/dev/null || {
+                echo "FAIL: current guest artifact was not accepted" >&2
+                exit 1
+            }
+            if [[ "$kind" == indirect-cold && "$mode" == 3 ]]; then
+                for kzt in 0 1; do
+                    export LATX_KZT=$kzt
+                    log="$work/gdb-hras-$hras-kzt-$kzt-hash-$hash.log"
+                    run_guest gdb -nx -q -batch \
+                        -x "$tests/tu-indirect-cold-gdb.py" -ex 'quit 1' \
+                        --args "$binary" "$guest" > "$log" 2>&1 || {
+                        cat "$log"; exit 1;
+                    }
+                    restored='AOT restored cold tail executed after signal '
+                    restored+='unlink/relink PASS'
+                    grep -F "$restored" "$log"
+                    grep -F 'AOT moved KZT helper relocation executed PASS' \
+                        "$log"
+                done
+            fi
+            export LATX_KZT=0
+        done
     done
 done
 sha256sum "$binary" "$guest"

@@ -4,6 +4,7 @@ import gdb
 
 low = int(os.environ['TU_COLD_BEGIN'], 0)
 high = int(os.environ['TU_COLD_END'], 0)
+HRAS_CALLIN_ACTIVE = 0x4852434900000001
 IR1_TYPE_RET = 4
 checked = False
 armed = False
@@ -118,7 +119,8 @@ class Register(gdb.Breakpoint):
             return False
         try:
             # aot_tb_register() always receives the block in LoongArch a0 ($r4).
-            # Read the argument instead of an optimized-out caller local.
+            # Read the argument instead of an optimized-out caller local: HRAS
+            # recovery registers blocks through more than one call site.
             tb_address = int(gdb.parse_and_eval('$r4'))
             tb = gdb.parse_and_eval(
                 '(TranslationBlock *)%d' % tb_address).dereference()
@@ -130,7 +132,8 @@ class Register(gdb.Breakpoint):
         assert int(tb['bool_flags']) & 8, 'must be a restored AOT TB'
         if not int(tb['bool_flags']) & 0x80:
             return False
-        if tb_address not in restored_rets:
+        if tb_address not in restored_rets or \
+                int(tb['lazypc'][0]) == HRAS_CALLIN_ACTIVE:
             return False
         tc, size = int(tb['tc']['ptr']), int(tb['tc']['size'])
         slot = tc + size - 4

@@ -33,6 +33,7 @@
 #include<sys/syscall.h>
 #include "exec/translate-all.h"
 #include "latx-smc.h"
+#include "hardware-ras.h"
 #ifdef CONFIG_LATX_AOT
 /* Tbs vector with @tb_num@ elements. */
 static TranslationBlock **tb_vector;
@@ -393,6 +394,8 @@ static aot_segment *find_seg(target_ulong target_seg_begin,
 static inline int create_aot_tb(aot_tb *curr_aot_tb, TranslationBlock *tb, 
         aot_segment *curr_seg, aot_segment *p_segments)
 {
+    uint8_t last_ir1_type = tb->s_data->last_ir1_type;
+
 #ifdef CONFIG_LATX_TU
     curr_aot_tb->tu_id = aot_cross_page_tu_enabled() ?
         (is_tu_tb(tb) ? tb->s_data->tu_id : tb->pc) -
@@ -412,6 +415,15 @@ static inline int create_aot_tb(aot_tb *curr_aot_tb, TranslationBlock *tb,
     curr_aot_tb->lazypc[1] = tb->lazypc[1];
     curr_aot_tb->canlink[0] = tb->canlink[0];
     curr_aot_tb->canlink[1] = tb->canlink[1];
+
+    /*
+     * Pre-translation may reuse s_data after this TB has been assembled.
+     * The CALLIN tag remains in persistent lazypc metadata, so use it to
+     * restore the type consumed by AOT recovery and merge.
+     */
+    if (hras_callin_has_cold_exit(tb)) {
+        last_ir1_type = IR1_TYPE_CALLIN;
+    }
     curr_aot_tb->jmp_stub_target_arg[0] = tb->jmp_stub_target_arg[0];
     curr_aot_tb->jmp_stub_target_arg[1] = tb->jmp_stub_target_arg[1];
     curr_aot_tb->next_tb_pc_offset = -1;
@@ -431,7 +443,6 @@ static inline int create_aot_tb(aot_tb *curr_aot_tb, TranslationBlock *tb,
         curr_aot_tb->jmp_stub_reset_offset[1] = tb->jmp_stub_reset_offset[1];
     }
     if (!use_indirect_jmp(tb)) {
-        uint8_t last_ir1_type = tb->s_data->last_ir1_type;
         if ((last_ir1_type == IR1_TYPE_BRANCH)
                 && tb->s_data->next_pc < curr_seg->details.seg_end
                 && tb->s_data->next_pc >= curr_seg->details.seg_begin) {
@@ -465,7 +476,7 @@ static inline int create_aot_tb(aot_tb *curr_aot_tb, TranslationBlock *tb,
     curr_aot_tb->rel_start_index = tb->s_data->rel_start;
     curr_aot_tb->rel_end_index = tb->s_data->rel_end;
     curr_aot_tb->first_jmp_align = tb->first_jmp_align;
-    curr_aot_tb->last_ir1_type = tb->s_data->last_ir1_type;
+    curr_aot_tb->last_ir1_type = last_ir1_type;
     /* AOT_STATS_COUNTED is runtime-only state. */
     curr_aot_tb->bool_flags =
         (tb->bool_flags & ~AOT_STATS_COUNTED) | IS_AOT_TB;

@@ -62,6 +62,7 @@ extern struct elfheader_s * elf_header;
 #endif
 #ifdef CONFIG_LATX
 #include "jrra.h"
+#include "hardware-ras.h"
 #endif
 /* -icount align implementation. */
 
@@ -575,6 +576,11 @@ void tb_stub_bypass(TranslationBlock *tb, int n, uintptr_t addr)
 void tb_set_jmp_target(TranslationBlock *tb, int n, uintptr_t addr)
 {
     assert(!use_tu_jmp(tb));
+#ifdef CONFIG_LATX
+    if (hras_set_call_target(tb, n, addr)) {
+        return;
+    }
+#endif
 #if defined(CONFIG_LATX) && defined(CONFIG_LATX_BNE_B)
 #define B_SHIFT     26
 #define OFF16_BITS  0xfc0003ff

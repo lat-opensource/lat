@@ -92,6 +92,13 @@ test(
 )
 
 test(
+  'test-latx-hras-pair',
+  python,
+  args: [files('test-latx-hras-pair.py'), project_source_root],
+  suite: 'lat-pr-fast',
+)
+
+test(
   'test-latx-tu-restore',
   python,
   args: [files('test-latx-tu-restore.py'), project_source_root],

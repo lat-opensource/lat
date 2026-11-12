@@ -3,6 +3,9 @@ foreach tu_target : [['i386', '32'], ['x86_64', '64']]
   if tu_target[0] + '-linux-user' in target_dirs
     tu_cases = ['boundary', 'mode-cache', 'hash-cache', 'lifecycle', 'signal-fault',
                 'member-limit', 'search-buffer']
+    if config_host.has_key('CONFIG_LATX_DEBUG')
+      tu_cases += ['hras-call', 'hras-indirect-call']
+    endif
     if tu_target[0] == 'i386'
       tu_cases += ['late-thunk']
     endif

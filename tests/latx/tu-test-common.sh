@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: GPL-2.0-only
 # Helpers for isolated cross-TU runtime tests. Source after selecting guest.
 export LATX_KZT=0 LATX_TU=1 LATX_JRRA=0 LATX_JRRA_STACK=0
+export LATX_HRAS=${LATX_HRAS:-1}
 export LATX_FAST_JMPCACHE_HASH=0 LATX_SOFTFPU=0 LATX_AOT_GENERATE=1
 
 cache_path() {

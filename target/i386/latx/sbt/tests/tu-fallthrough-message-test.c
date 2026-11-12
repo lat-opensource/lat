@@ -8,6 +8,7 @@
 __thread CPUState *thread_cpu;
 int qemu_loglevel;
 int option_aot = 3;
+int option_hw_cache_ras;
 int option_tu = 1;
 int dt_debug_enable;
 __thread TCGContext *tcg_ctx;
@@ -225,6 +226,15 @@ static void check_messages(bool code64)
 
     free(dynamic_tb_message_vector);
 
+    blocks[2].lazypc[1] = hras_pack_call_offset(blocks[2].pc, 0x1020);
+    seg.first_tb_id = -1;
+    seg.last_tb_id = -2;
+    segment_num = 1;
+    get_dynamic_message(&list[2], 1, segments, &segment_num);
+    g_assert(dynamic_tb_message_vector[0].fallthrough_offset ==
+             0x1020 - blocks[2].pc);
+    free(dynamic_tb_message_vector);
+
     blocks[2].lazypc[1] = 0;
     unreadable = true;
     seg.first_tb_id = -1;
@@ -237,6 +247,7 @@ static void check_messages(bool code64)
 
     /* Empty TBs remain ineligible even with a tagged continuation. */
     blocks[2].size = 0;
+    blocks[2].lazypc[1] = hras_pack_call_offset(blocks[2].pc, 0x1020);
     segment_num = 1;
     get_dynamic_message(&list[2], 1, segments, &segment_num);
     g_assert(dynamic_tb_message_vector[0].fallthrough_offset == 0);
@@ -513,22 +524,26 @@ static void check_member_queue_capacity(target_ulong base, bool cross_page,
 int main(void)
 {
     gitcapstone_init(64);
-    option_aot = 3;
-    check_messages(false);
-    check_messages(true);
-    check_fallthrough_offsets(0x1000);
-    check_member_queue(0x1000);
-    check_shared_call_tail(0x1000, false);
-    check_member_queue_capacity(0x1000, true, false, false);
-    check_member_queue_capacity(0x1000, true, true, false);
-    check_member_queue_capacity(0x1000, true, true, true);
-    check_member_queue_capacity(0x1000, false, false, false);
-    check_member_queue_capacity(0x1000, false, true, false);
+    /* TB metadata and TU membership must not depend on HRAS. */
+    for (int hras = 0; hras <= 1; hras++) {
+        option_hw_cache_ras = hras;
+        option_aot = 3;
+        check_messages(false);
+        check_messages(true);
+        check_fallthrough_offsets(0x1000);
+        check_member_queue(0x1000);
+        check_shared_call_tail(0x1000, false);
+        check_member_queue_capacity(0x1000, true, false, false);
+        check_member_queue_capacity(0x1000, true, true, false);
+        check_member_queue_capacity(0x1000, true, true, true);
+        check_member_queue_capacity(0x1000, false, false, false);
+        check_member_queue_capacity(0x1000, false, true, false);
 #if TARGET_ABI_BITS == 64
-    check_fallthrough_offsets(UINT64_C(0x100000000) + 0x1000);
-    check_member_queue(UINT64_C(0x100000000) + 0x1000);
-    check_shared_call_tail(UINT64_C(0x100000000) + 0x1000, true);
+        check_fallthrough_offsets(UINT64_C(0x100000000) + 0x1000);
+        check_member_queue(UINT64_C(0x100000000) + 0x1000);
+        check_shared_call_tail(UINT64_C(0x100000000) + 0x1000, true);
 #endif
+    }
     puts("PASS: full-TB fallthrough closure");
     return 0;
 }

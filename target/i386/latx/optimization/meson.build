@@ -1,6 +1,7 @@
 i386_ss.add(when: 'CONFIG_LATX', if_true: files(
   'tu.c',
   'jrra.c',
+  'hardware-ras.c',
   'flag-lbt.c',
   'flag-reduction.c',
   'insts-pattern.c',

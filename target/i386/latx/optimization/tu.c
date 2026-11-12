@@ -10,6 +10,7 @@
  * @brief TU optimization
  */
 #include "common.h"
+#include "qemu/bitmap.h"
 #include "exec/exec-all.h"
 #include "tcg/tcg.h"
 #include "translate.h"
@@ -21,6 +22,7 @@
 #include "jrra.h"
 #include "reg-alloc.h"
 #include "latx-options.h"
+#include "hardware-ras.h"
 #include "aot_page.h"
 #ifdef CONFIG_LATX_AOT
 #include "aot.h"
@@ -284,6 +286,8 @@ void tu_enough_space(CPUState *cpu)
 
 void tu_reset_tb(TranslationBlock *tb)
 {
+    tb->lazypc[0] = 0;
+    tb->lazypc[1] = 0;
     qemu_spin_init(&tb->jmp_lock);
     tb->jmp_dest[0] = (uintptr_t)NULL;
     tb->jmp_dest[1] = (uintptr_t)NULL;
@@ -1124,11 +1128,20 @@ static void fix_rel_table(uint32_t tb_num_in_tu, TranslationBlock **tb_list,
     for (int i = 0; i < tb_num_in_tu; i++) {
         tb = tb_list[i];
         for (int j = tb->s_data->rel_start; j != -1 && j <= tb->s_data->rel_end; j++) {
-            if (indirect_delta[i] &&
+            if (hras_call_has_cold_exit(tb) &&
+                rel_table[j].kind == JIRL_EPILOGUE_RET_ID_0 &&
+                rel_table[j].tc_offset == tb->jmp_target_arg[0]) {
+                rel_table[j].kind = B_EPILOGUE_RET_ID_0;
+                rel_table[j].tc_offset = tb->jmp_target_arg[1] + 4;
+            } else if (indirect_delta[i] &&
                 rel_table[j].tc_offset >= tb->s_data->indirect_miss_offset) {
                 rel_table[j].tc_offset += indirect_delta[i];
             } else if (rel_table[j].tc_offset >= tb->tc.size) {
-                rel_table[j].tc_offset += tb->tu_unlink.stub_offset - tb->tc.size;
+                uintptr_t stub_offset = hras_callin_has_cold_exit(tb) ?
+                    tb->jmp_target_arg[0] :
+                    (hras_call_has_cold_exit(tb) ?
+                     tb->jmp_target_arg[1] : tb->tu_unlink.stub_offset);
+                rel_table[j].tc_offset += stub_offset - tb->tc.size;
             }
         }
     }
@@ -1192,14 +1205,22 @@ static void mov_unlink_stub_to_end(uint32_t tb_num_in_tu, TranslationBlock **tb_
     uint32_t *tmp_buffer = (uint32_t *)tcg_ctx->code_gen_ptr;
     g_autofree uint32_t *cold_tmp_buffer = NULL;
     size_t tu_size = tb_list[0]->s_data->tu_size;
+    size_t direct_reserve = tb_num_in_tu * 12;
     size_t indirect_reserve = tb_num_in_tu * sizeof(uint32_t);
-    size_t reserve = indirect_reserve + CODE_GEN_ALIGN;
+    size_t reserve = direct_reserve + indirect_reserve + CODE_GEN_ALIGN;
+    size_t callin_cold_size = 0;
     size_t indirect_stubs[tb_num_in_tu];
     size_t cold_sizes[tb_num_in_tu];
+    DECLARE_BITMAP(callin_layout_map, MAX_TB_IN_CACHE) = { 0 };
     bool outline_indirect = in_pre_translate && aot_cross_page_tu_enabled() &&
         tcg_ctx->code_gen_ptr + reserve < tcg_ctx->code_gen_highwater &&
         tb_target_jmp_in_range((uintptr_t)tb_list[0]->tc.ptr,
             (uintptr_t)tcg_splitwx_to_rx(tcg_ctx->code_gen_ptr) + reserve);
+    bool callin_layout = option_hw_cache_ras &&
+        tu_size < HRAS_LA_BRANCH_RANGE / 2;
+    bool direct_layout = aot_cross_page_tu_enabled() &&
+        option_hw_cache_ras &&
+        tcg_ctx->code_gen_ptr + direct_reserve < tcg_ctx->code_gen_highwater;
     bool has_indirect_tail = false;
 
     assert(tu_size % 4 == 0);
@@ -1207,6 +1228,7 @@ static void mov_unlink_stub_to_end(uint32_t tb_num_in_tu, TranslationBlock **tb_
     memset(cold_sizes, 0, sizeof(cold_sizes));
     for (int i = 0; i < tb_num_in_tu; i++) {
         TranslationBlock *tb = tb_list[i];
+        TranslationBlock *next = i + 1 < tb_num_in_tu ? tb_list[i + 1] : NULL;
         size_t miss = tb->s_data->indirect_miss_offset;
 
         tb->tu_cold_offset = 0;
@@ -1216,9 +1238,18 @@ static void mov_unlink_stub_to_end(uint32_t tb_num_in_tu, TranslationBlock **tb_
             cold_sizes[i] = tb->tc.size - miss;
             has_indirect_tail = true;
         }
+        if (callin_layout && hras_callin_can_layout(tb, next)) {
+            set_bit(i, callin_layout_map);
+            callin_cold_size += tb->tc.size - tb->jmp_target_arg[0];
+            cold_sizes[i] = tb->tc.size - tb->jmp_target_arg[0];
+        }
     }
-    if (has_indirect_tail) {
-        cold_tmp_buffer = g_malloc(tu_size);
+    if (callin_cold_size || has_indirect_tail || direct_layout) {
+        /* Moved tails are disjoint parts of the original TU. */
+        size_t scratch_size = tu_size +
+                              (direct_layout ? direct_reserve : 0);
+
+        cold_tmp_buffer = g_malloc(scratch_size);
         tmp_buffer = cold_tmp_buffer;
     }
     uintptr_t tmp_buffer_size = 0;
@@ -1226,6 +1257,9 @@ static void mov_unlink_stub_to_end(uint32_t tb_num_in_tu, TranslationBlock **tb_
     TranslationBlock *tb;
     for (int i = 0; i < tb_num_in_tu; i++) {
         tb = tb_list[i];
+        TranslationBlock *callee = NULL;
+        TranslationBlock *next = i + 1 < tb_num_in_tu ? tb_list[i + 1] : NULL;
+
         if (indirect_stubs[i]) {
             size_t miss = tb->s_data->indirect_miss_offset;
             size_t cold_size = tb->tc.size - miss;
@@ -1236,7 +1270,60 @@ static void mov_unlink_stub_to_end(uint32_t tb_num_in_tu, TranslationBlock **tb_
             tb->tc.size = miss + sizeof(uint32_t);
             tmp_buffer_size += cold_size;
         }
-        if (use_tu_jmp(tb)) {
+
+        if (test_bit(i, callin_layout_map)) {
+            uintptr_t miss = tb->jmp_target_arg[0];
+            size_t cold_size = tb->tc.size - miss;
+
+            memcpy((void *)((uintptr_t)tmp_buffer + tmp_buffer_size),
+                   (void *)((uintptr_t)tb->tc.ptr + miss), cold_size);
+            tb->jmp_target_arg[0] = tmp_buffer_size;
+            tb->lazypc[0] = HRAS_CALLIN_PENDING;
+            tb->tc.size = miss;
+            tmp_buffer_size += cold_size;
+        }
+
+        if (direct_layout && !use_tu_jmp(tb)) {
+            /*
+             * Only members of this allocation retain their relative positions
+             * when AOT moves the TU. Cross-TU calls retain their pair.
+             */
+            for (int j = 0; j < tb_num_in_tu; j++) {
+                if (tb_list[j]->pc == tb->pc + tb->lazypc[0]) {
+                    callee = tb_list[j];
+                    break;
+                }
+            }
+        }
+        uintptr_t slot = (uintptr_t)tb->tc.ptr + tb->jmp_target_arg[0];
+        bool single = callee && callee->flags == tb->flags &&
+            tb_cflags(callee) == tb_cflags(tb) &&
+            tb_target_jmp_in_range(slot, (uintptr_t)callee->tc.ptr);
+
+        if (direct_layout && single && hras_call_can_layout(tb, next)) {
+            uint32_t *stub = (void *)((uintptr_t)tmp_buffer + tmp_buffer_size);
+            uint32_t *pair = (void *)(tb->tc.ptr + tb->jmp_target_arg[0]);
+
+            /*
+             * Build an immutable cold exit. a0 must identify the source CALL.
+             * Moving JIRL also changes its link register from a0 to zero.
+             */
+            stub[0] = 0x18000004; /* pcaddi a0, 0 */
+            stub[1] = pair[0];
+            stub[2] = pair[1] & ~0x1f;
+            tb->lazypc[1] = HRAS_SINGLE_CALL_MAGIC |
+                            ((uint64_t)tb->lazypc[1] & UINT32_MAX);
+            tb->jmp_target_arg[1] = tmp_buffer_size;
+            cold_sizes[i] = 12;
+            tmp_buffer_size += 12;
+            tb->tc.size = tb->jmp_target_arg[0] + (single ? 4 : 8);
+            tb->jmp_reset_offset[0] = tb->tc.size;
+#ifdef CONFIG_LATX_INSTS_PATTERN
+            tb->eflags_target_arg[0] = TB_JMP_RESET_OFFSET_INVALID;
+            tb->eflags_target_arg[1] = TB_JMP_RESET_OFFSET_INVALID;
+            tb->eflags_target_arg[2] = TB_JMP_RESET_OFFSET_INVALID;
+#endif
+        } else if (use_tu_jmp(tb)) {
 #ifdef CONFIG_LATX_INSTS_PATTERN
             tb->eflags_target_arg[0] = TB_JMP_RESET_OFFSET_INVALID;
             tb->eflags_target_arg[1] = TB_JMP_RESET_OFFSET_INVALID;
@@ -1271,7 +1358,24 @@ static void mov_unlink_stub_to_end(uint32_t tb_num_in_tu, TranslationBlock **tb_
         curr_pos += tb->tc.size;
     }
 
-    memcpy((void *)curr_pos, tmp_buffer, tmp_buffer_size);
+    memmove((void *)curr_pos, tmp_buffer, tmp_buffer_size);
+    for (int i = 0; i < tb_num_in_tu; i++) {
+        tb = tb_list[i];
+        if (tb->lazypc[0] == HRAS_CALLIN_PENDING) {
+            TranslationBlock *next = i + 1 < tb_num_in_tu ?
+                                     tb_list[i + 1] : NULL;
+            uintptr_t cold = curr_pos + tb->jmp_target_arg[0];
+
+            hras_callin_activate_layout(tb, next, cold);
+            tb->tu_cold_offset = tb->jmp_target_arg[0];
+            tb->tu_cold_size = cold_sizes[i];
+        }
+    }
+    if (curr_pos + tmp_buffer_size > (uintptr_t)tcg_ctx->code_gen_ptr) {
+        qatomic_set(&tcg_ctx->code_gen_ptr,
+                    (void *)ROUND_UP(curr_pos + tmp_buffer_size,
+                                     CODE_GEN_ALIGN));
+    }
 
     for (int i = 0; i < tb_num_in_tu; i++) {
         tb = tb_list[i];
@@ -1286,6 +1390,25 @@ static void mov_unlink_stub_to_end(uint32_t tb_num_in_tu, TranslationBlock **tb_
             indirect_stubs[i] = cold - slot;
             tb->tu_cold_offset = cold - (uintptr_t)tb->tc.ptr;
             tb->tu_cold_size = cold_sizes[i];
+        } else if (hras_call_has_cold_exit(tb)) {
+            bool single = hras_call_is_single(tb);
+            uintptr_t slot = (uintptr_t)tb->tc.ptr + tb->jmp_target_arg[0];
+            uintptr_t stub = curr_pos + tb->jmp_target_arg[1];
+            int64_t diff = (int64_t)(slot + (single ? 4 : 8)) - (int64_t)stub;
+            uint32_t *pcaddi = (void *)stub;
+
+            assert((diff & 3) == 0 && diff / 4 == sextract64(diff / 4, 0, 20));
+            tb->jmp_target_arg[1] = stub - (uintptr_t)tb->tc.ptr;
+            tb->tu_cold_offset = tb->jmp_target_arg[1];
+            tb->tu_cold_size = cold_sizes[i];
+            /* a0 identifies the source CALL, not the shared TU tail. */
+            *pcaddi = (*pcaddi & ~(0xfffff << 5)) |
+                      (((diff / 4) & 0xfffff) << 5);
+            light_tb_target_set_jmp_target((uintptr_t)tb->tc.ptr,
+                stub + 4, stub + 4, context_switch_native_to_bt_ret_id_0);
+            /* First B hides both words before the first runtime link. */
+            b_to_addr(slot, slot - tcg_splitwx_diff, stub);
+            tb_reset_jump(tb, 0);
         } else if (use_tu_jmp(tb)) {
             tb->tu_unlink.stub_offset = curr_pos  + tb->tu_unlink.stub_offset
                 - (uintptr_t)tb->tc.ptr;

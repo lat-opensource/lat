@@ -13,6 +13,7 @@
 
 #include "aot_recover_tb.h"
 #include "latx-options.h"
+#include "hardware-ras.h"
 #include "lsenv.h"
 #include "accel/tcg/internal.h"
 #include "exec/cpu-all.h"
@@ -730,6 +731,9 @@ static void recover_tb_range(target_ulong page, struct aot_tb *p_aot_tbs,
 #endif
             assert(tb->cflags == tcg_ctx->tb_cflags);
             aot_do_tb_reloc(tb, record, start, end);
+            if (hras_call_is_single(tb)) {
+                tb_reset_jump(tb, 0);
+            }
             if (!aot_cross_page_tu_enabled()) {
                 target_ulong next_pc = record->next_tb_pc_offset == -1 ? 0 :
                     start + record->next_tb_pc_offset;
@@ -758,6 +762,10 @@ static void recover_tb_range(target_ulong page, struct aot_tb *p_aot_tbs,
         }
         for (int k = 0; k < member_num; k++) {
             aot_restore_direct_links(tb_in_order[k], members[k]);
+            uintptr_t callee = qatomic_read(&tb_in_order[k]->jmp_dest[0]);
+            if (callee && !(callee & 1)) {
+                hras_link_call(tb_in_order[k], (TranslationBlock *)callee);
+            }
         }
     }
 #endif

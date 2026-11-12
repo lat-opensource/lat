@@ -28,6 +28,9 @@ case "$kind" in
         name=tu-signal-fault ;;
     member-limit) sources=(tu-member-limit.S); name=tu-member-limit ;;
     search-buffer) sources=(tu-search-buffer.S); name=tu-search-buffer ;;
+    hras-call) sources=(tu-hras-call.S); name=tu-hras-call ;;
+    hras-indirect-call)
+        sources=(tu-hras-indirect-call.c); name=tu-hras-indirect-call ;;
     indirect-cold) sources=(tu-indirect-cold.S); name=tu-indirect-cold ;;
     late-thunk) sources=(tu-late-thunk.S); name=tu-late-thunk ;;
     *) exit 2 ;;
@@ -89,7 +92,7 @@ else
     guest="$work/$name$bits"
     args=(-m"$bits" -O2 -g -no-pie -UNDEBUG)
     if [[ "$kind" == lifecycle || "$kind" == signal-fault ||
-          "$kind" == indirect-cold || "$kind" == member-limit ]]; then
+          "$kind" == hras-indirect-call ]]; then
         # Static fixtures also work when the host guest sysroot is older.
         args+=(-pthread -static)
     else
