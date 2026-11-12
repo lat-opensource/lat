@@ -26,6 +26,7 @@ case "$kind" in
     signal-fault)
         sources=(tu-signal-fault.c tu-signal-fault.S tu-signal-fault.h)
         name=tu-signal-fault ;;
+    member-limit) sources=(tu-member-limit.S); name=tu-member-limit ;;
     search-buffer) sources=(tu-search-buffer.S); name=tu-search-buffer ;;
     hras-call) sources=(tu-hras-call.S); name=tu-hras-call ;;
     indirect-cold) sources=(tu-indirect-cold.S); name=tu-indirect-cold ;;
@@ -33,7 +34,7 @@ case "$kind" in
     *) exit 2 ;;
 esac
 if [[ "$kind" == boundary || "$kind" == late-thunk ||
-      "$kind" == entry-signal ]]; then
+      "$kind" == indirect-cold || "$kind" == member-limit ]]; then
     command -v gdb >/dev/null || { echo 'SKIP: GDB required'; exit 77; }
     if ! gdb -nx -q -batch \
             -ex "file $binary" \
@@ -89,7 +90,7 @@ else
     guest="$work/$name$bits"
     args=(-m"$bits" -O2 -g -no-pie -UNDEBUG)
     if [[ "$kind" == lifecycle || "$kind" == signal-fault ||
-          "$kind" == entry-signal ]]; then
+          "$kind" == indirect-cold || "$kind" == member-limit ]]; then
         # Static fixtures also work when the host guest sysroot is older.
         args+=(-pthread -static)
     else
