@@ -15,3 +15,12 @@ foreach tu_target : [['i386', '32'], ['x86_64', '64']]
     endforeach
   endif
 endforeach
+
+if 'x86_64-linux-user' in target_dirs and config_host.has_key('CONFIG_LATX_KZT')
+  latx_integration_tests += [{
+    'name': 'test-tu-indirect-cold-x86_64',
+    'runner': find_program('../../../latx/test-tu-runtime.sh'),
+    'args': [emulators['latx-x86_64'], '64', 'indirect-cold'],
+    'timeout': 300,
+  }]
+endif
