@@ -259,6 +259,45 @@ void update_fcsr_by_cw(IR2_OPND cw)
     ra_free_temp(fcsr);
 }
 
+/* Hard-float LDMXCSR replacement. Strict softfpu keeps pending SSE flags
+ * separately; native x87 FAST flags cannot be attributed to SSE here. */
+static void update_fcsr_exceptions_by_mxcsr(IR2_OPND mxcsr)
+{
+    IR2_OPND fcsr = ra_alloc_itemp();
+    IR2_OPND mapped = ra_alloc_itemp();
+    IR2_OPND invalid = ra_alloc_itemp();
+
+    la_movfcsr2gr(fcsr, fcsr_ir2_opnd);
+
+    /* MXCSR flags [5:2,0] (P,U,O,Z,I) map to FCSR [20:16]
+     * (V,Z,O,U,I). Replace, rather than accumulate, on LDMXCSR so that
+     * a subsequent STMXCSR cannot resurrect cleared hardware flags.
+     * MXCSR Denormal (bit 1) has no FCSR counterpart. */
+    la_bitrev_w(mapped, mxcsr);
+    la_bstrpick_w(mapped, mapped, 29, 26);
+    la_bstrins_w(fcsr, mapped, FCSR_OFF_FLAGS_Z, FCSR_OFF_FLAGS_I);
+    la_bstrins_w(fcsr, mxcsr, FCSR_OFF_FLAGS_V, FCSR_OFF_FLAGS_V);
+
+    /* Masks [12:9,7] use the opposite polarity to FCSR Enables.
+     * Do not use update_fcsr_enable(): its x87 diagnostic override can
+     * force traps even when the guest MXCSR masks those exceptions. */
+    la_srli_w(mapped, mxcsr, 7);
+    la_bstrpick_w(invalid, mapped, 0, 0);
+    la_bitrev_w(mapped, mapped);
+    la_bstrpick_w(mapped, mapped, 29, 26);
+    la_bstrins_w(mapped, invalid, FCSR_OFF_EN_V, FCSR_OFF_EN_V);
+    la_xori(mapped, mapped, FCSR_ENABLE_SET);
+    la_bstrins_w(fcsr, mapped, FCSR_OFF_EN_V, FCSR_OFF_EN_I);
+
+    /* LDMXCSR starts a new exception state, not a new FP operation. */
+    la_bstrins_w(fcsr, zero_ir2_opnd, FCSR_OFF_CAUSE_V, FCSR_OFF_CAUSE_I);
+    la_movgr2fcsr(fcsr_ir2_opnd, fcsr);
+
+    ra_free_temp(invalid);
+    ra_free_temp(mapped);
+    ra_free_temp(fcsr);
+}
+
 void update_sw_by_fcsr(IR2_OPND sw_opnd)
 {
     int status_offset = lsenv_offset_of_status_word(lsenv);
@@ -350,6 +389,11 @@ bool translate_stmxcsr(IR1_INST *pir1)
 
         lsassert(offset <= 0x7ff);
         la_ld_wu(mxcsr_opnd, env_ir2_opnd, offset);
+        /* FAST softfpu also leaves native x87 flags here. Keep its
+         * existing behavior until those flags have a separate owner. */
+        if (!option_softfpu) {
+            merge_fcsr_flags(mxcsr_opnd);
+        }
     }
 
     /* 2. store  the value of the mxcsr register state to the dest_opnd */
@@ -376,9 +420,13 @@ bool translate_ldmxcsr(IR1_INST *pir1)
          * instruction re-syncs FCSR0.RM from the new value. */
         clear_sse_fcsr_flags();
         lsenv->tr_data->sse_rounding_prepared = false;
+    } else if (!option_softfpu) {
+        update_fcsr_exceptions_by_mxcsr(new_mxcsr);
     }
 
-    tr_gen_call_to_helper1((ADDR)update_mxcsr_status, 1,
+    /* This helper only updates SSE status; converting x87 registers would
+     * corrupt MMX payloads that share their storage. */
+    tr_gen_call_to_helper1((ADDR)update_mxcsr_status, 0,
                            LOAD_HELPER_UPDATE_MXCSR_STATUS);
     if (option_softfpu) {
         gen_softfpu_x87_fcsr_exit();
