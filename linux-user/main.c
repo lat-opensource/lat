@@ -1881,7 +1881,7 @@ int main(int argc, char **argv, char **envp)
     aot_init();
 #endif
 #ifdef TARGET_I386
-    initial_guest_exe_fd = fcntl(execfd, F_DUPFD_CLOEXEC, 0);
+    initial_guest_exe_fd = fcntl(execfd, F_DUPFD_CLOEXEC, STDERR_FILENO + 1);
     if (initial_guest_exe_fd < 0) {
         error_report("Unable to preserve guest executable: %s",
                      strerror(errno));
