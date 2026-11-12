@@ -2,7 +2,7 @@
 foreach tu_target : [['i386', '32'], ['x86_64', '64']]
   if tu_target[0] + '-linux-user' in target_dirs
     tu_cases = ['boundary', 'mode-cache', 'hash-cache', 'lifecycle', 'signal-fault',
-                'search-buffer']
+                'member-limit', 'search-buffer']
     if tu_target[0] == 'i386'
       tu_cases += ['late-thunk']
     endif

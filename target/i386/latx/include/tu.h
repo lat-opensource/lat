@@ -28,7 +28,7 @@ void tu_prepare_restore_tb(TranslationBlock *copy,
  * Although the current implementation do not need them.
  */
 #define MAX_TB_IN_TU 50
-#define MAX_TB_IN_TS (500)
+#define MAX_TB_IN_TS (1024)
 #define MAX_TB_IN_CACHE (MAX_TB_IN_TS + 10)
 /* Fixed-size PC index; keep it a power of two and above MAX_TB_IN_CACHE. */
 #define TU_MEMBER_INDEX_SIZE 2048
