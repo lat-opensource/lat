@@ -1,6 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * More than 1024 connected TBs fit within the independent page/IR1 budgets.
+ * One indirect CALL followed by ordinary TBs also catches a CALLIN selection
+ * bit being reused for member i + 64 when the TU's cold tails are moved.
  */
         .text
         .globl _start

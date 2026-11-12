@@ -13,6 +13,7 @@
 #include "bridge.h"
 #endif
 #include "translate.h"
+#include "hardware-ras.h"
 #include "syscall-tunnel.h"
 #include "profile.h"
 #include "tu.h"
@@ -669,6 +670,11 @@ bool translate_call(IR1_INST *pir1)
     }
     la_addi_addrx(esp_opnd, esp_opnd, -opnd_size);
 
+    TranslationBlock *tb = lsenv->tr_data->curr_tb;
+    tb->lazypc[1] = option_hw_cache_ras ?
+                    hras_pack_call_continuation(tb->pc,
+                                                ir1_addr_next(pir1),
+                                                opnd_size) : 0;
     /* QEMU exit_tb & goto_tb */
     tr_generate_exit_tb(pir1, 0);
 
@@ -788,6 +794,12 @@ bool translate_callin(IR1_INST *pir1)
         la_st_h(return_addr_opnd, esp_opnd, -opnd_size);
     }
     la_addi_addrx(esp_opnd, esp_opnd, -opnd_size);
+
+    TranslationBlock *tb = lsenv->tr_data->curr_tb;
+    tb->lazypc[1] = option_hw_cache_ras ?
+                    hras_pack_call_continuation(tb->pc,
+                                                ir1_addr_next(pir1),
+                                                opnd_size) : 0;
     ra_free_temp(return_addr_opnd);
 
     /* 5. indirect linkage */

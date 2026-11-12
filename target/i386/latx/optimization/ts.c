@@ -17,6 +17,7 @@
 #include "latx-config.h"
 #include "ir1.h"
 #include "hbr.h"
+#include "hardware-ras.h"
 #ifdef CONFIG_LATX_TU
 #include "tu.h"
 #endif
@@ -129,9 +130,13 @@ static target_ulong ts_tb_fallthrough_pc(const TranslationBlock *tb)
     unsigned int remaining = tb->size;
     struct la_dt_insn storage;
     IR1_INST ir1 = { 0 };
+    target_ulong continuation;
 
     if (!remaining) {
         return 0;
+    }
+    if (hras_unpack_call_offset(tb->lazypc[1], pc, &continuation)) {
+        return continuation;
     }
 
     while (remaining) {

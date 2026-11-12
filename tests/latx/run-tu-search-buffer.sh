@@ -10,13 +10,13 @@ home="$result/home"
 mkdir -p "$home"
 echo "Results: $result"
 
-timeout 60 env HOME="$home" LATX_AOT=3 LATX_AOT_GENERATE=1 \
+timeout 60 env HOME="$home" LATX_AOT=3 LATX_AOT_GENERATE=1 LATX_HRAS=0 \
     "$binary" "$guest"
 cache=$(cache_path "$home" 3)
 wait_cache "$cache"
 test -s "$cache"
 
-timeout 60 env HOME="$home" LATX_AOT=3 LATX_AOT_GENERATE=0 \
+timeout 60 env HOME="$home" LATX_AOT=3 LATX_AOT_GENERATE=0 LATX_HRAS=0 \
     LATX_TEST_AOT_LOAD_MARKER="$result/loaded" "$binary" "$guest"
 assert_loaded "$result/loaded"
 sha256sum "$binary" "$guest" "$cache"

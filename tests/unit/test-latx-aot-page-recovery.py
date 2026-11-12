@@ -93,6 +93,11 @@ static void aot_link_tree_insert(TranslationBlock *tb, target_ulong a,
                                  target_ulong b) {}
 static bool use_tu_jmp(TranslationBlock *tb) { return false; }
 static bool use_indirect_jmp(TranslationBlock *tb) { return false; }
+static bool hras_callin_has_cold_exit(TranslationBlock *tb) { return false; }
+static void tcg_tb_insert_tu(TranslationBlock **tbs, size_t count)
+{
+    assert(!"legacy TU without an HRAS cold exit should not be indexed");
+}
 #ifdef CONFIG_LATX_TBMINI_ENABLE
 static void aot_tbmini_set_pointer(uintptr_t at, uint64_t tb, uint64_t tag) {}
 #endif

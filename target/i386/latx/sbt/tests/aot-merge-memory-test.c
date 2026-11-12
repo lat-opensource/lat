@@ -375,6 +375,10 @@ static void test_branch_message_recovery(void)
     g_assert(message.fallthrough_offset == 0);
     tb.size = 4;
 
+    tb.lazypc[1] = hras_pack_call_offset(message.pc, message.pc + 0x30);
+    set_tb_message(&message, &tb, &seg);
+    g_assert(message.fallthrough_offset == 0x30);
+    tb.lazypc[1] = 0;
     tb.last_ir1_type = IR1_TYPE_RET;
     set_tb_message(&message, &tb, &seg);
     g_assert(message.fallthrough_offset == 0);

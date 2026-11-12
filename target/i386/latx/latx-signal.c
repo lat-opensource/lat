@@ -13,6 +13,7 @@
 #include "reg-alloc.h"
 #include "translate.h"
 #include "latx-signal.h"
+#include "hardware-ras.h"
 #include "qemu/cacheflush.h"
 #include "exec/tb-lookup.h"
 #include "loongarch-extcontext.h"
@@ -112,6 +113,31 @@ void unlink_indirect_jmp(CPUArchState *env, TranslationBlock *tb, ucontext_t *uc
     uintptr_t tc_ptr = (uintptr_t)tb->tc.ptr;
     uintptr_t jmp_rx = tc_ptr + offset;
     uintptr_t jmp_rw = jmp_rx - tcg_splitwx_diff;
+
+    if (hras_callin_has_cold_exit(tb) &&
+        tb->jmp_target_arg[1] + HRAS_LA_INSN_SIZE <= tb->tc.size &&
+        tb->jmp_reset_offset[1] < tb->tc.size &&
+        tb->jmp_target_arg[0] >= tb->tc.size) {
+        uintptr_t miss;
+        uint32_t insn;
+
+        /*
+         * The continuation TB follows this JIRL and the TU may be shared by
+         * parallel vCPUs.  Replace the JIRL with a branch to the cold miss
+         * path so every executor remains correct while this thread handles
+         * the signal.  A NOP would fall directly into the continuation.
+         */
+        jmp_rx = tc_ptr + tb->jmp_target_arg[1];
+        jmp_rw = jmp_rx - tcg_splitwx_diff;
+        miss = tc_ptr + tb->jmp_target_arg[0];
+        insn = qatomic_read((uint32_t *)jmp_rx);
+        if ((insn & HRAS_LA_OPCODE_MASK) == HRAS_LA_JIRL_OPCODE) {
+            env->insn_save[0] = jmp_rw;
+            env->insn_save[1] = insn;
+            b_to_addr(jmp_rx, jmp_rw, miss);
+        }
+        return;
+    }
 
 #define INS_SIZE 4
 #ifdef CONFIG_LATX_JRRA
@@ -252,6 +278,32 @@ static void unlink_tb_jmp(CPUArchState *env, TranslationBlock *current_tb,
             current_tb->jmp_indirect != TB_JMP_RESET_OFFSET_INVALID) {
         unlink_indirect_jmp(env, current_tb, uc);
     } else {
+#if defined(CONFIG_LATX_TU) && defined(CONFIG_LATX_FAST_JMPCACHE) && \
+    defined(CONFIG_LATX_LAZYLINK)
+        target_ulong continuation;
+
+        /*
+         * Replay only the host jump pair, after the guest CALL's stack
+         * update. The first word is PCADDU18I in both linked and reset
+         * states, so this conservative replay also remains safe.
+         *
+         * Use persistent CALL metadata rather than the current instructions:
+         * another thread may already have started restoring the pair.
+         * Replaying PCADDU18I is also safe for an already unlinked pair.
+         */
+        if (!hras_call_is_single(current_tb) &&
+            hras_unpack_call_offset(current_tb->lazypc[1], current_tb->pc,
+                                    &continuation) &&
+            current_tb->jmp_target_arg[0] != TB_JMP_RESET_OFFSET_INVALID &&
+            current_tb->jmp_reset_offset[0] != TB_JMP_RESET_OFFSET_INVALID) {
+            uintptr_t slot = (uintptr_t)current_tb->tc.ptr +
+                             current_tb->jmp_target_arg[0];
+
+            if (UC_PC(uc) == slot + HRAS_LA_INSN_SIZE) {
+                UC_PC(uc) = slot;
+            }
+        }
+#endif
         unlink_direct_jmp(current_tb);
     }
 }

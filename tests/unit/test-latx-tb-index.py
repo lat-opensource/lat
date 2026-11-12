@@ -60,6 +60,8 @@ typedef struct TranslationBlock {
 static struct { void *start, *end; } region;
 static uintptr_t tcg_splitwx_diff;
 static bool enabled = true;
+static bool option_hw_cache_ras;
+static int option_tu = 1, option_aot = 1;
 static bool aot_cross_page_tu_enabled(void) { return enabled; }
 static bool in_code_gen_buffer(void *p) {
     return (uintptr_t)p >= (uintptr_t)region.start &&

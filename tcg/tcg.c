@@ -248,7 +248,8 @@ static size_t latx_tb_index_buffer_size;
 static inline bool latx_tb_index_enabled(void)
 {
 #if defined(CONFIG_LATX_TU) && defined(CONFIG_LATX_AOT)
-    return aot_cross_page_tu_enabled();
+    return aot_cross_page_tu_enabled() ||
+           (option_hw_cache_ras && option_tu && option_aot != 0);
 #else
     return false;
 #endif
@@ -1015,10 +1016,12 @@ static void *tcg_tb_lookup_fast(uintptr_t tc_ptr)
     }
 #ifdef CONFIG_LATX_TU
     if (tbm->mtbp_struct.magic == TU_TBM_TABLE_MAGIC) {
+#ifdef CONFIG_LATX_AOT
         /* Cross-page TU holes must not use the approximate legacy table. */
-        if (latx_tb_index_enabled()) {
+        if (aot_cross_page_tu_enabled()) {
             return NULL;
         }
+#endif
         return query_tu_tbm_table(tbm, tc_ptr);
     }
 #endif

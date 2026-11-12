@@ -3,7 +3,8 @@
 """Check production TU member publication and invalidation with the real TB union.
 
 Only QHT/cache residency and individual TB invalidation are modelled.
-This checks the metadata lifetime boundary and ring traversal;
+This checks the metadata lifetime boundary, ring traversal and HRAS's
+runtime membership query;
 full AOT generation/load and SMC tests cover the LoongArch runtime separately.
 """
 import argparse
@@ -219,6 +220,7 @@ int main(void) {
     do_tb_group_invalidate(&tbs[3], false);
     assert(invalidations == 4);
 
+    HRAS_CHECK
     puts("PASS: TU metadata lifetime, membership and invalidation");
     return 0;
 }
@@ -243,7 +245,22 @@ def main():
     source += function(tu, 'void tu_link_members(')
     source += function(invalidate, 'static bool tb_same_tu(')
     source += function(invalidate, 'static void do_tb_group_invalidate(')
-    source += TEST
+    hras = repo / 'target/i386/latx/include/hardware-ras.h'
+    hras_check = ''
+    if hras.exists() and 'static inline bool hras_tb_in_tu(' in hras.read_text():
+        source += function(hras.read_text(), 'static inline bool hras_tb_in_tu(')
+        hras_check = r'''
+        /* A runtime membership query must not dereference translation data. */
+        TranslationBlock published = {.bool_flags = IS_TU_TB};
+        published.tu_next = (TranslationBlock *)(uintptr_t)1;
+        assert(hras_tb_in_tu(&published));
+        option_tu = false;
+        assert(!hras_tb_in_tu(&published));
+        option_tu = true;
+        TranslationBlock translating = {.s_data = &data[0]};
+        assert(hras_tb_in_tu(&translating));
+        '''
+    source += TEST.replace('HRAS_CHECK', hras_check)
     compiler = shlex.split(os.environ.get('CC', 'cc'))
     with tempfile.TemporaryDirectory(prefix='latx-tu-members-') as tmp:
         path = Path(tmp)

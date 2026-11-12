@@ -831,6 +831,18 @@ static void handle_arg_latx_tu(const char *arg)
 #endif
 }
 
+static void handle_arg_latx_hras(const char *arg)
+{
+    long value;
+
+    if (qemu_strtol(arg, NULL, 0, &value) || (value != 0 && value != 1)) {
+        fprintf(stderr, "LATX_HRAS must be 0 or 1; disabling LATX_HRAS\n");
+        option_hw_cache_ras = 0;
+        return;
+    }
+    option_hw_cache_ras = value;
+}
+
 static void handle_arg_latx_fast_jmpcache_hash(const char *arg)
 {
     long value;
@@ -1103,6 +1115,8 @@ static const struct qemu_argument arg_table[] = {
     "",           "enable jrra"},
     {"latx-tu", "LATX_TU", true, handle_arg_latx_tu,
     "0|1", "enable translation units"},
+    {"latx-hras", "LATX_HRAS", true, handle_arg_latx_hras,
+    "0|1", "enable experimental TU hardware return prediction"},
     {"latx-fast-jmpcache-hash", "LATX_FAST_JMPCACHE_HASH", true,
     handle_arg_latx_fast_jmpcache_hash,
     "0|1", "use low PC bits as the TB jump-cache hash"},
@@ -1649,6 +1663,19 @@ int main(int argc, char **argv, char **envp)
 #if !defined(CONFIG_LATX_FAST_JMPCACHE) || defined(CONFIG_LATX_GLUE_MASK)
     option_fast_jmpcache_hash = 0;
 #endif
+    if (option_hw_cache_ras) {
+#if defined(CONFIG_LATX_TU) && defined(CONFIG_LATX_FAST_JMPCACHE) && \
+    defined(CONFIG_LATX_LAZYLINK) && !defined(CONFIG_LATX_GLUE_MASK)
+        if (!option_tu) {
+            option_hw_cache_ras = 0;
+        } else if (option_jr_ra || option_jr_ra_stack) {
+            fprintf(stderr, "LATX_HRAS disabled because JRRA is enabled\n");
+            option_hw_cache_ras = 0;
+        }
+#else
+        option_hw_cache_ras = 0;
+#endif
+    }
 #endif
 
 #if defined(CONFIG_LATX) && defined(TARGET_I386) && TARGET_ABI_BITS == 32

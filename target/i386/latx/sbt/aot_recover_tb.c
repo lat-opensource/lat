@@ -13,6 +13,7 @@
 
 #include "aot_recover_tb.h"
 #include "latx-options.h"
+#include "hardware-ras.h"
 #include "lsenv.h"
 #include "accel/tcg/internal.h"
 #include "exec/cpu-all.h"
@@ -338,6 +339,7 @@ static bool recover_tb_range_page(target_ulong page, struct aot_tb *p_aot_tbs,
         if (i == num) {
             break;
         }
+        bool has_hras_cold = false;
         int j;
         for (j = i; j < num; j++) {
             if (p_aot_tbs[j].cflags != tcg_ctx->tb_cflags ||
@@ -349,6 +351,7 @@ static bool recover_tb_range_page(target_ulong page, struct aot_tb *p_aot_tbs,
             if (unlikely(!tb_in_order[j - i])) {
                 return recovered;
             }
+            has_hras_cold |= hras_callin_has_cold_exit(tb_in_order[j - i]);
         }
 #if defined(CONFIG_LATX_TBMINI_ENABLE)
         int tb_num_in_tu = j - i;
@@ -406,7 +409,13 @@ static bool recover_tb_range_page(target_ulong page, struct aot_tb *p_aot_tbs,
                 aot_link_tree_insert(tb, 0, 0);
             }
 #endif
-            aot_tb_register(tb, AOT_TB_RECOVERED);
+        }
+        /* Publish all host PC ranges before any member can execute. */
+        if (has_hras_cold) {
+            tcg_tb_insert_tu(tb_in_order, j - i);
+        }
+        for (int k = i; k < j; k++) {
+            aot_tb_register(tb_in_order[k - i], AOT_TB_RECOVERED);
         }
         recovered = true;
         i = j;
@@ -737,6 +746,9 @@ static bool recover_tb_range(target_ulong page, struct aot_tb *p_aot_tbs,
 #endif
             assert(tb->cflags == tcg_ctx->tb_cflags);
             aot_do_tb_reloc(tb, record, start, end);
+            if (hras_call_is_single(tb)) {
+                tb_reset_jump(tb, 0);
+            }
             if (!aot_cross_page_tu_enabled()) {
                 target_ulong next_pc = record->next_tb_pc_offset == -1 ? 0 :
                     start + record->next_tb_pc_offset;
@@ -766,6 +778,10 @@ static bool recover_tb_range(target_ulong page, struct aot_tb *p_aot_tbs,
         recovered = true;
         for (int k = 0; k < member_num; k++) {
             aot_restore_direct_links(tb_in_order[k], members[k]);
+            uintptr_t callee = qatomic_read(&tb_in_order[k]->jmp_dest[0]);
+            if (callee && !(callee & 1)) {
+                hras_link_call(tb_in_order[k], (TranslationBlock *)callee);
+            }
         }
     }
     return recovered;

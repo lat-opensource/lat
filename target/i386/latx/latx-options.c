@@ -35,6 +35,8 @@ int option_flag_reduction = 1;
 #endif
 
 int option_lative = 0;
+/* Hardware return prediction remains opt-in. */
+int option_hw_cache_ras;
 int option_fast_jmpcache_hash;
 int option_tu;
 #if defined(CONFIG_LATX_JRRA_STACK) && defined(CONFIG_LATX_LSFPU)
@@ -227,6 +229,8 @@ void conf_init(char **argv)
 void options_init(void)
 {
     latx_runtime_reset();
+    /* Hardware return prediction remains opt-in. */
+    option_hw_cache_ras = 0;
     option_fast_jmpcache_hash = 0;
 #ifdef CONFIG_LATX_TU
     option_tu = 1;

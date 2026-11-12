@@ -10,6 +10,7 @@ int option_aot_pe_profile;
 int option_aot;
 int option_fast_jmpcache_hash;
 int option_tu = 1;
+int option_hw_cache_ras;
 int option_load_aot = 1;
 const char *aot_process_profile = "browser";
 
@@ -33,10 +34,17 @@ static void check_cache_name_ignores_options(seg_info *seg)
     char configured[PATH_MAX];
 
     option_tu = 1;
+    option_hw_cache_ras = 0;
     get_cache_name(seg, plain);
+
+    option_hw_cache_ras = 1;
+    get_cache_name(seg, configured);
+    g_assert(strcmp(configured, plain) == 0);
+    option_hw_cache_ras = 0;
     option_tu = 0;
     get_cache_name(seg, configured);
     g_assert(strcmp(configured, plain) == 0);
+
     option_tu = 1;
     g_assert(segment_get_aot_file_name(seg, configured, strlen(plain)) ==
              -ENAMETOOLONG);

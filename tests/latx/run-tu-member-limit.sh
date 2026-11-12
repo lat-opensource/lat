@@ -17,21 +17,27 @@ TU_MEMBER_LIMIT=$(
 )
 export LATX_AOT=3
 export TU_MEMBER_REQUIRE_COLD=0
-taskhome="$result/home"
-mkdir -p "$taskhome"
-for phase in generate load; do
-    generate=1; [[ "$phase" == load ]] && generate=0
-    env HOME="$taskhome" LATX_AOT_GENERATE="$generate" TU_MEMBER_PHASE="$phase" \
-        gdb -nx -q -batch -x "$tests/tu-member-limit-gdb.py" \
-        --args "$binary" "$guest" >"$result/$phase.log" 2>&1
-    grep '^TU_MEMBER_RESULT ' "$result/$phase.log"
-    if [[ "$phase" == generate ]]; then
-        cache=$(cache_path "$taskhome" 3)
-        wait_cache "$cache"
-        sha256sum "$cache" >"$result/cache.sha256"
-    else
-        sha256sum -c "$result/cache.sha256"
-    fi
+for hras in 0 1; do
+    case "$guest" in
+        *64) export TU_MEMBER_REQUIRE_COLD=$hras ;;
+    esac
+    taskhome="$result/home-$hras"
+    mkdir -p "$taskhome"
+    for phase in generate load; do
+        generate=1; [[ "$phase" == load ]] && generate=0
+        env HOME="$taskhome" LATX_HRAS="$hras" \
+            LATX_AOT_GENERATE="$generate" TU_MEMBER_PHASE="$phase" \
+            gdb -nx -q -batch -x "$tests/tu-member-limit-gdb.py" \
+            --args "$binary" "$guest" >"$result/$hras-$phase.log" 2>&1
+        grep '^TU_MEMBER_RESULT ' "$result/$hras-$phase.log"
+        if [[ "$phase" == generate ]]; then
+            cache=$(cache_path "$taskhome" 3)
+            wait_cache "$cache"
+            sha256sum "$cache" >"$result/cache-$hras.sha256"
+        else
+            sha256sum -c "$result/cache-$hras.sha256"
+        fi
+    done
 done
 sha256sum "$binary"
-echo 'TU member limit PASS'
+echo 'TU member limit and indirect CALL layout PASS'

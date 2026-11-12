@@ -13,6 +13,7 @@
 #include "aot-version.h"
 #include "latx-options.h"
 #include "file_ctx.h"
+#include "hardware-ras.h"
 
 #ifdef CONFIG_LATX_AOT
 
@@ -901,23 +902,25 @@ static void set_tb_message(tb_tmp_message *message,
     if (!aot_tb->size) {
         return;
     }
-    switch (aot_tb->last_ir1_type) {
-    case IR1_TYPE_BRANCH:
-        if (aot_tb->next_tb_pc_offset >= 0) {
-            next_pc = seg->seg_begin + aot_tb->next_tb_pc_offset;
-        } else if (aot_tb->lazypc[0]) {
-            /* Older TU records kept this edge only in lazypc[0]. */
-            next_pc = pc + aot_tb->lazypc[0];
+    if (!hras_unpack_call_offset(aot_tb->lazypc[1], pc, &next_pc)) {
+        switch (aot_tb->last_ir1_type) {
+        case IR1_TYPE_BRANCH:
+            if (aot_tb->next_tb_pc_offset >= 0) {
+                next_pc = seg->seg_begin + aot_tb->next_tb_pc_offset;
+            } else if (aot_tb->lazypc[0]) {
+                /* Older TU records kept this edge only in lazypc[0]. */
+                next_pc = pc + aot_tb->lazypc[0];
+            }
+            break;
+        case IR1_TYPE_CALL:
+        case IR1_TYPE_CALLIN:
+        case IR1_TYPE_NORMAL:
+        case IR1_TYPE_SYSCALL:
+            next_pc = pc + aot_tb->size;
+            break;
+        default:
+            break;
         }
-        break;
-    case IR1_TYPE_CALL:
-    case IR1_TYPE_CALLIN:
-    case IR1_TYPE_NORMAL:
-    case IR1_TYPE_SYSCALL:
-        next_pc = pc + aot_tb->size;
-        break;
-    default:
-        break;
     }
     message->fallthrough_offset = tb_fallthrough_offset(pc, next_pc);
 }
