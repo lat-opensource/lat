@@ -815,6 +815,22 @@ static void handle_arg_latx_jrra(const char *arg)
     }
 }
 
+static void handle_arg_latx_tu(const char *arg)
+{
+    long value;
+
+    if (qemu_strtol(arg, NULL, 0, &value) || (value != 0 && value != 1)) {
+        fprintf(stderr, "LATX_TU must be 0 or 1; disabling TU\n");
+        option_tu = 0;
+        return;
+    }
+#ifdef CONFIG_LATX_TU
+    option_tu = value;
+#else
+    option_tu = 0;
+#endif
+}
+
 static void handle_arg_latx_fast_jmpcache_hash(const char *arg)
 {
     long value;
@@ -1072,6 +1088,8 @@ static const struct qemu_argument arg_table[] = {
     "",           ""},
     {"latx-jrra",    "LATX_JRRA",     true,  handle_arg_latx_jrra,
     "",           "enable jrra"},
+    {"latx-tu", "LATX_TU", true, handle_arg_latx_tu,
+    "0|1", "enable translation units"},
     {"latx-fast-jmpcache-hash", "LATX_FAST_JMPCACHE_HASH", true,
     handle_arg_latx_fast_jmpcache_hash,
     "0|1", "use low PC bits as the TB jump-cache hash"},

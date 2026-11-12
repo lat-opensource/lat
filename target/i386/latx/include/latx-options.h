@@ -27,9 +27,7 @@ extern int option_instptn;
 #ifdef CONFIG_LATX_FLAG_REDUCTION
 extern int option_flag_reduction;
 #endif
-#ifdef CONFIG_LATX_TU
-extern int option_tu_link;
-#endif
+extern int option_tu;
 
 #ifdef CONFIG_LATX_KZT
 #include "kzt-runtime.h"
@@ -179,6 +177,7 @@ extern unsigned long long counter_mips_tr;
     ENVFUN(LATX_FPUTAG, handle_arg_latx_fputag) \
     ENVFUN(SAVE_XMM, handle_arg_save_xmm) \
     ENVFUN(LATX_JRRA, handle_arg_latx_jrra) \
+    ENVFUN(LATX_TU, handle_arg_latx_tu) \
     ENVFUN(LATX_FAST_JMPCACHE_HASH, handle_arg_latx_fast_jmpcache_hash) \
     ENVFUN(LATX_IMM_REG, handle_arg_latx_imm_reg) \
     ENVFUN(LATX_MT, handle_arg_latx_mem_test) \
