@@ -885,6 +885,19 @@ static void handle_arg_latx_monitor_shared_mem(const char *arg)
     option_monitor_shared_mem = strtol(arg, NULL, 0);
 }
 
+#ifndef TARGET_X86_64
+static void handle_arg_i386_shared_mmap_shadow(const char *arg)
+{
+    long value;
+
+    if (qemu_strtol(arg, NULL, 0, &value) || (value != 0 && value != 1)) {
+        error_report("LATX_I386_SHARED_MMAP_SHADOW must be 0 or 1");
+        exit(EXIT_FAILURE);
+    }
+    option_i386_shared_mmap_shadow = value;
+}
+#endif
+
 static void handle_arg_latx_private_mmap_shadow(const char *arg)
 {
     option_private_mmap_shadow = strtol(arg, NULL, 0);
@@ -1051,6 +1064,11 @@ static const struct qemu_argument arg_table[] = {
     "",           "enable get real self maps"},
     {"latx-monitor-shared-mem",    "LATX_MONITOR_SHARED_MEM",     true,  handle_arg_latx_monitor_shared_mem,
     "",           "monitor shared memory, retranslate self modifying page"},
+#ifndef TARGET_X86_64
+    {"latx-i386-shared-mmap-shadow", "LATX_I386_SHARED_MMAP_SHADOW", true,
+    handle_arg_i386_shared_mmap_shadow, "0|1",
+    "enable i386 misaligned shared file shadows (default: 0)"},
+#endif
     {"latx-private-mmap-shadow", "LATX_PRIVATE_MMAP_SHADOW", true,
     handle_arg_latx_private_mmap_shadow, "",
     "shadow writable private SQLite file mapping fragments"},
