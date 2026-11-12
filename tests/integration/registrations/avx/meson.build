@@ -97,6 +97,14 @@ if 'x86_64-linux-user' in target_dirs
     suite: 'latx-integration',
   )
   foreach cache_option : ['0000', '1100', '1101', '1110', '1111']
+    latx_integration_tests += [{
+      'name': 'test-base-displacement-' + cache_option,
+      'runner': find_program('../../test-avx-regressions.py'),
+      'args': [emulators['latx-x86_64'],
+               files('../../base-displacement.asm')],
+      'env': {'LATX_IMM_REG': cache_option, 'LATX_SOFTFPU': '0'},
+      'timeout': 120,
+    }]
     test(
       'test-rip-relative-cache-' + cache_option,
       find_program('../../test-avx-regressions.py'),
