@@ -378,7 +378,9 @@ bool translate_ldmxcsr(IR1_INST *pir1)
         lsenv->tr_data->sse_rounding_prepared = false;
     }
 
-    tr_gen_call_to_helper1((ADDR)update_mxcsr_status, 1,
+    /* This helper only updates SSE status; converting x87 registers would
+     * corrupt MMX payloads that share their storage. */
+    tr_gen_call_to_helper1((ADDR)update_mxcsr_status, 0,
                            LOAD_HELPER_UPDATE_MXCSR_STATUS);
     if (option_softfpu) {
         gen_softfpu_x87_fcsr_exit();

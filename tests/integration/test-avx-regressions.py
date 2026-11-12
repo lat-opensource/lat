@@ -14,7 +14,7 @@ import tempfile
 import time
 
 
-def run_case(emulator, source, work, prebuilt, guest_bits=64):
+def run_case(emulator, source, work, prebuilt, guest_bits=64, jit_only=False):
     guest = work / source.stem
     if prebuilt:
         shutil.copy2(prebuilt / source.stem, guest)
@@ -52,7 +52,7 @@ def run_case(emulator, source, work, prebuilt, guest_bits=64):
     marker = work / (source.stem + ".aot-loaded")
     env.pop("LATX_TEST_AOT_LOAD_MARKER", None)
     try:
-        for mode in ("jit", "cold", "hot"):
+        for mode in (("jit",) if jit_only else ("jit", "cold", "hot")):
             env["LATX_AOT"] = "0" if mode == "jit" else "1"
             if mode == "hot":
                 env["LATX_TEST_AOT_LOAD_MARKER"] = str(marker)
@@ -88,6 +88,8 @@ def main():
     parser.add_argument("emulator", help="LAT executable, or native")
     parser.add_argument("--guest-bits", type=int, choices=(32, 64), default=64,
                         help="guest ELF width (default: 64)")
+    parser.add_argument("--jit-only", action="store_true",
+                        help="run configurations that disable AOT in JIT only")
     parser.add_argument("sources", type=Path, nargs="+")
     args = parser.parse_args()
     nasm_only = all(source.suffix == ".asm" for source in args.sources)
@@ -105,7 +107,7 @@ def main():
         for source in args.sources:
             try:
                 run_case(emulator, source.resolve(), Path(directory),
-                         args.prebuilt, args.guest_bits)
+                         args.prebuilt, args.guest_bits, args.jit_only)
                 print("PASS:", source.name, flush=True)
             except (subprocess.SubprocessError, RuntimeError) as error:
                 failures += 1
