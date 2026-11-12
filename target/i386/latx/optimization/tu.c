@@ -339,8 +339,26 @@ void tu_reset_tb(TranslationBlock *tb)
 /* Create a TB and initialize it. */
 static __thread TranslationBlock tu_tb_tmp;
 static __thread struct separated_data tmp_s_data;
-static __thread uint8_t search_buff[MAX_TB_IN_CACHE * TCG_MAX_INSNS];
-static __thread uint32_t search_buff_offset[MAX_TB_IN_CACHE];
+/* A JIT TU can overshoot its member target by one paired successor. */
+#define MAX_RUNTIME_TU_MEMBERS (MAX_TB_IN_TU + 1)
+/* Signed LEB128 needs at most ceil((TARGET_LONG_BITS + 1) / 7) bytes. */
+#define TU_SEARCH_SLEB_BYTES ((TARGET_LONG_BITS + 7) / 7)
+#define TU_SEARCH_BYTES_PER_INSN \
+    ((TARGET_INSN_START_WORDS + 1) * TU_SEARCH_SLEB_BYTES)
+static __thread uint8_t
+    search_buff[MAX_RUNTIME_TU_MEMBERS * TCG_MAX_INSNS];
+static __thread uint32_t search_buff_offset[MAX_RUNTIME_TU_MEMBERS];
+
+static size_t tu_search_buffer_required(uint32_t tb_num_in_tu,
+                                        TranslationBlock **tb_list)
+{
+    size_t insn_num = 0;
+
+    for (uint32_t i = 0; i < tb_num_in_tu; i++) {
+        insn_num += tb_list[i]->icount;
+    }
+    return insn_num * TU_SEARCH_BYTES_PER_INSN;
+}
 
 #include<sys/syscall.h>
 static TranslationBlock *tb_create_internal(CPUState *cpu, target_ulong pc,
@@ -1327,7 +1345,26 @@ void translate_tu(uint32 tb_num_in_tu, TranslationBlock **tb_list)
     int gen_code_size;
     uint32_t search_size = 0;
     TranslationBlock *tb;
+    uint8_t *tu_search_buff = search_buff;
+    uint32_t *tu_search_buff_offset = search_buff_offset;
+    g_autofree uint8_t *large_search_buff = NULL;
+    g_autofree uint32_t *large_search_buff_offset = NULL;
+    size_t search_capacity = sizeof(search_buff);
+    size_t search_required = tu_search_buffer_required(tb_num_in_tu, tb_list);
     bcc_jmp_fail = false;
+
+    if (tb_num_in_tu > MAX_RUNTIME_TU_MEMBERS) {
+        large_search_buff_offset = g_malloc_n(
+            tb_num_in_tu, sizeof(*large_search_buff_offset));
+        tu_search_buff_offset = large_search_buff_offset;
+    }
+    if (search_required > search_capacity) {
+        size_t insn_num = search_required / TU_SEARCH_BYTES_PER_INSN;
+
+        large_search_buff = g_malloc_n(insn_num, TU_SEARCH_BYTES_PER_INSN);
+        tu_search_buff = large_search_buff;
+        search_capacity = search_required;
+    }
 
 #if defined(CONFIG_LATX_TBMINI_ENABLE)
     uintptr_t tbmini_ptr = (uintptr_t)
@@ -1367,8 +1404,13 @@ retry:
                 tb_reset_jump(tb, 1);
             }
         }
-        search_buff_offset[i] = search_size;
-        search_size += encode_search(tb, search_buff + search_buff_offset[i]);
+        tu_search_buff_offset[i] = search_size;
+        int encoded_size = encode_search(tb, tu_search_buff +
+                                         tu_search_buff_offset[i]);
+
+        assert(encoded_size >= 0);
+        search_size += encoded_size;
+        assert(search_size <= search_capacity);
     }
 
     tb_list[0]->s_data->tu_size = tcg_ctx->code_gen_ptr - tb_list[0]->tc.ptr;
@@ -1400,10 +1442,11 @@ retry:
         tb = tb_list[i];
         tb->bool_flags |= IS_TU_TB;
         tb->tu_search_addr_offset = (uintptr_t)
-            ((uintptr_t)tcg_ctx->code_gen_ptr + search_buff_offset[i] - (uintptr_t)tb->tc.ptr);
+            ((uintptr_t)tcg_ctx->code_gen_ptr + tu_search_buff_offset[i] -
+             (uintptr_t)tb->tc.ptr);
     }
 
-    memcpy(tcg_ctx->code_gen_ptr, search_buff, search_size);
+    memcpy(tcg_ctx->code_gen_ptr, tu_search_buff, search_size);
     qatomic_set(&tcg_ctx->code_gen_ptr, (void *)
             ROUND_UP((uintptr_t)tcg_ctx->code_gen_ptr + search_size,
                 CODE_GEN_ALIGN));
