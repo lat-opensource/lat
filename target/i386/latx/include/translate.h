@@ -1119,6 +1119,8 @@ TRANS_FUNC_DEF(vpshufb_lsx);
 TRANS_FUNC_DEF(vpsubx);
 TRANS_FUNC_DEF(vptest);
 TRANS_FUNC_DEF(vptest_lsx);
+void generate_avx_test_flags(IR1_INST *, IR2_OPND, IR2_OPND, IR2_OPND,
+                             uint8_t);
 TRANS_FUNC_DEF(vpunpckhxx);
 TRANS_FUNC_DEF(vpunpckhxx_lsx);
 TRANS_FUNC_DEF(vpunpcklxx);
