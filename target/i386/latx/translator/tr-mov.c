@@ -2142,52 +2142,22 @@ bool translate_popal(IR1_INST *pir1) {
     return true;
 }
 
-/*
-* int hacker_popcnt(uint32_t n)
-* {
-* 	n -= (n>>1) & 0x55555555;
-* 	n  = (n & 0x33333333) + ((n>>2) & 0x33333333);
-* 	n  = ((n>>4) + n) & 0x0F0F0F0F;
-* 	n += n>>8;
-* 	n += n>>16;
-* 	return n & 0x0000003F;
-* }
-*/
 bool translate_popcnt(IR1_INST *pir1) {
     IR2_OPND src_opnd =
         load_ireg_from_ir1(ir1_get_opnd(pir1, 1), ZERO_EXTENSION, false);
     IR2_OPND count = ra_alloc_itemp();
-    IR2_OPND temp = ra_alloc_itemp();
-    IR2_OPND src_temp = ra_alloc_itemp();
-    IR2_OPND pop_count_ir2_opnd = ra_alloc_itemp();
-    int pop_count = ir1_opnd_size(ir1_get_opnd(pir1, 0));
+    IR2_OPND temp = ra_alloc_ftemp();
     IR2_OPND label_exit = ra_alloc_label();
-    IR2_OPND label_zero = ra_alloc_label();
-    IR2_OPND label_start = ra_alloc_label();
+
+    /* The zero-extended source occupies one independent 64-bit element. */
+    la_movgr2fr_d(temp, src_opnd);
+    la_vpcnt_d(temp, temp);
+    la_movfr2gr_d(count, temp);
+    ra_free_temp(temp);
 
     /* set O S Z A C P = 0 */
     la_x86mtflag(zero_ir2_opnd, 0x3f);
-    la_ori(count, zero_ir2_opnd, 0);
-
-    la_beq(src_opnd, zero_ir2_opnd, label_zero);
-
-    li_d(pop_count_ir2_opnd, pop_count);
-
-    la_or(src_temp, zero_ir2_opnd, src_opnd);
-/* label_start: */
-    la_label(label_start);
-    la_andi(temp, src_temp, 1);
-    la_add_d(count, count, temp);
-    la_srli_d(src_temp, src_temp, 1);
-    la_addi_d(pop_count_ir2_opnd, pop_count_ir2_opnd, -1);
-    la_bne(pop_count_ir2_opnd, zero_ir2_opnd, label_start);
-
-    ra_free_temp(temp);
-    /* 5. finish all steps, jump to exit */
-    la_b(label_exit);
-
-/* label_zero: */
-    la_label(label_zero);
+    la_bne(src_opnd, zero_ir2_opnd, label_exit);
     /* set zf = 1 */
     IR2_OPND n4095_opnd = ra_alloc_num_4095();
     la_x86mtflag(n4095_opnd, 0x8);
