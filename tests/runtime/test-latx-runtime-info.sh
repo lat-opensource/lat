@@ -147,6 +147,37 @@ output=$(HOME=$test_home LAT_LD_PREFIX=$environment_root \
     fail 'environment runtime info failed'
 assert_info "$environment_root" environment "$output"
 
+output=$(HOME=$test_home LAT_LD_PREFIX=$environment_root \
+    _LATX_LD_PREFIX_ABI=$guest_abi \
+    STEAM_RUNTIME=/steam/runtime \
+    "$translator" --runtime-info 2> "$workdir/same-abi.stderr") ||
+    fail 'same-ABI environment runtime info failed'
+assert_info "$environment_root" environment "$output"
+
+case "$guest_abi" in
+    x86_64) foreign_abi=i386 ;;
+    i386) foreign_abi=x86_64 ;;
+esac
+output=$(HOME=$test_home LAT_LD_PREFIX=$workdir/foreign-root \
+    _LATX_LD_PREFIX_ABI=$foreign_abi \
+    LATX_STEAM_RUNTIME_FILES=/steam/runtime/files \
+    "$translator" --runtime-info 2> "$workdir/foreign.stderr") ||
+    fail 'cross-ABI runtime info failed'
+assert_info "$workdir/global-root" user_config "$output"
+
+output=$(HOME=$test_home LAT_LD_PREFIX=$workdir/foreign-root \
+    _LATX_LD_PREFIX_ABI=$foreign_abi \
+    LATX_STEAM_CONTEXT=1 \
+    "$translator" --runtime-info 2> "$workdir/steam-context.stderr") ||
+    fail 'Steam-context runtime info failed'
+assert_info "$workdir/global-root" user_config "$output"
+
+output=$(HOME=$test_home LAT_LD_PREFIX=$workdir/foreign-root \
+    _LATX_LD_PREFIX_ABI=$foreign_abi \
+    "$translator" --runtime-info 2> "$workdir/non-steam.stderr") ||
+    fail 'non-Steam cross-ABI runtime info failed'
+assert_info "$workdir/foreign-root" environment "$output"
+
 output=$(HOME=$test_home LAT_LD_PREFIX=$workdir/environment-root \
     "$translator" --runtime-info -L "$workdir/command-line-root" \
     2> "$workdir/command-line.stderr") ||

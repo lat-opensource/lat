@@ -246,14 +246,28 @@ void latx_steam_context_configure(const envlist_t *envlist, bool in_runtime)
 {
     const char *steam_runtime = envlist ?
         envlist_getenv(envlist, "STEAM_RUNTIME") : NULL;
+    const char *steam_context_marker = envlist ?
+        envlist_getenv(envlist, LATX_STEAM_CONTEXT_ENV) : NULL;
 
     steam_context = in_runtime ||
+                    (steam_context_marker && steam_context_marker[0]) ||
                     (steam_runtime && steam_runtime[0] == '/');
 }
 
 bool latx_steam_context_active(void)
 {
     return steam_context;
+}
+
+bool latx_steam_program(const char *program)
+{
+    const char *basename = program ? strrchr(program, '/') : NULL;
+
+    basename = basename ? basename + 1 : program;
+    return !g_strcmp0(basename, "steam") ||
+           !g_strcmp0(basename, "steamwebhelper") ||
+           !g_strcmp0(basename, "steamwebhelper_sniper_wrap.sh") ||
+           !g_strcmp0(basename, "pressure-vessel-wrap");
 }
 
 const char *latx_steam_runtime_library_path(void)
