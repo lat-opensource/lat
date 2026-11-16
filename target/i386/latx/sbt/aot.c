@@ -906,6 +906,17 @@ char in_white_list(char *lib)
     return in_list(lib, lib_white_list);
 }
 
+/* Set only in a forked Quicktrans collection generator. */
+static bool aot_collect_snapshot;
+
+static void aot_collect_generation_failed(const char *name)
+{
+    if (aot_collect_snapshot) {
+        fprintf(stderr, "Quicktrans AOT collection failed to generate %s\n", name);
+        _exit(EXIT_FAILURE);
+    }
+}
+
 #define PROLIFERATION_RATE 10
 static inline int need_gen_aot(CPUState *cpu,
         char *lib_name, char *aot_file_name, int *lockfd, uint32_t tb_count)
@@ -923,7 +934,7 @@ static inline int need_gen_aot(CPUState *cpu,
         aim_tb_num = aot_get_tb_num(lib_name, aot_file_name, cpu);
     }
     /* Too few tb number. */
-    if (tb_count * PROLIFERATION_RATE < aim_tb_num) {
+    if (!aot_collect_snapshot && tb_count * PROLIFERATION_RATE < aim_tb_num) {
         return -1;
     }
     if (get_aot_path(aot_file_name, aot_file_path, PATH_MAX) < 0) {
@@ -934,13 +945,20 @@ static inline int need_gen_aot(CPUState *cpu,
         return -1;
     }
     
-    if (file_lock(aot_file_lock, lockfd, F_WRLCK, false) < 0) {
+    if (file_lock(aot_file_lock, lockfd, F_WRLCK, aot_collect_snapshot) < 0) {
+        int saved_errno = errno;
+        if (*lockfd >= 0) {
+            close(*lockfd);
+            *lockfd = -1;
+        }
+        errno = saved_errno;
         return -1;
     }
 
     if (lib && lib->is_unmapped) {
         flock_set(*lockfd, F_UNLCK, true);
         close(*lockfd);
+        *lockfd = -1;
         return -1;
     }
 
@@ -1023,11 +1041,13 @@ static inline void gen_aot_by_lib(int first_seg_id, int end_seg_id,
     char tmp_file_path[PATH_MAX];
     AOTMergeResult merge_result;
     int lockfd = -1;
+    bool completed = false;
 
     curr_lib_name = seg_info_vector[first_seg_id]->file_name;
     if (segment_get_aot_file_name(seg_info_vector[first_seg_id],
                                   curr_aot_file_name,
                                   sizeof(curr_aot_file_name)) < 0) {
+        aot_collect_generation_failed(curr_lib_name);
         return;
     }
 
@@ -1048,19 +1068,26 @@ static inline void gen_aot_by_lib(int first_seg_id, int end_seg_id,
             goto unlock;
         }
         pre_translate(first_seg_id, end_seg_id, cpu, NULL);
+        /* Empty mapped segments have no translated contribution to publish. */
+        completed = tb_num == 0;
         if (do_generate_aot(first_seg_id, end_seg_id)) {
             merge_result =
                 aot2_merge(curr_aot_file_name, first_seg_id, end_seg_id, cpu);
             if (merge_result == AOT_MERGE_NO_BASE ||
                 merge_result == AOT_MERGE_READY) {
-                generated_aot_file |= rename_aot_file(curr_aot_file_name);
+                completed = rename_aot_file(curr_aot_file_name);
+                generated_aot_file |= completed;
             } else {
+                completed = merge_result == AOT_MERGE_DUPLICATE;
                 unlink(tmp_file_path);
             }
         }
 unlock:
         flock_set(lockfd, F_UNLCK, true);
         close(lockfd);
+    }
+    if (!completed) {
+        aot_collect_generation_failed(curr_lib_name);
     }
 }
 
@@ -1880,6 +1907,7 @@ parent_exit:
 
     if (collect) {
         /* These settings change only in the forked generator. */
+        aot_collect_snapshot = true;
         option_aot = 1;
         option_load_aot = 0;
         option_aot_generate = 1;

@@ -762,6 +762,20 @@ foreach target : target_dirs
     )
     test('latx-aot-tb-collect', aot_tb_collect_test, suite: 'lat-pr-fast')
 
+    aot_collect_gate_test = executable(
+      'test-latx-aot-collect-gate',
+      files('target/i386/latx/sbt/tests/aot-collect-gate-test.c') +
+        genh + tcg_trace_genh + [syscall_nr_generated, latx_aot_build_id],
+      c_args: smc_reload_test_c_args,
+      dependencies: [glib],
+      include_directories: target_inc + [include_directories('target/i386/latx')],
+      link_args: smc_reload_test_link_args
+    )
+    foreach mode : ['contention', 'ratio', 'error']
+      test('latx-aot-collect-gate-' + mode, aot_collect_gate_test,
+           args: [mode], suite: 'lat-pr-fast', timeout: 10)
+    endforeach
+
     aot_defer_fixture = executable(
       'test-latx-aot-defer-fixture',
       files('target/i386/latx/sbt/tests/aot-defer-fixture.c',

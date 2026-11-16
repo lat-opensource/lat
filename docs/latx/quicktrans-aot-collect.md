@@ -124,3 +124,17 @@ exits, flushed TBs and removed executable mappings remain outside collection.
 Runtime timing can change which processes exit normally; neither worker counts
 nor cache-file counts establish equivalent coverage across application runs.
 No execution-frequency sampling is enabled by this controller.
+
+
+### Collection workers preserve each process contribution
+
+After a Quicktrans collection worker is released for generation, it waits for
+the per-module writer lock instead of silently skipping a busy module. The
+legacy TB-count growth heuristic is not a coverage-inclusion check and is not
+used for collection snapshots. Legacy AOT generation retains its previous
+nonblocking lock and count heuristic. Collection failures in module admission
+or nonempty generation/publication terminate the worker unsuccessfully so the
+controller can report the failure. This does not recover processes that exit
+before registration, and successful worker exit alone is not proof of complete
+application coverage. Lock waiting and the additional generation occur after
+application exit; this change makes no startup performance claim.

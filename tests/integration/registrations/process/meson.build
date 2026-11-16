@@ -360,3 +360,17 @@ if 'x86_64-linux-user' in target_dirs
     ],
   }]
 endif
+
+if 'CONFIG_LATX_FAST_TRANSLATOR' in config_host and \
+   'x86_64-linux-user' in target_dirs
+  latx_integration_tests += [{
+    'name': 'test-aot-collect-union-x86_64',
+    'runner': python,
+    'args': [
+      files('../../aot-collect-union.py'),
+      emulators['latx-x86_64'],
+      aot_collect_controller,
+    ],
+    'timeout': 60,
+  }]
+endif
