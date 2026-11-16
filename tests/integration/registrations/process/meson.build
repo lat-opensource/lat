@@ -373,4 +373,14 @@ if 'CONFIG_LATX_FAST_TRANSLATOR' in config_host and \
     ],
     'timeout': 60,
   }]
+  latx_integration_tests += [{
+    'name': 'test-aot-collect-sigterm-x86_64',
+    'runner': python,
+    'args': [
+      files('../../aot-collect-sigterm.py'),
+      emulators['latx-x86_64'],
+      aot_collect_controller,
+    ],
+    'timeout': 60,
+  }]
 endif

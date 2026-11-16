@@ -15625,7 +15625,9 @@ static abi_long do_syscall1(void *cpu_env, int num, abi_long arg1,
         }
         pthread_mutex_lock(&clone_lock);
 #ifdef CONFIG_LATX_AOT
-        if(current_cpu->cpu_index == 0) {
+        /* The last-thread collection runs below, after clone_lock is released. */
+        if (current_cpu->cpu_index == 0 &&
+            (!option_quicktrans_aot_collect || CPU_NEXT(first_cpu))) {
             aot_exit_entry(cpu, AOT_EXIT_THREAD);
         }
 #endif

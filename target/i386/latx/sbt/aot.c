@@ -1761,7 +1761,8 @@ void aot_exit_entry(CPUState *cpu, AOTExitReason reason)
         ts && ts->ipc_namespace_isolated);
 
     bool collect = option_quicktrans_aot_collect;
-    if (collect && reason != AOT_EXIT_NORMAL) {
+    /* Runtime TB flushes are not process/thread exits. */
+    if (collect && reason == AOT_EXIT_FLUSH) {
         return;
     }
     if (reason == AOT_EXIT_NORMAL) {

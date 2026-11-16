@@ -1,7 +1,7 @@
 # Experimental Quicktrans exit-time AOT generation
 
 This opt-in mode records stable executable file mappings while Quicktrans runs,
-then generates legacy TU/AOT code in a forked worker at normal final process exit.
+then generates legacy TU/AOT code in a forked worker at process/thread exit hooks shared with ordinary AOT generation.
 It does not load AOT during collection or replace running Quicktrans blocks.
 
 Build with `./latxbuild/build64.sh -c -f`. Collection is disabled by default.
@@ -31,8 +31,16 @@ off, and Wine/KZT disabled. It records coverage, not execution frequency. No
 per-execution counters are inserted. Existing cached startup flags route guest
 exit_group through normal cleanup only when collection is requested.
 
-The worker is waited for at final exit, so process exit can take longer. Thread
-exits, signals, and TB flushes do not trigger collection. Collection skips
+Without a controller, the worker is waited for at exit, so exit can take longer.
+Collection uses the ordinary AOT exit hooks: normal final exit, the existing
+main-thread exit hook, and default fatal-signal termination (including SIGTERM,
+SIGABRT and SIGSEGV). The existing kill/tgkill hooks also snapshot before a guest
+sends SIGKILL to itself. External SIGKILL cannot be intercepted. Ignored signals
+and application-installed handlers keep their original disposition; abort paths
+that bypass the ordinary AOT hook remain unchanged. Runtime TB flushes do not
+trigger experimental collection. Normal last-thread exit collects once, after
+releasing clone_lock. A snapshot or generation failure does not turn
+signal termination into a successful exit. Collection skips
 initially writable mappings and removes coverage when permissions change or
 mappings are unmapped/remapped. Anonymous/JIT code, SMC, unloaded modules and
 previously flushed TBs are not supported coverage sources. A failed exclusive
@@ -85,7 +93,7 @@ Guest exec descendants must use the same translator through the configured
 runtime/binfmt entry; the controller does not configure that entry. Apply any
 application CPU affinity after `--`, so the controller can run separately.
 
-Each normally exiting process forks a quiescent snapshot, closes inherited
+Each eligible exiting process attempts a quiescent snapshot, closes inherited
 application descriptors in the worker, and registers it with the controller.
 The original process can then exit without waiting for translation. Workers
 start only after the application tree exits; the existing concurrent generation,
@@ -119,8 +127,9 @@ workers that have not been released. Already released workers may finish.
 
 Before translation, workers recheck mapped files' device, inode, size and mtime,
 including nanoseconds, and reject a changed snapshot. This is not a content hash
-or a guarantee against concurrent writes during translation. Abnormal process
-exits, flushed TBs and removed executable mappings remain outside collection.
+or a guarantee against concurrent writes during translation. Flushed TBs and removed executable mappings remain outside collection.
+Exit snapshots remain best-effort: an
+in-progress collection or failed snapshot may still prevent a contribution.
 Runtime timing can change which processes exit normally; neither worker counts
 nor cache-file counts establish equivalent coverage across application runs.
 No execution-frequency sampling is enabled by this controller.
@@ -138,3 +147,29 @@ controller can report the failure. This does not recover processes that exit
 before registration, and successful worker exit alone is not proof of complete
 application coverage. Lock waiting and the additional generation occur after
 application exit; this change makes no startup performance claim.
+
+
+## Collection report scope
+
+`report_scope` is `observed_collection_protocol`. The controller observes
+connections, registered workers, and its child wait statuses; it does not
+inventory every translated process or every executed block.
+
+`coverage_status` is `incomplete` when a registration/worker failure is
+observed, or the root application dies from a signal without a registered
+snapshot. Otherwise it is `not_proven`, never an automatic claim of complete
+coverage. A root signal after successful snapshot registration does not itself
+mean the snapshot was lost. Unobserved descendant exits remain outside this
+report's scope.
+
+All existing fields retain their meanings and values: in particular,
+`collection_incomplete=false` means no incompleteness was observed by the old
+registration/worker checks, not that every process contributed coverage.
+`app_status` and worker statuses retain their actual exit/signal results.
+`failures` counts failure events, not unique failed workers.
+
+`registration_aborts[].peer_pid` is the process that connected, which may
+differ from a subsequently forked worker. `eof_before_ready` does not establish
+a signal or another specific cause. Reports must not infer one without an
+associated wait status. These reporting fields do not change signal handling,
+snapshot timing, collected blocks, or generation.
