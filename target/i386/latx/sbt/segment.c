@@ -17,6 +17,15 @@
 static GTree *segment_tree;
 static GTree *wine_sec_tree;
 
+/* seg_info is also embedded in the on-disk format. Keep deferred source
+ * identity only in the runtime allocation owned by segment_tree. */
+typedef struct MappedSegment {
+    seg_info info;
+    dev_t source_dev;
+    ino_t source_ino;
+    long mtime_nsec;
+} MappedSegment;
+
 int segment_get_aot_file_name(const seg_info *seg, char *name,
                               size_t name_size)
 {
@@ -180,7 +189,8 @@ void segment_tree_insert(char *name, target_ulong offset, target_ulong begin,
         return;
     }
 
-    seg_info *seg = (seg_info *)malloc(sizeof(seg_info));
+    MappedSegment *mapped = malloc(sizeof(*mapped));
+    seg_info *seg = mapped ? &mapped->info : NULL;
     if (seg == NULL) {
         qemu_log_mask(LAT_LOG_AOT, "Error! No memory for segment_tree_insert alloc!\n");
         _exit(-1);
@@ -198,6 +208,9 @@ void segment_tree_insert(char *name, target_ulong offset, target_ulong begin,
     seg->seg_end = end;
     seg->tv_sec = statbuf.st_mtim.tv_sec;
     seg->lib_size = statbuf.st_size;
+    mapped->source_dev = statbuf.st_dev;
+    mapped->source_ino = statbuf.st_ino;
+    mapped->mtime_nsec = statbuf.st_mtim.tv_nsec;
     seg->buffer = NULL;
     seg->p_segment = NULL;
     seg->seg_flag = 0;
@@ -425,6 +438,32 @@ bool segment_tree_winepe_lookup(target_ulong pc)
             return true;
     }
     return false;
+}
+
+/* A deferred snapshot must not publish old mapped bytes for a replaced file. */
+static gboolean check_segment_file(gpointer key, gpointer value, gpointer data)
+{
+    MappedSegment *mapped = value;
+    seg_info *seg = &mapped->info;
+    bool *unchanged = data;
+    struct stat st;
+
+    if (stat(seg->file_name, &st) || mapped->source_dev != st.st_dev ||
+        mapped->source_ino != st.st_ino || seg->lib_size != st.st_size ||
+        seg->tv_sec != st.st_mtim.tv_sec ||
+        mapped->mtime_nsec != st.st_mtim.tv_nsec) {
+        *unchanged = false;
+        return TRUE;
+    }
+    return FALSE;
+}
+
+bool segment_tree_files_unchanged(void)
+{
+    bool unchanged = true;
+
+    g_tree_foreach(segment_tree, check_segment_file, &unchanged);
+    return unchanged;
 }
 
 gint get_segment_num(void)

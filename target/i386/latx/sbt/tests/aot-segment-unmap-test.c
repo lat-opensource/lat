@@ -476,6 +476,46 @@ static void test_shm_disabled(void)
     option_aot = 1;
 }
 
+static void test_deferred_source_identity(char *path)
+{
+    struct stat original;
+    struct timespec times[2];
+    char replacement[] = "/tmp/latx-segment-replace-XXXXXX";
+    int fd;
+
+    g_assert(stat(path, &original) == 0);
+    segment_tree_insert(path, 0, 0x1000, 0x2000);
+    g_assert(segment_tree_files_unchanged());
+    times[0] = original.st_atim;
+    times[1] = original.st_mtim;
+    times[1].tv_nsec = (times[1].tv_nsec + 1) % 1000000000;
+    g_assert(utimensat(AT_FDCWD, path, times, 0) == 0);
+    g_assert(!segment_tree_files_unchanged());
+    times[1] = original.st_mtim;
+    g_assert(utimensat(AT_FDCWD, path, times, 0) == 0);
+    g_assert(segment_tree_files_unchanged());
+    g_assert(truncate(path, 1) == 0);
+    g_assert(!segment_tree_files_unchanged());
+    g_assert(truncate(path, 0) == 0);
+    g_assert(utimensat(AT_FDCWD, path, times, 0) == 0);
+    g_assert(segment_tree_files_unchanged());
+    fd = mkstemp(replacement);
+    g_assert(fd >= 0);
+    close(fd);
+    g_assert(utimensat(AT_FDCWD, replacement, times, 0) == 0);
+    g_assert(rename(replacement, path) == 0);
+    g_assert(!segment_tree_files_unchanged());
+    segment_tree_remove_range(0x1000, 0x2000);
+    segment_tree_insert(path, 0, 0x1000, 0x2000);
+    g_assert(segment_tree_files_unchanged());
+    g_assert(unlink(path) == 0);
+    g_assert(!segment_tree_files_unchanged());
+    segment_tree_remove_range(0x1000, 0x2000);
+    fd = open(path, O_CREAT | O_WRONLY, 0600);
+    g_assert(fd >= 0);
+    close(fd);
+}
+
 int main(int argc, char **argv)
 {
     char path[] = "/tmp/latx-segment-unmap-XXXXXX";
@@ -524,6 +564,7 @@ int main(int argc, char **argv)
         g_hash_table_destroy(page_flags);
         return 0;
     }
+    test_deferred_source_identity(path);
     test_mmap_replacement(path);
     test_mmap_late_segment(path, 0);
 #if MAP_FIXED_NOREPLACE != 0

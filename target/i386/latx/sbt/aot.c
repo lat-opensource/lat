@@ -15,6 +15,7 @@
 #include "aot.h"
 #include "aot-version.h"
 #include "aot_exit.h"
+#include "aot_defer.h"
 #include "latx-config.h"
 #include <stdlib.h>
 #include <math.h>
@@ -1757,6 +1758,17 @@ void aot_exit_entry(CPUState *cpu, AOTExitReason reason)
 	_exit(0);
     }
 
+    int control_fd = -1;
+    const char *control_path = collect ? getenv(AOT_DEFER_ENV) : NULL;
+    if (control_path && control_path[0]) {
+        control_fd = aot_defer_connect(control_path);
+        if (control_fd < 0) {
+            fprintf(stderr, "Quicktrans AOT deferred control unavailable; "
+                    "skipping generation: %s\n", strerror(errno));
+            return;
+        }
+    }
+
     bool exclusive_started = false;
     bool in_exclusive_context = cpu_in_exclusive_context(cpu);
     if (!in_exclusive_context) {
@@ -1764,6 +1776,9 @@ void aot_exit_entry(CPUState *cpu, AOTExitReason reason)
             if (!start_exclusive_timeout(AOT_EXIT_EXCLUSIVE_TIMEOUT_MS)) {
                 qemu_log_mask(LAT_LOG_AOT,
                               "skip final aot: exclusive wait timeout\n");
+                if (control_fd >= 0) {
+                    close(control_fd);
+                }
                 return;
             }
         } else {
@@ -1812,7 +1827,7 @@ void aot_exit_entry(CPUState *cpu, AOTExitReason reason)
     pid_t pid = fork();
     if (pid) {
         if (pid > 0) {
-            if (collect) {
+            if (collect && control_fd < 0) {
                 int status;
                 pid_t waited;
                 do {
@@ -1822,7 +1837,7 @@ void aot_exit_entry(CPUState *cpu, AOTExitReason reason)
                     fprintf(stderr, "Quicktrans AOT worker failed; "
                             "guest exit status is unchanged\n");
                 }
-            } else {
+            } else if (!collect) {
                 waitpid(pid, NULL, 0);
             }
             if (old_sa.sa_handler != SIG_DFL) {
@@ -1838,13 +1853,26 @@ void aot_exit_entry(CPUState *cpu, AOTExitReason reason)
         }
 
 parent_exit:
+        if (control_fd >= 0) {
+            close(control_fd);
+        }
         if (exclusive_started) {
             end_exclusive();
         }
         return;
     }
 
-    if (daemonize) {
+    if (control_fd >= 0) {
+        if (aot_defer_wait(control_fd) < 0) {
+            _exit(EXIT_FAILURE);
+        }
+        close(control_fd);
+        if (!segment_tree_files_unchanged()) {
+            fprintf(stderr, "Quicktrans AOT deferred worker failed: "
+                    "mapped source file changed while waiting\n");
+            _exit(EXIT_FAILURE);
+        }
+    } else if (daemonize) {
         creat_daemon(reason == AOT_EXIT_FINAL);
     } else {
         close_all_fd();

@@ -528,6 +528,16 @@ common_all = static_library('common',
 feature_to_c = find_program('scripts/feature_to_c.sh')
 
 emulators = {}
+if 'CONFIG_LATX' in config_host
+  aot_collect_controller = executable(
+    'latx-aot-collect',
+    files('tools/latx-aot-collect.c'),
+    include_directories: include_directories('target/i386/latx/include'),
+    build_by_default: false,
+    install: false,
+  )
+endif
+
 foreach target : target_dirs
   config_target = config_target_mak[target]
   target_name = config_target['TARGET_NAME']
@@ -751,6 +761,20 @@ foreach target : target_dirs
       link_args: smc_reload_test_link_args + ['-Wl,--wrap=realloc']
     )
     test('latx-aot-tb-collect', aot_tb_collect_test, suite: 'lat-pr-fast')
+
+    aot_defer_fixture = executable(
+      'test-latx-aot-defer-fixture',
+      files('target/i386/latx/sbt/tests/aot-defer-fixture.c',
+            'target/i386/latx/sbt/aot_defer.c') + genh,
+      c_args: smc_reload_test_c_args,
+      dependencies: [glib],
+      include_directories: target_inc,
+      link_args: smc_reload_test_link_args + ['-Wl,--wrap=recv']
+    )
+    test('latx-aot-defer', python,
+      args: [files('target/i386/latx/sbt/tests/aot-defer-test.py'),
+             aot_collect_controller, aot_defer_fixture],
+      suite: 'lat-pr-fast', timeout: 20)
 
     aot_exit_worker_test = executable(
       'test-latx-aot-exit-worker',

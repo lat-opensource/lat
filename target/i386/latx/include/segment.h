@@ -89,6 +89,7 @@ void segment_tree_remove(seg_info *val);
 void segment_tree_remove_range(target_ulong begin, target_ulong end);
 bool segment_tree_winepe_lookup(target_ulong pc);
 gint get_segment_num(void);
+bool segment_tree_files_unchanged(void);
 void do_segment_record(seg_info **seg_info_vector);
 int segment_get_aot_file_name(const seg_info *seg, char *name,
                               size_t name_size);
