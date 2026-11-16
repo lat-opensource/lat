@@ -139,6 +139,12 @@ typedef struct aot_tb {
     uint8_t last_ir1_type;
     uint8_t eflag_use;
     int8_t canlink[2];
+#ifdef CONFIG_LATX_PROFILER
+    /* Static IR2 count in the existing profiler measurement-exclusion metric.
+     * Dynamic counters belong to a process and must not be serialized.
+     */
+    uint64_t profile_nr_code;
+#endif
 } aot_tb;
 
 typedef enum aot_rel_kind {

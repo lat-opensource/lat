@@ -41,6 +41,13 @@ inline static TranslationBlock *creat_tb(aot_tb *p_aot_tb, abi_ulong start,
     if (unlikely(!tb)) {
 	return NULL;
     }
+#ifdef CONFIG_LATX_PROFILER
+    /* tcg_tb_alloc() does not initialize profile fields. Both TB and TU
+     * recovery start new dynamic counters and restore only static IR2 data.
+     */
+    CLN_TB_PROFILE(tb);
+    SET_TB_PROFILE(tb, nr_code, p_aot_tb->profile_nr_code);
+#endif
     /* Initialize Tb */
     qemu_spin_init(&tb->jmp_lock);
     tb->lazypc[0] = p_aot_tb->lazypc[0];
@@ -156,7 +163,7 @@ static void recover_tb_range(target_ulong page, struct aot_tb *p_aot_tbs,
             tb_reset_jump(tb, 1);
         }
 #ifdef CONFIG_LATX_PROFILER
-        CLN_TB_PROFILE(tb);
+        /* creat_tb() already initialized counters and restored nr_code. */
 #endif
         aot_tb_register(tb, AOT_TB_RECOVERED);
 

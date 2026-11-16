@@ -416,6 +416,9 @@ static inline int create_aot_tb(aot_tb *curr_aot_tb, TranslationBlock *tb,
     }
 
     curr_aot_tb->icount = tb->icount;
+#ifdef CONFIG_LATX_PROFILER
+    curr_aot_tb->profile_nr_code = GET_TB_PROFILE(tb, nr_code);
+#endif
     curr_aot_tb->tu_size = tb->s_data->tu_size;
     curr_aot_tb->offset_in_segment =
         tb->pc - curr_seg->details.seg_begin;
