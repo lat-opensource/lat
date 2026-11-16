@@ -54,6 +54,7 @@
 #include "cpu_loop-common.h"
 #include "crypto/init.h"
 #ifdef CONFIG_LATX
+#include "qemu/steam.h"
 #include "steam.h"
 #endif
 int mydebug = 1;
@@ -655,13 +656,34 @@ static void handle_arg_runtime_info(const char *arg)
 static void handle_arg_ld_prefix(const char *arg)
 {
     g_autofree char *setting = g_strdup_printf(
-        "LAT_LD_PREFIX=%s", arg);
+        LATX_GUEST_LD_PREFIX_ENV "=%s", arg);
+    g_autofree char *abi_setting = g_strdup_printf(
+        LATX_GUEST_LD_PREFIX_ABI_ENV "=%s", latx_runtime_guest_abi());
 
-    if (!setting || envlist_setenv(envlist, setting) != 0) {
+    if (!setting || !abi_setting ||
+        envlist_setenv(envlist, setting) != 0 ||
+        envlist_setenv(envlist, abi_setting) != 0) {
         usage(EXIT_FAILURE);
     }
     interp_prefix = strdup(arg);
     latx_runtime_prefix_selected();
+}
+
+static void sanitize_inherited_ld_prefix(void)
+{
+    const char *inherited_abi = getenv(LATX_GUEST_LD_PREFIX_ABI_ENV);
+
+    /* Steam mixed-ABI children must not inherit their parent's runtime. */
+    if (!latx_steam_context_active() || !inherited_abi ||
+        !strcmp(inherited_abi,
+                                  latx_runtime_guest_abi())) {
+        return;
+    }
+
+    unsetenv(LATX_GUEST_LD_PREFIX_ENV);
+    unsetenv(LATX_GUEST_LD_PREFIX_ABI_ENV);
+    (void)envlist_unsetenv(envlist, LATX_GUEST_LD_PREFIX_ENV);
+    (void)envlist_unsetenv(envlist, LATX_GUEST_LD_PREFIX_ABI_ENV);
 }
 
 static void handle_arg_optimize(const char *arg)
@@ -1506,6 +1528,16 @@ int main(int argc, char **argv, char **envp)
 
     /* extracting environment variables */
     optind = parse_args(argc, argv);
+
+    latx_steam_context_configure(
+        envlist,
+        latx_steam_program(exec_path) ||
+        envlist_getenv(envlist, LATX_STEAM_RUNTIME_FILES_ENV) != NULL);
+    if (latx_steam_context_active()) {
+        (void)g_setenv(LATX_STEAM_CONTEXT_ENV, "1", true);
+        (void)envlist_setenv(envlist, LATX_STEAM_CONTEXT_ENV "=1");
+    }
+    sanitize_inherited_ld_prefix();
 
     if (argc >= 5 && !strcmp(argv[1], argv[2])) {
         long long hash = 0;

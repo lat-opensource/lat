@@ -7,6 +7,9 @@
 
 #include "qemu/envlist.h"
 
+#define LATX_STEAM_RUNTIME_FILES_ENV "LATX_STEAM_RUNTIME_FILES"
+#define LATX_STEAM_CONTEXT_ENV "LATX_STEAM_CONTEXT"
+
 /*
  * Discover a Runtime candidate. Generic Runtime handling is enabled only
  * when expected_files matches the candidate's canonical files path.
@@ -21,6 +24,7 @@ char *latx_steam_runtime_make_library_path(const char *suffix);
 bool latx_steam_runtime_is_library_path(const char *path);
 bool latx_steam_runtime_is_i386_library_path(const char *path);
 bool latx_steam_runtime_is_wrapper(const char *program);
+bool latx_steam_program(const char *program);
 char *latx_steam_runtime_resolve_path(const char *name);
 void latx_steam_context_configure(const envlist_t *envlist, bool in_runtime);
 bool latx_steam_context_active(void);
