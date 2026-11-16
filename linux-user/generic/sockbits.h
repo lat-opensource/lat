@@ -59,4 +59,6 @@
 
 #define TARGET_SO_PROTOCOL             38
 #define TARGET_SO_DOMAIN               39
+
+#define TARGET_SO_PEERGROUPS           59
 #endif
