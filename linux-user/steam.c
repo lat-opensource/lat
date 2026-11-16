@@ -15,15 +15,6 @@
 
 static char **steam_payload;
 
-/*
- * This is a lineage marker, not a Runtime discovery input.  It is written
- * only after the current executable has been verified as the Runtime's
- * pressure-vessel wrapper, then checked against the canonical Runtime path
- * in children that the wrapper launches.
- */
-#define LATX_STEAM_RUNTIME_FILES_ENV \
-    "LATX_STEAM_RUNTIME_FILES"
-
 static bool latx_steam_runtime_mark(envlist_t *envlist)
 {
     const char *files = latx_steam_runtime_files();
@@ -47,6 +38,64 @@ static bool latx_steam_webhelper(const char *pathname)
     return !strcmp(basename, "steamwebhelper_sniper_wrap.sh");
 }
 
+typedef enum {
+    LATX_STEAM_TERMINAL_INVALID,
+    LATX_STEAM_TERMINAL_NONE,
+    LATX_STEAM_TERMINAL_AUTO,
+    LATX_STEAM_TERMINAL_TTY,
+    LATX_STEAM_TERMINAL_XTERM,
+} LatxSteamTerminal;
+
+static LatxSteamTerminal latx_steam_terminal_mode(const char *value)
+{
+    if (!value || !value[0] || !strcmp(value, "auto")) {
+        return LATX_STEAM_TERMINAL_AUTO;
+    }
+    if (!strcmp(value, "none") || !strcmp(value, "no")) {
+        return LATX_STEAM_TERMINAL_NONE;
+    }
+    if (!strcmp(value, "tty")) {
+        return LATX_STEAM_TERMINAL_TTY;
+    }
+    if (!strcmp(value, "xterm")) {
+        return LATX_STEAM_TERMINAL_XTERM;
+    }
+    return LATX_STEAM_TERMINAL_INVALID;
+}
+
+static bool latx_steam_shell_mode(const char *value, bool *active)
+{
+    if (!value || !value[0] || !strcmp(value, "none") ||
+        !strcmp(value, "no")) {
+        *active = false;
+        return true;
+    }
+    if (!strcmp(value, "after") || !strcmp(value, "fail") ||
+        !strcmp(value, "instead")) {
+        *active = true;
+        return true;
+    }
+    return false;
+}
+
+static bool latx_steam_boolean_value(const char *value, bool *result)
+{
+    if (!value || !value[0]) {
+        return false;
+    }
+    if (!strcmp(value, "1") || !g_ascii_strcasecmp(value, "true") ||
+        !g_ascii_strcasecmp(value, "yes")) {
+        *result = true;
+        return true;
+    }
+    if (!strcmp(value, "0") || !g_ascii_strcasecmp(value, "false") ||
+        !g_ascii_strcasecmp(value, "no")) {
+        *result = false;
+        return true;
+    }
+    return false;
+}
+
 static bool latx_steam_non_direct_mode(const char *arg)
 {
     return !strcmp(arg, "--launcher") ||
@@ -60,15 +109,7 @@ static bool latx_steam_non_direct_mode(const char *arg)
            !strcmp(arg, "--only-prepare") ||
            g_str_has_prefix(arg, "--only-prepare=") ||
            !strcmp(arg, "--test") ||
-           g_str_has_prefix(arg, "--test=") ||
-           !strcmp(arg, "--shell") ||
-           g_str_has_prefix(arg, "--shell=") ||
-           !strcmp(arg, "--shell-after") ||
-           g_str_has_prefix(arg, "--shell-after=") ||
-           !strcmp(arg, "--shell-fail") ||
-           g_str_has_prefix(arg, "--shell-fail=") ||
-           !strcmp(arg, "--shell-instead") ||
-           g_str_has_prefix(arg, "--shell-instead=");
+           g_str_has_prefix(arg, "--test=");
 }
 
 static bool latx_steam_option_value(char ***arg)
@@ -81,29 +122,111 @@ static bool latx_steam_option_value(char ***arg)
     return true;
 }
 
+static void latx_steam_append_loader_entry(GString **list, const char *value)
+{
+    if (!value || !value[0]) {
+        return;
+    }
+
+    if (!*list) {
+        *list = g_string_new(NULL);
+    } else if ((*list)->len) {
+        g_string_append_c(*list, ':');
+    }
+    g_string_append(*list, value);
+}
+
+static char *latx_steam_filter_game_overlay(const char *value)
+{
+    g_auto(GStrv) entries = g_strsplit_set(value, ": ", -1);
+    GString *filtered = g_string_new(NULL);
+
+    for (char **entry = entries; entry && *entry; entry++) {
+        if (!(*entry)[0]) {
+            continue;
+        }
+        if (g_str_has_suffix(*entry, "/gameoverlayrenderer.so")) {
+            continue;
+        }
+        if (filtered->len) {
+            g_string_append_c(filtered, ':');
+        }
+        g_string_append(filtered, *entry);
+    }
+    return g_string_free(filtered, false);
+}
+
+static void latx_steam_apply_loader_list(envlist_t *envlist, const char *name,
+                                         const char *override,
+                                         bool has_override,
+                                         const GString *additions,
+                                         bool remove_game_overlay)
+{
+    const char *base = has_override ? override : envlist_getenv(envlist, name);
+    g_autofree char *value = NULL;
+    g_autofree char *assignment = NULL;
+
+    if (!has_override && (!additions || !additions->len) &&
+        !remove_game_overlay) {
+        return;
+    }
+    if (base && base[0] && additions && additions->len) {
+        value = g_strdup_printf("%s:%s", base, additions->str);
+    } else if (additions && additions->len) {
+        value = g_strdup(additions->str);
+    } else if (base) {
+        value = g_strdup(base);
+    } else if (has_override) {
+        value = g_strdup("");
+    }
+
+    if (!value) {
+        return;
+    }
+    if (remove_game_overlay) {
+        g_autofree char *filtered = latx_steam_filter_game_overlay(value);
+
+        g_free(g_steal_pointer(&value));
+        value = g_steal_pointer(&filtered);
+    }
+    assignment = g_strdup_printf("%s=%s", name, value);
+    (void)envlist_setenv(envlist, assignment);
+}
+
 static void latx_steam_apply_runtime_paths(
-    envlist_t *envlist, const char *app_library_path,
+    envlist_t *envlist, const char *payload_path, const char *app_library_path,
     const char *old_xdg_data_dirs)
 {
     const char *files = latx_steam_runtime_files();
+    const char *app_path = app_library_path && app_library_path[0] ?
+                           app_library_path : NULL;
     g_autofree char *application_paths = NULL;
     g_autofree char *library_path = NULL;
     g_autofree char *assignment = NULL;
+    g_autofree char *payload_dir = NULL;
+    bool steam_payload = latx_steam_program(payload_path);
     if (!files) {
         return;
     }
 
-    /*
-     * Keep the guest sysroot and Steam Runtime ahead of the application
-     * fallback so a bundled library cannot split the Runtime dependency set.
-     * Passthrough wrappers are still selected by soname when enabled.
-     */
-    application_paths = g_strdup("/usr/lib64:/usr/lib");
+    if (steam_payload) {
+        /*
+         * Steam's own payload must lead the search so its versioned libraries
+         * remain a coherent set ahead of the generic guest sysroot.
+         */
+        payload_dir = g_path_get_dirname(payload_path);
+        application_paths = g_strdup_printf("%s%s%s:/usr/lib64:/usr/lib",
+                                            payload_dir, app_path ? ":" : "",
+                                            app_path ? app_path : "");
+    } else {
+        /* Applications keep the established sysroot and Runtime priority. */
+        application_paths = g_strdup("/usr/lib64:/usr/lib");
+    }
     library_path = latx_steam_runtime_make_library_path(application_paths);
-    if (library_path && app_library_path && app_library_path[0]) {
+    if (library_path && app_path && !steam_payload) {
         g_autofree char *runtime_path = g_steal_pointer(&library_path);
 
-        library_path = g_strconcat(runtime_path, ":", app_library_path, NULL);
+        library_path = g_strconcat(runtime_path, ":", app_path, NULL);
     }
     if (library_path) {
         assignment = g_strdup_printf("LD_LIBRARY_PATH=%s", library_path);
@@ -127,13 +250,29 @@ static char **latx_steam_direct_payload(const char *program,
         "PRESSURE_VESSEL_APP_LD_LIBRARY_PATH=";
     static const char xdg_data_dirs_prefix[] = "XDG_DATA_DIRS=";
     static const char ld_preload_prefix[] = "LD_PRELOAD=";
+    static const char ld_audit_prefix[] = "LD_AUDIT=";
+    static const char host_ld_preload_option[] = "--host-ld-preload=";
     static const char ld_preload_option[] = "--ld-preload=";
     static const char ld_preloads_prefix[] = "--ld-preloads=";
+    static const char ld_audit_option[] = "--ld-audit=";
+    static const char ld_audits_prefix[] = "--ld-audits=";
     const char *app_library_path = NULL;
     const char *host_ld_preload = NULL;
+    const char *host_ld_audit = NULL;
     g_autofree char *old_xdg_data_dirs = NULL;
     GPtrArray *environment;
     GString *preloads = NULL;
+    GString *audits = NULL;
+    bool has_host_ld_preload = false;
+    bool has_host_ld_audit = false;
+    bool batch =
+        !g_strcmp0(envlist_getenv(envlist, "PRESSURE_VESSEL_BATCH"), "1");
+    bool shell;
+    bool remove_game_overlay =
+        !g_strcmp0(envlist_getenv(envlist,
+                                 "PRESSURE_VESSEL_REMOVE_GAME_OVERLAY"), "1");
+    LatxSteamTerminal terminal = latx_steam_terminal_mode(
+        envlist_getenv(envlist, "PRESSURE_VESSEL_TERMINAL"));
     char **arg;
     char **payload = NULL;
     bool steam_webhelper;
@@ -144,6 +283,11 @@ static char **latx_steam_direct_payload(const char *program,
 
     old_xdg_data_dirs = g_strdup(envlist_getenv(envlist, "XDG_DATA_DIRS"));
     environment = g_ptr_array_new_with_free_func(g_free);
+    if (terminal == LATX_STEAM_TERMINAL_INVALID ||
+        !latx_steam_shell_mode(
+            envlist_getenv(envlist, "PRESSURE_VESSEL_SHELL"), &shell)) {
+        goto out;
+    }
     for (arg = target_argv + 1; *arg && strcmp(*arg, "--"); arg++) {
         const char *assignment = NULL;
         const char *preload = NULL;
@@ -157,6 +301,74 @@ static char **latx_steam_direct_payload(const char *program,
             assignment = *arg + strlen(env_if_host_prefix);
         } else if (latx_steam_non_direct_mode(*arg)) {
             goto out;
+        } else if (!strcmp(*arg, "--batch")) {
+            batch = true;
+        } else if (g_str_has_prefix(*arg, "--batch=")) {
+            if (!latx_steam_boolean_value(*arg + strlen("--batch="),
+                                          &batch)) {
+                goto out;
+            }
+        } else if (!strcmp(*arg, "--shell")) {
+            if (!latx_steam_option_value(&arg) ||
+                !latx_steam_shell_mode(*arg, &shell)) {
+                goto out;
+            }
+        } else if (g_str_has_prefix(*arg, "--shell=")) {
+            if (!latx_steam_shell_mode(*arg + strlen("--shell="), &shell)) {
+                goto out;
+            }
+        } else if (!strcmp(*arg, "--shell-after") ||
+                   g_str_has_prefix(*arg, "--shell-after=") ||
+                   !strcmp(*arg, "--shell-fail") ||
+                   g_str_has_prefix(*arg, "--shell-fail=") ||
+                   !strcmp(*arg, "--shell-instead") ||
+                   g_str_has_prefix(*arg, "--shell-instead=")) {
+            shell = true;
+        } else if (!strcmp(*arg, "--terminal")) {
+            if (!latx_steam_option_value(&arg)) {
+                goto out;
+            }
+            terminal = latx_steam_terminal_mode(*arg);
+            if (terminal == LATX_STEAM_TERMINAL_INVALID) {
+                goto out;
+            }
+        } else if (g_str_has_prefix(*arg, "--terminal=")) {
+            terminal = latx_steam_terminal_mode(*arg + strlen("--terminal="));
+            if (terminal == LATX_STEAM_TERMINAL_INVALID) {
+                goto out;
+            }
+        } else if (!strcmp(*arg, "--tty") ||
+                   g_str_has_prefix(*arg, "--tty=")) {
+            terminal = LATX_STEAM_TERMINAL_TTY;
+        } else if (!strcmp(*arg, "--xterm") ||
+                   g_str_has_prefix(*arg, "--xterm=")) {
+            terminal = LATX_STEAM_TERMINAL_XTERM;
+        } else if (!strcmp(*arg, "--remove-game-overlay")) {
+            remove_game_overlay = true;
+        } else if (g_str_has_prefix(*arg, "--remove-game-overlay=")) {
+            if (!latx_steam_boolean_value(
+                    *arg + strlen("--remove-game-overlay="),
+                    &remove_game_overlay)) {
+                goto out;
+            }
+        } else if (!strcmp(*arg, "--keep-game-overlay")) {
+            remove_game_overlay = false;
+        } else if (g_str_has_prefix(*arg, "--keep-game-overlay=")) {
+            bool keep;
+
+            if (!latx_steam_boolean_value(*arg +
+                                          strlen("--keep-game-overlay="),
+                                          &keep)) {
+                goto out;
+            }
+            remove_game_overlay = !keep;
+        } else if (!strcmp(*arg, "--host-ld-preload")) {
+            if (!latx_steam_option_value(&arg)) {
+                goto out;
+            }
+            preload = *arg;
+        } else if (g_str_has_prefix(*arg, host_ld_preload_option)) {
+            preload = *arg + strlen(host_ld_preload_option);
         } else if (!strcmp(*arg, "--ld-preload") ||
                    !strcmp(*arg, "--ld-preloads")) {
             if (!latx_steam_option_value(&arg)) {
@@ -167,28 +379,34 @@ static char **latx_steam_direct_payload(const char *program,
             preload = *arg + strlen(ld_preload_option);
         } else if (g_str_has_prefix(*arg, ld_preloads_prefix)) {
             preload = *arg + strlen(ld_preloads_prefix);
-        } else if (!strcmp(*arg, "--variable-dir") ||
-                   !strcmp(*arg, "--ld-audit") ||
+        } else if (!strcmp(*arg, "--ld-audit") ||
                    !strcmp(*arg, "--ld-audits")) {
             if (!latx_steam_option_value(&arg)) {
                 goto out;
             }
-        } else if (g_str_has_prefix(*arg, "--variable-dir=") ||
-                   g_str_has_prefix(*arg, "--ld-audit=") ||
-                   g_str_has_prefix(*arg, "--ld-audits=")) {
-            /* These options are represented by their paired environment. */
+            latx_steam_append_loader_entry(&audits, *arg);
+        } else if (g_str_has_prefix(*arg, ld_audit_option)) {
+            latx_steam_append_loader_entry(
+                &audits, *arg + strlen(ld_audit_option));
+        } else if (g_str_has_prefix(*arg, ld_audits_prefix)) {
+            latx_steam_append_loader_entry(
+                &audits, *arg + strlen(ld_audits_prefix));
+        } else if (!strcmp(*arg, "--variable-dir")) {
+            if (!latx_steam_option_value(&arg)) {
+                goto out;
+            }
         } else {
-            goto out;
+            /*
+             * Direct execution creates no container. Options that only adjust
+             * container setup have no equivalent here; environment and loader
+             * options with direct equivalents are handled above. Skipping the
+             * remaining wrapper options keeps new Runtime releases compatible
+             * without treating each container-only addition as a new failure.
+             */
         }
 
         if (preload && preload[0]) {
-            if (!preloads) {
-                preloads = g_string_new(NULL);
-            }
-            if (preloads->len) {
-                g_string_append_c(preloads, ':');
-            }
-            g_string_append(preloads, preload);
+            latx_steam_append_loader_entry(&preloads, preload);
         }
 
         if (assignment) {
@@ -199,6 +417,10 @@ static char **latx_steam_direct_payload(const char *program,
                 app_library_path = assignment + strlen(app_ld_prefix);
             } else if (g_str_has_prefix(assignment, ld_preload_prefix)) {
                 host_ld_preload = assignment + strlen(ld_preload_prefix);
+                has_host_ld_preload = true;
+            } else if (g_str_has_prefix(assignment, ld_audit_prefix)) {
+                host_ld_audit = assignment + strlen(ld_audit_prefix);
+                has_host_ld_audit = true;
             } else {
                 if (g_str_has_prefix(assignment, xdg_data_dirs_prefix)) {
                     g_free(old_xdg_data_dirs);
@@ -212,6 +434,18 @@ static char **latx_steam_direct_payload(const char *program,
     if (!*arg || !arg[1]) {
         goto out;
     }
+    if (batch) {
+        shell = false;
+        terminal = LATX_STEAM_TERMINAL_NONE;
+    } else if (terminal == LATX_STEAM_TERMINAL_AUTO) {
+        terminal = shell ? LATX_STEAM_TERMINAL_XTERM :
+                           LATX_STEAM_TERMINAL_NONE;
+    }
+    if (terminal == LATX_STEAM_TERMINAL_TTY ||
+        terminal == LATX_STEAM_TERMINAL_XTERM ||
+        (terminal == LATX_STEAM_TERMINAL_NONE && shell)) {
+        goto out;
+    }
 
     payload = arg + 1;
     /* Runtime entry points can be host scripts as well as guest ELFs. */
@@ -221,24 +455,21 @@ static char **latx_steam_direct_payload(const char *program,
         for (size_t i = 0; i < environment->len; i++) {
             (void)envlist_setenv(envlist, g_ptr_array_index(environment, i));
         }
-        if (host_ld_preload) {
-            g_autofree char *assignment = g_strdup_printf(
-                "LD_PRELOAD=%s", host_ld_preload);
-
-            (void)envlist_setenv(envlist, assignment);
-        } else if (preloads && preloads->len) {
-            g_autofree char *assignment = g_strdup_printf(
-                "LD_PRELOAD=%s", preloads->str);
-
-            (void)envlist_setenv(envlist, assignment);
-        }
-        latx_steam_apply_runtime_paths(envlist, app_library_path,
-                                                 old_xdg_data_dirs);
+        latx_steam_apply_loader_list(envlist, "LD_PRELOAD", host_ld_preload,
+                                     has_host_ld_preload, preloads,
+                                     remove_game_overlay);
+        latx_steam_apply_loader_list(envlist, "LD_AUDIT", host_ld_audit,
+                                     has_host_ld_audit, audits, false);
+        latx_steam_apply_runtime_paths(envlist, payload[0], app_library_path,
+                                       old_xdg_data_dirs);
     }
 
 out:
     if (preloads) {
         g_string_free(preloads, true);
+    }
+    if (audits) {
+        g_string_free(audits, true);
     }
     g_ptr_array_free(environment, true);
     return payload;
@@ -433,17 +664,19 @@ void latx_steam_prepare(const char *program, char **target_argv,
 {
     const char *basename = program ? strrchr(program, '/') : NULL;
     const char *expected_files;
+    bool steam_program;
     bool wrapper_name;
 
     steam_payload = NULL;
 
     expected_files = envlist_getenv(envlist,
                                     LATX_STEAM_RUNTIME_FILES_ENV);
-    wrapper_name = !g_strcmp0(basename ? basename + 1 : program,
-                              "pressure-vessel-wrap");
+    basename = basename ? basename + 1 : program;
+    wrapper_name = !g_strcmp0(basename, "pressure-vessel-wrap");
+    steam_program = latx_steam_program(program);
     latx_steam_context_configure(envlist,
-                                 wrapper_name || expected_files != NULL);
-
+                                 wrapper_name || steam_program ||
+                                 expected_files != NULL);
     /* Avoid Runtime discovery for launches outside the pressure-vessel chain. */
     if (!wrapper_name && !expected_files) {
         return;
