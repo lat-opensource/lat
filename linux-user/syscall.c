@@ -3616,6 +3616,31 @@ get_timeout:
             }
             break;
         }
+#ifdef SO_PEERGROUPS
+        case TARGET_SO_PEERGROUPS: {
+            char *groups;
+
+            if (get_user_u32(len, optlen)) {
+                return -TARGET_EFAULT;
+            }
+            if (len < 0) {
+                return -TARGET_EINVAL;
+            }
+            groups = lock_user(VERIFY_WRITE, optval_addr, len, 0);
+            if (!groups && len > 0) {
+                return -TARGET_EFAULT;
+            }
+            lv = len;
+            ret = get_errno(getsockopt(sockfd, level, SO_PEERGROUPS,
+                                       groups, &lv));
+            if (put_user_u32(lv, optlen)) {
+                unlock_user(groups, optval_addr, 0);
+                return -TARGET_EFAULT;
+            }
+            unlock_user(groups, optval_addr, ret < 0 ? 0 : lv);
+            break;
+        }
+#endif
         case TARGET_SO_PEERSEC: {
             char *name;
 
