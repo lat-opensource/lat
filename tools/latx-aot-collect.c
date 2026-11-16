@@ -396,7 +396,21 @@ finish:
         FILE *file = fopen(report, "w");
         if (file) {
             bool comma = false;
-            fprintf(file, "{\"app_status\":%d,\"root_exit_ms\":%.3f,\"app_exit_ms\":%.3f,\"all_exit_ms\":%.3f,\"failures\":%d,\"workers\":[",
+            bool root_snapshot = false;
+            for (int i = 0; i < limit; i++) {
+                if (workers[i].pid && workers[i].peer_pid == root) {
+                    root_snapshot = true;
+                    break;
+                }
+            }
+            /* Compatibility fields below retain their protocol-only meaning.
+             * A successful protocol cannot prove coverage of unobserved exits. */
+            bool coverage_incomplete = failures || aborts ||
+                (root_done && WIFSIGNALED(root_status) && !root_snapshot);
+            fprintf(file, "{\"report_scope\":\"observed_collection_protocol\","
+                    "\"coverage_status\":\"%s\",",
+                    coverage_incomplete ? "incomplete" : "not_proven");
+            fprintf(file, "\"app_status\":%d,\"root_exit_ms\":%.3f,\"app_exit_ms\":%.3f,\"all_exit_ms\":%.3f,\"failures\":%d,\"workers\":[",
                     root_done ? exit_code(root_status) : -1, root_exit_ms,
                     app_exit_ms, now_ms(), failures);
             for (int i = 0; i < limit; i++) {

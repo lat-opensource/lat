@@ -790,6 +790,20 @@ foreach target : target_dirs
              aot_collect_controller, aot_defer_fixture],
       suite: 'lat-pr-fast', timeout: 20)
 
+    aot_report_fixture = executable(
+      'test-latx-aot-report-fixture',
+      files('target/i386/latx/sbt/tests/aot-report-fixture.c',
+            'target/i386/latx/sbt/aot_defer.c') + genh,
+      c_args: smc_reload_test_c_args,
+      dependencies: [glib],
+      include_directories: target_inc,
+      link_args: smc_reload_test_link_args + ['-Wl,--wrap=recv']
+    )
+    test('latx-aot-report', python,
+      args: [files('target/i386/latx/sbt/tests/aot-report-test.py'),
+             aot_collect_controller, aot_report_fixture],
+      suite: 'lat-pr-fast', timeout: 30)
+
     aot_exit_worker_test = executable(
       'test-latx-aot-exit-worker',
       files(
