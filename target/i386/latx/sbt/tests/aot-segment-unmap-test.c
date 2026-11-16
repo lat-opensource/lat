@@ -30,6 +30,7 @@ static GHashTable *page_flags;
 
 bool message_with_timestamp;
 int option_aot = 1;
+int option_quicktrans_aot_collect;
 int option_aot_pe_profile;
 int option_prlimit;
 const char *aot_process_profile = "browser";

@@ -741,6 +741,17 @@ foreach target : target_dirs
       suite: 'lat-pr-fast',
     )
 
+    aot_tb_collect_test = executable(
+      'test-latx-aot-tb-collect',
+      files('target/i386/latx/sbt/tests/aot-tb-collect-test.c') +
+        genh + tcg_trace_genh + [syscall_nr_generated, latx_aot_build_id],
+      c_args: smc_reload_test_c_args,
+      dependencies: [glib],
+      include_directories: target_inc + [include_directories('target/i386/latx')],
+      link_args: smc_reload_test_link_args + ['-Wl,--wrap=realloc']
+    )
+    test('latx-aot-tb-collect', aot_tb_collect_test, suite: 'lat-pr-fast')
+
     aot_exit_worker_test = executable(
       'test-latx-aot-exit-worker',
       files(

@@ -106,12 +106,6 @@ void aot_set_process_profile(int argc, char **argv)
     }
 }
 
-/* Helper functions used to dump tbs in hash table to a vector */
-static void do_tb_count(void *p, uint32_t hash, void *userp)
-{
-    tb_num++;
-}
-
 static char not_required_tb(TranslationBlock *tb) 
 {
     if (tb == NULL
@@ -126,17 +120,40 @@ static char not_required_tb(TranslationBlock *tb)
     return false;
 }
 
-static int record_index;
-/* static target_ulong pre_tb_pc; */
-static void do_tb_record(void *p, uint32_t hash, void *userp)
+typedef struct AOTTBCollector {
+    size_t capacity;
+    bool failed;
+} AOTTBCollector;
+
+static void do_tb_collect(void *p, uint32_t hash, void *userp)
 {
-    assert(record_index < tb_num);
-    TranslationBlock *tb = (TranslationBlock *)p;
-    if (not_required_tb(tb)) {
-        tb_num--;
+    AOTTBCollector *collector = userp;
+    TranslationBlock **grown;
+    size_t capacity;
+
+    if (collector->failed || not_required_tb(p)) {
         return;
     }
-    tb_vector[record_index++] = (TranslationBlock *)p;
+    if ((size_t)tb_num == collector->capacity) {
+        if (collector->capacity == INT_MAX) {
+            collector->failed = true;
+            return;
+        }
+        capacity = collector->capacity ? collector->capacity * 2 : 256;
+        capacity = MIN(capacity, (size_t)INT_MAX);
+        if (capacity > SIZE_MAX / sizeof(*tb_vector)) {
+            collector->failed = true;
+            return;
+        }
+        grown = realloc(tb_vector, capacity * sizeof(*tb_vector));
+        if (!grown) {
+            collector->failed = true;
+            return;
+        }
+        tb_vector = grown;
+        collector->capacity = capacity;
+    }
+    tb_vector[tb_num++] = p;
 }
 
 /* Basic Block relocation table with @rel_entry_num elements. */
@@ -225,26 +242,26 @@ void mk_aot_dir(char * pathname)
     }
 }
 
-/*
- * Prepare all TBs which will be handled later.
- * 1. Calculate TBs number.
- * 2. Allocate memory to store these TBs.
- * 3. Sort this vector and remove SMC.
- * 4. Remove duplicate TB.
-*/
+/* Collect eligible TBs in traversal order, then keep the existing sort order.
+ * The generator owns a quiescent snapshot; no TB can change during this walk.
+ */
 static void get_tb(void)
 {
+    AOTTBCollector collector = { 0 };
+
     tb_num = 0;
-    record_index = 0;
-    qht_iter(&tb_ctx.htable, do_tb_count, NULL);
-    tb_vector =
-        (TranslationBlock **)malloc(tb_num * sizeof(TranslationBlock *));
-    assert(tb_vector);
-    qht_iter(&tb_ctx.htable, do_tb_record, NULL);
-    if (tb_num == 0) {
-        return;
+    tb_vector = NULL;
+    qht_iter(&tb_ctx.htable, do_tb_collect, &collector);
+    if (collector.failed) {
+        free(tb_vector);
+        tb_vector = NULL;
+        tb_num = 0;
+        fprintf(stderr, "AOT TB collection failed; no partial coverage generated\n");
+        _exit(EXIT_FAILURE);
     }
-    qsort(tb_vector, tb_num, sizeof(TranslationBlock *), tb_cmp);
+    if (tb_num > 1) {
+        qsort(tb_vector, tb_num, sizeof(*tb_vector), tb_cmp);
+    }
 }
 
 /* Prepare segment infomation. */ 
