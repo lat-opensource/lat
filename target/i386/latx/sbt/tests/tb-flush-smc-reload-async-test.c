@@ -9,9 +9,28 @@
 #include "aot.h"
 #include "exec/fasttb.h"
 #include "latx-options.h"
+#include "latx-config.h"
+#include "latx-signal.h"
 #include "smc_reload.h"
 #include "sysemu/tcg.h"
 #include "ts.h"
+
+#if defined(CONFIG_LATX_FAST_TRANSLATOR) && defined(TARGET_X86_64)
+__thread volatile sig_atomic_t latx_tb_flush_active;
+
+/* This fixture exercises queued SMC reload cleanup, not compact TB reset. */
+bool latx_quicktrans_compact_tb_enabled(void)
+{
+    return false;
+}
+
+bool qht_try_reset_exclusive(struct qht *ht G_GNUC_UNUSED,
+                             size_t n_elems G_GNUC_UNUSED)
+{
+    g_assert_not_reached();
+    return false;
+}
+#endif
 
 static run_on_cpu_func queued_func;
 static run_on_cpu_data queued_data;
