@@ -10,8 +10,7 @@ case "$guest" in
     *) echo 'guest filename must end in 32 or 64' >&2; exit 2 ;;
 esac
 test_dir=$(dirname "$(realpath "$0")")
-# Exercise the page budget and rollback without HRAS layout changes.
-export LATX_HRAS=0 LATX_HRAS_SINGLE=0
+# Exercise the page budget and rollback.
 source "$test_dir/tu-test-common.sh"
 result=$(mktemp -d "${TMPDIR:-/tmp}/latu-tu-boundary.XXXXXX")
 export HOME="$result/home"
