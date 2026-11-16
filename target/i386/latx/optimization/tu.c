@@ -1382,6 +1382,7 @@ void translate_tu(uint32 tb_num_in_tu, TranslationBlock **tb_list)
 #endif
 
 retry:
+    search_size = 0;
     for (uint32_t i = 0; i < tb_num_in_tu; i++) {
         tb = tb_list[i];
         tb->s_data->indirect_miss_offset = 0;

@@ -28,7 +28,6 @@ case "$kind" in
         name=tu-signal-fault ;;
     member-limit) sources=(tu-member-limit.S); name=tu-member-limit ;;
     search-buffer) sources=(tu-search-buffer.S); name=tu-search-buffer ;;
-    hras-call) sources=(tu-hras-call.S); name=tu-hras-call ;;
     indirect-cold) sources=(tu-indirect-cold.S); name=tu-indirect-cold ;;
     late-thunk) sources=(tu-late-thunk.S); name=tu-late-thunk ;;
     *) exit 2 ;;
