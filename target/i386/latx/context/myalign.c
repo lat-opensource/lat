@@ -1660,7 +1660,7 @@ typedef struct x64_xcb_connection_s {
     x64_xcb_xid_t xid;
 } x64_xcb_connection_t;
 
-#define NXCB 8
+#define NXCB 16
 my_xcb_connection_t* my_xcb_connects[NXCB] = {0};
 x64_xcb_connection_t x64_xcb_connects[NXCB] = {0};
 #ifdef CONFIG_LATX_DEBUG
@@ -1700,7 +1700,8 @@ void* align_xcb_connection(void* src)
         if(src==&x64_xcb_connects[i])
             dest = my_xcb_connects[i];
     #if 1
-    if (!(src&&dest&&((my_xcb_connection_t *)src)->xid.last == ((my_xcb_connection_t *)dest)->xid.last)) {
+    if (dest && ((my_xcb_connection_t *)src)->xid.last !=
+                ((my_xcb_connection_t *)dest)->xid.last) {
         my_xcb_flush(dest);
     }
 #ifdef CONFIG_LATX_DEBUG
@@ -1708,8 +1709,8 @@ void* align_xcb_connection(void* src)
         latx_xcb_cmp(src,dest);
     }
 #endif
-    if(!dest)
-        dest = add_xcb_connection(src);
+    if (!dest)
+        return src;
     #else
     if(!dest) {
         printf_log(LOG_NONE, "BOX64: Error, xcb_connect %p not found\n", src);
