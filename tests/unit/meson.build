@@ -11,6 +11,18 @@ test(
   suite: 'lat-pr-fast',
 )
 
+test_lat_wow64 = executable(
+  'test-lat-wow64',
+  files('test-lat-wow64.c', '../../target/i386/latx/wow64.c'),
+  include_directories: include_directories(
+    '../../include', '../../target/i386/latx',
+  ),
+  dependencies: glib,
+  build_by_default: false,
+)
+
+test('test-lat-wow64', test_lat_wow64, suite: 'lat-pr-fast')
+
 test_exclusive_timeout = executable(
   'test-exclusive-timeout',
   files('test-exclusive-timeout.c'),
