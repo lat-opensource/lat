@@ -3618,7 +3618,7 @@ get_timeout:
         }
 #ifdef SO_PEERGROUPS
         case TARGET_SO_PEERGROUPS: {
-            char *groups;
+            g_autofree char *groups = NULL;
 
             if (get_user_u32(len, optlen)) {
                 return -TARGET_EFAULT;
@@ -3626,22 +3626,37 @@ get_timeout:
             if (len < 0) {
                 return -TARGET_EINVAL;
             }
-            groups = lock_user(VERIFY_WRITE, optval_addr, len, 0);
-            if (!groups && len > 0) {
-                return -TARGET_EFAULT;
+            /*
+             * A short buffer returns ERANGE without accessing optval. Query
+             * the size first, then stage the array so that only the actual
+             * output range needs to be writable in the guest. Do not allocate
+             * the guest's (potentially much larger) advertised capacity.
+             */
+            lv = 0;
+            for (;;) {
+                char *new_groups;
+
+                ret = get_errno(getsockopt(sockfd, level, SO_PEERGROUPS,
+                                           groups, &lv));
+                if (ret != -TARGET_ERANGE || lv > (socklen_t)len) {
+                    break;
+                }
+                /* Peer credentials may change between the two host calls. */
+                new_groups = g_try_realloc(groups, lv);
+                if (!new_groups) {
+                    return -TARGET_ENOMEM;
+                }
+                groups = new_groups;
             }
-            lv = len;
-            ret = get_errno(getsockopt(sockfd, level, SO_PEERGROUPS,
-                                       groups, &lv));
             if (ret < 0 && ret != -TARGET_ERANGE) {
-                unlock_user(groups, optval_addr, 0);
                 return ret;
             }
-            if (put_user_u32(lv, optlen)) {
-                unlock_user(groups, optval_addr, 0);
+            if (ret == 0 && lv && copy_to_user(optval_addr, groups, lv)) {
                 return -TARGET_EFAULT;
             }
-            unlock_user(groups, optval_addr, ret < 0 ? 0 : lv);
+            if (put_user_u32(lv, optlen)) {
+                return -TARGET_EFAULT;
+            }
             break;
         }
 #endif
