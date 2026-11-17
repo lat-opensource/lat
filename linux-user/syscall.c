@@ -3633,6 +3633,10 @@ get_timeout:
             lv = len;
             ret = get_errno(getsockopt(sockfd, level, SO_PEERGROUPS,
                                        groups, &lv));
+            if (ret < 0 && ret != -TARGET_ERANGE) {
+                unlock_user(groups, optval_addr, 0);
+                return ret;
+            }
             if (put_user_u32(lv, optlen)) {
                 unlock_user(groups, optval_addr, 0);
                 return -TARGET_EFAULT;
