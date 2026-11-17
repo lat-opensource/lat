@@ -377,7 +377,7 @@ static int lat_wow64_float_trap(CPUX86State *env, int trap)
         case 0x26: case 0x2e: case 0x36: case 0x3e: case 0x64: case 0x65:
         case 0x66: case 0x67: case 0xf0: case 0xf2: case 0xf3:
             continue;
-        case 0x0f:
+        case 0x0f: case 0xc4: case 0xc5:
             trap = 19; /* SIMD floating-point exception. */
             break;
         default:
