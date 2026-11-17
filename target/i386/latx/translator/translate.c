@@ -20,6 +20,9 @@
 #include "latx-smc.h"
 #include "jrra.h"
 #include "latx-native-asm.h"
+#ifdef CONFIG_LATX_WOW64
+#include "qemu.h"
+#endif
 
 extern void *helper_tb_lookup_ptr(CPUArchState *);
 static int ss_generate_match_fail_native_code(void* code_buf);
@@ -225,6 +228,22 @@ IR1_INST *get_ir1_list(struct TranslationBlock *tb, ADDRX pc, int max_insns)
 
     int ir1_num = 0;
     do {
+#ifdef CONFIG_LATX_WOW64
+        /* End before a page boundary so an inaccessible future instruction
+         * cannot fault while earlier guest instructions are still pending. */
+        if (lat_wow64_provider_plugin_active && ir1_num &&
+            ((pc & TARGET_PAGE_MASK) != (start_pc & TARGET_PAGE_MASK) ||
+             TARGET_PAGE_SIZE - (pc & ~TARGET_PAGE_MASK) < 15)) {
+            pir1 = &ir1_list[ir1_num];
+            memset(pir1, 0, sizeof(*pir1));
+            pir1->info = (void *)((char *)pir1_base +
+                                 ir1_num * sizeof(struct la_dt_insn));
+            memset(pir1->info, 0, sizeof(*pir1->info));
+            ir1_make_ins_JMP(pir1, pc, 0);
+            ++ir1_num;
+            break;
+        }
+#endif
         /* read 32 instructioin bytes */
         lsassert(lsenv->cpu_state != NULL);
         /*
@@ -239,10 +258,18 @@ IR1_INST *get_ir1_list(struct TranslationBlock *tb, ADDRX pc, int max_insns)
          */
         pins = inst_cache;
 
-        int max_insn_len = get_insn_len_readable(pc);
-        for (int i = 0; i < max_insn_len; ++i) {
-            *pins = cpu_read_code_via_qemu(lsenv->cpu_state, pc + i);
-            pins++;
+#ifdef CONFIG_LATX_WOW64
+        if (lat_wow64_provider_plugin_active &&
+            TARGET_PAGE_SIZE - (pc & ~TARGET_PAGE_MASK) < 15) {
+            lat_wow64_provider_fetch_code(lsenv->cpu_state, pc, inst_cache);
+        } else
+#endif
+        {
+            int max_insn_len = get_insn_len_readable(pc);
+            for (int i = 0; i < max_insn_len; ++i) {
+                *pins = cpu_read_code_via_qemu(lsenv->cpu_state, pc + i);
+                pins++;
+            }
         }
         /* disasemble this instruction */
         pir1 = &ir1_list[ir1_num];

@@ -65,6 +65,10 @@ Loading the library on a host worker thread that subsequently exits is supported
 Linux guest system calls. For exits carrying REPLY_REQUIRED, send exactly one
 reply with the returned sequence before reentry. Use CONTINUE after a handled
 service, or update the context and use the appropriate advertised reply action.
+Explicit entry and redirect PCs must fit in 32 bits; only entry accepts
+`LAT_WOW64_ENTER_CURRENT_PC` as a sentinel. Effective i386 addresses wrap at
+32 bits. Executing a mapping without EXEC returns a page-fault exit with the
+instruction-fetch error bit, including when an instruction crosses a page.
 A configured `int3` address is the host's optional return sentinel; other `int3`
 instructions produce breakpoint exits.
 
@@ -104,3 +108,10 @@ Other Linux launcher options and per-application configuration are not parsed.
 The default x87 implementation uses native double precision; use
 `LATX_SOFTFPU=2` for architectural 80-bit precision. The test includes a precision
 sentinel and pending x87/SSE exception checks.
+
+Unmasked native floating-point faults preserve their x87 or SSE trap and status
+when returned to Wine. This does not provide independent x87/SSE exception
+controls: the existing engine shares native FCSR exception enables. In particular,
+CW=0x037f with MXCSR=0x1d80 currently fails to raise an SSE divide fault. Tests of
+SSE fault delivery enable divide in both controls to isolate delivery from that
+known limitation. Mixed-control floating-point semantics need separate work.

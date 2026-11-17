@@ -10,6 +10,7 @@
 #include "cpu.h"
 #include "exec/cpu-all.h"
 #include "exec/exec-all.h"
+#include "exec/cpu_ldst.h"
 #include "exec/fasttb.h"
 #include "hw/core/cpu.h"
 #include "latx-config.h"
@@ -20,7 +21,11 @@
 #include "sysemu/tcg.h"
 #include "tcg/tcg.h"
 #include "tcg/helper-tcg.h"
-
+#ifdef CONFIG_LATX_CAPSTONE_GIT
+#include "capstone_git/arch/X86/X86DisassemblerDecoder.h"
+#else
+#include "capStone/arch/X86/X86DisassemblerDecoder.h"
+#endif
 
 int lat_wow64_cpu_exec(CPUState *cpu);
 void lat_wow64_init_fpu_regs(CPUX86State *env);
@@ -213,6 +218,68 @@ static uint32_t segment_flags(bool code)
                      DESC_DPL_MASK | DESC_A_MASK;
 
     return flags | (code ? DESC_CS_MASK | DESC_R_MASK : DESC_W_MASK);
+}
+
+void lat_wow64_provider_check_code(CPUArchState *env, target_ulong pc,
+                                    target_ulong address)
+{
+    int flags = page_get_flags(address);
+    CPUState *cpu;
+
+    if ((flags & (PAGE_VALID | PAGE_EXEC)) == (PAGE_VALID | PAGE_EXEC)) {
+        return;
+    }
+    cpu = env_cpu(env);
+    env->eip = pc;
+    env->cr[2] = address;
+    env->error_code = PG_ERROR_U_MASK | PG_ERROR_I_D_MASK |
+                      ((flags & PAGE_VALID) ? PG_ERROR_P_MASK : 0);
+    env->exception_is_int = 0;
+    env->exception_next_eip = -1;
+    cpu->exception_index = EXCP0E_PAGE;
+    mmap_unlock();
+    cpu_loop_exit(cpu);
+}
+
+typedef struct LatWow64CodeReader {
+    CPUArchState *env;
+    target_ulong pc, fault_address;
+    uint8_t *code;
+    bool fault;
+} LatWow64CodeReader;
+
+static int lat_wow64_code_byte(const struct reader_info *arg, uint8_t *byte,
+                              uint64_t address)
+{
+    LatWow64CodeReader *reader = (LatWow64CodeReader *)arg;
+    uint64_t offset = address - reader->pc;
+    uint32_t guest_address = address;
+
+    if (offset >= 15) return -1;
+    if ((page_get_flags(guest_address) & (PAGE_VALID | PAGE_EXEC)) !=
+        (PAGE_VALID | PAGE_EXEC)) {
+        reader->fault = true;
+        reader->fault_address = guest_address;
+        return -1;
+    }
+    *byte = cpu_ldub_code(reader->env, guest_address);
+    reader->code[offset] = *byte;
+    return 0;
+}
+
+void lat_wow64_provider_fetch_code(CPUArchState *env, target_ulong pc,
+                                    uint8_t *code)
+{
+    struct InternalInstruction instruction = { 0 };
+    LatWow64CodeReader reader = { .env = env, .pc = pc, .code = code };
+    int result;
+
+    memset(code, 0, 15);
+    result = decodeInstruction(&instruction, lat_wow64_code_byte, &reader,
+                               pc, MODE_32BIT);
+    if (result && reader.fault) {
+        lat_wow64_provider_check_code(env, pc, reader.fault_address);
+    }
 }
 
 static void set_segment_descriptor(CPUX86State *env, uint16_t selector,

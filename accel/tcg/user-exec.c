@@ -28,6 +28,9 @@
 #include "exec/log.h"
 #include "qemu/atomic128.h"
 #include "trace/trace-root.h"
+#ifdef CONFIG_LATX_WOW64
+#include "qemu.h"
+#endif
 #include "trace/mem.h"
 #include <dlfcn.h>
 #include "loongarch-extcontext.h"
@@ -791,6 +794,11 @@ void *probe_access(CPUArchState *env, target_ulong addr, int size,
 tb_page_addr_t get_page_addr_code_hostp(CPUArchState *env, target_ulong addr,
                                         void **hostp)
 {
+#ifdef CONFIG_LATX_WOW64
+    if (lat_wow64_provider_plugin_active) {
+        lat_wow64_provider_check_code(env, addr, addr);
+    }
+#endif
     if (hostp) {
         *hostp = g2h_untagged(addr);
     }

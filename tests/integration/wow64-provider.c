@@ -169,6 +169,153 @@ static void test_cache_pressure(LatWow64Process *process,
     assert(!munmap(code, length));
 }
 
+static void test_i386_address_width(LatWow64Process *process,
+                                    LatWow64Thread *thread,
+                                    unsigned char *memory, size_t page)
+{
+    unsigned char wrap[] = { 0xbb,0xf0,0xff,0xff,0xff,0x8b,0x83,0,0,0,0,0xcd,0x80 };
+    unsigned char high_code[] = {
+        0xc7,0x05,0,0,0,0,0x78,0x56,0x34,0x12,0xa1,0,0,0,0,0xcd,0x80,
+    };
+    LatWow64Exit event = { .size = sizeof(event), .abi_version = LAT_WOW64_ABI_VERSION };
+    LatWow64Context context;
+    LatWow64MemoryEvent map = {
+        .size = sizeof(map), .abi_version = LAT_WOW64_ABI_VERSION,
+        .type = LAT_WOW64_MEMORY_WRITE, .address = (uintptr_t)memory, .length = page,
+    };
+    uint32_t address = (uintptr_t)(memory + page + 768);
+    uint32_t displacement = address + 16;
+    unsigned char *high;
+
+    *(uint32_t *)(uintptr_t)address = 0x76543210;
+    memcpy(wrap + 7, &displacement, sizeof(displacement));
+    memcpy(memory + 192, wrap, sizeof(wrap));
+    ok(api->memory_event(process, &map));
+    ok(api->enter(thread, (uintptr_t)(memory + 192), &event));
+    assert(event.reason == LAT_WOW64_EXIT_SYSCALL && event.service_number == 0x76543210);
+    reply(thread, &event);
+
+    high = mmap((void *)0xf0000000, page, PROT_READ | PROT_WRITE | PROT_EXEC,
+                MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
+    assert(high != MAP_FAILED);
+    address = (uintptr_t)(high + page - 4);
+    memcpy(high_code + 2, &address, sizeof(address));
+    memcpy(high_code + 11, &address, sizeof(address));
+    memcpy(high, high_code, sizeof(high_code));
+    map.type = LAT_WOW64_MEMORY_MAP;
+    map.address = (uintptr_t)high;
+    map.protection = LAT_WOW64_PROT_READ | LAT_WOW64_PROT_WRITE | LAT_WOW64_PROT_EXEC;
+    ok(api->memory_event(process, &map));
+    ok(api->enter(thread, (uintptr_t)high, &event));
+    assert(event.reason == LAT_WOW64_EXIT_SYSCALL && event.service_number == 0x12345678);
+    ok(api->get_context(thread, &context));
+    assert(context.eip == (uintptr_t)high + sizeof(high_code));
+    reply(thread, &event);
+    map.type = LAT_WOW64_MEMORY_UNMAP;
+    ok(api->memory_event(process, &map));
+    assert(!munmap(high, page));
+    puts("i386 address wrap and high-bit addresses PASS");
+}
+
+static void test_i386_execute_permissions(LatWow64Process *process,
+                                         LatWow64Thread *thread,
+                                         unsigned char *memory, size_t page)
+{
+    unsigned char *code = mmap((void *)0x40000000, 2 * page,
+                               PROT_READ | PROT_WRITE | PROT_EXEC,
+                               MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
+    unsigned char *next = code + page;
+    LatWow64Exit event = { .size = sizeof(event), .abi_version = LAT_WOW64_ABI_VERSION };
+    LatWow64MemoryEvent map = {
+        .size = sizeof(map), .abi_version = LAT_WOW64_ABI_VERSION,
+        .type = LAT_WOW64_MEMORY_MAP, .address = (uintptr_t)code, .length = 2 * page,
+        .protection = LAT_WOW64_PROT_READ | LAT_WOW64_PROT_WRITE | LAT_WOW64_PROT_EXEC,
+    };
+    LatWow64Context saved, context;
+    uint32_t address = (uintptr_t)next;
+
+    assert(code != MAP_FAILED);
+    ok(api->get_context(thread, &saved));
+    memset(code, 0x90, 2 * page);
+    memcpy(next, "\xcd\x80", 2);
+    /* An indirect jump must report the destination, not the jump's PC. */
+    code[0] = 0xb8;
+    memcpy(code + 1, &address, 4);
+    memcpy(code + 5, "\xff\xe0", 2);
+    ok(api->memory_event(process, &map));
+    map.type = LAT_WOW64_MEMORY_PROTECT;
+    map.address = (uintptr_t)next;
+    map.length = page;
+    map.protection &= ~LAT_WOW64_PROT_EXEC;
+    ok(api->memory_event(process, &map));
+    for (unsigned int kind = 0; kind < 4; ++kind) {
+        uintptr_t pc = kind == 0 ? (uintptr_t)next :
+                       kind == 1 ? (uintptr_t)code : (uintptr_t)(next - 2);
+        if (kind == 3) {
+            /* mov eax,imm32 straddles the RX/RW boundary. */
+            next[-2] = 0xb8;
+            next[-1] = 0x12;
+        }
+        LatWow64MemoryEvent write = map;
+        write.type = LAT_WOW64_MEMORY_WRITE;
+        write.address = (uintptr_t)code;
+        write.length = 2 * page;
+        ok(api->memory_event(process, &write));
+        ok(api->enter(thread, pc, &event));
+        fprintf(stderr, "execute permission case %u: trap=%u pc=%#llx address=%#llx error=%#x\n",
+                kind, event.trap_number, (unsigned long long)event.guest_pc,
+                (unsigned long long)event.fault_address, event.error_code);
+        assert(event.reason == LAT_WOW64_EXIT_EXCEPTION && event.trap_number == 14);
+        assert(event.guest_pc == (kind == 3 ? (uintptr_t)(next - 2) : (uintptr_t)next));
+        assert(event.fault_address == (uintptr_t)next && (event.error_code & 0x14) == 0x14);
+        reply(thread, &event);
+    }
+    /* The same crossing instruction succeeds once both pages are executable. */
+    memcpy(next, "\x34\x56\x78\xcd\x80", 5);
+    map.protection |= LAT_WOW64_PROT_EXEC;
+    ok(api->memory_event(process, &map));
+    ok(api->enter(thread, (uintptr_t)(next - 2), &event));
+    fprintf(stderr, "cross-page executable: reason=%u trap=%u service=%#llx pc=%#llx\n",
+            event.reason, event.trap_number, (unsigned long long)event.service_number,
+            (unsigned long long)event.guest_pc);
+    assert(event.reason == LAT_WOW64_EXIT_SYSCALL && event.service_number == 0x78563412);
+    reply(thread, &event);
+    /* Previously translated code must stop executing after EXEC is removed. */
+    map.protection &= ~LAT_WOW64_PROT_EXEC;
+    ok(api->memory_event(process, &map));
+    ok(api->enter(thread, (uintptr_t)(next - 2), &event));
+    assert(event.reason == LAT_WOW64_EXIT_EXCEPTION && event.trap_number == 14);
+    reply(thread, &event);
+
+    /* A final RET does not fetch any byte from the following RW/NOACCESS page. */
+    next[-1] = 0xc3;
+    memcpy(code + 64, "\xb8\x2a\0\0\0\xcd\x80", 7);
+    for (unsigned int noaccess = 0; noaccess < 2; ++noaccess) {
+        LatWow64MemoryEvent write = map;
+        write.type = LAT_WOW64_MEMORY_WRITE;
+        write.address = (uintptr_t)code;
+        ok(api->memory_event(process, &write));
+        map.protection = noaccess ? 0 : LAT_WOW64_PROT_READ | LAT_WOW64_PROT_WRITE;
+        ok(api->memory_event(process, &map));
+        ok(api->get_context(thread, &context));
+        context.gpr[LAT_WOW64_ESP] = (uintptr_t)(memory + page + 1024);
+        *(uint32_t *)(memory + page + 1024) = (uintptr_t)(code + 64);
+        ok(api->set_context(thread, &context));
+        ok(api->enter(thread, (uintptr_t)(next - 1), &event));
+        assert(event.reason == LAT_WOW64_EXIT_SYSCALL && event.service_number == 42);
+        reply(thread, &event);
+    }
+    ok(api->get_context(thread, &context));
+    saved.generation = context.generation;
+    ok(api->set_context(thread, &saved));
+    map.type = LAT_WOW64_MEMORY_UNMAP;
+    map.address = (uintptr_t)code;
+    map.length = 2 * page;
+    ok(api->memory_event(process, &map));
+    assert(!munmap(code, 2 * page));
+    puts("i386 execute permissions and page boundaries PASS");
+}
+
 extern unsigned long wow64_check_host_fprs(LatWow64Status (*callback)(void *),
                                            void *opaque,
                                            LatWow64Status *status);
@@ -300,6 +447,9 @@ int main(int argc, char **argv)
     reply(thread, &event);
     ok(api->enter(thread, LAT_WOW64_ENTER_CURRENT_PC, &event));
     assert(event.reason == LAT_WOW64_EXIT_RETURN);
+
+    test_i386_address_width(process, thread, memory, page);
+    test_i386_execute_permissions(process, thread, memory, page);
 
     /* Code writes must invalidate the previously generated translation. */
     memory[1] = 84;

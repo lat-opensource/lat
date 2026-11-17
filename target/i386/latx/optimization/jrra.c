@@ -26,6 +26,9 @@
 #include "aot_recover_tb.h"
 #include "loongarch-extcontext.h"
 #include <sys/mman.h>
+#ifdef CONFIG_LATX_WOW64
+#include "qemu.h"
+#endif
 
 #if defined(TARGET_X86_64) && defined(CONFIG_LATX_JRRA)
 struct SignalReturnBridge {
@@ -153,6 +156,13 @@ static TranslationBlock *get_next_tb(TranslationBlock *tb, CPUState *cpu,
 {
 
     TranslationBlock *n;
+#ifdef CONFIG_LATX_WOW64
+    if (lat_wow64_provider_plugin_active &&
+        (!(page_get_flags(tb->next_86_pc) & PAGE_EXEC) ||
+         TARGET_PAGE_SIZE - (tb->next_86_pc & ~TARGET_PAGE_MASK) < 15)) {
+        return NULL;
+    }
+#endif
 #ifdef CONFIG_LATX_AOT
     if (!in_pre_translate) {
         n = tb_lookup(cpu, tb->next_86_pc, 0, flags, cflags);
