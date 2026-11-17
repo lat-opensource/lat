@@ -433,6 +433,74 @@ int main(int argc, char **argv)
         reply(thread, &event);
     }
 
+    /* A hardware divide must leave the caller's signal mask unchanged. */
+    {
+        static const unsigned char divide[] = {0x31, 0xc9, 0xf7, 0xf1};
+        sigset_t before, after;
+
+        memcpy(memory + 128, divide, sizeof(divide));
+        ok(api->memory_event(process, &map));
+        assert(!pthread_sigmask(SIG_SETMASK, NULL, &before));
+        ok(api->enter(thread, (uintptr_t)(memory + 128), &event));
+        assert(!pthread_sigmask(SIG_SETMASK, NULL, &after));
+        assert(!pthread_sigmask(SIG_SETMASK, &before, NULL));
+        assert(event.reason == LAT_WOW64_EXIT_EXCEPTION);
+        assert(event.trap_number == 0);
+        assert(event.guest_pc == (uintptr_t)(memory + 130));
+        for (int sig = 1; sig < NSIG; ++sig) {
+            if (sigismember(&before, sig) != sigismember(&after, sig)) {
+                fprintf(stderr, "signal %d mask changed after divide\n", sig);
+                abort();
+            }
+        }
+        reply(thread, &event);
+        puts("hardware divide signal mask PASS");
+    }
+
+    /* Unmasked x87 and SSE divides use different architectural traps. */
+    {
+        static const unsigned char x87[] = {
+            0xd9, 0xe8, 0xd9, 0xee, 0xde, 0xf9, 0x9b, 0xcd, 0x80,
+        };
+        static const unsigned char sse[] = {
+            0xb8, 0, 0, 0x80, 0x3f,       /* mov eax,1.0f */
+            0x66, 0x0f, 0x6e, 0xc0,       /* movd xmm0,eax */
+            0x0f, 0x57, 0xc9,             /* xorps xmm1,xmm1 */
+            0xf3, 0x0f, 0x5e, 0xc1,       /* divss xmm0,xmm1 */
+            0xcd, 0x80,
+        };
+        for (unsigned int simd = 0; simd < 2; ++simd) {
+            ok(api->get_context(thread, &context));
+            memset(context.fxsave, 0, sizeof(context.fxsave));
+            /* Matching masks isolate fault conversion from the existing
+             * translator limitation with independent x87/SSE controls. */
+            context.fxsave[0] = 0x7b;
+            context.fxsave[1] = 3;
+            context.fxsave[24] = 0x80;
+            context.fxsave[25] = simd ? 0x1d : 0x1f;
+            ok(api->set_context(thread, &context));
+            memcpy(memory + 128, simd ? sse : x87, simd ? sizeof(sse) : sizeof(x87));
+            ok(api->memory_event(process, &map));
+            ok(api->enter(thread, (uintptr_t)(memory + 128), &event));
+            ok(api->get_context(thread, &context));
+            fprintf(stderr, "unmasked %s: reason=%u trap=%u pc=%#llx x87=%02x%02x MXCSR=%02x%02x\n",
+                    simd ? "SSE" : "x87", event.reason, event.trap_number,
+                    (unsigned long long)event.guest_pc, context.fxsave[3], context.fxsave[2],
+                    context.fxsave[25], context.fxsave[24]);
+            assert(event.reason == LAT_WOW64_EXIT_EXCEPTION);
+            assert(event.trap_number == (simd ? 19 : 16));
+            assert(context.fxsave[simd ? 24 : 2] & 4);
+            assert(!(context.fxsave[simd ? 2 : 24] & 4));
+            reply(thread, &event);
+        }
+        memset(context.fxsave, 0, sizeof(context.fxsave));
+        context.fxsave[0] = 0x7f;
+        context.fxsave[1] = 3;
+        context.fxsave[24] = 0x80;
+        context.fxsave[25] = 0x1f;
+        ok(api->set_context(thread, &context));
+    }
+
     /* A guest access fault must return its PC and fault address to Wine. */
     {
         static const unsigned char fault[] = {0xa1, 0, 0, 0, 0};

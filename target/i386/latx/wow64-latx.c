@@ -21,6 +21,7 @@
 #include "tcg/tcg.h"
 #include "tcg/helper-tcg.h"
 
+
 int lat_wow64_cpu_exec(CPUState *cpu);
 void lat_wow64_init_fpu_regs(CPUX86State *env);
 
@@ -47,6 +48,7 @@ typedef struct LatWow64SignalCpuSlot {
     int tid;
     CPUState *cpu;
     uintptr_t *helper_retaddr;
+    uint32_t float_status;
 } LatWow64SignalCpuSlot;
 
 static LatWow64SignalCpuSlot lat_wow64_signal_cpus[LAT_WOW64_SIGNAL_CPU_SLOTS];
@@ -75,6 +77,7 @@ static bool lat_wow64_provider_reserve_signal_cpu(void)
 
     if (!slot) return false;
     qatomic_set(&slot->cpu, NULL);
+    slot->float_status = 0;
     qatomic_set(&slot->helper_retaddr, &helper_retaddr);
     return true;
 }
@@ -87,14 +90,34 @@ static void lat_wow64_provider_publish_signal_cpu(CPUState *cpu)
     qatomic_set(&slot->cpu, cpu);
 }
 
-static void lat_wow64_provider_clear_signal_cpu(void)
+static uint32_t lat_wow64_provider_clear_signal_cpu(void)
 {
     LatWow64SignalCpuSlot *slot = lat_wow64_provider_find_signal_cpu_slot(false);
+    uint32_t status;
 
     g_assert(slot);
+    status = slot->float_status;
     qatomic_set(&slot->cpu, NULL);
     qatomic_set(&slot->helper_retaddr, NULL);
     qatomic_set(&slot->tid, 0);
+    return status;
+}
+
+void lat_wow64_provider_record_sigfpe(int code)
+{
+    LatWow64SignalCpuSlot *slot = lat_wow64_provider_find_signal_cpu_slot(false);
+
+    if (!slot) return;
+    /* Linux can clear FCSR Cause before saving the signal context. Preserve
+     * the hardware fault reason independently of the sticky exception bits. */
+    switch (code) {
+    case FPE_FLTINV: case FPE_FLTSUB: slot->float_status = 1; break;
+    case FPE_FLTDIV: slot->float_status = 4; break;
+    case FPE_FLTOVF: slot->float_status = 8; break;
+    case FPE_FLTUND: slot->float_status = 0x10; break;
+    case FPE_FLTRES: slot->float_status = 0x20; break;
+    default: break;
+    }
 }
 
 int lat_wow64_provider_signal_state(CPUState **cpu, uintptr_t **retaddr)
@@ -267,8 +290,41 @@ static uint32_t lat_wow64_fcsr_exceptions(uint32_t fcsr)
            ((flags & 16) >> 4);
 }
 
+/* Linux reports native x87 and SSE arithmetic faults through SIGFPE. The
+ * restored guest instruction distinguishes x87 (#MF) from SSE (#XM). */
+static int lat_wow64_float_trap(CPUX86State *env, int trap)
+{
+    if (trap != EXCP10_COPR) {
+        return trap;
+    }
+    mmap_lock();
+    for (unsigned int i = 0; i < 15; ++i) {
+        uint32_t pc = env->eip + i;
+        uint8_t opcode;
+
+        if (!(page_get_flags(pc) & PAGE_READ)) {
+            break;
+        }
+        opcode = ldub_p(g2h_untagged(pc));
+        switch (opcode) {
+        case 0x26: case 0x2e: case 0x36: case 0x3e: case 0x64: case 0x65:
+        case 0x66: case 0x67: case 0xf0: case 0xf2: case 0xf3:
+            continue;
+        case 0x0f:
+            trap = 19; /* SIMD floating-point exception. */
+            break;
+        default:
+            break;
+        }
+        break;
+    }
+    mmap_unlock();
+    return trap;
+}
+
 static void lat_wow64_context_from_cpu(LatWow64Context *context,
-                                         CPUX86State *env)
+                                         CPUX86State *env, int trap,
+                                         uint32_t float_status)
 {
     uint8_t fxsave[512] QEMU_ALIGNED(16) = { 0 };
     unsigned int i;
@@ -292,8 +348,19 @@ static void lat_wow64_context_from_cpu(LatWow64Context *context,
     context->dr3 = env->dr[3];
     context->dr6 = env->dr[6];
     context->dr7 = env->dr[7];
-    if (!option_softfpu) {
-        env->fpus |= lat_wow64_fcsr_exceptions(env->fcsr);
+    uint32_t fcsr = env->fcsr;
+    if (trap == EXCP10_COPR || trap == 19) {
+        /* An unmasked fault can set Cause without setting sticky Flags. */
+        fcsr |= (fcsr >> 8) & (0x1fu << 16);
+    }
+    if (trap == 19) {
+        env->mxcsr |= lat_wow64_fcsr_exceptions(fcsr) | float_status;
+    } else if (!option_softfpu) {
+        env->fpus |= lat_wow64_fcsr_exceptions(fcsr) | float_status;
+        if (float_status) {
+            env->fpus |= 0x8080; /* x87 ES and B. */
+            env->fpip = env->eip;
+        }
     } else if (latx_softfpu_sse_sync_enabled()) {
         env->mxcsr |= lat_wow64_fcsr_exceptions(env->fcsr);
     }
@@ -457,6 +524,7 @@ static LatWow64Status backend_execute(void *opaque, LatWow64Thread *thread,
     bool run_guest;
     uint64_t host_teb;
     uint32_t host_fcsr;
+    uint32_t float_status;
     unsigned int lock_depth = 0;
     int trap;
 
@@ -514,7 +582,7 @@ static LatWow64Status backend_execute(void *opaque, LatWow64Thread *thread,
     lat_wow64_host_teb_set(host_teb);
     lat_wow64_host_fcsr_set(host_fcsr);
     lat_wow64_provider_guest_active = false;
-    lat_wow64_provider_clear_signal_cpu();
+    float_status = lat_wow64_provider_clear_signal_cpu();
     cpu_exec_end(cpu);
     process_queued_cpu_work(cpu);
     while (have_mmap_lock()) {
@@ -523,7 +591,10 @@ static LatWow64Status backend_execute(void *opaque, LatWow64Thread *thread,
     while (lock_depth--) {
         mmap_lock();
     }
-    lat_wow64_context_from_cpu(context, env);
+    if (trap == EXCP00_DIVZ && float_status) {
+        trap = lat_wow64_float_trap(env, EXCP10_COPR);
+    }
+    lat_wow64_context_from_cpu(context, env, trap, float_status);
     if (unregister_rcu) {
         rcu_unregister_thread();
     }

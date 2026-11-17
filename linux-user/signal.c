@@ -1374,6 +1374,19 @@ static void host_signal_handler(int host_signum, siginfo_t *info,
 #ifdef CONFIG_LATX
         env->puc = uc;
 #endif
+#ifdef CONFIG_LATX_WOW64
+        /* The provider returns directly to Wine, without the Linux guest
+         * signal loop. Undo the handler's mask before leaving by longjmp. */
+        if (lat_wow64_provider_plugin_active) {
+            lat_wow64_provider_record_sigfpe(info->si_code);
+#ifndef CONFIG_LOONGARCH_NEW_WORLD
+            sigset_t *old_set = (sigset_t *)((void *)&uc->uc_mcontext + 0x1540);
+            sigprocmask(SIG_SETMASK, old_set, NULL);
+#else
+            sigprocmask(SIG_SETMASK, &uc->uc_sigmask, NULL);
+#endif
+        }
+#endif
         cc = CPU_GET_CLASS(cpu);
         cc->tcg_ops->tlb_fill(cpu, address, 0, MMU_DATA_LOAD,
                               MMU_USER_IDX, false, pc, info);

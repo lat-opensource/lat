@@ -33,6 +33,9 @@
 #include "trace-tcg.h"
 #include "exec/log.h"
 #include "loongarch-extcontext.h"
+#ifdef CONFIG_LATX_WOW64
+#include "qemu.h"
+#endif
 
 #ifdef CONFIG_LATX
 #include "reg-map.h"
@@ -8715,6 +8718,11 @@ static void restore_extcontext(CPUX86State *env, ucontext_t *uc)
     memset(&extctx, 0, sizeof(extctx));
     parse_extcontext(uc, &extctx);
 
+#ifdef CONFIG_LATX_WOW64
+    if (lat_wow64_provider_plugin_active && !option_softfpu && env->mode_fpu) {
+        env->fpstt = UC_GET_FTOP(&extctx, uint32_t) & 7;
+    }
+#endif
     /* save fcsr */
     env->fcsr = UC_GET_FCSR(&extctx, int);
 

@@ -380,6 +380,7 @@ extern __thread CPUState *thread_cpu;
 extern char lat_wow64_provider_plugin_active;
 extern __thread char lat_wow64_provider_guest_active;
 int lat_wow64_provider_signal_state(CPUState **cpu, uintptr_t **retaddr);
+void lat_wow64_provider_record_sigfpe(int code);
 int cpu_signal_handler_with_state(int sig, void *info, void *uc,
                                   CPUState *cpu, uintptr_t *retaddr);
 #endif
