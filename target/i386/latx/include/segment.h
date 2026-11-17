@@ -60,6 +60,9 @@ typedef struct wine_sec_head {
     int8_t nop[20];
 } __attribute__((packed)) wine_sec_head;
 
+/* Fixed optional-header fields, through NumberOfRvaAndSizes. */
+#define WINE_PE_H_OPT32_FIXED_SIZE 96
+#define WINE_PE_H_OPT64_FIXED_SIZE 112
 #define WINE_PE_H_OPT32_SIZE 224
 #define WINE_PE_H_OPT64_SIZE 240
 #define WINE_PE_H_SEC_MAX_NUMS 96
