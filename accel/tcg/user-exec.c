@@ -488,10 +488,10 @@ do_return:
    the effective address of the memory exception. 'is_write' is 1 if a
    write caused the exception and otherwise 0'. 'old_set' is the
    signal set which should be restored */
-static inline int handle_cpu_signal(uintptr_t pc, siginfo_t *info,
-                                    int is_write, sigset_t *old_set)
+static inline int handle_cpu_signal_state(uintptr_t pc, siginfo_t *info,
+                                    int is_write, sigset_t *old_set,
+                                          CPUState *cpu, uintptr_t *retaddr)
 {
-    CPUState *cpu = current_cpu;
     CPUClass *cc;
     unsigned long address = (unsigned long)info->si_addr;
     MMUAccessType access_type = is_write ? MMU_DATA_STORE : MMU_DATA_LOAD;
@@ -514,7 +514,7 @@ static inline int handle_cpu_signal(uintptr_t pc, siginfo_t *info,
     ucontext_t *uc = container_of(old_set, ucontext_t, uc_sigmask);
 #endif
 #endif
-    switch (helper_retaddr) {
+    switch (*retaddr) {
     default:
         /*
          * Fault during host memory operation within a helper function.
@@ -522,7 +522,7 @@ static inline int handle_cpu_signal(uintptr_t pc, siginfo_t *info,
          * pointer into the generated code that will unwind to the
          * correct guest pc.
          */
-        pc = helper_retaddr;
+        pc = *retaddr;
         break;
 
     case 0:
@@ -663,7 +663,8 @@ static inline int handle_cpu_signal(uintptr_t pc, siginfo_t *info,
              * currently executing TB was modified and must be exited
              * immediately.  Clear helper_retaddr for next execution.
              */
-            clear_helper_retaddr();
+            signal_barrier();
+            *retaddr = 0;
             cpu_exit_tb_from_sighandler(cpu, old_set);
             /* NORETURN */
 
@@ -700,12 +701,20 @@ static inline int handle_cpu_signal(uintptr_t pc, siginfo_t *info,
      * an exception.  Undo signal and retaddr state prior to longjmp.
      */
     sigprocmask(SIG_SETMASK, old_set, NULL);
-    clear_helper_retaddr();
+    signal_barrier();
+    *retaddr = 0;
 
     cc = CPU_GET_CLASS(cpu);
     cc->tcg_ops->tlb_fill(cpu, address, 0, access_type,
                           MMU_USER_IDX, false, pc, info);
     g_assert_not_reached();
+}
+
+static inline int handle_cpu_signal(uintptr_t pc, siginfo_t *info,
+                                    int is_write, sigset_t *old_set)
+{
+    return handle_cpu_signal_state(pc, info, is_write, old_set,
+                                   current_cpu, &helper_retaddr);
 }
 
 static int probe_access_internal(CPUArchState *env, target_ulong addr,
@@ -1331,8 +1340,9 @@ out:
 
 static int elf_native_func[] = {0x6f6c6552/*"Relo"*/};
 #endif
-int cpu_signal_handler(int host_signum, void *pinfo,
-                       void *puc)
+static int loongarch_cpu_signal_handler(int host_signum, void *pinfo,
+                                        void *puc, CPUState *cpu,
+                                        uintptr_t *retaddr)
 {
     siginfo_t *info = pinfo;
     ucontext_t *uc = puc;
@@ -1347,7 +1357,7 @@ int cpu_signal_handler(int host_signum, void *pinfo,
 #ifndef CONFIG_SOFTMMU
     if (info->si_signo == SIGSEGV &&
         info->si_code == SEGV_MAPERR &&
-        (tcg_tb_lookup(pc) || !current_cpu->running)) {
+        (tcg_tb_lookup(pc) || !cpu->running)) {
         int prot = page_get_flags((target_ulong)(uint64_t)info->si_addr);
         if (prot & PAGE_BITS) {
             cpu_relax();
@@ -1475,12 +1485,26 @@ insn_parse_end:
     /* TODO:workaround of user/kernel uapi mismatch */
     {
     sigset_t *puc_sigmask = (sigset_t *)((void *)&uc->uc_mcontext+0x1540);
-    return handle_cpu_signal(pc, info, is_write, puc_sigmask);
+    return handle_cpu_signal_state(pc, info, is_write, puc_sigmask, cpu, retaddr);
     }
 #else
-    return handle_cpu_signal(pc, info, is_write, &uc->uc_sigmask);
+    return handle_cpu_signal_state(pc, info, is_write, &uc->uc_sigmask, cpu, retaddr);
 #endif
 }
+
+int cpu_signal_handler(int sig, void *info, void *uc)
+{
+    return loongarch_cpu_signal_handler(sig, info, uc, current_cpu,
+                                        &helper_retaddr);
+}
+
+#ifdef CONFIG_LATX_WOW64
+int cpu_signal_handler_with_state(int sig, void *info, void *uc,
+                                  CPUState *cpu, uintptr_t *retaddr)
+{
+    return loongarch_cpu_signal_handler(sig, info, uc, cpu, retaddr);
+}
+#endif
 
 #elif defined(__riscv)
 

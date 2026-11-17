@@ -376,6 +376,14 @@ abi_long do_syscall_with_seccomp(void *cpu_env, int num, int seccomp_num,
                                 abi_long arg5, abi_long arg6, abi_long arg7,
                                 abi_long arg8);
 extern __thread CPUState *thread_cpu;
+#ifdef CONFIG_LATX_WOW64
+extern char lat_wow64_provider_plugin_active;
+extern __thread char lat_wow64_provider_guest_active;
+int lat_wow64_provider_signal_state(CPUState **cpu, uintptr_t **retaddr);
+int cpu_signal_handler_with_state(int sig, void *info, void *uc,
+                                  CPUState *cpu, uintptr_t *retaddr);
+#endif
+
 #ifdef CONFIG_LATX
 void latx_register_host_thread_template(CPUArchState *env);
 int latx_finalize_host_thread_template(CPUArchState *env);

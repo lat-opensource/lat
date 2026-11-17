@@ -201,7 +201,7 @@ static void parse_extcontext(TestContext *uc, struct extctx_layout *ext) { (void
 #define UC_GET_FTOP(ext, type) 0
 #define UC_GET_FPR(ext, fd, type) (abort(), (type)0)
 #define UC_GET_LSX(ext, fd, lane, type) (abort(), (type)0)
-static void clear_helper_retaddr(void) {}
+static void signal_barrier(void) {}
 static _Noreturn void cpu_exit_tb_from_sighandler(void *cpu, void *old_set) {
     (void)cpu; (void)old_set; CHECK(!locks); longjmp(exit_env, 1);
 }
@@ -217,6 +217,7 @@ TEST = r'''
 static int dispatch(uintptr_t address, int size, TestContext *uc, uint32_t inst) {
     siginfo_t *info = NULL;
     void *cpu = NULL, *old_set = NULL;
+    uintptr_t helper_pc = 0, *retaddr = &helper_pc;
     uintptr_t pc = uc->pc, guest_store_address = address;
     int emu_store = size, *emu = &emu_store;
     if (!size) emu = NULL;

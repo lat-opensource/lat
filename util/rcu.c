@@ -354,18 +354,43 @@ void drain_call_rcu(void)
 
 }
 
+static __thread bool rcu_registered;
+
+#ifdef CONFIG_LATX_WOW64
+static void rcu_implicit_thread_exit(void *unused)
+{
+    if (rcu_thread_registered()) {
+        rcu_unregister_thread();
+    }
+}
+
+/* A shared-library constructor may run on a short-lived host thread. */
+static GPrivate rcu_implicit_registration =
+    G_PRIVATE_INIT(rcu_implicit_thread_exit);
+#endif
+
+bool rcu_thread_registered(void)
+{
+    return rcu_registered;
+}
+
 void rcu_register_thread(void)
 {
     assert(rcu_reader.ctr == 0);
     qemu_mutex_lock(&rcu_registry_lock);
     QLIST_INSERT_HEAD(&registry, &rcu_reader, node);
+    rcu_registered = true;
     qemu_mutex_unlock(&rcu_registry_lock);
 }
 
 void rcu_unregister_thread(void)
 {
+#ifdef CONFIG_LATX_WOW64
+    g_private_set(&rcu_implicit_registration, NULL);
+#endif
     qemu_mutex_lock(&rcu_registry_lock);
     QLIST_REMOVE(&rcu_reader, node);
+    rcu_registered = false;
     qemu_mutex_unlock(&rcu_registry_lock);
 }
 
@@ -396,6 +421,9 @@ static void rcu_init_complete(bool start_thread)
     }
 
     rcu_register_thread();
+#ifdef CONFIG_LATX_WOW64
+    g_private_set(&rcu_implicit_registration, GINT_TO_POINTER(1));
+#endif
 }
 
 static int atfork_depth = 1;

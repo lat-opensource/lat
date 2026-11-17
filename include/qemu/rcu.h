@@ -115,6 +115,7 @@ extern void synchronize_rcu(void);
 /*
  * Reader thread registration.
  */
+extern bool rcu_thread_registered(void);
 extern void rcu_register_thread(void);
 extern void rcu_unregister_thread(void);
 
