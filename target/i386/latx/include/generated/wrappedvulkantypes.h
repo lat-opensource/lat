@@ -55,6 +55,7 @@ typedef int32_t (*iFpuUp_t)(void*, uint32_t, uint64_t, void*);
 	GO(vkDestroyImage, vFpUp_t) \
 	GO(vkDestroyImageView, vFpUp_t) \
 	GO(vkDestroyIndirectCommandsLayoutNV, vFpUp_t) \
+	GO(vkDestroyIndirectCommandsLayoutEXT, vFpUp_t) \
 	GO(vkDestroyMicromapEXT, vFpUp_t) \
 	GO(vkDestroyOpticalFlowSessionNV, vFpUp_t) \
 	GO(vkDestroyPipeline, vFpUp_t) \
@@ -83,6 +84,7 @@ typedef int32_t (*iFpuUp_t)(void*, uint32_t, uint64_t, void*);
 	GO(vkGetPhysicalDeviceDisplayPropertiesKHR, iFppp_t) \
 	GO(vkGetDisplayPlaneCapabilitiesKHR, iFpUup_t) \
 	GO(vkAllocateMemory, iFpppp_t) \
+	GO(vkCreateAccelerationStructure2KHR, iFpppp_t) \
 	GO(vkCreateAccelerationStructureKHR, iFpppp_t) \
 	GO(vkCreateAccelerationStructureNV, iFpppp_t) \
 	GO(vkCreateBuffer, iFpppp_t) \
@@ -106,6 +108,7 @@ typedef int32_t (*iFpuUp_t)(void*, uint32_t, uint64_t, void*);
 	GO(vkCreateHeadlessSurfaceEXT, iFpppp_t) \
 	GO(vkCreateImage, iFpppp_t) \
 	GO(vkCreateImageView, iFpppp_t) \
+	GO(vkCreateIndirectCommandsLayoutEXT, iFpppp_t) \
 	GO(vkCreateIndirectCommandsLayoutNV, iFpppp_t) \
 	GO(vkCreateMicromapEXT, iFpppp_t) \
 	GO(vkCreateOpticalFlowSessionNV, iFpppp_t) \

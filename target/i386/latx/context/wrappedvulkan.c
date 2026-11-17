@@ -744,6 +744,7 @@ DESTROY64(vkDestroyPrivateDataSlot)
 DESTROY64(vkDestroyPrivateDataSlotEXT)
 
 CREATE(vkCreateAccelerationStructureKHR)
+CREATE(vkCreateAccelerationStructure2KHR)
 DESTROY64(vkDestroyAccelerationStructureKHR)
 
 EXPORT int my_vkCreateDeferredOperationKHR(void* device, my_VkAllocationCallbacks_t* pAllocator, void* p)
@@ -766,6 +767,8 @@ DESTROY64(vkDestroyCuModuleNVX)
 
 CREATE(vkCreateIndirectCommandsLayoutNV)
 DESTROY64(vkDestroyIndirectCommandsLayoutNV)
+CREATE(vkCreateIndirectCommandsLayoutEXT)
+DESTROY64(vkDestroyIndirectCommandsLayoutEXT)
 
 CREATE(vkCreateAccelerationStructureNV)
 EXPORT int my_vkCreateRayTracingPipelinesNV(void* device, uint64_t pipeline, uint32_t count, void* infos, my_VkAllocationCallbacks_t* pAllocator, void* p)
