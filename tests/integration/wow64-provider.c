@@ -1,0 +1,531 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
+#define _GNU_SOURCE
+#include <assert.h>
+#include <dlfcn.h>
+#include <errno.h>
+#include <stdint.h>
+#include <pthread.h>
+#include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/mman.h>
+#include <unistd.h>
+
+#include "latx-wow64.h"
+
+static const LatWow64Api *api;
+static volatile sig_atomic_t host_signals;
+static volatile sig_atomic_t restart_signals;
+
+static void host_signal(int sig)
+{
+    if (sig == SIGUSR1) {
+        ++host_signals;
+    } else if (sig == SIGRTMIN + 1) {
+        ++restart_signals;
+    }
+}
+
+static void ok(LatWow64Status status)
+{
+    if (status != LAT_WOW64_STATUS_OK) {
+        fprintf(stderr, "WoW64 provider status: %d\n", status);
+        _exit(1);
+    }
+}
+
+static void reply(LatWow64Thread *thread, const LatWow64Exit *event)
+{
+    LatWow64Reply r = {
+        .size = sizeof(r),
+        .abi_version = LAT_WOW64_ABI_VERSION,
+        .sequence = event->sequence,
+        .action = LAT_WOW64_REPLY_CONTINUE,
+    };
+    ok(api->reply(thread, &r));
+}
+
+struct worker {
+    LatWow64Thread *thread;
+    uintptr_t pc;
+    uint32_t expected;
+};
+
+static void *run_worker(void *arg)
+{
+    struct worker *worker = arg;
+    LatWow64Context context;
+    LatWow64Exit event = {
+        .size = sizeof(event), .abi_version = LAT_WOW64_ABI_VERSION,
+    };
+
+    do {
+        LatWow64Status status = api->enter(worker->thread, worker->pc, &event);
+        assert(status == LAT_WOW64_STATUS_OK ||
+               status == LAT_WOW64_STATUS_STALE_MAPPING);
+        if (event.reason == LAT_WOW64_EXIT_STOPPED) reply(worker->thread, &event);
+        worker->pc = LAT_WOW64_ENTER_CURRENT_PC;
+    } while (event.reason == LAT_WOW64_EXIT_STOPPED ||
+             event.reason == LAT_WOW64_EXIT_STALE_MAPPING);
+    assert(event.reason == LAT_WOW64_EXIT_SYSCALL);
+    ok(api->get_context(worker->thread, &context));
+    assert(context.gpr[LAT_WOW64_EAX] == worker->expected);
+    reply(worker->thread, &event);
+    return NULL;
+}
+
+struct host_read {
+    int fd;
+    int ready;
+    ssize_t result;
+    int error;
+};
+
+static void *host_read(void *opaque)
+{
+    struct host_read *call = opaque;
+    char byte;
+    __atomic_store_n(&call->ready, 1, __ATOMIC_RELEASE);
+    call->result = read(call->fd, &byte, 1);
+    call->error = errno;
+    return NULL;
+}
+
+static void test_host_restart(void)
+{
+    int pipefd[2];
+    pthread_t host;
+    struct host_read call = { 0 };
+    assert(!pipe(pipefd));
+    call.fd = pipefd[0];
+    assert(!pthread_create(&host, NULL, host_read, &call));
+    while (!__atomic_load_n(&call.ready, __ATOMIC_ACQUIRE)) usleep(100);
+    usleep(20000);
+    assert(!pthread_kill(host, SIGRTMIN + 1));
+    while (!restart_signals) usleep(100);
+    assert(write(pipefd[1], "x", 1) == 1);
+    assert(!pthread_join(host, NULL));
+    fprintf(stderr, "host read after forwarded signal: result=%zd errno=%d\n",
+            call.result, call.error);
+    assert(call.result == 1);
+    close(pipefd[0]);
+    close(pipefd[1]);
+}
+
+static void *load_provider(void *path)
+{
+    return dlopen(path, RTLD_NOW | RTLD_LOCAL | RTLD_NODELETE);
+}
+
+static void test_cache_pressure(LatWow64Process *process,
+                                LatWow64Thread *thread,
+                                LatWow64Context *context, size_t page)
+{
+    const unsigned int blocks = 1u << 22;
+    size_t length = ((size_t)blocks * 8 + 2 + page - 1) & ~(page - 1);
+    unsigned char *code = mmap((void *)0x38000000, length,
+                              PROT_READ | PROT_WRITE | PROT_EXEC,
+                              MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE,
+                              -1, 0);
+    LatWow64MemoryEvent map = {
+        .size = sizeof(map), .abi_version = LAT_WOW64_ABI_VERSION,
+        .type = LAT_WOW64_MEMORY_MAP, .address = (uintptr_t)code,
+        .length = length,
+        .protection = LAT_WOW64_PROT_READ | LAT_WOW64_PROT_WRITE |
+                      LAT_WOW64_PROT_EXEC,
+    };
+    LatWow64Exit event = {
+        .size = sizeof(event), .abi_version = LAT_WOW64_ABI_VERSION,
+    };
+    unsigned int stops = 0;
+    uintptr_t pc = (uintptr_t)code;
+    assert(code != MAP_FAILED);
+    for (unsigned int i = 0; i < blocks; ++i) {
+        /* inc eax; add edx,8; jmp edx: indirect targets prevent TU joining. */
+        memcpy(code + i * 8, "\x40\x83\xc2\x08\xff\xe2\x90\x90", 8);
+    }
+    code[blocks * 8] = 0xcd;
+    code[blocks * 8 + 1] = 0x80;
+    ok(api->memory_event(process, &map));
+    ok(api->get_context(thread, context));
+    context->gpr[LAT_WOW64_EAX] = 0;
+    context->gpr[LAT_WOW64_EDX] = (uintptr_t)code;
+    ok(api->set_context(thread, context));
+    for (;;) {
+        ok(api->enter(thread, pc, &event));
+        pc = LAT_WOW64_ENTER_CURRENT_PC;
+        if (event.reason != LAT_WOW64_EXIT_STOPPED) break;
+        assert(++stops < 100);
+        reply(thread, &event);
+    }
+    fprintf(stderr, "cache pressure: stops=%u service=%u\n", stops,
+            event.service_number);
+    assert(stops && event.reason == LAT_WOW64_EXIT_SYSCALL);
+    assert(event.service_number == blocks);
+    reply(thread, &event);
+    map.type = LAT_WOW64_MEMORY_UNMAP;
+    ok(api->memory_event(process, &map));
+    assert(!munmap(code, length));
+}
+
+extern unsigned long wow64_check_host_fprs(LatWow64Status (*callback)(void *),
+                                           void *opaque,
+                                           LatWow64Status *status);
+struct checked_call {
+    LatWow64ProcessConfig *config;
+    LatWow64Process **process;
+    LatWow64Context *context;
+    LatWow64Thread **thread;
+    uintptr_t pc;
+    LatWow64Exit *event;
+};
+
+static LatWow64Status checked_create_process(void *opaque)
+{
+    struct checked_call *call = opaque;
+    return api->process_create(call->config, call->process);
+}
+
+static LatWow64Status checked_create_thread(void *opaque)
+{
+    struct checked_call *call = opaque;
+    return api->thread_create(*call->process, call->context, call->thread);
+}
+
+static LatWow64Status checked_enter(void *opaque)
+{
+    struct checked_call *call = opaque;
+    return api->enter(*call->thread, call->pc, call->event);
+}
+
+static void checked(LatWow64Status (*callback)(void *), struct checked_call *call)
+{
+    LatWow64Status status;
+    assert(wow64_check_host_fprs(callback, call, &status) == 0);
+    ok(status);
+}
+
+int main(int argc, char **argv)
+{
+    /* mov eax,42; mov edx,fs:[0]; int 80; int3 */
+    static const unsigned char code[] = {
+        0xb8, 42, 0, 0, 0, 0x0f, 0xa0, 0x0f, 0xa1, 0x64, 0x8b, 0x15, 0, 0, 0, 0,
+        0xcd, 0x80, 0xcc,
+    };
+    const LatWow64Api *(*get_api)(uint32_t);
+    LatWow64Process *process;
+    LatWow64Thread *thread;
+    LatWow64Context context = {
+        .size = sizeof(context),
+        .abi_version = LAT_WOW64_ABI_VERSION,
+        .eflags = 0x202,
+        .cs = 0x23, .ss = 0x2b, .ds = 0x2b, .es = 0x2b, .fs = 0x53,
+    };
+    LatWow64Exit event = {
+        .size = sizeof(event), .abi_version = LAT_WOW64_ABI_VERSION,
+    };
+    LatWow64ProcessConfig config = {
+        .size = sizeof(config), .abi_version = LAT_WOW64_ABI_VERSION,
+    };
+    LatWow64MemoryEvent map = {
+        .size = sizeof(map), .abi_version = LAT_WOW64_ABI_VERSION,
+        .type = LAT_WOW64_MEMORY_MAP,
+        .protection = LAT_WOW64_PROT_READ | LAT_WOW64_PROT_WRITE |
+                      LAT_WOW64_PROT_EXEC,
+    };
+    size_t page = sysconf(_SC_PAGESIZE);
+    unsigned char *memory;
+    void *module;
+
+    assert(argc == 2 || argc == 3);
+    struct sigaction restart_action = { .sa_handler = host_signal,
+                                        .sa_flags = SA_RESTART };
+    sigemptyset(&restart_action.sa_mask);
+    assert(!sigaction(SIGRTMIN + 1, &restart_action, NULL));
+    assert(signal(SIGUSR1, host_signal) != SIG_ERR);
+    if (argc == 3 && !strcmp(argv[2], "--worker-loader")) {
+        pthread_t loader;
+        assert(!pthread_create(&loader, NULL, load_provider, argv[1]));
+        assert(!pthread_join(loader, &module));
+    } else {
+        module = load_provider(argv[1]);
+    }
+    if (!module) {
+        fprintf(stderr, "dlopen: %s\n", dlerror());
+        return 1;
+    }
+    get_api = dlsym(module, "lat_wow64_get_api");
+    assert(get_api && !get_api(LAT_WOW64_ABI_VERSION + 1));
+    api = get_api(LAT_WOW64_ABI_VERSION);
+    assert(api && api->size == sizeof(*api));
+    memory = mmap((void *)0x30000000, 4 * page, PROT_READ | PROT_WRITE | PROT_EXEC,
+                  MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
+    assert(memory != MAP_FAILED);
+    memcpy(memory, code, sizeof(code));
+    *(uint32_t *)(memory + page) = 0x1234abcd;
+    context.fs_base = (uintptr_t)(memory + page);
+    context.gpr[LAT_WOW64_ESP] = (uintptr_t)(memory + 3 * page - 16);
+    context.fxsave[0] = 0x7f;
+    context.fxsave[1] = 3;
+    context.fxsave[24] = 0x80;
+    context.fxsave[25] = 0x1f;
+    config.return_address = (uintptr_t)(memory + sizeof(code) - 1);
+    struct checked_call call = {
+        .config = &config, .process = &process, .context = &context,
+        .thread = &thread, .pc = (uintptr_t)memory, .event = &event,
+    };
+    checked(checked_create_process, &call);
+    map.address = (uintptr_t)memory;
+    map.length = 3 * page;
+    ok(api->memory_event(process, &map));
+    context.dr7 = 1;
+    assert(api->thread_create(process, &context, &thread) ==
+           LAT_WOW64_STATUS_INVALID_ARGUMENT);
+    context.dr7 = 0;
+    checked(checked_create_thread, &call);
+    if (argc == 3 && !strcmp(argv[2], "--cache-pressure")) {
+        test_cache_pressure(process, thread, &context, page);
+        ok(api->thread_destroy(thread));
+        ok(api->process_destroy(process));
+        assert(!munmap(memory, 4 * page));
+        puts("WoW64 provider cache pressure PASS");
+        return 0;
+    }
+    checked(checked_enter, &call);
+    assert(event.reason == LAT_WOW64_EXIT_SYSCALL);
+    assert(event.service_number == 42);
+    ok(api->get_context(thread, &context));
+    assert(context.gpr[LAT_WOW64_EDX] == 0x1234abcd);
+    reply(thread, &event);
+    ok(api->enter(thread, LAT_WOW64_ENTER_CURRENT_PC, &event));
+    assert(event.reason == LAT_WOW64_EXIT_RETURN);
+
+    /* Code writes must invalidate the previously generated translation. */
+    memory[1] = 84;
+    map.type = LAT_WOW64_MEMORY_WRITE;
+    ok(api->memory_event(process, &map));
+    ok(api->enter(thread, (uintptr_t)memory, &event));
+    assert(event.reason == LAT_WOW64_EXIT_SYSCALL);
+    assert(event.service_number == 84);
+    reply(thread, &event);
+
+    /* fld1; fld1; faddp; movaps xmm0,xmm1; int 80 */
+    {
+        static const unsigned char floating[] = {
+            0xd9, 0xe8, 0xd9, 0xe8, 0xde, 0xc1,
+            0x0f, 0x28, 0xc1, 0xcd, 0x80,
+        };
+        memcpy(memory + 64, floating, sizeof(floating));
+        ok(api->memory_event(process, &map));
+        ok(api->get_context(thread, &context));
+        memset(context.fxsave + 176, 0x5a, 16);
+        ok(api->set_context(thread, &context));
+        ok(api->enter(thread, (uintptr_t)(memory + 64), &event));
+        assert(event.reason == LAT_WOW64_EXIT_SYSCALL);
+        ok(api->get_context(thread, &context));
+        assert(context.fxsave[39] == 0x80 && context.fxsave[41] == 0x40);
+        for (unsigned int i = 0; i < 16; ++i) {
+            assert(context.fxsave[160 + i] == 0x5a);
+        }
+        reply(thread, &event);
+    }
+
+    /* Soft x87 modes keep native SSE exceptions in the saved FCSR. */
+    if (getenv("LATX_SOFTFPU") &&
+        (!strcmp(getenv("LATX_SOFTFPU"), "1") ||
+         !strcmp(getenv("LATX_SOFTFPU"), "2"))) {
+        unsigned char divide_sse[] = {
+            0xf3, 0x0f, 0x10, 0x05, 0, 0, 0, 0, /* movss xmm0,[one] */
+            0x0f, 0x57, 0xc9,                   /* xorps xmm1,xmm1 */
+            0xf3, 0x0f, 0x5e, 0xc1,             /* divss xmm0,xmm1 */
+            0xcd, 0x80,
+        };
+        uint32_t address = (uintptr_t)(memory + page + 512);
+        *(uint32_t *)(memory + page + 512) = 0x3f800000;
+        memcpy(divide_sse + 4, &address, sizeof(address));
+        memcpy(memory + 96, divide_sse, sizeof(divide_sse));
+        ok(api->memory_event(process, &map));
+        ok(api->enter(thread, (uintptr_t)(memory + 96), &event));
+        assert(event.reason == LAT_WOW64_EXIT_SYSCALL);
+        ok(api->get_context(thread, &context));
+        fprintf(stderr, "SSE divide MXCSR=%02x%02x\n",
+                context.fxsave[25], context.fxsave[24]);
+        assert(context.fxsave[24] & 4);
+        assert(!(context.fxsave[2] & 4));
+        reply(thread, &event);
+
+        /* An x87 exception imported from Windows must not become SSE state
+         * when no SSE arithmetic executes on the next entry. */
+        context.fxsave[2] |= 4;
+        context.fxsave[24] = 0x80;
+        context.fxsave[25] = 0x1f;
+        ok(api->set_context(thread, &context));
+        memcpy(memory + 96, "\xcd\x80", 2);
+        ok(api->memory_event(process, &map));
+        ok(api->enter(thread, (uintptr_t)(memory + 96), &event));
+        assert(event.reason == LAT_WOW64_EXIT_SYSCALL);
+        ok(api->get_context(thread, &context));
+        fprintf(stderr, "x87/SSE isolation: status=%02x MXCSR=%02x%02x\n",
+                context.fxsave[2], context.fxsave[25], context.fxsave[24]);
+        assert(context.fxsave[2] & 4);
+        assert(!(context.fxsave[24] & 4));
+        reply(thread, &event);
+    }
+
+    if (getenv("LATX_SOFTFPU") && !strcmp(getenv("LATX_SOFTFPU"), "2")) {
+        unsigned char precise[] = {
+            0xdb, 0xe3, 0xd9, 0xe8, 0xdb, 0x2d, 0, 0, 0, 0,
+            0xde, 0xc1, 0xcd, 0x80,
+        };
+        static const unsigned char tiny[] = {
+            0, 0, 0, 0, 0, 0, 0, 0x80, 0xc0, 0x3f,
+        };
+        uint32_t address = (uintptr_t)(memory + page + 528);
+        memcpy(memory + page + 528, tiny, sizeof(tiny));
+        memcpy(precise + 6, &address, sizeof(address));
+        memcpy(memory + 96, precise, sizeof(precise));
+        ok(api->memory_event(process, &map));
+        ok(api->enter(thread, (uintptr_t)(memory + 96), &event));
+        assert(event.reason == LAT_WOW64_EXIT_SYSCALL);
+        ok(api->get_context(thread, &context));
+        /* 1 + 2^-63: the low bit is lost by the default double precision. */
+        assert(context.fxsave[32] == 1 && context.fxsave[39] == 0x80);
+        assert(context.fxsave[40] == 0xff && context.fxsave[41] == 0x3f);
+        fprintf(stderr, "80-bit x87 precision sentinel PASS\n");
+        reply(thread, &event);
+    }
+
+    /* Masked x87 exceptions must survive context export and reentry. */
+    {
+        static const unsigned char divide[] = {
+            0xd9, 0xe8, 0xd9, 0xee, 0xde, 0xf9, 0xcd, 0x80,
+        };
+        memcpy(memory + 96, divide, sizeof(divide));
+        ok(api->memory_event(process, &map));
+        ok(api->enter(thread, (uintptr_t)(memory + 96), &event));
+        assert(event.reason == LAT_WOW64_EXIT_SYSCALL);
+        ok(api->get_context(thread, &context));
+        fprintf(stderr, "x87 divide status=%02x%02x\n",
+                context.fxsave[3], context.fxsave[2]);
+        assert(context.fxsave[2] & 4);
+        reply(thread, &event);
+        ok(api->enter(thread, (uintptr_t)(memory + sizeof(code) - 1), &event));
+        assert(event.reason == LAT_WOW64_EXIT_RETURN);
+        ok(api->get_context(thread, &context));
+        assert(context.fxsave[2] & 4);
+
+        /* 1/3 also sets the precision flag, without an explicit status-word
+         * instruction that could hide a missing export synchronization. */
+        static const unsigned char inexact[] = {
+            0xdb, 0xe3, 0xd9, 0xe8, 0xd9, 0xe8, 0xde, 0xc1,
+            0xd9, 0xe8, 0xde, 0xc1, 0xd9, 0xe8, 0xd9, 0xc9,
+            0xde, 0xf9, 0xcd, 0x80,
+        };
+        memcpy(memory + 96, inexact, sizeof(inexact));
+        ok(api->memory_event(process, &map));
+        ok(api->enter(thread, (uintptr_t)(memory + 96), &event));
+        assert(event.reason == LAT_WOW64_EXIT_SYSCALL);
+        ok(api->get_context(thread, &context));
+        fprintf(stderr, "x87 inexact status=%02x%02x\n",
+                context.fxsave[3], context.fxsave[2]);
+        assert(context.fxsave[2] & 0x20);
+        reply(thread, &event);
+    }
+
+    /* A guest access fault must return its PC and fault address to Wine. */
+    {
+        static const unsigned char fault[] = {0xa1, 0, 0, 0, 0};
+        memcpy(memory + 128, fault, sizeof(fault));
+        ok(api->memory_event(process, &map));
+        ok(api->enter(thread, (uintptr_t)(memory + 128), &event));
+        assert(event.reason == LAT_WOW64_EXIT_EXCEPTION);
+        assert(event.trap_number == 14 && event.fault_address == 0);
+        assert(event.guest_pc == (uintptr_t)(memory + 128));
+        reply(thread, &event);
+    }
+    ok(api->thread_destroy(thread));
+
+    /* Each guest waits for the other inside LATX, proving concurrent execution. */
+    {
+        static const unsigned char concurrent[] = {
+            0x64, 0xa1, 0, 0, 0, 0, 0xf0, 0xff, 0x07,
+            0x83, 0x3f, 0x02, 0x75, 0xfb, 0xcd, 0x80,
+        };
+        struct worker workers[2];
+        pthread_t hosts[2];
+
+        memcpy(memory + 256, concurrent, sizeof(concurrent));
+        ok(api->memory_event(process, &map));
+        *(uint32_t *)(memory + page + 128) = 0;
+        for (unsigned int i = 0; i < 2; ++i) {
+            context.generation = 0;
+            context.fs_base = (uintptr_t)(memory + page + i * 16);
+            context.gpr[LAT_WOW64_EDI] = (uintptr_t)(memory + page + 128);
+            context.gpr[LAT_WOW64_ESP] = (uintptr_t)(memory + 3 * page - 16 - i * 256);
+            workers[i].expected = 0x11223300 + i;
+            *(uint32_t *)(memory + page + i * 16) = workers[i].expected;
+            workers[i].pc = (uintptr_t)(memory + 256);
+            ok(api->thread_create(process, &context, &workers[i].thread));
+        }
+        for (unsigned int i = 0; i < 2; ++i) {
+            assert(!pthread_create(&hosts[i], NULL, run_worker, &workers[i]));
+        }
+        for (unsigned int i = 0; i < 2; ++i) {
+            assert(!pthread_join(hosts[i], NULL));
+            ok(api->thread_destroy(workers[i].thread));
+        }
+    }
+    /* Creating and destroying another CPU must not wait for this guest. */
+    {
+        static const unsigned char waiting[] = {
+            0x64, 0xa1, 0, 0, 0, 0,       /* mov eax,fs:[0] */
+            0xc7, 0x47, 4, 1, 0, 0, 0,  /* mov [edi+4],1 */
+            0x83, 0x3f, 0, 0x74, 0xfb,   /* wait for [edi] != 0 */
+            0xcd, 0x80,
+        };
+        struct worker worker = { .pc = (uintptr_t)(memory + 512),
+                                 .expected = 0x33445566 };
+        LatWow64Thread *idle;
+        pthread_t host;
+        uint32_t *control = (uint32_t *)(memory + page + 128);
+
+        memcpy(memory + 512, waiting, sizeof(waiting));
+        ok(api->memory_event(process, &map));
+        control[0] = control[1] = 0;
+        context.generation = 0;
+        context.fs_base = (uintptr_t)(memory + page);
+        *(uint32_t *)(memory + page) = worker.expected;
+        context.gpr[LAT_WOW64_EDI] = (uintptr_t)control;
+        ok(api->thread_create(process, &context, &worker.thread));
+        assert(!pthread_create(&host, NULL, run_worker, &worker));
+        while (!__atomic_load_n(control + 1, __ATOMIC_ACQUIRE)) {
+            usleep(100);
+        }
+        assert(!pthread_kill(host, SIGUSR1));
+        while (!host_signals) {
+            usleep(100);
+        }
+        ok(api->thread_create(process, &context, &idle));
+        ok(api->thread_destroy(idle));
+        /* Updating an unrelated executable page must interrupt linked code. */
+        {
+            LatWow64MemoryEvent unrelated = map;
+            unrelated.type = LAT_WOW64_MEMORY_MAP;
+            unrelated.address = (uintptr_t)(memory + 3 * page);
+            unrelated.length = page;
+            unrelated.protection = LAT_WOW64_PROT_READ | LAT_WOW64_PROT_EXEC;
+            ok(api->memory_event(process, &unrelated));
+        }
+        __atomic_store_n(control, 1, __ATOMIC_RELEASE);
+        assert(!pthread_join(host, NULL));
+        ok(api->thread_destroy(worker.thread));
+    }
+    test_host_restart();
+    map.type = LAT_WOW64_MEMORY_UNMAP;
+    ok(api->memory_event(process, &map));
+    ok(api->process_destroy(process));
+    munmap(memory, 4 * page);
+    puts("WoW64 i386 provider: syscall, FS, x87/SSE, fault, parallel, return and invalidation PASS");
+    return 0;
+}
