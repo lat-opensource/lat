@@ -316,6 +316,64 @@ static void test_i386_execute_permissions(LatWow64Process *process,
     puts("i386 execute permissions and page boundaries PASS");
 }
 
+static void test_i386_x87_fault_retry(LatWow64Process *process,
+                                     LatWow64Thread *thread,
+                                     unsigned char *memory, size_t page)
+{
+    unsigned char fild[] = {0xdb, 0x05, 0, 0, 0, 0, 0xcd, 0x80};
+    unsigned char *operand = mmap((void *)0x50000000, page, PROT_NONE,
+                                 MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
+    uint32_t address = (uintptr_t)operand;
+    LatWow64Context context, saved;
+    LatWow64Exit event = { .size = sizeof(event), .abi_version = LAT_WOW64_ABI_VERSION };
+    LatWow64MemoryEvent map = {
+        .size = sizeof(map), .abi_version = LAT_WOW64_ABI_VERSION,
+        .type = LAT_WOW64_MEMORY_MAP, .address = (uintptr_t)operand, .length = page,
+    };
+    LatWow64MemoryEvent write = map;
+
+    assert(operand != MAP_FAILED);
+    ok(api->get_context(thread, &saved));
+    context = saved;
+    memset(context.fxsave, 0, sizeof(context.fxsave));
+    context.fxsave[0] = 0x7f;
+    context.fxsave[1] = 3;
+    context.fxsave[3] = 0x18; /* TOP=3, empty stack. */
+    context.fxsave[24] = 0x80;
+    context.fxsave[25] = 0x1f;
+    ok(api->set_context(thread, &context));
+    memcpy(fild + 2, &address, sizeof(address));
+    memcpy(memory + 128, fild, sizeof(fild));
+    write.type = LAT_WOW64_MEMORY_WRITE;
+    write.address = (uintptr_t)memory;
+    ok(api->memory_event(process, &write));
+    ok(api->memory_event(process, &map));
+    ok(api->enter(thread, (uintptr_t)(memory + 128), &event));
+    assert(event.reason == LAT_WOW64_EXIT_EXCEPTION && event.trap_number == 14);
+    assert(event.guest_pc == (uintptr_t)(memory + 128) && event.fault_address == address);
+    ok(api->get_context(thread, &context));
+    fprintf(stderr, "FILD fault TOP=%u (expected 3)\n", (context.fxsave[3] >> 3) & 7);
+    assert(((context.fxsave[3] >> 3) & 7) == 3);
+    reply(thread, &event);
+    assert(!mprotect(operand, page, PROT_READ | PROT_WRITE));
+    *(int32_t *)operand = 42;
+    map.type = LAT_WOW64_MEMORY_PROTECT;
+    map.protection = LAT_WOW64_PROT_READ | LAT_WOW64_PROT_WRITE;
+    ok(api->memory_event(process, &map));
+    ok(api->enter(thread, LAT_WOW64_ENTER_CURRENT_PC, &event));
+    assert(event.reason == LAT_WOW64_EXIT_SYSCALL);
+    ok(api->get_context(thread, &context));
+    assert(((context.fxsave[3] >> 3) & 7) == 2);
+    assert(context.fxsave[39] == 0xa8 && context.fxsave[40] == 4 && context.fxsave[41] == 0x40);
+    reply(thread, &event);
+    saved.generation = context.generation;
+    ok(api->set_context(thread, &saved));
+    map.type = LAT_WOW64_MEMORY_UNMAP;
+    ok(api->memory_event(process, &map));
+    assert(!munmap(operand, page));
+    puts("x87 FILD page fault and retry PASS");
+}
+
 extern unsigned long wow64_check_host_fprs(LatWow64Status (*callback)(void *),
                                            void *opaque,
                                            LatWow64Status *status);
@@ -450,6 +508,7 @@ int main(int argc, char **argv)
 
     test_i386_address_width(process, thread, memory, page);
     test_i386_execute_permissions(process, thread, memory, page);
+    test_i386_x87_fault_retry(process, thread, memory, page);
 
     /* Code writes must invalidate the previously generated translation. */
     memory[1] = 84;
