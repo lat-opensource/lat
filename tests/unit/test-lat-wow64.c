@@ -265,6 +265,56 @@ static void test_abi_validation(void)
     g_mutex_clear(&backend.lock);
 }
 
+static void test_i386_pc_bounds(void)
+{
+    TestBackend backend = { .use_exit_reason = true,
+                            .exit_reason = LAT_WOW64_EXIT_EXCEPTION };
+    LatWow64Process *process;
+    LatWow64Thread *thread;
+    LatWow64Context initial = make_context(1), saved;
+    LatWow64Exit event = { .size = sizeof(event),
+                          .abi_version = LAT_WOW64_ABI_VERSION };
+    LatWow64Reply reply = { .size = sizeof(reply),
+                           .abi_version = LAT_WOW64_ABI_VERSION,
+                           .action = LAT_WOW64_REPLY_REDIRECT };
+    const uint64_t invalid_pcs[] = { UINT64_C(0x100000000),
+                                     UINT64_C(0x100001234), UINT64_MAX - 1 };
+    unsigned int i;
+
+    g_mutex_init(&backend.lock);
+    process = create_process(&backend);
+    g_assert_cmpint(lat_wow64_thread_create(process, &initial, &thread), ==,
+                   LAT_WOW64_STATUS_OK);
+    for (i = 0; i < G_N_ELEMENTS(invalid_pcs); ++i) {
+        g_assert_cmpint(lat_wow64_enter(thread, invalid_pcs[i], &event), ==,
+                       LAT_WOW64_STATUS_INVALID_ARGUMENT);
+    }
+    g_assert_cmpuint(backend.last_guest_pc, ==, 0);
+    g_assert_cmpint(lat_wow64_get_context(thread, &saved), ==, LAT_WOW64_STATUS_OK);
+    g_assert_cmpuint(saved.gpr[LAT_WOW64_EAX], ==, initial.gpr[LAT_WOW64_EAX]);
+
+    /* High-bit-set i386 PCs remain valid and must be zero-extended. */
+    g_assert_cmpint(lat_wow64_enter(thread, UINT32_MAX, &event), ==, LAT_WOW64_STATUS_OK);
+    g_assert_cmpuint(backend.last_guest_pc, ==, UINT32_MAX);
+    reply.sequence = event.sequence;
+    for (i = 0; i < G_N_ELEMENTS(invalid_pcs); ++i) {
+        reply.detail = invalid_pcs[i];
+        g_assert_cmpint(lat_wow64_reply(thread, &reply), ==,
+                       LAT_WOW64_STATUS_INVALID_ARGUMENT);
+    }
+    reply.detail = UINT32_MAX;
+    g_assert_cmpint(lat_wow64_reply(thread, &reply), ==, LAT_WOW64_STATUS_OK);
+    g_assert_cmpint(lat_wow64_get_context(thread, &saved), ==, LAT_WOW64_STATUS_OK);
+    g_assert_cmpuint(saved.eip, ==, UINT32_MAX);
+    backend.use_exit_reason = false;
+    g_assert_cmpint(lat_wow64_enter(thread, LAT_WOW64_ENTER_CURRENT_PC, &event), ==,
+                   LAT_WOW64_STATUS_OK);
+    g_assert_cmpuint(backend.last_guest_pc, ==, UINT32_MAX);
+    g_assert_cmpint(lat_wow64_thread_destroy(thread), ==, LAT_WOW64_STATUS_OK);
+    g_assert_cmpint(lat_wow64_process_destroy(process), ==, LAT_WOW64_STATUS_OK);
+    g_mutex_clear(&backend.lock);
+}
+
 static void test_memory_generation(void)
 {
     TestBackend backend = { 0 };
@@ -1184,6 +1234,7 @@ int main(int argc, char **argv)
 {
     g_test_init(&argc, &argv, NULL);
     g_test_add_func("/lat-wow64/abi/validation", test_abi_validation);
+    g_test_add_func("/lat-wow64/abi/i386-pc-bounds", test_i386_pc_bounds);
     g_test_add_func("/lat-wow64/memory/generation", test_memory_generation);
     g_test_add_func("/lat-wow64/memory/event-order", test_memory_event_order);
     g_test_add_func("/lat-wow64/memory/multi-mapping-range",

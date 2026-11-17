@@ -504,7 +504,8 @@ static LatWow64Status lat_wow64_enter_internal(LatWow64Thread *thread,
     bool outer_entry;
     bool stale_after_execution = false;
 
-    if (!thread || !exit_info) {
+    if (!thread || !exit_info ||
+        (guest_pc != LAT_WOW64_ENTER_CURRENT_PC && guest_pc > UINT32_MAX)) {
         return LAT_WOW64_STATUS_INVALID_ARGUMENT;
     }
     if (!lat_wow64_struct_valid(exit_info->size, sizeof(*exit_info),
@@ -677,7 +678,7 @@ LatWow64Status lat_wow64_reply(LatWow64Thread *thread, const LatWow64Reply *repl
     if (reply->flags || reply->action == LAT_WOW64_REPLY_NONE ||
         reply->action > LAT_WOW64_REPLY_REDIRECT ||
         (reply->action == LAT_WOW64_REPLY_REDIRECT ?
-         reply->detail == LAT_WOW64_ENTER_CURRENT_PC : reply->detail != 0)) {
+         reply->detail > UINT32_MAX : reply->detail != 0)) {
         return LAT_WOW64_STATUS_INVALID_ARGUMENT;
     }
 
