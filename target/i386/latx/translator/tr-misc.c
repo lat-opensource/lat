@@ -202,6 +202,7 @@ static void do_translate_free_brick_tb(void)
 }
 
 static void do_translate_brick_tb(wrapper_t wrapper, uintptr_t function,
+                                  uintptr_t endpoint,
                                   struct cpu_state_info *state_info,
                                   CPUState *cpu, target_ulong tb_pc,
                                   TranslationBlock *tb)
@@ -219,6 +220,9 @@ static void do_translate_brick_tb(wrapper_t wrapper, uintptr_t function,
         return;
     }
     kzt_native_to_wrapper();
+    IR2_OPND endpoint_ir2_opnd = ra_alloc_itemp();
+    li_d(endpoint_ir2_opnd, endpoint);
+    kzt_helper_ptr((ADDR)kzt_set_bridge_endpoint, endpoint_ir2_opnd);
     wrapper_gpr_trans((ADDR)function);
 
     tr_set_running_of_cs(false);
@@ -226,6 +230,9 @@ static void do_translate_brick_tb(wrapper_t wrapper, uintptr_t function,
     la_jirl(ra_ir2_opnd, ra_ir2_opnd, 0);
     tr_set_running_of_cs(true);
 
+    li_d(endpoint_ir2_opnd, 0);
+    kzt_helper_ptr((ADDR)kzt_set_bridge_endpoint, endpoint_ir2_opnd);
+    ra_free_temp(endpoint_ir2_opnd);
     kzt_wrapper_to_native();
     gen_set_next_tb_code(&esp_ir2_opnd);
 
@@ -262,12 +269,14 @@ bool translate_int_3(IR1_INST *pir1)
                              &state_info.cs_base, &state_info.flags);
         wrapper_t wrapper;
         uintptr_t function;
+        uintptr_t endpoint;
         if (latx_kzt_runtime_enabled() &&
             kzt_registered_onebridge_snapshot(state_info.current_pc,
-                                              &wrapper, &function)) {
+                                              &wrapper, &function,
+                                              &endpoint)) {
             TranslationBlock *tb = NULL;
             mmap_lock();
-            do_translate_brick_tb(wrapper, function, &state_info, cpu,
+            do_translate_brick_tb(wrapper, function, endpoint, &state_info, cpu,
                                   state_info.current_pc, tb);
             mmap_unlock();
             return true;

@@ -22,6 +22,17 @@
 
 KHASH_MAP_INIT_INT64(bridgemap, uintptr_t)
 
+static uint64_t bridge_key2(wrapper_t w, void *fnc, void *fnc2)
+{
+    uint64_t key = (uintptr_t)fnc;
+
+    key ^= (uint64_t)(uintptr_t)fnc2 + 0x9e3779b97f4a7c15ULL +
+           (key << 6) + (key >> 2);
+    key ^= (uint64_t)(uintptr_t)w + 0x9e3779b97f4a7c15ULL +
+           (key << 6) + (key >> 2);
+    return key;
+}
+
 //onebridge is 32 bytes
 #define NBRICK  4096/sizeof(onebridge_t)
 typedef struct brick_s brick_t;
@@ -41,6 +52,7 @@ typedef struct bridge_s {
 
 static GMutex bridge_registry_lock;
 static brick_t *bridge_registry;
+static __thread uintptr_t bridge_endpoint;
 
 static void register_brick(brick_t *brick)
 {
@@ -135,6 +147,8 @@ uintptr_t AddBridge(bridge_t* bridge, wrapper_t w, void* fnc, int N, const char*
     b->b[sz].f = (uintptr_t)fnc;
     b->b[sz].C3 = N?0xC2:0xC3;
     b->b[sz].N = N;
+    b->b[sz].func = 0;
+    b->b[sz].name_or_func = (void *)name;
     b->sz++;
     g_mutex_unlock(&bridge_registry_lock);
     // add bridge to map, for fast recovery
@@ -142,6 +156,41 @@ uintptr_t AddBridge(bridge_t* bridge, wrapper_t w, void* fnc, int N, const char*
     khint_t k = kh_put(bridgemap, bridge->bridgemap, (uintptr_t)fnc, &ret);
     kh_value(bridge->bridgemap, k) = (uintptr_t)&b->b[sz].CC;
 
+    g_mutex_unlock(&bridge->lock);
+    return (uintptr_t)&b->b[sz].CC;
+}
+
+uintptr_t AddBridge2(bridge_t *bridge, wrapper_t w, void *fnc, void *fnc2,
+                     int N, const char *name)
+{
+    brick_t *b = NULL;
+    int sz = -1;
+    uint64_t key = bridge_key2(w, fnc, fnc2);
+
+    g_mutex_lock(&bridge->lock);
+    b = bridge->last;
+    if (b->sz == NBRICK) {
+        b->next = NewBrick();
+        b = b->next;
+        bridge->last = b;
+    }
+    sz = b->sz;
+    g_mutex_lock(&bridge_registry_lock);
+    b->b[sz].CC = 0xCC;
+    b->b[sz].S = 'S';
+    b->b[sz].C = 'C';
+    b->b[sz].w = w;
+    b->b[sz].f = (uintptr_t)fnc;
+    b->b[sz].C3 = N ? 0xC2 : 0xC3;
+    b->b[sz].N = N;
+    b->b[sz].func = fnc2 ? 1 : 0;
+    b->b[sz].name_or_func = fnc2 ? fnc2 : (void *)name;
+    b->sz++;
+    g_mutex_unlock(&bridge_registry_lock);
+
+    int ret;
+    khint_t k = kh_put(bridgemap, bridge->bridgemap, key, &ret);
+    kh_value(bridge->bridgemap, k) = (uintptr_t)&b->b[sz].CC;
     g_mutex_unlock(&bridge->lock);
     return (uintptr_t)&b->b[sz].CC;
 }
@@ -174,7 +223,8 @@ bool kzt_is_registered_onebridge(uintptr_t addr)
 }
 
 bool kzt_registered_onebridge_snapshot(uintptr_t addr, wrapper_t *wrapper,
-                                       uintptr_t *function)
+                                       uintptr_t *function,
+                                       uintptr_t *endpoint)
 {
     g_mutex_lock(&bridge_registry_lock);
     onebridge_t *slot = find_registered_onebridge(addr);
@@ -186,9 +236,25 @@ bool kzt_registered_onebridge_snapshot(uintptr_t addr, wrapper_t *wrapper,
         if (function) {
             *function = slot->f;
         }
+        if (endpoint) {
+            *endpoint = slot->func ? (uintptr_t)slot->name_or_func : 0;
+        }
     }
     g_mutex_unlock(&bridge_registry_lock);
     return slot != NULL;
+}
+
+void kzt_set_bridge_endpoint(uintptr_t endpoint)
+{
+    bridge_endpoint = endpoint;
+}
+
+uintptr_t kzt_take_bridge_endpoint(void)
+{
+    uintptr_t endpoint = bridge_endpoint;
+
+    bridge_endpoint = 0;
+    return endpoint;
 }
 
 uintptr_t CheckBridged(bridge_t* bridge, void* fnc)
@@ -196,11 +262,32 @@ uintptr_t CheckBridged(bridge_t* bridge, void* fnc)
     // check if function alread have a bridge (the function wrapper will not be tested)
     g_mutex_lock(&bridge->lock);
     khint_t k = kh_get(bridgemap, bridge->bridgemap, (uintptr_t)fnc);
-    if (k == kh_end(bridge->bridgemap)) {
-        g_mutex_unlock(&bridge->lock);
-        return 0;
+    uintptr_t ret = 0;
+    if (k != kh_end(bridge->bridgemap)) {
+        onebridge_t *slot = (onebridge_t *)kh_value(bridge->bridgemap, k);
+        if (slot->f == (uintptr_t)fnc && !slot->func) {
+            ret = (uintptr_t)slot;
+        }
     }
-    uintptr_t ret = kh_value(bridge->bridgemap, k);
+    g_mutex_unlock(&bridge->lock);
+    return ret;
+}
+
+uintptr_t CheckBridged2(bridge_t *bridge, wrapper_t w, void *fnc, void *fnc2)
+{
+    uint64_t key = bridge_key2(w, fnc, fnc2);
+
+    g_mutex_lock(&bridge->lock);
+    khint_t k = kh_get(bridgemap, bridge->bridgemap, key);
+    uintptr_t ret = 0;
+    if (k != kh_end(bridge->bridgemap)) {
+        onebridge_t *slot = (onebridge_t *)kh_value(bridge->bridgemap, k);
+        if (slot->w == w && slot->f == (uintptr_t)fnc &&
+            slot->func == (fnc2 ? 1 : 0) &&
+            slot->name_or_func == (fnc2 ? fnc2 : slot->name_or_func)) {
+            ret = (uintptr_t)slot;
+        }
+    }
     g_mutex_unlock(&bridge->lock);
     return ret;
 }
@@ -212,6 +299,19 @@ uintptr_t AddCheckBridge(bridge_t* bridge, wrapper_t w, void* fnc, int N, const 
     uintptr_t ret = CheckBridged(bridge, fnc);
     if(!ret)
         ret = AddBridge(bridge, w, fnc, N, name);
+    return ret;
+}
+
+uintptr_t AddCheckBridge2(bridge_t *bridge, wrapper_t w, void *fnc, void *fnc2,
+                          int N, const char *name)
+{
+    if (!fnc && w) {
+        return 0;
+    }
+    uintptr_t ret = CheckBridged2(bridge, w, fnc, fnc2);
+    if (!ret) {
+        ret = AddBridge2(bridge, w, fnc, fnc2, N, name);
+    }
     return ret;
 }
 
