@@ -194,6 +194,10 @@ typedef struct LatWow64Api {
     LatWow64Status (*thread_get_info)(LatWow64Thread *, LatWow64ThreadInfo *);
     LatWow64Status (*thread_suspend)(LatWow64Thread *);
     LatWow64Status (*thread_resume)(LatWow64Thread *);
+    /* Async-signal-safe. Only the host thread currently using this handle
+     * may request its own interruption; the handle must remain alive. Pass the
+     * original host signal ucontext, or NULL outside a signal handler. */
+    void (*request_interrupt)(LatWow64Thread *, void *host_signal_context);
 } LatWow64Api;
 
 /* Only this function is exported by liblatx-wow64.so. */

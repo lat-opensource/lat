@@ -15,6 +15,7 @@
 #include "hw/core/cpu.h"
 #include "latx-config.h"
 #include "latx-options.h"
+#include "latx-signal.h"
 #include "lsenv.h"
 #include "translate.h"
 #include "wow64-internal.h"
@@ -52,6 +53,7 @@ static __thread bool lat_wow64_host_signal_altstack_usable;
 typedef struct LatWow64SignalCpuSlot {
     int tid;
     CPUState *cpu;
+    TranslationBlock *entry_tb;
     uintptr_t *helper_retaddr;
     uint32_t float_status;
 } LatWow64SignalCpuSlot;
@@ -81,6 +83,7 @@ static bool lat_wow64_provider_reserve_signal_cpu(void)
     LatWow64SignalCpuSlot *slot = lat_wow64_provider_find_signal_cpu_slot(true);
 
     if (!slot) return false;
+    qatomic_set(&slot->entry_tb, NULL);
     qatomic_set(&slot->cpu, NULL);
     slot->float_status = 0;
     qatomic_set(&slot->helper_retaddr, &helper_retaddr);
@@ -102,6 +105,7 @@ static uint32_t lat_wow64_provider_clear_signal_cpu(void)
 
     g_assert(slot);
     status = slot->float_status;
+    qatomic_set(&slot->entry_tb, NULL);
     qatomic_set(&slot->cpu, NULL);
     qatomic_set(&slot->helper_retaddr, NULL);
     qatomic_set(&slot->tid, 0);
@@ -132,6 +136,41 @@ int lat_wow64_provider_signal_state(CPUState **cpu, uintptr_t **retaddr)
     if (!slot || !(*cpu = qatomic_read(&slot->cpu))) return false;
     *retaddr = qatomic_read(&slot->helper_retaddr);
     return *retaddr != NULL;
+}
+
+/* Valid only while cpu_tb_exec owns a live TB reference. Clear it on
+ * normal return and the cpu_exec longjmp path before any cache mutation. */
+void lat_wow64_provider_tb_enter(TranslationBlock *tb)
+{
+    LatWow64SignalCpuSlot *slot = lat_wow64_provider_find_signal_cpu_slot(false);
+
+    if (slot) qatomic_set(&slot->entry_tb, tb);
+}
+
+TranslationBlock *lat_wow64_provider_signal_entry_tb(void)
+{
+    LatWow64SignalCpuSlot *slot = lat_wow64_provider_find_signal_cpu_slot(false);
+
+    return slot ? qatomic_read(&slot->entry_tb) : NULL;
+}
+
+static void plugin_request_interrupt(LatWow64Thread *thread, void *host_signal_context)
+{
+    CPUState *cpu;
+    uintptr_t *retaddr;
+    sigset_t set, previous;
+
+    /* Match the signal handler's serialization while unlinking guest code. */
+    sigfillset(&set);
+    sigprocmask(SIG_BLOCK, &set, &previous);
+    lat_wow64_request_interrupt(thread);
+    if (lat_wow64_provider_signal_state(&cpu, &retaddr)) {
+        cpu_exit(cpu);
+        if (host_signal_context) {
+            tb_exit_to_qemu(cpu->env_ptr, host_signal_context);
+        }
+    }
+    sigprocmask(SIG_SETMASK, &previous, NULL);
 }
 
 static bool lat_wow64_provider_install_signal_altstack(stack_t *previous,
@@ -645,11 +684,19 @@ static LatWow64Status backend_execute(void *opaque, LatWow64Thread *thread,
         lat_wow64_provider_guest_active = true;
     }
     g_mutex_unlock(&backend->lock);
+    /* A request received before publication cannot kick this CPU. Consume it
+     * only after publication so a later request is handled by the signal path. */
+    if (lat_wow64_consume_interrupt(thread)) {
+        run_guest = false;
+    }
     trap = run_guest ? lat_wow64_cpu_exec(cpu) : EXCP_INTERRUPT;
     lat_wow64_host_teb_set(host_teb);
     lat_wow64_host_fcsr_set(host_fcsr);
     lat_wow64_provider_guest_active = false;
     float_status = lat_wow64_provider_clear_signal_cpu();
+    /* Execution has returned, so requests received while it ran have been
+     * satisfied. They must not stop the next entry a second time. */
+    lat_wow64_consume_interrupt(thread);
     cpu_exec_end(cpu);
     process_queued_cpu_work(cpu);
     while (have_mmap_lock()) {
@@ -902,6 +949,7 @@ const LatWow64Api *lat_wow64_get_api(uint32_t abi_version)
         .thread_get_info = lat_wow64_thread_get_info,
         .thread_suspend = lat_wow64_thread_suspend,
         .thread_resume = lat_wow64_thread_resume,
+        .request_interrupt = plugin_request_interrupt,
     };
 
     return abi_version == LAT_WOW64_ABI_VERSION ? &api : NULL;

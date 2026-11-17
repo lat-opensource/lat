@@ -75,6 +75,28 @@ static void *run_worker(void *arg)
     return NULL;
 }
 
+static __thread LatWow64Thread *interrupted_thread;
+
+static void interrupt_guest(int signal, siginfo_t *info, void *context)
+{
+    int saved_errno = errno;
+    (void)signal;
+    (void)info;
+    api->request_interrupt(interrupted_thread, context);
+    errno = saved_errno;
+}
+
+static void *run_until_interrupted(void *opaque)
+{
+    struct worker *worker = opaque;
+    LatWow64Exit event = { .size = sizeof(event), .abi_version = LAT_WOW64_ABI_VERSION };
+    interrupted_thread = worker->thread;
+    ok(api->enter(worker->thread, worker->pc, &event));
+    assert(event.reason == LAT_WOW64_EXIT_STOPPED);
+    reply(worker->thread, &event);
+    return NULL;
+}
+
 struct host_read {
     int fd;
     int ready;
@@ -797,6 +819,42 @@ int main(int argc, char **argv)
         __atomic_store_n(control, 1, __ATOMIC_RELEASE);
         assert(!pthread_join(host, NULL));
         ok(api->thread_destroy(worker.thread));
+    }
+    /* Requests both before CPU publication and inside linked guest code must
+     * return normally, preserving a usable thread and no second pending stop. */
+    {
+        static const unsigned char loop[] = {
+            0xc7, 0x07, 1, 0, 0, 0, /* mov dword [edi],1 */
+            0xeb, 0xfe,             /* jmp $ */
+        };
+        struct worker worker = { .pc = (uintptr_t)(memory + 768) };
+        struct sigaction action = { .sa_sigaction = interrupt_guest,
+                                    .sa_flags = SA_SIGINFO };
+        pthread_t host;
+        uint32_t *started = (uint32_t *)(memory + page + 128);
+
+        sigfillset(&action.sa_mask);
+        assert(!sigaction(SIGUSR2, &action, NULL));
+        memcpy(memory + 768, loop, sizeof(loop));
+        memcpy(memory + 800, "\xcd\x80", 2);
+        ok(api->memory_event(process, &map));
+        context.generation = 0;
+        context.gpr[LAT_WOW64_EDI] = (uintptr_t)started;
+        ok(api->thread_create(process, &context, &worker.thread));
+        api->request_interrupt(worker.thread, NULL);
+        ok(api->enter(worker.thread, worker.pc, &event));
+        assert(event.reason == LAT_WOW64_EXIT_STOPPED);
+        reply(worker.thread, &event);
+        *started = 0;
+        assert(!pthread_create(&host, NULL, run_until_interrupted, &worker));
+        while (!__atomic_load_n(started, __ATOMIC_ACQUIRE)) usleep(100);
+        assert(!pthread_kill(host, SIGUSR2));
+        assert(!pthread_join(host, NULL));
+        ok(api->enter(worker.thread, (uintptr_t)(memory + 800), &event));
+        assert(event.reason == LAT_WOW64_EXIT_SYSCALL);
+        reply(worker.thread, &event);
+        ok(api->thread_destroy(worker.thread));
+        puts("WoW64 pre-entry and linked-loop host interruption PASS");
     }
     test_host_restart();
     map.type = LAT_WOW64_MEMORY_UNMAP;

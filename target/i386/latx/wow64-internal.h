@@ -17,6 +17,8 @@ LatWow64Status lat_wow64_process_create(const LatWow64BackendOps *, void *, cons
 LatWow64Status lat_wow64_process_destroy(LatWow64Process *);
 LatWow64Status lat_wow64_thread_create(LatWow64Process *, const LatWow64Context *, LatWow64Thread **);
 LatWow64Status lat_wow64_thread_destroy(LatWow64Thread *);
+void lat_wow64_request_interrupt(LatWow64Thread *);
+bool lat_wow64_consume_interrupt(LatWow64Thread *);
 uint64_t lat_wow64_thread_serial(const LatWow64Thread *);
 LatWow64Status lat_wow64_get_context(LatWow64Thread *, LatWow64Context *);
 LatWow64Status lat_wow64_set_context(LatWow64Thread *, const LatWow64Context *);

@@ -255,8 +255,14 @@ static void unlink_tb_jmp(CPUArchState *env, TranslationBlock *current_tb,
 void tb_exit_to_qemu(CPUArchState *env, ucontext_t *uc)
 {
     TranslationBlock *current_tb = NULL;
+    TranslationBlock *entry_tb = NULL;
     uintptr_t pc = (uintptr_t)UC_PC(uc);
 
+#ifdef CONFIG_LATX_WOW64
+    if (lat_wow64_provider_plugin_active) {
+        entry_tb = lat_wow64_provider_signal_entry_tb();
+    }
+#endif
     current_tb = tcg_tb_lookup(pc);
     if (current_tb) {
         unlink_tb_jmp(env, current_tb, uc);
@@ -270,6 +276,10 @@ void tb_exit_to_qemu(CPUArchState *env, ucontext_t *uc)
         current_tb = tcg_tb_lookup(UC_GR(uc)[1] - sizeof(uint32_t));
         if (current_tb) {
             unlink_tb_jmp(env, current_tb, uc);
+        } else if (entry_tb) {
+            /* The signal interrupted the C dispatcher or entry prologue,
+             * before reaching translated code. Its first TB must return. */
+            unlink_tb_jmp(env, entry_tb, uc);
         } else {
 #ifdef SIGNAL_UNLINK_DBG
             fprintf(stderr, "lhl-debug %s current_tb NULL pid %d\n", __func__, getpid());

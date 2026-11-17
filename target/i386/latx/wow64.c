@@ -46,7 +46,20 @@ struct LatWow64Thread {
     bool suspended;
     bool stopped;
     bool destroying;
+    int interrupt_pending;
 };
+
+/* A signal can interrupt the core while its locks are held. Only atomics
+ * are permitted here; the backend consumes the request after CPU publication. */
+void lat_wow64_request_interrupt(LatWow64Thread *thread)
+{
+    __atomic_store_n(&thread->interrupt_pending, 1, __ATOMIC_RELEASE);
+}
+
+bool lat_wow64_consume_interrupt(LatWow64Thread *thread)
+{
+    return __atomic_exchange_n(&thread->interrupt_pending, 0, __ATOMIC_ACQ_REL);
+}
 
 static GPrivate lat_wow64_active_process = G_PRIVATE_INIT(NULL);
 

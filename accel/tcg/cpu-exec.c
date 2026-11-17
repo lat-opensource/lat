@@ -54,6 +54,9 @@ extern struct elfheader_s * elf_header;
 #include "sysemu/replay.h"
 #include "internal.h"
 #include "qemu/cacheflush.h"
+#ifdef CONFIG_LATX_WOW64
+#include "qemu.h"
+#endif
 #ifdef CONFIG_LATX_AOT
 #include "aot_recover_tb.h"
 #endif
@@ -269,7 +272,21 @@ cpu_tb_exec(CPUState *cpu, TranslationBlock *itb, int *tb_exit)
 #ifdef CONFIG_LATX
 
     env->fpu_clobber = false;
+#ifdef CONFIG_LATX_WOW64
+    if (lat_wow64_provider_plugin_active) {
+        lat_wow64_provider_tb_enter(itb);
+        if (qatomic_read(&cpu->exit_request)) {
+            lat_wow64_provider_tb_enter(NULL);
+            if (env->insn_save[0]) link_indirect_jmp(env);
+            cpu->exception_index = EXCP_INTERRUPT;
+            cpu_loop_exit(cpu);
+        }
+    }
+#endif
     ret = tcg_qemu_tb_exec(env, tb_ptr);
+#ifdef CONFIG_LATX_WOW64
+    if (lat_wow64_provider_plugin_active) lat_wow64_provider_tb_enter(NULL);
+#endif
 
     int tbexit = ret & TB_EXIT_MASK;
     uintptr_t tc_ptr = ret & ~TB_EXIT_MASK;
@@ -1209,6 +1226,12 @@ int cpu_exec(CPUState *cpu)
 
 #ifdef CONFIG_LATX
         CPUArchState *env = cpu->env_ptr;
+#ifdef CONFIG_LATX_WOW64
+        if (lat_wow64_provider_plugin_active) {
+            lat_wow64_provider_tb_enter(NULL);
+            if (env->insn_save[0]) link_indirect_jmp(env);
+        }
+#endif
 
         /*
          * Some exits bypass the translated cleanup and siglongjmp restores a
