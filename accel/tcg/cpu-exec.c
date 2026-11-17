@@ -278,26 +278,18 @@ cpu_tb_exec(CPUState *cpu, TranslationBlock *itb, int *tb_exit)
     if (rettb) {
         uint64_t lazypc = 0;
         if (tbexit) {
-#ifdef CONFIG_LATX_FAST_TRANSLATOR
             if (!latx_tb_exit_resolve_pc(rettb->canlink[1], rettb->pc,
-                                         rettb->lazypc[1], &lazypc)) {
+                                      rettb->lazypc[1], &lazypc)) {
                 goto latx_skip_lazypc_update;
             }
-#else
-            lazypc = rettb->pc + rettb->lazypc[1];
-#endif
             if (rettb->canlink[1]) {
                 ret |= (uint64_t)rettb;
             }
         } else {
-#ifdef CONFIG_LATX_FAST_TRANSLATOR
             if (!latx_tb_exit_resolve_pc(rettb->canlink[0], rettb->pc,
-                                         rettb->lazypc[0], &lazypc)) {
+                                      rettb->lazypc[0], &lazypc)) {
                 goto latx_skip_lazypc_update;
             }
-#else
-            lazypc = rettb->pc + rettb->lazypc[0];
-#endif
             if (rettb->canlink[0]) {
                 ret |= (uint64_t)rettb;
             }
@@ -311,10 +303,8 @@ cpu_tb_exec(CPUState *cpu, TranslationBlock *itb, int *tb_exit)
 #endif
         }
         env->eip = lazypc;
-#ifdef CONFIG_LATX_FAST_TRANSLATOR
 latx_skip_lazypc_update:
         ;
-#endif
     }
 
 #ifdef CONFIG_LATX_MONITOR_SHARED_MEM

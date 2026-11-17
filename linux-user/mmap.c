@@ -21,6 +21,7 @@
 #include "trace.h"
 #include "exec/log.h"
 #include "qemu.h"
+#include "quicktrans-config.h"
 
 #ifndef MREMAP_DONTUNMAP
 #define MREMAP_DONTUNMAP 4
@@ -774,10 +775,7 @@ abi_long target_mmap(abi_ulong start, abi_ulong len, int target_prot,
     /* Preserve the legacy Wine mapping workarounds when Quicktrans is off.
      * Quicktrans needs independent shared/private subpages: the widened file
      * mapping can lose the adjacent dispatcher pointer during writeback. */
-#if defined(CONFIG_LATX_FAST_TRANSLATOR) && defined(TARGET_X86_64)
-    if (!latx_quicktrans_enabled())
-#endif
-    {
+    if (!latx_quicktrans_enabled()) {
         /* Hacking wine user_shared_data mapping to avoid shadow page */
         if (start == 0x7ffe0000 && len == 0x1000 && (flags == (MAP_FIXED | MAP_SHARED)) && fd > 0
             && (qemu_host_page_size > TARGET_PAGE_SIZE)) {

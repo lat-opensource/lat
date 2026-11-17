@@ -13,9 +13,12 @@ static inline bool latx_tb_exit_resolve_pc(int8_t canlink, uint64_t tb_pc,
                                            int64_t lazypc,
                                            uint64_t *next_pc)
 {
+    /* Only Quicktrans builds emit the stored-EIP sentinel. */
+#ifdef CONFIG_LATX_FAST_TRANSLATOR
     if (canlink == LATX_CANLINK_EIP_STORED) {
         return false;
     }
+#endif
 
     *next_pc = tb_pc + lazypc;
     return true;
