@@ -318,12 +318,13 @@ static bool wine_dll_inset_sec(abi_ulong map_start, abi_ulong map_len, int map_f
     section_bytes = pe_head.NumberOfSections;
     section_bytes *= sizeof(wine_sec_head);
     if (pe_head.Magic == IMAGE_NT_OPTIONAL_HDR32_MAGIC) {
-        optional_min = WINE_PE_H_OPT32_SIZE;
+        optional_min = WINE_PE_H_OPT32_FIXED_SIZE;
     } else if (pe_head.Magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC) {
-        optional_min = WINE_PE_H_OPT64_SIZE;
+        optional_min = WINE_PE_H_OPT64_FIXED_SIZE;
     } else {
         return false;
     }
+    /* Data directories are variable in number and are not read here. */
     if (pe_head.SizeOfOptionalHeader < optional_min) {
         return false;
     }

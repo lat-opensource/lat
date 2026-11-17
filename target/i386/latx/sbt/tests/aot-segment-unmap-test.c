@@ -489,6 +489,10 @@ enum {
     PE_TEST_IMAGE_STRIDE = 0x10000,
     PE_TEST_NONSTANDARD_OPT_SIZE = 256,
     PE_TEST_UNKNOWN_MAGIC = 0x1234,
+    PE_TEST_OPT32_FIXED_SIZE = 96,
+    PE_TEST_OPT64_FIXED_SIZE = 112,
+    PE_TEST_DATA_DIRECTORY_SIZE = 8,
+    PE_TEST_SHORT_DIRECTORY_COUNT = 14,
 };
 
 static void write_pe_image(int fd, uint16_t magic, uint16_t optional_size,
@@ -510,6 +514,8 @@ static void write_pe_image(int fd, uint16_t magic, uint16_t optional_size,
     };
     size_t section_offset = PE_TEST_NT_OFFSET + PE_OPTIONAL_HEADER_OFFSET +
                             optional_size;
+    size_t fixed_size = magic == IMAGE_NT_OPTIONAL_HDR64_MAGIC ?
+        PE_TEST_OPT64_FIXED_SIZE : PE_TEST_OPT32_FIXED_SIZE;
 
     g_assert(file_size <= sizeof(image));
     g_assert(section_count > 0 && section_count <= G_N_ELEMENTS(sections));
@@ -520,6 +526,15 @@ static void write_pe_image(int fd, uint16_t magic, uint16_t optional_size,
     memcpy(nt_header + PE_COFF_OPTIONAL_HEADER_SIZE_OFFSET,
            &optional_size, sizeof(optional_size));
     memcpy(nt_header + PE_OPTIONAL_HEADER_OFFSET, &magic, sizeof(magic));
+    if (optional_size >= fixed_size) {
+        uint32_t directory_count = MIN(16, (optional_size - fixed_size) /
+                                           PE_TEST_DATA_DIRECTORY_SIZE);
+
+        /* NumberOfRvaAndSizes is the final field before the directories. */
+        memcpy(nt_header + PE_OPTIONAL_HEADER_OFFSET + fixed_size -
+               sizeof(directory_count), &directory_count,
+               sizeof(directory_count));
+    }
     if (section_offset + section_count * sizeof(wine_sec_head) <=
         sizeof(image)) {
         for (int i = 0; i < section_count; i++) {
@@ -556,6 +571,53 @@ static void test_wine_pe_path_validation(void)
     force_truncated_readlink = false;
 
     munmap(mapped, PE_TEST_FILE_SIZE);
+    close(fd);
+    unlink(path);
+}
+
+static void test_wine_pe_short_optional_headers(void)
+{
+    char path[] = "/tmp/latx-pe-short-XXXXXX.dll";
+    int fd = mkstemps(path, sizeof(".dll") - 1);
+    target_ulong base = 0x30000000;
+    const uint16_t magics[] = {IMAGE_NT_OPTIONAL_HDR32_MAGIC,
+                               IMAGE_NT_OPTIONAL_HDR64_MAGIC};
+    const uint16_t fixed_sizes[] = {PE_TEST_OPT32_FIXED_SIZE,
+                                    PE_TEST_OPT64_FIXED_SIZE};
+    const unsigned int directory_counts[] = {0, PE_TEST_SHORT_DIRECTORY_COUNT};
+
+    g_assert(fd >= 0);
+    for (unsigned int i = 0; i < G_N_ELEMENTS(magics); i++) {
+        for (unsigned int j = 0; j < G_N_ELEMENTS(directory_counts); j++) {
+            uint16_t optional_size = fixed_sizes[i] + directory_counts[j] *
+                PE_TEST_DATA_DIRECTORY_SIZE;
+            size_t section_end = PE_TEST_NT_OFFSET + PE_OPTIONAL_HEADER_OFFSET +
+                optional_size + sizeof(wine_sec_head);
+            wine_sec_info *info;
+
+            write_pe_image(fd, magics[i], optional_size, IMAGE_NT_SIGNATURE,
+                           PE_TEST_FILE_SIZE, 1, PE_TEST_TEXT_RVA, 0);
+            g_assert(wine_dll_track_sections(base, PE_TEST_FILE_SIZE, 0, fd));
+            info = wine_sec_tree_lookup(base + PE_TEST_TEXT_RVA);
+            g_assert(info != NULL);
+            g_assert(info->offset == PE_TEST_TEXT_RVA);
+            g_assert(strcmp(info->file_name, path) == 0);
+            base += PE_TEST_IMAGE_STRIDE;
+
+            /* A shorter optional header must not weaken table bounds. */
+            g_assert(!wine_dll_track_sections(base, section_end - 1, 0, fd));
+            g_assert(wine_sec_tree_lookup(base + PE_TEST_TEXT_RVA) == NULL);
+            g_assert(ftruncate(fd, section_end - 1) == 0);
+            g_assert(!wine_dll_track_sections(base, PE_TEST_FILE_SIZE, 0, fd));
+            g_assert(wine_sec_tree_lookup(base + PE_TEST_TEXT_RVA) == NULL);
+        }
+
+        write_pe_image(fd, magics[i], fixed_sizes[i] - 1, IMAGE_NT_SIGNATURE,
+                       PE_TEST_FILE_SIZE, 1, PE_TEST_TEXT_RVA, 0);
+        g_assert(!wine_dll_track_sections(base, PE_TEST_FILE_SIZE, 0, fd));
+        g_assert(wine_sec_tree_lookup(base + PE_TEST_TEXT_RVA) == NULL);
+        base += PE_TEST_IMAGE_STRIDE;
+    }
     close(fd);
     unlink(path);
 }
@@ -680,6 +742,7 @@ int main(int argc, char **argv)
 #endif
     test_wine_pe_path_validation();
     test_wine_pe_headers();
+    test_wine_pe_short_optional_headers();
     guest = mmap(NULL, stride * 5, PROT_READ | PROT_WRITE,
                   MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     g_assert(guest != MAP_FAILED);
