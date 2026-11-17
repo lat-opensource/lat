@@ -96,11 +96,14 @@ Meson 安装目标会把模板安装到 configure 指定的 ``sysconfdir``。默
 覆盖现有的 LATX 配置文件。
 
 
+完整选项清单、位掩码和编译限制见 :download:`LATU 选项参考（Markdown） <latu-options.md>`。
+
+
 常用选项
 ========
 
-下表以当前 O1 release 构建的默认行为为准。只有编译进翻译器的功能才接受对应
-选项；配置文件包含不支持的选项时，LATX 会报告 ``no option``。
+下表主要以传统 O1 release 构建为准；Quicktrans 构建默认关闭 AOT。
+只有编译进翻译器的功能才接受对应选项；配置文件包含不支持的选项时，LATX 会报告 ``no option``。
 
 .. list-table::
    :header-rows: 1
@@ -110,7 +113,7 @@ Meson 安装目标会把模板安装到 configure 指定的 ``sysconfdir``。默
      - 默认值
      - 用途与注意事项
    * - ``LATX_AOT``
-     - ``1``
+     - 传统构建 ``1``，Quicktrans 构建 ``0``
      - 控制 AOT 预翻译。设为 ``0`` 可在排查缓存或翻译差异时关闭 AOT。软浮点、
        隐藏虚拟化和部分调试模式会自动关闭 AOT。
    * - ``LATX_KZT``
@@ -212,7 +215,7 @@ X11 的 ``gl``、``vulkan`` 和 ``vaapi``。这样不会把 host 库创建的对
     LATX_KZT=1 LATX_KZT_LIBS=x11 LATX_KZT_LOG=1 \
         latx-x86_64 /path/to/program
 
-所有选项都可以写入应用 section。例如只对 ``gtkperf`` 关闭 X11：
+上述 KZT 选项都可以写入应用 section。例如只对 ``gtkperf`` 关闭 X11：
 
 .. code-block:: ini
 

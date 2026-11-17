@@ -14,3 +14,6 @@ Contents:
    :maxdepth: 2
 
    main
+   latx-environment
+
+完整选项参考： :download:`LATU 选项参考（Markdown） <latu-options.md>`。
