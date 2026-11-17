@@ -198,7 +198,7 @@ cpu_tb_exec(CPUState *cpu, TranslationBlock *itb, int *tb_exit)
         Dl_info dl_info;
         uintptr_t function;
         if (latx_kzt_runtime_enabled() &&
-            kzt_registered_onebridge_snapshot(itb->pc, NULL, &function) &&
+            kzt_registered_onebridge_snapshot(itb->pc, NULL, &function, NULL) &&
             dladdr((const void *)function, &dl_info)) {
             qemu_log_mask_and_addr(CPU_LOG_EXEC, itb->pc,
                    "pid(%d) - tid(%" PRIuPTR ") Trace cpu%d: %p [ "

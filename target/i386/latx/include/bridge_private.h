@@ -14,6 +14,8 @@ typedef union onebridge_s {
     uintptr_t f;    // the function for the wrapper
     uint8_t C3;     // C2 or C3 ret
     uint16_t N;     // N in case of C2 ret
+    uint8_t func;   /* 1 if name_or_func is the alternate function pointer */
+    void *name_or_func; /* function name or alternate function pointer */
     };
     struct {
     uint8_t B8;     // B8 00 11 22 33 mov rax, num

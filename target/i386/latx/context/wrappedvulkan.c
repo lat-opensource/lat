@@ -94,17 +94,16 @@ static symbol1_t* getWrappedSymbol(const char* rname, int warning, const char** 
     return &kh_value(my_context->vkwrappers, k);
 }
 
-static void* resolveSymbol(void* symbol, const char* rname)
+static void *resolveSymbol(void *symbol, void *fnc, const char *rname)
 {
     // get wrapper
     const char* constname = NULL;
     symbol1_t *s = getWrappedSymbol(rname, 1, &constname);
     if(!s)
         return NULL;
-    if(!s->resolved) {
-        s->addr = AddCheckBridge(my_context->system, s->w, symbol, 0, constname);
-        s->resolved = 1;
-    }
+    s->addr = AddCheckBridge2(my_context->system, s->w, symbol, fnc, 0,
+                              constname);
+    s->resolved = 1;
     void* ret = (void*)s->addr;
     printf_dlsym(LOG_DEBUG, "%p (%p)\n", ret, symbol);
     return ret;
@@ -118,17 +117,13 @@ EXPORT void* my_vkGetDeviceProcAddr(void* device, void* name)
     printf_dlsym(LOG_DEBUG, "Calling my_vkGetDeviceProcAddr(%p, \"%s\") => ", device, rname);
     if(!my_context->vkwrappers)
         fillVulkanProcWrapper(my_context);
-    symbol1_t* s = getWrappedSymbol(rname, 0, NULL);
-    if(s && s->resolved) {
-        void* ret = (void*)s->addr;
-        printf_dlsym(LOG_DEBUG, "%p (cached)\n", ret);
-        return ret;
-    }
     k = kh_get(symbol1map, my_context->vkmymap, rname);
     int is_my = (k==kh_end(my_context->vkmymap))?0:1;
     void* symbol = my->vkGetDeviceProcAddr(device, name);
+    void *fnc = NULL;
     if(symbol && is_my) {   // only wrap if symbol exist
         // try again, by using custom "my_" now...
+        fnc = symbol;
         char* alternate = make_proc_name("my_", rname, "");
         symbol = alternate ? dlsym(my_context->box64lib, alternate) : NULL;
         free(alternate);
@@ -141,7 +136,7 @@ EXPORT void* my_vkGetDeviceProcAddr(void* device, void* name)
         printf_dlsym(LOG_DEBUG, "%p\n", NULL);
         return NULL;    // easy
     }
-    return resolveSymbol(symbol, rname);
+    return resolveSymbol(symbol, fnc, rname);
 }
 
 EXPORT void* my_vkGetInstanceProcAddr(void* instance, void* name)
@@ -156,23 +151,19 @@ EXPORT void* my_vkGetInstanceProcAddr(void* instance, void* name)
         my->currentInstance = instance;
         updateInstance(my);
     }
-    symbol1_t* s = getWrappedSymbol(rname, 0, NULL);
-    if(s && s->resolved) {
-        void* ret = (void*)s->addr;
-        printf_dlsym(LOG_DEBUG, "%p (cached)\n", ret);
-        return ret;
-    }
     // check if vkprocaddress is filled, and search for lib and fill it if needed
     // get proc adress using actual glXGetProcAddress
     k = kh_get(symbol1map, my_context->vkmymap, rname);
     int is_my = (k==kh_end(my_context->vkmymap))?0:1;
     void* symbol = my_context->vkprocaddress(instance, rname);
+    void *fnc = NULL;
     if(!symbol) {
         printf_dlsym(LOG_DEBUG, "%p\n", NULL);
         return NULL;    // easy
     }
     if(is_my) {
         // try again, by using custom "my_" now...
+        fnc = symbol;
         char* alternate = make_proc_name("my_", rname, "");
         symbol = alternate ? dlsym(my_context->box64lib, alternate) : NULL;
         free(alternate);
@@ -185,7 +176,7 @@ EXPORT void* my_vkGetInstanceProcAddr(void* instance, void* name)
         printf_dlsym(LOG_DEBUG, "%p\n", NULL);
         return NULL;
     }
-    return resolveSymbol(symbol, rname);
+    return resolveSymbol(symbol, fnc, rname);
 }
 
 void* my_GetVkProcAddr(void* name, void*(*getaddr)(const char*))
@@ -196,23 +187,19 @@ void* my_GetVkProcAddr(void* name, void*(*getaddr)(const char*))
     printf_dlsym(LOG_DEBUG, "Calling my_GetVkProcAddr(\"%s\", %p) => ", rname, getaddr);
     if(!my_context->vkwrappers)
         fillVulkanProcWrapper(my_context);
-    symbol1_t* s = getWrappedSymbol(rname, 0, NULL);
-    if(s && s->resolved) {
-        void* ret = (void*)s->addr;
-        printf_dlsym(LOG_DEBUG, "%p (cached)\n", ret);
-        return ret;
-    }
     // check if vkprocaddress is filled, and search for lib and fill it if needed
     // get proc adress using actual glXGetProcAddress
     k = kh_get(symbol1map, my_context->vkmymap, rname);
     int is_my = (k==kh_end(my_context->vkmymap))?0:1;
     void* symbol = getaddr(rname);
+    void *fnc = NULL;
     if(!symbol) {
         printf_dlsym(LOG_DEBUG, "%p\n", NULL);
         return NULL;    // easy
     }
     if(is_my) {
         // try again, by using custom "my_" now...
+        fnc = symbol;
         char* alternate = make_proc_name("my_", rname, "");
         symbol = alternate ? dlsym(my_context->box64lib, alternate) : NULL;
         free(alternate);
@@ -225,7 +212,7 @@ void* my_GetVkProcAddr(void* name, void*(*getaddr)(const char*))
         printf_dlsym(LOG_DEBUG, "%p\n", NULL);
         return NULL;
     }
-    return resolveSymbol(symbol, rname);
+    return resolveSymbol(symbol, fnc, rname);
 }
 
 
@@ -504,12 +491,29 @@ my_VkAllocationCallbacks_t* find_VkAllocationCallbacks(my_VkAllocationCallbacks_
     dest->pfnInternalFree = find_InternalFreeNotification_Fct(src->pfnInternalFree);
     return dest;
 }
+
+typedef int (*vulkan_create_proc_t)(void *, void *,
+                                    my_VkAllocationCallbacks_t *, void *);
+typedef void (*vulkan_destroy64_proc_t)(void *, uint64_t,
+                                        my_VkAllocationCallbacks_t *);
+
+static uintptr_t managed_vulkan_proc(uintptr_t fallback)
+{
+    uintptr_t endpoint = kzt_take_bridge_endpoint();
+
+    return endpoint ? endpoint : fallback;
+}
+
 // functions....
 #define CREATE(A)   \
-EXPORT int my_##A(void* device, void* pAllocateInfo, my_VkAllocationCallbacks_t* pAllocator, void* p)    \
-{                                                                                                                       \
-    my_VkAllocationCallbacks_t my_alloc;                                                                                \
-    return my->A(device, pAllocateInfo, find_VkAllocationCallbacks(&my_alloc, pAllocator), p);                          \
+EXPORT int my_##A(void *device, void *pAllocateInfo,                    \
+                  my_VkAllocationCallbacks_t *pAllocator, void *p)      \
+{                                                                       \
+    my_VkAllocationCallbacks_t my_alloc;                                \
+    vulkan_create_proc_t fn = (vulkan_create_proc_t)                    \
+        managed_vulkan_proc((uintptr_t)my->A);                          \
+    return fn(device, pAllocateInfo,                                    \
+              find_VkAllocationCallbacks(&my_alloc, pAllocator), p);    \
 }
 #define DESTROY(A)   \
 EXPORT void my_##A(void* device, void* p, my_VkAllocationCallbacks_t* pAllocator)                        \
@@ -518,10 +522,13 @@ EXPORT void my_##A(void* device, void* p, my_VkAllocationCallbacks_t* pAllocator
     my->A(device, p, find_VkAllocationCallbacks(&my_alloc, pAllocator));                                                \
 }
 #define DESTROY64(A)   \
-EXPORT void my_##A(void* device, uint64_t p, my_VkAllocationCallbacks_t* pAllocator)                     \
-{                                                                                                                       \
-    my_VkAllocationCallbacks_t my_alloc;                                                                                \
-    my->A(device, p, find_VkAllocationCallbacks(&my_alloc, pAllocator));                                                \
+EXPORT void my_##A(void *device, uint64_t p,                            \
+                   my_VkAllocationCallbacks_t *pAllocator)              \
+{                                                                       \
+    my_VkAllocationCallbacks_t my_alloc;                                \
+    vulkan_destroy64_proc_t fn = (vulkan_destroy64_proc_t)              \
+        managed_vulkan_proc((uintptr_t)my->A);                          \
+    fn(device, p, find_VkAllocationCallbacks(&my_alloc, pAllocator));   \
 }
 
 CREATE(vkAllocateMemory)
