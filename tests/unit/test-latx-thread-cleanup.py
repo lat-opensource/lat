@@ -433,7 +433,11 @@ def main():
     translate = source("accel/tcg/translate-all.c")
     reset = function(syscall, "static void reset_16k_buf(", optional=True)
     set_buffer = function(syscall, "static void set_16k_buf(")
-    destroy = function(config, "void latx_lsenv_destroy(", optional=True)
+    # Keep both signatures and the opening directive when they share a body.
+    destroy = function(config, "#ifdef CONFIG_LATX_WOW64_PE\nvoid latx_lsenv_destroy(",
+                       optional=True)
+    if not destroy:
+        destroy = function(config, "void latx_lsenv_destroy(", optional=True)
     tu_destroy = function(tu, "void tu_control_destroy(", optional=True)
     # Both syscall exit and seccomp KILL_THREAD must keep the common teardown.
     assert syscall.count("exit_guest_thread_locked(env);") == 2
