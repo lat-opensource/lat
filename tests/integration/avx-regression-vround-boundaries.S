@@ -51,6 +51,17 @@
 _start:
     SWEEP xmm,4
     SWEEP ymm,8
+    vmovdqu ymm0, [rip + long_input]
+    vroundps ymm0, ymm0, 0x08
+    lea rdi, [rip + nearest_expected]
+    CHECK 0,8
+    vroundps ymm1, [rip + long_input], 0x0a
+    lea rdi, [rip + ceil_expected]
+    CHECK 1,8
+    vmovdqu ymm0, [rip + infinity_input]
+    vroundps ymm0, ymm0, 0x09
+    lea rdi, [rip + infinity_expected]
+    CHECK 0,8
     /* A long block of wide rounds must fit the translator's IR2 limits. */
     vmovdqu ymm0, [rip + long_input]
     .rept 255
@@ -71,6 +82,14 @@ long_input:
     .long 0x3fc00000,0x3f000000,0x80000000,0xbe800000,0xbfc00000,0,0x40000000,0xc0400000
 long_expected:
     .long 0x3f800000,0,0x80000000,0xbf800000,0xc0000000,0,0x40000000,0xc0400000
+nearest_expected:
+    .long 0x40000000,0,0x80000000,0x80000000,0xc0000000,0,0x40000000,0xc0400000
+ceil_expected:
+    .long 0x40000000,0x3f800000,0x80000000,0x80000000,0xbf800000,0,0x40000000,0xc0400000
+infinity_input:
+    .long 0x3fc00000,0x3f000000,0x80000000,0xbe800000,0xbfc00000,0,0x40000000,0x7f800000
+infinity_expected:
+    .long 0x3f800000,0,0x80000000,0xbf800000,0xc0000000,0,0x40000000,0x7f800000
 input:
     .long 0x0,0x80000000,0x1,0x80000001,0x7fffff,0x807fffff,0x800000,0x80800000
     .long 0x3effffff,0xbeffffff,0x3f000000,0xbf000000,0x3f7fffff,0xbf7fffff,0x3f800000,0xbf800000

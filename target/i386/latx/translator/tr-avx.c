@@ -5431,6 +5431,86 @@ static void translate_vroundps_trunc_sae(IR2_OPND dest, IR2_OPND src,
     ra_free_temp(nan_mask);
 }
 
+static void emit_vroundps_ymm_sae(IR2_OPND dest, IR2_OPND src, unsigned mode,
+                                 IR2_OPND slow)
+{
+    IR2_OPND abs = ra_alloc_ftemp();
+    IR2_OPND exponent = ra_alloc_ftemp();
+    IR2_OPND shift = ra_alloc_ftemp();
+    IR2_OPND mask = ra_alloc_ftemp();
+    IR2_OPND scratch = ra_alloc_ftemp();
+    IR2_OPND rounded = ra_alloc_ftemp();
+
+    la_xvslli_w(scratch, src, 1);
+    la_xvsrli_w(abs, scratch, 1);
+    la_xvsrli_w(exponent, scratch, 24);
+
+    /* Check every lane before writing dest, which can alias src. */
+    la_xvseqi_w(mask, exponent, 0);
+    la_xvand_v(mask, mask, abs);
+    la_xvldi(scratch, VLDI_IMM_TYPE0(2, 255));
+    la_xvseq_w(scratch, exponent, scratch);
+    la_xvor_v(mask, mask, scratch);
+    la_xvseteqz_v(fcc0_ir2_opnd, mask);
+    la_bceqz(fcc0_ir2_opnd, slow);
+
+    /* For |x| >= 1, clear the fractional bits after adding the bias. */
+    la_xvldi(scratch, VLDI_IMM_TYPE0(2, 150));
+    la_xvmin_wu(shift, exponent, scratch);
+    la_xvsub_w(shift, scratch, shift);
+    la_xvmini_wu(shift, shift, 23);
+    la_xvseq_w(mask, exponent, exponent);
+    la_xvsll_w(mask, mask, shift);
+    la_xvnor_v(mask, mask, mask);
+    if (mode == 0) {
+        /* Half minus one, plus the parity of the retained integer. */
+        la_xvsrl_w(rounded, src, shift);
+        la_xvldi(scratch, VLDI_IMM_TYPE0(2, 1));
+        la_xvand_v(rounded, rounded, scratch);
+        la_xvand_v(rounded, rounded, mask);
+        la_xvsrli_w(scratch, mask, 1);
+        la_xvadd_w(rounded, rounded, scratch);
+    } else {
+        la_xvslti_w(rounded, src, 0);
+        if (mode == 1) {
+            la_xvand_v(rounded, mask, rounded);
+        } else {
+            la_xvandn_v(rounded, rounded, mask);
+        }
+    }
+    la_xvadd_w(rounded, src, rounded);
+    la_xvandn_v(rounded, mask, rounded);
+
+    /* Below one the result is either signed zero or signed one. */
+    la_xvldi(shift, VLDI_IMM_TYPE0(2, 127));
+    if (mode == 0) {
+        la_xvldi(scratch, VLDI_IMM_TYPE0(2, 126));
+        la_xvslli_w(scratch, scratch, 23);
+        la_xvslt_wu(mask, scratch, abs);
+    } else {
+        la_xvslti_w(mask, src, 0);
+        if (mode == 2) {
+            la_xvnor_v(mask, mask, mask);
+        }
+        la_xvseqi_w(scratch, abs, 0);
+        la_xvandn_v(mask, scratch, mask);
+    }
+    la_xvslt_wu(exponent, exponent, shift);
+    la_xvslli_w(shift, shift, 23);
+    la_xvand_v(mask, mask, shift);
+    la_xvsrli_w(scratch, src, 31);
+    la_xvslli_w(scratch, scratch, 31);
+    la_xvor_v(mask, mask, scratch);
+    la_xvbitsel_v(dest, rounded, mask, exponent);
+
+    ra_free_temp(rounded);
+    ra_free_temp(scratch);
+    ra_free_temp(mask);
+    ra_free_temp(shift);
+    ra_free_temp(exponent);
+    ra_free_temp(abs);
+}
+
 bool translate_vroundps(IR1_INST *pir1)
 {
     if (!option_enable_lasx) {
@@ -5459,28 +5539,31 @@ bool translate_vroundps(IR1_INST *pir1)
         return true;
     }
 
-    IR2_OPND temp = ra_alloc_ftemp();
-    IR2_OPND fcsr = ra_alloc_itemp();
-    IR2_OPND fcsr_save = ra_alloc_itemp();
-    IR2_OPND mxcsr = ra_alloc_itemp();
-
     unsigned lanes = is_xmm ? 4 : 8;
     bool use_fast_round = can_emit_round_fixed(imm, lanes);
     IR2_OPND done;
     if (use_fast_round) {
         IR2_OPND slow = ra_alloc_label();
-        IR2_OPND result = ra_alloc_ftemp();
         done = ra_alloc_label();
-        emit_round_fixed(result, src, imm, false,
-                         lanes, slow);
-        la_xvori_b(dest, result, 0);
-        if (is_xmm) {
-            set_high128_xreg_to_zero(dest);
+        if (!is_xmm && (imm & 8) && (imm & 3) != 3) {
+            emit_vroundps_ymm_sae(dest, src, imm & 3, slow);
+        } else {
+            IR2_OPND result = ra_alloc_ftemp();
+            emit_round_fixed(result, src, imm, false, lanes, slow);
+            la_xvori_b(dest, result, 0);
+            if (is_xmm) {
+                set_high128_xreg_to_zero(dest);
+            }
+            ra_free_temp(result);
         }
-        ra_free_temp(result);
         la_b(done);
         la_label(slow);
     }
+
+    IR2_OPND temp = ra_alloc_ftemp();
+    IR2_OPND fcsr = ra_alloc_itemp();
+    IR2_OPND fcsr_save = ra_alloc_itemp();
+    IR2_OPND mxcsr = ra_alloc_itemp();
     if(imm & 0x8){
         IR2_INST * ( * tr_inst)(IR2_OPND, IR2_OPND, IR2_OPND, int);
         tr_inst = is_xmm ? la_vfcmp_cond_s : la_xvfcmp_cond_s;
