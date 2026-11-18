@@ -48,6 +48,18 @@
     dec r10d
     jne .Lloop\@
 .endm
+.macro CHECK_MXCSR kind, source, mode
+    mov dword ptr [rip + mxcsr], (0x1f80 | (\mode << 13))
+    ldmxcsr [rip + mxcsr]
+    vmovdqu ymm0, [rip + \source]
+    vround\kind ymm1, ymm0, (8 | \mode)
+    vmovdqu [rip + mxcsr_expected], ymm1
+    lea rdi, [rip + mxcsr_expected]
+    vround\kind ymm0, ymm0, 0x0f
+    CHECK 0,8
+    vround\kind ymm1, [rip + \source], 0x0c
+    CHECK 1,8
+.endm
 _start:
     SWEEP xmm,4
     SWEEP ymm,8
@@ -77,6 +89,13 @@ _start:
     vroundpd ymm0, ymm0, 0x09
     lea rdi, [rip + pd_floor]
     CHECK 0,8
+    .irp mode,0,1,2,3
+      CHECK_MXCSR ps, long_input, \mode
+      CHECK_MXCSR pd, pd_input, \mode
+    .endr
+    /* The final lane must enter the original path before any writeback. */
+    CHECK_MXCSR ps, infinity_input, 1
+    CHECK_MXCSR pd, pd_infinity, 1
     /* A long block of wide rounds must fit the translator's IR2 limits. */
     vmovdqu ymm0, [rip + long_input]
     .rept 255
@@ -160,4 +179,6 @@ expected:
 .bss
 .p2align 5
 out: .skip 32
+mxcsr_expected: .skip 32
+mxcsr: .skip 4
 .section .note.GNU-stack,"",@progbits

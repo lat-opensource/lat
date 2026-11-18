@@ -5445,9 +5445,11 @@ static void emit_vround_ymm_constant(IR2_OPND dest, unsigned value,
     }
 }
 
-static void emit_vround_ymm_sae(IR2_OPND dest, IR2_OPND src, unsigned mode,
+static void emit_vround_ymm_sae(IR2_OPND dest, IR2_OPND src, uint8_t imm,
                                bool is_double, IR2_OPND slow)
 {
+    const unsigned mode = imm & 3;
+    const bool dynamic = imm & 4;
     const unsigned fraction = is_double ? 52 : 23;
     const unsigned bias = is_double ? 1023 : 127;
     const unsigned sign = is_double ? 63 : 31;
@@ -5457,6 +5459,9 @@ static void emit_vround_ymm_sae(IR2_OPND dest, IR2_OPND src, unsigned mode,
     IR2_OPND mask = ra_alloc_ftemp();
     IR2_OPND scratch = ra_alloc_ftemp();
     IR2_OPND rounded = ra_alloc_ftemp();
+    IR2_OPND direction;
+    IR2_OPND directed_mask;
+    IR2_OPND bias_ready;
 
 #define ROUND_OP(op, ...) \
     (is_double ? la_xv##op##_d(__VA_ARGS__) : la_xv##op##_w(__VA_ARGS__))
@@ -5487,7 +5492,25 @@ static void emit_vround_ymm_sae(IR2_OPND dest, IR2_OPND src, unsigned mode,
     ROUND_OP(seq, mask, exponent, exponent);
     ROUND_OP(sll, mask, mask, shift);
     la_xvnor_v(mask, mask, mask);
-    if (mode == 0) {
+    if (dynamic) {
+        IR2_OPND nearest = ra_alloc_label();
+
+        direction = ra_alloc_itemp();
+        directed_mask = ra_alloc_ftemp();
+        bias_ready = ra_alloc_label();
+        la_ld_wu(direction, env_ir2_opnd, lsenv_offset_of_mxcsr(lsenv));
+        la_bstrpick_d(direction, direction, 14, 13);
+        la_beqz(direction, nearest);
+        /* Floor adds a bias in negative lanes, ceil in positive lanes. */
+        ROUND_OP(srli, directed_mask, src, sign);
+        ROUND_OP(replgr2vr, scratch, direction);
+        ROUND_OP(add, directed_mask, directed_mask, scratch);
+        ROUND_OP(seqi, directed_mask, directed_mask, 2);
+        la_xvand_v(rounded, mask, directed_mask);
+        la_b(bias_ready);
+        la_label(nearest);
+    }
+    if (dynamic || mode == 0) {
         /* Half minus one, plus the parity of the retained integer. */
         ROUND_OP(srl, rounded, src, shift);
         emit_vround_ymm_constant(scratch, 1, is_double);
@@ -5503,14 +5526,24 @@ static void emit_vround_ymm_sae(IR2_OPND dest, IR2_OPND src, unsigned mode,
             la_xvandn_v(rounded, rounded, mask);
         }
     }
-    if (mode != 3) {
+    if (dynamic) {
+        la_label(bias_ready);
+    }
+    if (dynamic || mode != 3) {
         ROUND_OP(add, rounded, src, rounded);
     }
-    la_xvandn_v(rounded, mask, mode == 3 ? src : rounded);
+    la_xvandn_v(rounded, mask, !dynamic && mode == 3 ? src : rounded);
 
     /* Below one the result is either signed zero or signed one. */
     emit_vround_ymm_constant(shift, bias, is_double);
-    if (mode == 0) {
+    IR2_OPND directed_small;
+    IR2_OPND small_ready;
+    if (dynamic) {
+        directed_small = ra_alloc_label();
+        small_ready = ra_alloc_label();
+        la_bnez(direction, directed_small);
+    }
+    if (dynamic || mode == 0) {
         emit_vround_ymm_constant(scratch, bias - 1, is_double);
         ROUND_OP(slli, scratch, scratch, fraction);
         ROUND_OP_U(slt, mask, scratch, abs);
@@ -5522,10 +5555,19 @@ static void emit_vround_ymm_sae(IR2_OPND dest, IR2_OPND src, unsigned mode,
         ROUND_OP(seqi, scratch, abs, 0);
         la_xvandn_v(mask, scratch, mask);
     }
+    if (dynamic) {
+        la_b(small_ready);
+        la_label(directed_small);
+        ROUND_OP(seqi, scratch, abs, 0);
+        la_xvandn_v(mask, scratch, directed_mask);
+        la_label(small_ready);
+        ra_free_temp(directed_mask);
+        ra_free_temp(direction);
+    }
     ROUND_OP_U(slt, exponent, exponent, shift);
     ROUND_OP(srli, scratch, src, sign);
     ROUND_OP(slli, scratch, scratch, sign);
-    if (mode != 3) {
+    if (dynamic || mode != 3) {
         ROUND_OP(slli, shift, shift, fraction);
         la_xvand_v(mask, mask, shift);
         la_xvor_v(scratch, mask, scratch);
@@ -5541,6 +5583,15 @@ static void emit_vround_ymm_sae(IR2_OPND dest, IR2_OPND src, unsigned mode,
     ra_free_temp(shift);
     ra_free_temp(exponent);
     ra_free_temp(abs);
+}
+
+static bool can_emit_vround_packed_fast(uint8_t imm, bool is_xmm, unsigned lanes)
+{
+    /* LASX checks all YMM lanes in parallel, retaining the fixed-path budget. */
+    if (!is_xmm && (imm & 8)) {
+        imm &= ~4;
+    }
+    return can_emit_round_fast(imm, lanes);
 }
 
 bool translate_vroundps(IR1_INST *pir1)
@@ -5572,13 +5623,13 @@ bool translate_vroundps(IR1_INST *pir1)
     }
 
     unsigned lanes = is_xmm ? 4 : 8;
-    bool use_fast_round = can_emit_round_fast(imm, lanes);
+    bool use_fast_round = can_emit_vround_packed_fast(imm, is_xmm, lanes);
     IR2_OPND done;
     if (use_fast_round) {
         IR2_OPND slow = ra_alloc_label();
         done = ra_alloc_label();
-        if (!is_xmm && (imm & 8) && (imm & 3) != 3) {
-            emit_vround_ymm_sae(dest, src, imm & 3, false, slow);
+        if (!is_xmm && (imm & 8) && ((imm & 4) || (imm & 3) != 3)) {
+            emit_vround_ymm_sae(dest, src, imm, false, slow);
         } else {
             IR2_OPND result = ra_alloc_ftemp();
             emit_round_fast(result, src, imm, false, lanes, slow);
@@ -5635,6 +5686,9 @@ bool translate_vroundps(IR1_INST *pir1)
         ra_free_temp(fcsr);
         ra_free_temp(fcsr_save);
         ra_free_temp(mxcsr);
+        if (use_fast_round) {
+            la_label(done);
+        }
         return true;
     }
     la_movgr2fcsr(fcsr_ir2_opnd, fcsr);
@@ -5686,13 +5740,13 @@ bool translate_vroundpd(IR1_INST *pir1)
 
     bool is_xmm = ir1_opnd_is_xmm(opnd0);
     unsigned lanes = is_xmm ? 2 : 4;
-    bool use_fast_round = can_emit_round_fast(imm, lanes);
+    bool use_fast_round = can_emit_vround_packed_fast(imm, is_xmm, lanes);
     IR2_OPND done;
     if (use_fast_round) {
         IR2_OPND slow = ra_alloc_label();
         done = ra_alloc_label();
         if (!is_xmm && (imm & 8)) {
-            emit_vround_ymm_sae(dest, src, imm & 3, true, slow);
+            emit_vround_ymm_sae(dest, src, imm, true, slow);
         } else {
             IR2_OPND result = ra_alloc_ftemp();
             emit_round_fast(result, src, imm, true, lanes, slow);
@@ -5749,6 +5803,9 @@ bool translate_vroundpd(IR1_INST *pir1)
         ra_free_temp(fcsr);
         ra_free_temp(fcsr_save);
         ra_free_temp(mxcsr);
+        if (use_fast_round) {
+            la_label(done);
+        }
         return true;
     }
     la_movgr2fcsr(fcsr_ir2_opnd, fcsr);
