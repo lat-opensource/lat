@@ -62,6 +62,21 @@ _start:
     vroundps ymm0, ymm0, 0x09
     lea rdi, [rip + infinity_expected]
     CHECK 0,8
+    vmovdqu ymm0, [rip + pd_input]
+    vroundpd ymm0, ymm0, 0x08
+    lea rdi, [rip + pd_nearest]
+    CHECK 0,8
+    vroundpd ymm1, [rip + pd_input], 0x0a
+    lea rdi, [rip + pd_ceil]
+    CHECK 1,8
+    vmovdqu ymm0, [rip + pd_large]
+    vroundpd ymm0, ymm0, 0x0b
+    lea rdi, [rip + pd_trunc]
+    CHECK 0,8
+    vmovdqu ymm0, [rip + pd_infinity]
+    vroundpd ymm0, ymm0, 0x09
+    lea rdi, [rip + pd_floor]
+    CHECK 0,8
     /* A long block of wide rounds must fit the translator's IR2 limits. */
     vmovdqu ymm0, [rip + long_input]
     .rept 255
@@ -90,6 +105,20 @@ infinity_input:
     .long 0x3fc00000,0x3f000000,0x80000000,0xbe800000,0xbfc00000,0,0x40000000,0x7f800000
 infinity_expected:
     .long 0x3f800000,0,0x80000000,0xbf800000,0xc0000000,0,0x40000000,0x7f800000
+pd_input:
+    .quad 0x3fe0000000000000,0x8000000000000000,0x3ff8000000000000,0xc004000000000000
+pd_nearest:
+    .quad 0,0x8000000000000000,0x4000000000000000,0xc000000000000000
+pd_ceil:
+    .quad 0x3ff0000000000000,0x8000000000000000,0x4000000000000000,0xc000000000000000
+pd_large:
+    .quad 0xbfefffffffffffff,0x432fffffffffffff,0x4330000000000000,0x7fefffffffffffff
+pd_trunc:
+    .quad 0x8000000000000000,0x432ffffffffffffe,0x4330000000000000,0x7fefffffffffffff
+pd_infinity:
+    .quad 0xbfe0000000000000,0x8000000000000000,0x3ff8000000000000,0x7ff0000000000000
+pd_floor:
+    .quad 0xbff0000000000000,0x8000000000000000,0x3ff0000000000000,0x7ff0000000000000
 input:
     .long 0x0,0x80000000,0x1,0x80000001,0x7fffff,0x807fffff,0x800000,0x80800000
     .long 0x3effffff,0xbeffffff,0x3f000000,0xbf000000,0x3f7fffff,0xbf7fffff,0x3f800000,0xbf800000
