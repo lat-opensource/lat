@@ -1,0 +1,8 @@
+[wrap-file]
+directory = proxy-libintl-c03e1a74b17fa7ec467e110130775409e4828a4c
+source_url = https://codeload.github.com/frida/proxy-libintl/tar.gz/c03e1a74b17fa7ec467e110130775409e4828a4c
+source_filename = proxy-libintl-c03e1a74.tar.gz
+source_hash = b2be1569c4e6b0131a446d857665a192674d36185e2fa534614eece0b0ea70c3
+
+[provide]
+intl = intl_dep
