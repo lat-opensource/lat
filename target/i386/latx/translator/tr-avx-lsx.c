@@ -3624,16 +3624,32 @@ static bool translate_avx_round_packed_lsx(IR1_INST *pir1,
 
     lsassert(ir1_opnd_is_xmm(opnd0) || ymm);
     load_avx_lsx_operand(opnd1, ymm, &src_low, &src_high);
+    IR2_OPND result_high = ymm ? ra_alloc_ftemp() : result_low;
+    unsigned lanes = double_precision ? 2 : 4;
+    bool use_fast_round = can_emit_round_fixed(imm, ymm ? 2 * lanes : lanes);
+    IR2_OPND merge;
+
+    if (use_fast_round) {
+        IR2_OPND slow = ra_alloc_label();
+        merge = ra_alloc_label();
+        emit_round_fixed(result_low, src_low, imm, double_precision, lanes, slow);
+        if (ymm) {
+            emit_round_fixed(result_high, src_high, imm, double_precision,
+                             lanes, slow);
+        }
+        la_b(merge);
+        la_label(slow);
+    }
     translate_avx_round_lane_lsx(result_low, src_low, imm, double_precision);
     if (ymm) {
-        IR2_OPND result_high = ra_alloc_ftemp();
-
-        translate_avx_round_lane_lsx(result_high, src_high, imm,
-                                     double_precision);
-        store_avx_lsx_result(opnd0, result_low, result_high);
+        translate_avx_round_lane_lsx(result_high, src_high, imm, double_precision);
+    }
+    if (use_fast_round) {
+        la_label(merge);
+    }
+    store_avx_lsx_result(opnd0, result_low, result_high);
+    if (ymm) {
         ra_free_temp(result_high);
-    } else {
-        store_avx_lsx_result(opnd0, result_low, result_low);
     }
     ra_free_temp(result_low);
     ra_free_temp(src_low);
@@ -3664,7 +3680,19 @@ static bool translate_avx_round_scalar_lsx(IR1_INST *pir1,
     } else {
         la_vreplvei_w(scalar, src2, 0);
     }
+    bool use_fast_round = can_emit_round_fixed(imm, 1);
+    IR2_OPND merge;
+    if (use_fast_round) {
+        IR2_OPND slow = ra_alloc_label();
+        merge = ra_alloc_label();
+        emit_round_fixed(rounded, src2, imm, double_precision, 1, slow);
+        la_b(merge);
+        la_label(slow);
+    }
     translate_avx_round_lane_lsx(rounded, scalar, imm, double_precision);
+    if (use_fast_round) {
+        la_label(merge);
+    }
     la_vori_b(dest, src1, 0);
     if (double_precision) {
         la_vextrins_d(dest, rounded, 0);

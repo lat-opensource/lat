@@ -51,6 +51,13 @@
 _start:
     SWEEP xmm,4
     SWEEP ymm,8
+    /* A long block of wide rounds must fit the translator's IR2 limits. */
+    vmovdqu ymm0, [rip + long_input]
+    .rept 255
+      vroundps ymm1, ymm0, 0x09
+    .endr
+    lea rdi, [rip + long_expected]
+    CHECK 1,8
     xor edi, edi
     jmp exit
 fail:
@@ -60,6 +67,10 @@ exit:
     syscall
 .section .rodata
 .p2align 5
+long_input:
+    .long 0x3fc00000,0x3f000000,0x80000000,0xbe800000,0xbfc00000,0,0x40000000,0xc0400000
+long_expected:
+    .long 0x3f800000,0,0x80000000,0xbf800000,0xc0000000,0,0x40000000,0xc0400000
 input:
     .long 0x0,0x80000000,0x1,0x80000001,0x7fffff,0x807fffff,0x800000,0x80800000
     .long 0x3effffff,0xbeffffff,0x3f000000,0xbf000000,0x3f7fffff,0xbf7fffff,0x3f800000,0xbf800000
