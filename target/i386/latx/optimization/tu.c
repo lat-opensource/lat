@@ -1195,6 +1195,24 @@ static void relocate_tu_unlink_stub(TranslationBlock *tb)
     }
 }
 
+/* Both TU explorers sort the final member list by guest PC. */
+static TranslationBlock *tu_find_sorted_member(TranslationBlock **members,
+                                               uint32_t count, uint64_t pc)
+{
+    uint32_t lo = 0, hi = count;
+
+    while (lo < hi) {
+        uint32_t mid = lo + (hi - lo) / 2;
+
+        if (members[mid]->pc < pc) {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+    return lo < count && members[lo]->pc == pc ? members[lo] : NULL;
+}
+
 static void mov_unlink_stub_to_end(uint32_t tb_num_in_tu, TranslationBlock **tb_list)
 {
     if (tb_num_in_tu <= 1) {
@@ -1257,8 +1275,8 @@ static void mov_unlink_stub_to_end(uint32_t tb_num_in_tu, TranslationBlock **tb_
     TranslationBlock *tb;
     for (int i = 0; i < tb_num_in_tu; i++) {
         tb = tb_list[i];
-        TranslationBlock *callee = NULL;
         TranslationBlock *next = i + 1 < tb_num_in_tu ? tb_list[i + 1] : NULL;
+        bool single = false;
 
         if (indirect_stubs[i]) {
             size_t miss = tb->s_data->indirect_miss_offset;
@@ -1283,24 +1301,21 @@ static void mov_unlink_stub_to_end(uint32_t tb_num_in_tu, TranslationBlock **tb_
             tmp_buffer_size += cold_size;
         }
 
-        if (direct_layout && !use_tu_jmp(tb)) {
+        if (direct_layout && hras_call_can_layout(tb, next)) {
             /*
              * Only members of this allocation retain their relative positions
              * when AOT moves the TU. Cross-TU calls retain their pair.
              */
-            for (int j = 0; j < tb_num_in_tu; j++) {
-                if (tb_list[j]->pc == tb->pc + tb->lazypc[0]) {
-                    callee = tb_list[j];
-                    break;
-                }
-            }
-        }
-        uintptr_t slot = (uintptr_t)tb->tc.ptr + tb->jmp_target_arg[0];
-        bool single = callee && callee->flags == tb->flags &&
-            tb_cflags(callee) == tb_cflags(tb) &&
-            tb_target_jmp_in_range(slot, (uintptr_t)callee->tc.ptr);
+            TranslationBlock *callee = tu_find_sorted_member(
+                tb_list, tb_num_in_tu, tb->pc + tb->lazypc[0]);
+            uintptr_t slot = (uintptr_t)tb->tc.ptr + tb->jmp_target_arg[0];
 
-        if (direct_layout && single && hras_call_can_layout(tb, next)) {
+            single = callee && callee->flags == tb->flags &&
+                tb_cflags(callee) == tb_cflags(tb) &&
+                tb_target_jmp_in_range(slot, (uintptr_t)callee->tc.ptr);
+        }
+
+        if (single) {
             uint32_t *stub = (void *)((uintptr_t)tmp_buffer + tmp_buffer_size);
             uint32_t *pair = (void *)(tb->tc.ptr + tb->jmp_target_arg[0]);
 
@@ -1316,7 +1331,7 @@ static void mov_unlink_stub_to_end(uint32_t tb_num_in_tu, TranslationBlock **tb_
             tb->jmp_target_arg[1] = tmp_buffer_size;
             cold_sizes[i] = 12;
             tmp_buffer_size += 12;
-            tb->tc.size = tb->jmp_target_arg[0] + (single ? 4 : 8);
+            tb->tc.size = tb->jmp_target_arg[0] + HRAS_LA_INSN_SIZE;
             tb->jmp_reset_offset[0] = tb->tc.size;
 #ifdef CONFIG_LATX_INSTS_PATTERN
             tb->eflags_target_arg[0] = TB_JMP_RESET_OFFSET_INVALID;
