@@ -3055,6 +3055,68 @@ bool translate_roundpd(IR1_INST *pir1)
     return true;
 }
 
+/* Fixed floor with precision exceptions suppressed (ROUNDSD imm 0x09). */
+static void emit_roundsd_floor(IR2_OPND dest, IR2_OPND src, IR2_OPND slow)
+{
+    IR2_OPND bits = ra_alloc_itemp();
+    IR2_OPND exp = ra_alloc_itemp();
+    IR2_OPND mask = ra_alloc_itemp();
+    IR2_OPND edge = ra_alloc_label();
+    IR2_OPND large = ra_alloc_label();
+    IR2_OPND small_normal = ra_alloc_label();
+    IR2_OPND done = ra_alloc_label();
+
+    if (option_enable_lasx) {
+        la_xvpickve2gr_d(bits, src, 0);
+    } else {
+        la_vpickve2gr_d(bits, src, 0);
+    }
+
+    /* For 1 <= abs(src) < 2^52, mask off the fractional bits. */
+    la_bstrpick_d(exp, bits, 62, 52);
+    la_addi_d(exp, exp, -1023);
+    la_sltui(mask, exp, 52);
+    la_beqz(mask, edge);
+    /* An all-ones word shifted right by exp + 12 leaves 52 - exp bits. */
+    la_addi_d(exp, exp, 12);
+    la_addi_d(mask, zero_ir2_opnd, -1);
+    la_srl_d(mask, mask, exp);
+    la_srai_d(exp, bits, 63);
+    la_and(exp, exp, mask);
+    la_add_d(bits, bits, exp);
+    la_andn(bits, bits, mask);
+    la_b(done);
+
+    la_label(edge);
+    la_bge(exp, zero_ir2_opnd, large);
+    la_addi_d(mask, exp, 1023);
+    la_bnez(mask, small_normal);
+    la_bstrpick_d(mask, bits, 51, 0);
+    la_bnez(mask, slow);           /* Subnormals depend on DAZ. */
+    la_b(done);                    /* Preserve either sign of zero. */
+
+    la_label(small_normal);
+    /* A normal with magnitude below one rounds to 0 or -1. */
+    la_srai_d(bits, bits, 63);
+    la_lu52i_d(mask, zero_ir2_opnd, -1025); /* IEEE bits of -1.0 */
+    la_and(bits, bits, mask);
+    la_b(done);
+
+    la_label(large);
+    la_addi_d(mask, exp, -1024);
+    la_beqz(mask, slow);           /* Infinity and all NaNs. */
+    la_label(done);                /* Finite magnitudes >= 2^52 are integral. */
+
+    if (option_enable_lasx) {
+        la_xvinsgr2vr_d(dest, bits, 0);
+    } else {
+        la_vinsgr2vr_d(dest, bits, 0);
+    }
+    ra_free_temp(bits);
+    ra_free_temp(mask);
+    ra_free_temp(exp);
+}
+
 bool translate_roundsd(IR1_INST *pir1)
 {
     IR1_OPND *opnd0 = ir1_get_opnd(pir1, 0);
@@ -3071,7 +3133,11 @@ bool translate_roundsd(IR1_INST *pir1)
     if (use_fast_round) {
         IR2_OPND slow = ra_alloc_label();
         done = ra_alloc_label();
-        emit_round_fast(dest, src1, imm, true, 1, slow);
+        if ((imm & 0xf) == 9) {
+            emit_roundsd_floor(dest, src1, slow);
+        } else {
+            emit_round_fast(dest, src1, imm, true, 1, slow);
+        }
         la_b(done);
         la_label(slow);
     }
