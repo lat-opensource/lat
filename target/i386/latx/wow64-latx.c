@@ -764,6 +764,16 @@ static LatWow64Status plugin_process_destroy(LatWow64Process *process)
     return status;
 }
 
+void lat_wow64_process_term(uint32_t post)
+{
+    /* Wine can kill a translating thread while leaving this caller alive. */
+    if (post) {
+        mmap_unlock();
+    } else {
+        mmap_lock();
+    }
+}
+
 const LatWow64Api *lat_wow64_get_api(uint32_t abi_version)
 {
     static const LatWow64Api api = {

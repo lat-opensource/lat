@@ -1,4 +1,4 @@
 LATX_WOW64_1.0 {
-    global: lat_wow64_get_api;
+    global: lat_wow64_get_api; lat_wow64_process_term;
     local: *;
 };

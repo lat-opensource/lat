@@ -13,6 +13,9 @@ extern "C" {
 #define LAT_WOW64_ABI_VERSION 1u
 #define LAT_WOW64_MAX_ENTER_DEPTH 64u
 
+/* Optional Wine host hook. Post completes a matching pre-termination call. */
+void lat_wow64_process_term(uint32_t post);
+
 typedef struct LatWow64Process LatWow64Process;
 typedef struct LatWow64Thread LatWow64Thread;
 
