@@ -1615,6 +1615,9 @@ void load_imm_to_ir1_opnd_gpr(IR1_OPND *opnd0, uint64_t imm);
 IR2_OPND load_freg256_from_ir1(IR1_OPND *opnd1);
 void clear_xmm_high64(IR2_OPND opnd);
 /* Request a logical upper zero: defer guest registers, clear temporaries now. */
+bool can_emit_round_fast(uint8_t imm, unsigned lanes);
+void emit_round_fast(IR2_OPND result, IR2_OPND src, uint8_t imm,
+                      bool is_double, unsigned lanes, IR2_OPND slow);
 void set_high128_xreg_to_zero(IR2_OPND opnd);
 /* Cancel an obsolete pending clear after an overwrite; emit no instructions. */
 void cancel_pending_ymmh_zero(IR2_OPND opnd);
