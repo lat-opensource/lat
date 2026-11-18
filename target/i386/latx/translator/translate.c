@@ -278,7 +278,7 @@ IR1_INST *get_ir1_list(struct TranslationBlock *tb, ADDRX pc, int max_insns)
         pins = inst_cache;
 
 #ifdef CONFIG_LATX_WOW64_PE
-        lat_wow64_pe_fetch_code(lsenv->cpu_state, pc, inst_cache);
+        lat_wow64_pe_fetch_code(lsenv->cpu_state, pc, inst_cache, !ir1_num);
 #else
 #ifdef CONFIG_LATX_WOW64
         if (lat_wow64_provider_plugin_active &&
@@ -2960,6 +2960,10 @@ static void generate_indirect_goto(void *code_buf)
     IR2_OPND base = ra_alloc_data();
     la_data_li(base, (ADDR)code_buf);
     IR2_OPND label_miss = ra_alloc_label();
+#ifdef CONFIG_LATX_WOW64_PE
+    /* An indirect transfer can loop without ever reaching the dispatcher. */
+    gen_pe_poll_exit(label_miss);
+#endif
 
     /* indirect jmp */
     IR2_OPND jmp_entry = ra_alloc_itemp();

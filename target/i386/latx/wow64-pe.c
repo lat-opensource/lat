@@ -25,6 +25,20 @@
 #include "wow64-x86-state.h"
 
 LONG WINAPI NtCompareObjects(HANDLE first, HANDLE second);
+LONG WINAPI NtQueryVirtualMemory(HANDLE process, const void *address, ULONG info_class,
+                                 void *buffer, SIZE_T size, SIZE_T *returned);
+
+/* MEMORY_REGION_INFORMATION from the native memory query. */
+typedef struct PeMemoryRegion {
+    void *allocation_base;
+    ULONG allocation_protect;
+    ULONG region_type;
+    SIZE_T region_size;
+    SIZE_T commit_size;
+    ULONG_PTR partition_id;
+    ULONG_PTR node_preference;
+} PeMemoryRegion;
+
 typedef struct PeHostTls PeHostTls;
 
 typedef struct PeThread {
@@ -47,6 +61,8 @@ static QemuSpin thread_control_lock;
 struct PeHostTls {
     CPUState *cpu;
     uintptr_t helper_ra;
+    uintptr_t unmap_address;
+    size_t unmap_size;
     unsigned int lock_depth;
     bool process_term_lock;
     struct rcu_reader_data reader;
@@ -253,6 +269,42 @@ void lat_wow64_pe_memory_event(const LatWow64MemoryEvent *event)
         page_set_flags(start, end, flags);
     }
     tb_invalidate_phys_range(start, end);
+    mmap_unlock();
+}
+
+void lat_wow64_pe_begin_unmap(void *address)
+{
+    const uint64_t guest_end = UINT64_C(0x100000000);
+    const ULONG memory_region_information = 3;
+    PeHostTls *host = pe_host_tls();
+    PeMemoryRegion region;
+
+    /* The syscall accepts an interior address and may remove the entire view. */
+    mmap_lock();
+    host->unmap_address = 0;
+    host->unmap_size = guest_end;
+    if (!NtQueryVirtualMemory(GetCurrentProcess(), address, memory_region_information,
+                              &region, sizeof(region), NULL) && region.region_size) {
+        uintptr_t base = (uintptr_t)region.allocation_base;
+
+        host->unmap_address = base;
+        host->unmap_size = base < guest_end ? MIN(region.region_size, guest_end - base) : 0;
+    }
+}
+
+void lat_wow64_pe_end_unmap(bool success)
+{
+    PeHostTls *host = pe_host_tls();
+
+    if (success && host->unmap_size) {
+        LatWow64MemoryEvent event = {
+            .type = LAT_WOW64_MEMORY_UNMAP,
+            .address = host->unmap_address,
+            .length = host->unmap_size,
+        };
+
+        lat_wow64_pe_memory_event(&event);
+    }
     mmap_unlock();
 }
 
@@ -514,12 +566,13 @@ static int read_code_byte(const struct reader_info *opaque, uint8_t *value,
     return 0;
 }
 
-void lat_wow64_pe_fetch_code(void *opaque, uint32_t pc, uint8_t bytes[15])
+void lat_wow64_pe_fetch_code(void *opaque, uint32_t pc, uint8_t bytes[15], bool first)
 {
     CPUX86State *env = opaque;
     size_t available = TARGET_PAGE_SIZE - (pc & (TARGET_PAGE_SIZE - 1));
 
-    if (!code_can_execute(pc)) {
+    /* The decoder stops the block before it can fetch from a second page. */
+    if (first && !code_can_execute(pc)) {
         code_fault(env, pc, pc);
     }
     if (available >= 15) {
@@ -607,6 +660,7 @@ static bool pe_thread_init(void)
     cpu->cpu_index = UNASSIGNED_CPU_INDEX;
     cpu->cflags_next_tb = -1;
     cpu->icount_decr_ptr = &cpu_neg(cpu)->icount_decr;
+    env->tb_jmp_cache_ptr = cpu->tb_jmp_cache;
     QTAILQ_INIT(&cpu->breakpoints);
     QTAILQ_INIT(&cpu->watchpoints);
     QSIMPLEQ_INIT(&cpu->work_list);
@@ -739,7 +793,6 @@ bool lat_wow64_pe_init(void)
     lat_wow64_pe_rcu_init();
     qemu_init_cpu_list();
     options_init();
-    qemu_loglevel = CPU_LOG_TB_NOCHAIN;
     option_anonym = 1;
     latx_dt_init();
     if (!pe_thread_init()) {
