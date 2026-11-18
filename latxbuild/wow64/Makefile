@@ -10,9 +10,13 @@ PYTHON ?= python3
 MESON ?= meson
 NINJA ?= ninja
 WINE_PE_BUILD ?= $(WINE_SRC)
+LATX_UNIX_BUILD ?= $(OUT)
+PREFIX ?= /usr/local
+WINE_PE_DIR ?= $(PREFIX)/lib/wine/loong64-windows
+WINE_UNIX_DIR ?= $(PREFIX)/lib/wine/loongarch64-unix
 
 ifeq ($(strip $(WINE_SRC)),)
-$(error Set WINE_SRC to the Hangover Wine source directory)
+$(error Set WINE_SRC to the Wine source directory with Loong64 WoW64 support)
 endif
 
 .DELETE_ON_ERROR:
@@ -75,9 +79,17 @@ CORE_CPPFLAGS := -DNEED_CPU_H -DNDEBUG -DNOMINMAX -D__USE_MINGW_ANSI_STDIO=1 \
 CORE_CFLAGS := $(PE_CFLAGS) -std=gnu11 -Werror=implicit-function-declaration \
                -Werror=incompatible-pointer-types
 
-.PHONY: wowlatx.dll unix FORCE
+.PHONY: wowlatx.dll unix install-pe install-unix FORCE
 wowlatx.dll: $(OUT)/wowlatx.dll
 unix: $(OUT)/wowlatx-unix.dll $(OUT)/wowlatx-unix.so
+
+install-pe: wowlatx.dll
+	install -D -m 755 "$(OUT)/wowlatx.dll" "$(DESTDIR)$(WINE_PE_DIR)/wowlatx.dll"
+
+install-unix: unix $(LATX_UNIX_BUILD)/liblatx-wow64.so
+	install -D -m 755 "$(OUT)/wowlatx-unix.dll" "$(DESTDIR)$(WINE_PE_DIR)/wowlatx-unix.dll"
+	install -D -m 755 -t "$(DESTDIR)$(WINE_UNIX_DIR)" \
+	    "$(OUT)/wowlatx-unix.so" "$(LATX_UNIX_BUILD)/liblatx-wow64.so"
 
 $(OUT)/wowlatx.dll: $(CPU_OBJ) $(CORE_OBJS) $(CAPSTONE_OBJS) $(GLIB_BUILD)/.built $(PE_IMPORTS) $(WINEBUILD)
 	$(WINCC) $(PE_CFLAGS) $(PE_LDFLAGS) \
