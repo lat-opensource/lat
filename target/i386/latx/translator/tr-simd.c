@@ -2561,6 +2561,12 @@ bool translate_blendvpd(IR1_INST *pir1)
     return true;
 }
 
+static void load_round_mxcsr_direction(IR2_OPND direction)
+{
+    la_ld_wu(direction, env_ir2_opnd, lsenv_offset_of_mxcsr(lsenv));
+    la_bstrpick_d(direction, direction, 14, 13);
+}
+
 /*
  * Round a normal IEEE value using its sign, exponent and fraction. No
  * floating-point operation runs here, so neither guest flags nor the host
@@ -2575,8 +2581,10 @@ static void emit_round_fixed_lane(IR2_OPND bits, uint8_t imm, bool is_double,
     const unsigned max_exp = 2 * bias + 1;
     const unsigned mode = imm & 3;
     const bool suppress_inexact = imm & 8;
+    const bool dynamic = imm & 4;
     IR2_OPND exp = ra_alloc_itemp();
     IR2_OPND mask = ra_alloc_itemp();
+    IR2_OPND direction = dynamic ? ra_alloc_itemp() : zero_ir2_opnd;
     IR2_OPND nonzero_exp = ra_alloc_label();
     IR2_OPND small = suppress_inexact ? ra_alloc_label() : slow;
     IR2_OPND done = ra_alloc_label();
@@ -2603,6 +2611,29 @@ static void emit_round_fixed_lane(IR2_OPND bits, uint8_t imm, bool is_double,
     if (!suppress_inexact) {
         la_and(exp, bits, mask);
         la_bnez(exp, slow);
+    } else if (dynamic) {
+        IR2_OPND nearest = ra_alloc_label();
+        IR2_OPND clear_fraction = ra_alloc_label();
+
+        la_and(direction, bits, mask);
+        la_beqz(direction, done);
+        load_round_mxcsr_direction(direction);
+        la_beqz(direction, nearest);
+        /* For floor/ceil, add the mask iff RC + sign == 2. */
+        la_srli_d(exp, bits, 63);
+        la_add_d(direction, direction, exp);
+        la_addi_d(direction, direction, -2);
+        la_bnez(direction, clear_fraction);
+        la_add_d(bits, bits, mask);
+        la_b(clear_fraction);
+        la_label(nearest);
+        la_srl_d(exp, bits, exp);
+        la_andi(exp, exp, 1);
+        la_add_d(bits, bits, exp);
+        la_srli_d(exp, mask, 1);
+        la_add_d(bits, bits, exp);
+        la_label(clear_fraction);
+        la_andn(bits, bits, mask);
     } else {
         switch (mode) {
         case 0:
@@ -2634,21 +2665,39 @@ static void emit_round_fixed_lane(IR2_OPND bits, uint8_t imm, bool is_double,
         IR2_OPND signed_zero = ra_alloc_label();
 
         la_label(small);            /* 0 < abs(src) < 1. */
-        switch (mode) {
-        case 0:
+        if (dynamic) {
+            IR2_OPND directed = ra_alloc_label();
+            IR2_OPND signed_one = ra_alloc_label();
+
+            load_round_mxcsr_direction(direction);
+            la_bnez(direction, directed);
             la_bstrpick_d(exp, bits, sign_bit - 1, 0);
             li_d(mask, (uint64_t)(bias - 1) << mantissa);
             la_bgeu(mask, exp, signed_zero);
-            break;
-        case 1:
-            la_bge(bits, zero_ir2_opnd, signed_zero);
-            break;
-        case 2:
-            la_blt(bits, zero_ir2_opnd, signed_zero);
-            break;
-        default:
-            la_b(signed_zero);
-            break;
+            la_b(signed_one);
+            la_label(directed);
+            la_srli_d(exp, bits, 63);
+            la_add_d(direction, direction, exp);
+            la_addi_d(direction, direction, -2);
+            la_bnez(direction, signed_zero);
+            la_label(signed_one);
+        } else {
+            switch (mode) {
+            case 0:
+                la_bstrpick_d(exp, bits, sign_bit - 1, 0);
+                li_d(mask, (uint64_t)(bias - 1) << mantissa);
+                la_bgeu(mask, exp, signed_zero);
+                break;
+            case 1:
+                la_bge(bits, zero_ir2_opnd, signed_zero);
+                break;
+            case 2:
+                la_blt(bits, zero_ir2_opnd, signed_zero);
+                break;
+            default:
+                la_b(signed_zero);
+                break;
+            }
         }
         la_bstrins_d(bits, zero_ir2_opnd, sign_bit - 1, 0);
         li_d(mask, (uint64_t)bias << mantissa);
@@ -2659,19 +2708,27 @@ static void emit_round_fixed_lane(IR2_OPND bits, uint8_t imm, bool is_double,
     }
 
     la_label(done);
+    if (dynamic) {
+        ra_free_temp(direction);
+    }
     ra_free_temp(mask);
     ra_free_temp(exp);
 }
 
-bool can_emit_round_fixed(uint8_t imm, unsigned lanes)
+bool can_emit_round_fast(uint8_t imm, unsigned lanes)
 {
     TranslationBlock *tb = lsenv->tr_data->curr_tb;
+    bool dynamic = imm & 4;
 
     /*
      * Bound the per-lane expansion across a block to the lane count of a
      * full scalar block. IR2 links and host instruction offsets are 16-bit.
+     * The extra MXCSR direction branches count as a second scalar lane.
      */
-    return !(imm & 4) && tb->icount * lanes <= MAX_IR1_NUM_PER_TB;
+    if (dynamic && (lanes != 1 || !(imm & 8))) {
+        return false;
+    }
+    return tb->icount * lanes * (dynamic ? 2 : 1) <= MAX_IR1_NUM_PER_TB;
 }
 
 /*
@@ -2679,7 +2736,7 @@ bool can_emit_round_fixed(uint8_t imm, unsigned lanes)
  * the original instruction must see its unmodified source and destination.
  * Scalar callers can write the destination after the only lane passes.
  */
-void emit_round_fixed(IR2_OPND result, IR2_OPND src, uint8_t imm,
+void emit_round_fast(IR2_OPND result, IR2_OPND src, uint8_t imm,
                       bool is_double, unsigned lanes, IR2_OPND slow)
 {
     IR2_OPND bits = ra_alloc_itemp();
@@ -2730,14 +2787,14 @@ bool translate_roundps(IR1_INST *pir1)
     IR2_OPND result = option_enable_lasx ? ra_alloc_ftemp() : dest;
     uint8_t imm = ir1_opnd_uimm(opnd2);
 
-    bool use_fast_round = can_emit_round_fixed(imm, 4);
+    bool use_fast_round = can_emit_round_fast(imm, 4);
     IR2_OPND done;
 
     if (use_fast_round) {
         IR2_OPND slow = ra_alloc_label();
         done = ra_alloc_label();
         IR2_OPND fast_result = ra_alloc_ftemp();
-        emit_round_fixed(fast_result, src, imm, false, 4, slow);
+        emit_round_fast(fast_result, src, imm, false, 4, slow);
         if (option_enable_lasx) {
             store_sse_result128(dest, fast_result);
         } else {
@@ -2816,13 +2873,13 @@ bool translate_roundss(IR1_INST *pir1)
     IR2_OPND src1 = load_freg128_from_ir1(opnd1);
     uint8_t imm = ir1_opnd_uimm(opnd2);
 
-    bool use_fast_round = can_emit_round_fixed(imm, 1);
+    bool use_fast_round = can_emit_round_fast(imm, 1);
     IR2_OPND done;
 
     if (use_fast_round) {
         IR2_OPND slow = ra_alloc_label();
         done = ra_alloc_label();
-        emit_round_fixed(dest, src1, imm, false, 1, slow);
+        emit_round_fast(dest, src1, imm, false, 1, slow);
         la_b(done);
         la_label(slow);
     }
@@ -2877,6 +2934,9 @@ bool translate_roundss(IR1_INST *pir1)
         ra_free_temp(fcsr);
         ra_free_temp(fcsr_save);
         ra_free_temp(mxcsr);
+        if (use_fast_round) {
+            la_label(done);
+        }
         return true;
     }
     la_movgr2fcsr(fcsr_ir2_opnd, fcsr);
@@ -2919,14 +2979,14 @@ bool translate_roundpd(IR1_INST *pir1)
     IR2_OPND result = option_enable_lasx ? ra_alloc_ftemp() : dest;
     uint8_t imm = ir1_opnd_uimm(opnd2);
 
-    bool use_fast_round = can_emit_round_fixed(imm, 2);
+    bool use_fast_round = can_emit_round_fast(imm, 2);
     IR2_OPND done;
 
     if (use_fast_round) {
         IR2_OPND slow = ra_alloc_label();
         done = ra_alloc_label();
         IR2_OPND fast_result = ra_alloc_ftemp();
-        emit_round_fixed(fast_result, src, imm, true, 2, slow);
+        emit_round_fast(fast_result, src, imm, true, 2, slow);
         if (option_enable_lasx) {
             store_sse_result128(dest, fast_result);
         } else {
@@ -3005,13 +3065,13 @@ bool translate_roundsd(IR1_INST *pir1)
     IR2_OPND src1 = load_freg128_from_ir1(opnd1);
     uint8_t imm = ir1_opnd_uimm(opnd2);
 
-    bool use_fast_round = can_emit_round_fixed(imm, 1);
+    bool use_fast_round = can_emit_round_fast(imm, 1);
     IR2_OPND done;
 
     if (use_fast_round) {
         IR2_OPND slow = ra_alloc_label();
         done = ra_alloc_label();
-        emit_round_fixed(dest, src1, imm, true, 1, slow);
+        emit_round_fast(dest, src1, imm, true, 1, slow);
         la_b(done);
         la_label(slow);
     }
@@ -3067,6 +3127,9 @@ bool translate_roundsd(IR1_INST *pir1)
         ra_free_temp(fcsr);
         ra_free_temp(fcsr_save);
         ra_free_temp(mxcsr);
+        if (use_fast_round) {
+            la_label(done);
+        }
         return true;
     }
     la_movgr2fcsr(fcsr_ir2_opnd, fcsr);

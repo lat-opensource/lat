@@ -3626,15 +3626,15 @@ static bool translate_avx_round_packed_lsx(IR1_INST *pir1,
     load_avx_lsx_operand(opnd1, ymm, &src_low, &src_high);
     IR2_OPND result_high = ymm ? ra_alloc_ftemp() : result_low;
     unsigned lanes = double_precision ? 2 : 4;
-    bool use_fast_round = can_emit_round_fixed(imm, ymm ? 2 * lanes : lanes);
+    bool use_fast_round = can_emit_round_fast(imm, ymm ? 2 * lanes : lanes);
     IR2_OPND merge;
 
     if (use_fast_round) {
         IR2_OPND slow = ra_alloc_label();
         merge = ra_alloc_label();
-        emit_round_fixed(result_low, src_low, imm, double_precision, lanes, slow);
+        emit_round_fast(result_low, src_low, imm, double_precision, lanes, slow);
         if (ymm) {
-            emit_round_fixed(result_high, src_high, imm, double_precision,
+            emit_round_fast(result_high, src_high, imm, double_precision,
                              lanes, slow);
         }
         la_b(merge);
@@ -3680,12 +3680,12 @@ static bool translate_avx_round_scalar_lsx(IR1_INST *pir1,
     } else {
         la_vreplvei_w(scalar, src2, 0);
     }
-    bool use_fast_round = can_emit_round_fixed(imm, 1);
+    bool use_fast_round = can_emit_round_fast(imm, 1);
     IR2_OPND merge;
     if (use_fast_round) {
         IR2_OPND slow = ra_alloc_label();
         merge = ra_alloc_label();
-        emit_round_fixed(rounded, src2, imm, double_precision, 1, slow);
+        emit_round_fast(rounded, src2, imm, double_precision, 1, slow);
         la_b(merge);
         la_label(slow);
     }

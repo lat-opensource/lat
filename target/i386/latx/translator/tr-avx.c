@@ -5572,7 +5572,7 @@ bool translate_vroundps(IR1_INST *pir1)
     }
 
     unsigned lanes = is_xmm ? 4 : 8;
-    bool use_fast_round = can_emit_round_fixed(imm, lanes);
+    bool use_fast_round = can_emit_round_fast(imm, lanes);
     IR2_OPND done;
     if (use_fast_round) {
         IR2_OPND slow = ra_alloc_label();
@@ -5581,7 +5581,7 @@ bool translate_vroundps(IR1_INST *pir1)
             emit_vround_ymm_sae(dest, src, imm & 3, false, slow);
         } else {
             IR2_OPND result = ra_alloc_ftemp();
-            emit_round_fixed(result, src, imm, false, lanes, slow);
+            emit_round_fast(result, src, imm, false, lanes, slow);
             la_xvori_b(dest, result, 0);
             if (is_xmm) {
                 set_high128_xreg_to_zero(dest);
@@ -5686,7 +5686,7 @@ bool translate_vroundpd(IR1_INST *pir1)
 
     bool is_xmm = ir1_opnd_is_xmm(opnd0);
     unsigned lanes = is_xmm ? 2 : 4;
-    bool use_fast_round = can_emit_round_fixed(imm, lanes);
+    bool use_fast_round = can_emit_round_fast(imm, lanes);
     IR2_OPND done;
     if (use_fast_round) {
         IR2_OPND slow = ra_alloc_label();
@@ -5695,7 +5695,7 @@ bool translate_vroundpd(IR1_INST *pir1)
             emit_vround_ymm_sae(dest, src, imm & 3, true, slow);
         } else {
             IR2_OPND result = ra_alloc_ftemp();
-            emit_round_fixed(result, src, imm, true, lanes, slow);
+            emit_round_fast(result, src, imm, true, lanes, slow);
             la_xvori_b(dest, result, 0);
             if (is_xmm) {
                 set_high128_xreg_to_zero(dest);
@@ -5803,21 +5803,21 @@ bool translate_vroundss(IR1_INST *pir1)
     IR2_OPND temp = ra_alloc_ftemp();
     IR2_OPND temp_dest = ra_alloc_ftemp();
     IR2_OPND src = ra_alloc_ftemp();
+    bool is_xmm = ir1_opnd_is_xmm(opnd0);
+    IR2_OPND merge = ra_alloc_label();
+    if (can_emit_round_fast(imm, 1)) {
+        IR2_OPND original = ra_alloc_label();
+        emit_round_fast(temp_dest, src2, imm, false, 1, original);
+        la_b(merge);
+        la_label(original);
+    }
     IR2_OPND fcsr = ra_alloc_itemp();
     IR2_OPND fcsr_save = ra_alloc_itemp();
     IR2_OPND mxcsr = ra_alloc_itemp();
-    bool is_xmm = ir1_opnd_is_xmm(opnd0);
     la_xvreplve0_w(src, src2);
-    IR2_OPND merge = ra_alloc_label();
     if (!(imm & 0x4)) {
         IR2_OPND slow = ra_alloc_label();
         IR2_OPND sticky = ra_alloc_label();
-        if (can_emit_round_fixed(imm, 1)) {
-            IR2_OPND original = ra_alloc_label();
-            emit_round_fixed(temp_dest, src2, imm, false, 1, original);
-            la_b(merge);
-            la_label(original);
-        }
         IR2_INST *(*fixed_round)(IR2_OPND, IR2_OPND);
 
         switch (imm & 0x3) {
@@ -5890,13 +5890,14 @@ bool translate_vroundss(IR1_INST *pir1)
         la_bstrins_w(fcsr, temp, 9, 8);
         la_movgr2fcsr(fcsr_ir2_opnd, fcsr);
         tr_inst(temp_dest, src);
+        la_movgr2fcsr(fcsr_ir2_opnd, fcsr_save);
+        la_label(merge);
         if (ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 0)) !=
             ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 1))) {
             la_xvori_b(dest, src1, 0);
         }
         la_xvinsve0_w(dest, temp_dest, 0);
         set_high128_xreg_to_zero(dest);
-        la_movgr2fcsr(fcsr_ir2_opnd, fcsr_save);
 
         ra_free_temp(temp);
         ra_free_temp(fcsr);
@@ -5957,21 +5958,21 @@ bool translate_vroundsd(IR1_INST *pir1)
     IR2_OPND temp = ra_alloc_ftemp();
     IR2_OPND temp_dest = ra_alloc_ftemp();
     IR2_OPND src = ra_alloc_ftemp();
+    bool is_xmm = ir1_opnd_is_xmm(opnd0);
+    IR2_OPND merge = ra_alloc_label();
+    if (can_emit_round_fast(imm, 1)) {
+        IR2_OPND original = ra_alloc_label();
+        emit_round_fast(temp_dest, src2, imm, true, 1, original);
+        la_b(merge);
+        la_label(original);
+    }
     IR2_OPND fcsr = ra_alloc_itemp();
     IR2_OPND fcsr_save = ra_alloc_itemp();
     IR2_OPND mxcsr = ra_alloc_itemp();
-    bool is_xmm = ir1_opnd_is_xmm(opnd0);
     la_xvreplve0_d(src, src2);
-    IR2_OPND merge = ra_alloc_label();
     if (!(imm & 0x4)) {
         IR2_OPND slow = ra_alloc_label();
         IR2_OPND sticky = ra_alloc_label();
-        if (can_emit_round_fixed(imm, 1)) {
-            IR2_OPND original = ra_alloc_label();
-            emit_round_fixed(temp_dest, src2, imm, true, 1, original);
-            la_b(merge);
-            la_label(original);
-        }
         IR2_INST *(*fixed_round)(IR2_OPND, IR2_OPND);
 
         switch (imm & 0x3) {
@@ -6044,13 +6045,14 @@ bool translate_vroundsd(IR1_INST *pir1)
         la_bstrins_w(fcsr, temp, 9, 8);
         la_movgr2fcsr(fcsr_ir2_opnd, fcsr);
         tr_inst(temp_dest, src);
+        la_movgr2fcsr(fcsr_ir2_opnd, fcsr_save);
+        la_label(merge);
         if (ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 0)) !=
             ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 1))) {
             la_xvori_b(dest, src1, 0);
         }
         la_xvinsve0_d(dest, temp_dest, 0);
         set_high128_xreg_to_zero(dest);
-        la_movgr2fcsr(fcsr_ir2_opnd, fcsr_save);
 
         ra_free_temp(temp);
         ra_free_temp(fcsr);
