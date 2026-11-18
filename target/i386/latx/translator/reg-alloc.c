@@ -174,7 +174,11 @@ const int reg_statics_map[] = {
     /* last exec tb */
     REG_MAP_DEF(S_UD0, la_fp),
     /* next x86 addr */
+#ifdef CONFIG_LATX_WOW64_PE
+    REG_MAP_DEF(S_UD1, la_t8),
+#else
     REG_MAP_DEF(S_UD1, la_r21),
+#endif
 #ifndef TARGET_X86_64
     /* we don't use shadow stack */
     REG_MAP_DEF(S_UD2, NOT_DEF),

@@ -683,6 +683,7 @@ do_check_protect_pse36:
 }
 #endif
 
+#ifndef CONFIG_LATX_WOW64_PE
 bool x86_cpu_tlb_fill(CPUState *cs, vaddr addr, int size,
                       MMUAccessType access_type, int mmu_idx,
                       bool probe, uintptr_t retaddr, void *info)
@@ -722,3 +723,4 @@ bool x86_cpu_tlb_fill(CPUState *cs, vaddr addr, int size,
     return true;
 #endif
 }
+#endif

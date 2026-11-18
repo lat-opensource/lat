@@ -10,7 +10,9 @@
 #include "reg-alloc.h"
 #include "latx-debug.h"
 #include "latx-runtime.h"
+#ifndef CONFIG_LATX_WOW64_PE
 #include "latx-string-utils.h"
+#endif
 #include "translate.h"
 #if defined(CONFIG_LATX_KZT)
 #include "kzt-groups.h"
@@ -124,6 +126,7 @@ unsigned long long counter_tb_tr;
 unsigned long long counter_ir1_tr;
 unsigned long long counter_mips_tr;
 
+#ifndef CONFIG_LATX_WOW64_PE
 void load_conf_file(const char *file, const char *program,
                     LatxRuntimeSource runtime_source)
 {
@@ -218,6 +221,8 @@ void conf_init(char **argv)
         load_conf_file(path, program, LATX_RUNTIME_SOURCE_USER_CONFIG);
     }
 }
+
+#endif
 
 void options_init(void)
 {

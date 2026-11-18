@@ -22,10 +22,12 @@
 #ifdef CONFIG_LATX_TU
 #include "tu.h"
 #endif
+#ifndef CONFIG_LATX_WOW64_PE
 #include "ts.h"
 #include "aot_recover_tb.h"
 #include "loongarch-extcontext.h"
 #include <sys/mman.h>
+#endif
 #ifdef CONFIG_LATX_WOW64
 #include "qemu.h"
 #endif
@@ -315,6 +317,7 @@ void jrra_restore_current_tb_head(TranslationBlock *tb,
 #endif
 }
 
+#ifndef CONFIG_WIN32
 bool jrra_handle_sigill(CPUArchState *env, ucontext_t *uc)
 {
 #ifdef CONFIG_LATX_JRRA
@@ -345,6 +348,8 @@ bool jrra_handle_sigill(CPUArchState *env, ucontext_t *uc)
 #endif
     return false;
 }
+
+#endif
 
 void jrra_emit_call_metadata(TranslationBlock *tb, target_ulong next_pc,
                              JrraCallType call_type)

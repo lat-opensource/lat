@@ -218,5 +218,5 @@ if latx_kzt
 endif
 
 i386_ss.add(when: 'CONFIG_LATX_WOW64', if_true: files(
-  'wow64.c', 'wow64-latx.c', 'wow64-context.S',
+  'wow64.c', 'wow64-latx.c', 'wow64-x86-state.c', 'wow64-context.S',
 ))

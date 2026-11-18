@@ -63,8 +63,12 @@ typedef uint64_t vaddr;
 #define CPU(obj) ((CPUState *)(obj))
 
 typedef struct CPUClass CPUClass;
+#ifdef CONFIG_LATX_WOW64_PE
+#define CPU_GET_CLASS(cpu) ((CPUClass *)OBJECT(cpu)->class)
+#else
 DECLARE_CLASS_CHECKERS(CPUClass, CPU,
                        TYPE_CPU)
+#endif
 
 typedef enum MMUAccessType {
     MMU_DATA_LOAD  = 0,
@@ -450,7 +454,12 @@ extern CPUTailQ cpus;
 #define CPU_FOREACH_SAFE(cpu, next_cpu) \
     QTAILQ_FOREACH_SAFE_RCU(cpu, &cpus, node, next_cpu)
 
+#ifdef CONFIG_LATX_WOW64_PE
+CPUState **lat_wow64_pe_current_cpu_slot(void);
+#define current_cpu (*lat_wow64_pe_current_cpu_slot())
+#else
 extern __thread CPUState *current_cpu;
+#endif
 
 static inline void cpu_tb_jmp_cache_clear(CPUState *cpu)
 {

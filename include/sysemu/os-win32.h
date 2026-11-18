@@ -44,8 +44,14 @@
  * in terms of setjmp/longjmp on Win32.
  */
 #define sigjmp_buf jmp_buf
+#ifdef CONFIG_LATX_WOW64_PE
+__declspec(noreturn) void lat_wow64_pe_longjmp(jmp_buf env, int value);
+#define sigsetjmp(env, savemask) _setjmpex(env, NULL)
+#define siglongjmp(env, val) lat_wow64_pe_longjmp(env, val)
+#else
 #define sigsetjmp(env, savemask) setjmp(env)
 #define siglongjmp(env, val) longjmp(env, val)
+#endif
 
 /* Missing POSIX functions. Don't use MinGW-w64 macros. */
 #ifndef _POSIX_THREAD_SAFE_FUNCTIONS

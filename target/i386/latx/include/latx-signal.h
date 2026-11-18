@@ -20,9 +20,12 @@ void unlink_direct_jmp(TranslationBlock *tb);
 #ifdef CONFIG_LATX_TU
 void unlink_tu_jmp(TranslationBlock *tb);
 #endif
+#ifndef CONFIG_LATX_WOW64_PE
 void unlink_indirect_jmp(CPUArchState *env, TranslationBlock *tb, ucontext_t *uc);
 bool signal_in_glue(CPUArchState *env, ucontext_t *uc);
 void tb_exit_to_qemu(CPUArchState *env, ucontext_t *uc);
+#endif
+
 #ifdef CONFIG_LATX_WOW64
 TranslationBlock *lat_wow64_provider_signal_entry_tb(void);
 void lat_wow64_provider_tb_enter(TranslationBlock *tb);

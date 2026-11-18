@@ -219,7 +219,13 @@ cpu_tb_exec(CPUState *cpu, TranslationBlock *itb, int *tb_exit)
         qemu_log_mask_and_addr(CPU_LOG_EXEC, itb->pc,
                "pid(%d) - tid(%" PRIuPTR ") Trace cpu%d: %p [ "
                TARGET_FMT_lx "/%#x] %s\n",
-               getpid(), (uintptr_t)pthread_self(), cpu->cpu_index, itb->tc.ptr,
+               getpid(),
+#ifdef CONFIG_LATX_WOW64_PE
+               (uintptr_t)qemu_get_thread_id(),
+#else
+               (uintptr_t)pthread_self(),
+#endif
+               cpu->cpu_index, itb->tc.ptr,
                itb->pc, itb->flags, lookup_symbol(itb->pc));
 #endif
     }
@@ -836,6 +842,12 @@ static inline TranslationBlock *tb_find(CPUState *cpu,
         mmap_unlock();
         return NULL;
     }
+#ifdef CONFIG_LATX_WOW64_PE
+        if (tb_page_addr0(tb) == -1) {
+            mmap_unlock();
+            return tb;
+        }
+#endif
         /* We add the TB in the virtual pc hash table for the fast lookup */
         int hash_value = tb_jmp_cache_hash_func(pc);
 #ifdef CONFIG_LATX_FAST_JMPCACHE
@@ -1135,6 +1147,11 @@ static inline void cpu_loop_exec_tb(CPUState *cpu, TranslationBlock *tb,
     trace_exec_tb(tb, tb->pc);
     tb = cpu_tb_exec(cpu, tb, tb_exit);
     if (*tb_exit != TB_EXIT_REQUESTED) {
+#ifdef CONFIG_LATX_WOW64_PE
+        if (tb && tb_page_addr0(tb) == -1) {
+            tb = NULL;
+        }
+#endif
         *last_tb = tb;
         return;
     }

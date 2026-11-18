@@ -20,8 +20,17 @@
 #include "latx-smc.h"
 #include "jrra.h"
 #include "latx-native-asm.h"
+#ifdef CONFIG_LATX_WOW64_PE
+#include "wow64-pe.h"
+#endif
 #ifdef CONFIG_LATX_WOW64
 #include "qemu.h"
+#endif
+
+#ifdef _WIN32
+/* Windows headers use IN and OUT as annotation macros. */
+#undef IN
+#undef OUT
 #endif
 
 extern void *helper_tb_lookup_ptr(CPUArchState *);
@@ -211,6 +220,9 @@ IR1_INST *get_ir1_list(struct TranslationBlock *tb, ADDRX pc, int max_insns)
     pir1_base = (void *)((uint64_t)pir1_base + *ir1_num_in_tu * sizeof(struct la_dt_insn));
 #endif
 
+#ifdef CONFIG_LATX_WOW64_PE
+    bool single_insn = max_insns == 1;
+#endif
     if (max_insns == 1) {
         max_insns++;
     }
@@ -228,12 +240,16 @@ IR1_INST *get_ir1_list(struct TranslationBlock *tb, ADDRX pc, int max_insns)
 
     int ir1_num = 0;
     do {
-#ifdef CONFIG_LATX_WOW64
+#if defined(CONFIG_LATX_WOW64) || defined(CONFIG_LATX_WOW64_PE)
         /* End before a page boundary so an inaccessible future instruction
          * cannot fault while earlier guest instructions are still pending. */
-        if (lat_wow64_provider_plugin_active && ir1_num &&
-            ((pc & TARGET_PAGE_MASK) != (start_pc & TARGET_PAGE_MASK) ||
-             TARGET_PAGE_SIZE - (pc & ~TARGET_PAGE_MASK) < 15)) {
+        bool block_end = (pc & TARGET_PAGE_MASK) != (start_pc & TARGET_PAGE_MASK) ||
+                         TARGET_PAGE_SIZE - (pc & ~TARGET_PAGE_MASK) < 15;
+#ifdef CONFIG_LATX_WOW64_PE
+        if (ir1_num && (single_insn || block_end)) {
+#else
+        if (lat_wow64_provider_plugin_active && ir1_num && block_end) {
+#endif
             pir1 = &ir1_list[ir1_num];
             memset(pir1, 0, sizeof(*pir1));
             pir1->info = (void *)((char *)pir1_base +
@@ -258,6 +274,9 @@ IR1_INST *get_ir1_list(struct TranslationBlock *tb, ADDRX pc, int max_insns)
          */
         pins = inst_cache;
 
+#ifdef CONFIG_LATX_WOW64_PE
+        lat_wow64_pe_fetch_code(lsenv->cpu_state, pc, inst_cache);
+#else
 #ifdef CONFIG_LATX_WOW64
         if (lat_wow64_provider_plugin_active &&
             TARGET_PAGE_SIZE - (pc & ~TARGET_PAGE_MASK) < 15) {
@@ -271,6 +290,7 @@ IR1_INST *get_ir1_list(struct TranslationBlock *tb, ADDRX pc, int max_insns)
                 pins++;
             }
         }
+#endif
         /* disasemble this instruction */
         pir1 = &ir1_list[ir1_num];
         /* get next pc */
@@ -323,6 +343,7 @@ IR1_INST *get_ir1_list(struct TranslationBlock *tb, ADDRX pc, int max_insns)
         next_pir1->info = NULL;
     }
 #endif
+#ifndef CONFIG_LATX_WOW64_PE
     if (pir1->info != NULL && ir1_num == 2 && ir1_is_return(pir1) &&
         ir1_opcode(&ir1_list[0]) == dt_X86_INS_MOV) {
         IR1_INST *insert_ir1 = &ir1_list[0];
@@ -335,6 +356,7 @@ IR1_INST *get_ir1_list(struct TranslationBlock *tb, ADDRX pc, int max_insns)
             ht_pc_thunk_insert(start_pc, reg_index);
         }
     }
+#endif
 
 #ifdef CONFIG_LATX_TU
     *ir1_num_in_tu += ir1_num;
@@ -2531,7 +2553,6 @@ int tr_ir2_generate(struct TranslationBlock *tb)
     bool reduce_proepo = false;
     bool x87_fcsr_active = false;
     int softfpu_region_end = -1;
-
     lsenv->tr_data->softfpu_region_active = false;
 
 #ifdef CONFIG_LATX_MONITOR_SHARED_MEM
@@ -2894,6 +2915,20 @@ int tr_translate_tb(struct TranslationBlock *tb)
  * ra_alloc_dbt_arg2: next x86 ip
  */
 
+#ifdef CONFIG_LATX_WOW64_PE
+static void gen_pe_poll_exit(IR2_OPND leave)
+{
+    const int offset = (int)offsetof(X86CPU, neg.icount_decr.u16.high) -
+                       (int)offsetof(X86CPU, env);
+    IR2_OPND requested = ra_alloc_itemp();
+
+    QEMU_BUILD_BUG_ON(offset < -2048 || offset > 2047);
+    la_ld_hu(requested, env_ir2_opnd, offset);
+    la_bnez(requested, leave);
+    ra_free_temp(requested);
+}
+#endif
+
 static void generate_indirect_goto(void *code_buf)
 {
     /*
@@ -3188,6 +3223,15 @@ direct_jmp:
          * Also, if we need to patch the offset, the patch place need to be
          * aligned. This nop is used to do that.
          */
+#ifdef CONFIG_LATX_WOW64_PE
+        /* A direct loop must yield for a thread-control or exclusive request. */
+        bool poll = succ_x86_addr <= tb->pc;
+        IR2_OPND leave;
+        if (poll) {
+            leave = ra_alloc_label();
+            gen_pe_poll_exit(leave);
+        }
+#endif
         la_code_accl(base, 2, 0x03400000);
 
         if (!use_tu_jmp(tb)) {
@@ -3196,7 +3240,7 @@ direct_jmp:
 #else
             set_jmp_reset_offset(tb, NULL, NULL, succ_id);
 #endif
-#ifndef CONFIG_LATX_LAZYLINK
+#if !defined(CONFIG_LATX_LAZYLINK) || defined(CONFIG_LATX_WOW64_PE)
             la_b(imm_zero_ir2_opnd);
  #ifdef CONFIG_LATX_LARGE_CC
             la_nop();
@@ -3204,6 +3248,11 @@ direct_jmp:
 #endif
         }
 
+#ifdef CONFIG_LATX_WOW64_PE
+        if (poll) {
+            la_label(leave);
+        }
+#endif
 #ifdef CONFIG_LATX_PROFILER
         la_profile_begin();
 #endif
@@ -3299,6 +3348,10 @@ void tr_generate_goto_tb(void) /* TODO */
 #define FP_EXTRA_SPACE          (S8_EXTRA_SPACE + REG_LEN)
 #define RA_EXTRA_SPACE          (FP_EXTRA_SPACE + REG_LEN)
 #define FCSR_EXTRA_SPACE        (RA_EXTRA_SPACE + REG_LEN)
+#ifdef CONFIG_LATX_WOW64_PE
+#define F24_EXTRA_SPACE         (FCSR_EXTRA_SPACE + REG_LEN)
+#define ENTRY_EXTRA_SPACE       (F24_EXTRA_SPACE + 8 * REG_LEN)
+#endif
 
 void generate_context_switch_bt_to_native(void *code_buf)
 {
@@ -3320,9 +3373,18 @@ void generate_context_switch_bt_to_native(void *code_buf)
     la_st_d(fp_ir2_opnd, sp_ir2_opnd, FP_EXTRA_SPACE);
     la_st_d(ra_ir2_opnd, sp_ir2_opnd, RA_EXTRA_SPACE);
 
+#ifdef CONFIG_LATX_WOW64_PE
+    /* r21 always points at the Windows TEB, including in JIT helpers. */
+    la_st_d(a0_ir2_opnd, sp_ir2_opnd, ENTRY_EXTRA_SPACE);
+    for (int i = 0; i < 8; i++) {
+        IR2_OPND fpr = create_ir2_opnd(IR2_OPND_FPR, 24 + i);
+        la_fst_d(fpr, sp_ir2_opnd, F24_EXTRA_SPACE + i * REG_LEN);
+    }
+#else
     /* move a0(tb_ptr) to S_UD1 */
     IR2_OPND native_addr_opnd = ra_alloc_statics(S_UD1);
     la_or(native_addr_opnd, a0_ir2_opnd, zero_ir2_opnd);
+#endif
 
     /* set env_ir2_opnd */
     la_or(env_ir2_opnd, a1_ir2_opnd, zero_ir2_opnd);
@@ -3335,6 +3397,12 @@ void generate_context_switch_bt_to_native(void *code_buf)
 
     la_ld_w(fcsr_value_opnd, env_ir2_opnd,
                           lsenv_offset_of_fcsr(lsenv));
+#ifdef CONFIG_LATX_WOW64_PE
+    IR2_OPND host_fcsr = ra_alloc_itemp();
+    la_movfcsr2gr(host_fcsr, fcsr_ir2_opnd);
+    la_st_w(host_fcsr, sp_ir2_opnd, FCSR_EXTRA_SPACE);
+    ra_free_temp(host_fcsr);
+#endif
     la_movgr2fcsr(fcsr_ir2_opnd, fcsr_value_opnd);
     ra_free_temp(fcsr_value_opnd);
 
@@ -3345,7 +3413,10 @@ void generate_context_switch_bt_to_native(void *code_buf)
 #endif
     jrra_context_switch_bt_to_native();
 
-    /* jump to native code address (saved in t9) */
+#ifdef CONFIG_LATX_WOW64_PE
+    IR2_OPND native_addr_opnd = ra_alloc_itemp();
+    la_ld_d(native_addr_opnd, sp_ir2_opnd, ENTRY_EXTRA_SPACE);
+#endif
     la_jirl(zero_ir2_opnd, native_addr_opnd, 0);
 }
 
@@ -3379,6 +3450,14 @@ void generate_context_switch_native_to_bt(void)
     la_movfcsr2gr(fcsr_value_opnd, fcsr_ir2_opnd);
     la_st_w(fcsr_value_opnd, env_ir2_opnd,
                           lsenv_offset_of_fcsr(lsenv));
+#ifdef CONFIG_LATX_WOW64_PE
+    la_ld_w(fcsr_value_opnd, sp_ir2_opnd, FCSR_EXTRA_SPACE);
+    la_movgr2fcsr(fcsr_ir2_opnd, fcsr_value_opnd);
+    for (int i = 0; i < 8; i++) {
+        IR2_OPND fpr = create_ir2_opnd(IR2_OPND_FPR, 24 + i);
+        la_fld_d(fpr, sp_ir2_opnd, F24_EXTRA_SPACE + i * REG_LEN);
+    }
+#endif
 
     /* 5. restore ra */
     la_ld_d(ra_ir2_opnd, sp_ir2_opnd, RA_EXTRA_SPACE);
@@ -4365,6 +4444,7 @@ void tr_load_registers_from_env(uint8 gpr_to_load, uint8 fpr_to_load,
 #ifdef TARGET_X86_64
 void tr_save_x64_8_registers_to_env(uint8 gpr_to_save, uint8 xmm_to_save)
 {
+#ifndef CONFIG_LATX_WOW64_PE
     int i = 0;
     for (i = 0; i < 8; ++i) {
         if (BITS_ARE_SET(gpr_to_save, 1 << i)) {
@@ -4378,10 +4458,12 @@ void tr_save_x64_8_registers_to_env(uint8 gpr_to_save, uint8 xmm_to_save)
     } else {
         tr_save_xmm64_to_env(xmm_to_save);
     }
+#endif
 }
 
 void tr_load_x64_8_registers_from_env(uint8 gpr_to_load, uint8 xmm_to_load)
 {
+#ifndef CONFIG_LATX_WOW64_PE
     int i = 0;
     for (i = 0; i < 8; ++i) {
         if (BITS_ARE_SET(gpr_to_load, 1 << i)) {
@@ -4394,6 +4476,7 @@ void tr_load_x64_8_registers_from_env(uint8 gpr_to_load, uint8 xmm_to_load)
     if (!option_enable_lasx) {
         tr_load_ymm_high_from_env((uint16_t)xmm_to_load << 8);
     }
+#endif
 }
 #endif
 
@@ -4437,7 +4520,13 @@ void convert_fpregs_x80_to_64(void)
 
 static void tr_gen_call_to_helper_prologue(int use_fp)
 {
-    tr_save_registers_to_env(0, FPR_USEDEF_TO_SAVE, XMM_USEDEF_TO_SAVE,
+#ifdef CONFIG_LATX_WOW64_PE
+    /* A host fault can arrive while the helper is using the saved GPRs. */
+    const uint8_t gpr_to_save = UINT8_MAX;
+#else
+    const uint8_t gpr_to_save = 0;
+#endif
+    tr_save_registers_to_env(gpr_to_save, FPR_USEDEF_TO_SAVE, XMM_USEDEF_TO_SAVE,
                              options_to_save());
 #ifdef TARGET_X86_64
     tr_save_x64_8_registers_to_env(GPR_USEDEF_TO_SAVE >> 8, XMM_USEDEF_TO_SAVE >> 8);

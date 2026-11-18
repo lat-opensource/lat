@@ -17,6 +17,16 @@
 #include "qemu/notify.h"
 #include "qemu-thread-common.h"
 #include <process.h>
+#ifdef CONFIG_LATX_WOW64_PE
+#include <winternl.h>
+
+struct _PS_ATTRIBUTE_LIST;
+NTSTATUS WINAPI NtCreateThreadEx(HANDLE *, ACCESS_MASK, OBJECT_ATTRIBUTES *,
+                                 HANDLE, void (CALLBACK *)(void *), void *,
+                                 ULONG, ULONG_PTR, SIZE_T, SIZE_T,
+                                 struct _PS_ATTRIBUTE_LIST *);
+#define THREAD_CREATE_FLAGS_SKIP_LOADER_INIT 0x20
+#endif
 
 static bool name_threads;
 
@@ -320,7 +330,13 @@ struct QemuThreadData {
 static bool atexit_registered;
 static NotifierList main_thread_exit;
 
+#ifdef CONFIG_LATX_WOW64_PE
+void *lat_wow64_pe_qemu_thread_data(void);
+void lat_wow64_pe_set_qemu_thread_data(void *data);
+#define qemu_thread_data ((QemuThreadData *)lat_wow64_pe_qemu_thread_data())
+#else
 static __thread QemuThreadData *qemu_thread_data;
+#endif
 
 static void run_main_thread_exit(void)
 {
@@ -345,13 +361,21 @@ void qemu_thread_atexit_remove(Notifier *notifier)
     notifier_remove(notifier);
 }
 
+#ifdef CONFIG_LATX_WOW64_PE
+static void WINAPI win32_start_routine(void *arg)
+#else
 static unsigned __stdcall win32_start_routine(void *arg)
+#endif
 {
     QemuThreadData *data = (QemuThreadData *) arg;
     void *(*start_routine)(void *) = data->start_routine;
     void *thread_arg = data->arg;
 
+#ifdef CONFIG_LATX_WOW64_PE
+    lat_wow64_pe_set_qemu_thread_data(data);
+#else
     qemu_thread_data = data;
+#endif
     qemu_thread_exit(start_routine(thread_arg));
     abort();
 }
@@ -369,7 +393,11 @@ void qemu_thread_exit(void *arg)
     } else {
         g_free(data);
     }
+#ifdef CONFIG_LATX_WOW64_PE
+    ExitThread(0);
+#else
     _endthreadex(0);
+#endif
 }
 
 void *qemu_thread_join(QemuThread *thread)
@@ -419,11 +447,23 @@ void qemu_thread_create(QemuThread *thread, const char *name,
         InitializeCriticalSection(&data->cs);
     }
 
+#ifdef CONFIG_LATX_WOW64_PE
+    /* The default WoW64 loader starts i386 execution, even for a host entry. */
+    NTSTATUS status = NtCreateThreadEx(&hThread, THREAD_ALL_ACCESS, NULL,
+                                      GetCurrentProcess(), win32_start_routine,
+                                      data, THREAD_CREATE_FLAGS_SKIP_LOADER_INIT,
+                                      0, 0, 0, NULL);
+    if (status) {
+        error_exit(RtlNtStatusToDosError(status), __func__);
+    }
+    thread->tid = GetThreadId(hThread);
+#else
     hThread = (HANDLE) _beginthreadex(NULL, 0, win32_start_routine,
                                       data, 0, &thread->tid);
     if (!hThread) {
         error_exit(GetLastError(), __func__);
     }
+#endif
     CloseHandle(hThread);
     thread->data = data;
 }

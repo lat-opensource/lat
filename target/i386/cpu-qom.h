@@ -30,8 +30,14 @@
 #define TYPE_X86_CPU "i386-cpu"
 #endif
 
+#ifdef CONFIG_LATX_WOW64_PE
+typedef struct X86CPU X86CPU;
+typedef struct X86CPUClass X86CPUClass;
+#define X86_CPU(cpu) ((X86CPU *)(cpu))
+#else
 OBJECT_DECLARE_TYPE(X86CPU, X86CPUClass,
                     X86_CPU)
+#endif
 
 typedef struct X86CPUModel X86CPUModel;
 

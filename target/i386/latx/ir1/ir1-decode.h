@@ -21,10 +21,16 @@ typedef struct Ir1DecodeTemplate {
     struct la_dt_insn decoded;
 } Ir1DecodeTemplate;
 
+#ifdef CONFIG_LATX_WOW64_PE
+/* The PE runtime serializes the decoder together with the rest of translation. */
+static Ir1DecodeTemplate *ir1_decode_templates;
+static uint8_t *ir1_decode_template_valid;
+#else
 static __thread Ir1DecodeTemplate *ir1_decode_templates;
 static __thread uint8_t *ir1_decode_template_valid;
 static GPrivate ir1_decode_templates_owner = G_PRIVATE_INIT(g_free);
 static GPrivate ir1_decode_template_valid_owner = G_PRIVATE_INIT(g_free);
+#endif
 
 static uint32_t ir1_decode_template_hash(const uint8_t *code, size_t size,
                                          int mode)
@@ -448,9 +454,11 @@ static void ir1_decode_template_insert(const uint8_t *code, size_t code_size,
                                      IR1_DECODE_TEMPLATE_CACHE_SIZE);
         ir1_decode_template_valid = g_new0(uint8_t,
                                            IR1_DECODE_TEMPLATE_CACHE_SIZE);
+#ifndef CONFIG_LATX_WOW64_PE
         g_private_set(&ir1_decode_templates_owner, ir1_decode_templates);
         g_private_set(&ir1_decode_template_valid_owner,
                       ir1_decode_template_valid);
+#endif
     }
     size_t prefix_size = MIN((size_t)info->size, 4);
     size_t index = ir1_decode_template_hash(code, prefix_size, mode);

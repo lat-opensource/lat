@@ -15,7 +15,9 @@
 #include "latx-signal.h"
 #include "qemu/cacheflush.h"
 #include "exec/tb-lookup.h"
+#ifndef CONFIG_LATX_WOW64_PE
 #include "loongarch-extcontext.h"
+#endif
 
 #ifdef CONFIG_LATX_TU
 void unlink_tu_jmp(TranslationBlock *tb) 
@@ -104,6 +106,7 @@ void link_indirect_jmp(CPUArchState *env)
     flush_idcache_range(jmp_rw, jmp_rw, 4);
 }
 
+#ifndef CONFIG_LATX_WOW64_PE
 void unlink_indirect_jmp(CPUArchState *env, TranslationBlock *tb, ucontext_t *uc)
 {
     IR2_INST *pir2 = generate_andi(zero_ir2_opnd, zero_ir2_opnd, 0);
@@ -287,3 +290,5 @@ void tb_exit_to_qemu(CPUArchState *env, ucontext_t *uc)
         }
     }
 }
+
+#endif

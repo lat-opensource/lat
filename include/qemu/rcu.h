@@ -68,7 +68,13 @@ struct rcu_reader_data {
     QLIST_ENTRY(rcu_reader_data) node;
 };
 
+#ifdef CONFIG_LATX_WOW64_PE
+struct rcu_reader_data *lat_wow64_pe_rcu_reader(void);
+void lat_wow64_pe_remove_rcu_reader(struct rcu_reader_data *reader);
+#define rcu_reader (*lat_wow64_pe_rcu_reader())
+#else
 extern __thread struct rcu_reader_data rcu_reader;
+#endif
 
 static inline void rcu_read_lock(void)
 {

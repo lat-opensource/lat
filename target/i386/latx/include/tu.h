@@ -11,13 +11,13 @@
  */
 #ifndef __TU_H_
 #define __TU_H_
-#include <gmodule.h>
 #include "reg-map.h"
 #include "ir1.h"
 
 void get_last_info(TranslationBlock *tb, IR1_INST *pir1);
 
 #ifdef CONFIG_LATX_TU
+#include <gmodule.h>
 /*
  * The reason why MAX_TB_IN_CACHE > MAX_TB_IN_TU is
  * TBs in TU sometimes need to translate next guest_pc

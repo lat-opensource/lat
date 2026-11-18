@@ -11,7 +11,9 @@
  */
 #include "translate.h"
 #include "reg-alloc.h"
+#if !defined(CONFIG_LATX_WOW64_PE) || defined(CONFIG_LATX_AOT)
 #include "aot.h"
+#endif
 #include "latx-options.h"
 #include "imm-cache.h"
 

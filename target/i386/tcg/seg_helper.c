@@ -1212,6 +1212,7 @@ static void handle_even_inj(CPUX86State *env, int intno, int is_int,
  * the int instruction. next_eip is the env->eip value AFTER the interrupt
  * instruction. It is only relevant if is_int is TRUE.
  */
+#ifndef CONFIG_LATX_WOW64_PE
 static void do_interrupt_all(X86CPU *cpu, int intno, int is_int,
                              int error_code, target_ulong next_eip, int is_hw)
 {
@@ -1390,6 +1391,8 @@ bool x86_cpu_exec_interrupt(CPUState *cs, int interrupt_request)
     /* Ensure that no TB jump will be modified as the program flow was changed.  */
     return true;
 }
+
+#endif
 
 void helper_lldt(CPUX86State *env, int selector)
 {

@@ -267,6 +267,7 @@ bool translate_lddqu(IR1_INST *pir1)
     return true;
 }
 
+#if !defined(CONFIG_LATX_WOW64_PE) || defined(CONFIG_LATX_SMC_OPT)
 bool translate_movaps_vst_x4(IR1_INST *pir1)
 {
     IR1_INST *p0 = pir1;
@@ -401,6 +402,7 @@ bool translate_movaps_vst_x4(IR1_INST *pir1)
 
     return true;
 }
+#endif
 
 void smc_hook_get_xmm(void *_env, int reg, uint64_t *val)
 {

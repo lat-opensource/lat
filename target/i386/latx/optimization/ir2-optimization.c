@@ -594,6 +594,7 @@ void tr_ir2_optimize(TranslationBlock *tb)
     } */
 }
 
+#ifndef CONFIG_LATX_WOW64_PE
 extern void ir1_optimization(TranslationBlock *tb);
 
 void ir2_opt_push_pop_fix(TranslationBlock *tb, CPUState *cpu, int i)
@@ -754,3 +755,4 @@ void ir2_opt_push_pop_fix(TranslationBlock *tb, CPUState *cpu, int i)
     env->regs[R_ESP] += patch_off;
     tr_fini(false);
 }
+#endif

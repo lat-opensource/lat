@@ -64,7 +64,9 @@ static inline int rcu_gp_ongoing(unsigned long *ctr)
 /* Written to only by each individual reader. Read by both the reader and the
  * writers.
  */
+#ifndef CONFIG_LATX_WOW64_PE
 __thread struct rcu_reader_data rcu_reader;
+#endif
 
 /* Protected by rcu_registry_lock.  */
 typedef QLIST_HEAD(, rcu_reader_data) ThreadList;
@@ -354,7 +356,12 @@ void drain_call_rcu(void)
 
 }
 
+#ifdef CONFIG_LATX_WOW64_PE
+bool *lat_wow64_pe_rcu_registered(void);
+#define rcu_registered (*lat_wow64_pe_rcu_registered())
+#else
 static __thread bool rcu_registered;
+#endif
 
 #ifdef CONFIG_LATX_WOW64
 static void rcu_implicit_thread_exit(void *unused)
@@ -393,6 +400,16 @@ void rcu_unregister_thread(void)
     rcu_registered = false;
     qemu_mutex_unlock(&rcu_registry_lock);
 }
+
+#ifdef CONFIG_LATX_WOW64_PE
+void lat_wow64_pe_remove_rcu_reader(struct rcu_reader_data *reader)
+{
+    /* The CPU is parked outside cpu_exec and can no longer use the registry. */
+    qemu_mutex_lock(&rcu_registry_lock);
+    QLIST_REMOVE(reader, node);
+    qemu_mutex_unlock(&rcu_registry_lock);
+}
+#endif
 
 static void rcu_start_call_thread(void)
 {
@@ -524,7 +541,11 @@ void rcu_raw_clone_child(void)
 }
 #endif
 
+#ifdef CONFIG_LATX_WOW64_PE
+void lat_wow64_pe_rcu_init(void)
+#else
 static void __attribute__((__constructor__)) rcu_init(void)
+#endif
 {
     smp_mb_global_init();
 #ifdef CONFIG_POSIX

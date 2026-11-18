@@ -1668,7 +1668,11 @@ typedef struct CPUX86State {
 
     unsigned nr_dies;
 #ifdef CONFIG_LATX
+#ifdef CONFIG_LATX_WOW64_PE
+    void *puc;
+#elif !defined(CONFIG_WIN32)
     ucontext_t *puc;
+#endif
     uintptr_t insn_save[2];
     target_ulong kzt_guest_stack_base;
 #ifdef CONFIG_LATX_KZT

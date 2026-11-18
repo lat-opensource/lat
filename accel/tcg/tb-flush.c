@@ -16,7 +16,7 @@
 #include "sysemu/tcg.h"
 #include "accel/tcg/internal.h"
 
-#ifdef CONFIG_USER_ONLY
+#if defined(CONFIG_USER_ONLY) && !defined(CONFIG_LATX_WOW64_PE)
 #include "qemu.h"
 #endif
 
@@ -68,7 +68,7 @@ void do_tb_flush(CPUState *cpu, run_on_cpu_data tb_flush_count)
     }
     did_flush = true;
 
-#ifdef CONFIG_LATX
+#if defined(CONFIG_LATX) && !defined(CONFIG_LATX_WOW64_PE)
     if (option_smc_reload) {
         smc_reload_tree_clear();
     }
