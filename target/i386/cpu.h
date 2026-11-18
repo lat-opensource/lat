@@ -1419,6 +1419,9 @@ typedef struct CPUX86State {
     /* for debug,can be removed later */
     uint64_t mips_regs[32];
     int fcsr;
+#if defined(CONFIG_LATX_WOW64) || defined(CONFIG_LATX_WOW64_PE)
+    uint32_t wow64_x87_fcsr;
+#endif
     /* TODO: why? in new qemu has no next_eip member */
     target_ulong exception_next_eip;
     void *tb_jmp_cache_ptr; /* struct TranslationBlock ** */

@@ -26,6 +26,9 @@
 #ifdef CONFIG_LATX_WOW64
 #include "qemu.h"
 #endif
+#if defined(CONFIG_LATX_WOW64) || defined(CONFIG_LATX_WOW64_PE)
+#include "../wow64-x86-state.h"
+#endif
 
 #ifdef _WIN32
 /* Windows headers use IN and OUT as annotation macros. */
@@ -2237,7 +2240,7 @@ typedef enum SoftFPURegionClass {
     SOFTFPU_REGION_TRANSPARENT,
 } SoftFPURegionClass;
 
-static bool is_softfpu_x87_insn(IR1_OPCODE opcode)
+static bool is_x87_insn(IR1_OPCODE opcode)
 {
     switch (opcode) {
     case dt_X86_INS_WAIT:
@@ -2553,6 +2556,18 @@ int tr_ir2_generate(struct TranslationBlock *tb)
     bool reduce_proepo = false;
     bool x87_fcsr_active = false;
     int softfpu_region_end = -1;
+#if defined(CONFIG_LATX_WOW64) || defined(CONFIG_LATX_WOW64_PE)
+    const bool split_fcsr = lat_wow64_split_native_fcsr();
+    void (*x87_enter)(void) = split_fcsr ? gen_wow64_x87_fcsr_enter
+                                        : gen_softfpu_x87_fcsr_enter;
+    void (*x87_exit)(void) = split_fcsr ? gen_wow64_x87_fcsr_exit
+                                       : gen_softfpu_x87_fcsr_exit;
+#else
+    const bool split_fcsr = false;
+    void (*x87_enter)(void) = gen_softfpu_x87_fcsr_enter;
+    void (*x87_exit)(void) = gen_softfpu_x87_fcsr_exit;
+#endif
+
     lsenv->tr_data->softfpu_region_active = false;
 
 #ifdef CONFIG_LATX_MONITOR_SHARED_MEM
@@ -2664,13 +2679,18 @@ int tr_ir2_generate(struct TranslationBlock *tb)
         }
 #endif
 
-        bool x87_insn = option_softfpu &&
-                         is_softfpu_x87_insn(ir1_opcode(pir1));
+        IR1_OPCODE opcode = ir1_opcode(pir1);
+        bool x87_insn = (option_softfpu || split_fcsr) && is_x87_insn(opcode);
+        if (split_fcsr) {
+            x87_insn |= opcode == dt_X86_INS_XSAVE || opcode == dt_X86_INS_XSAVE64 ||
+                        opcode == dt_X86_INS_XSAVEOPT || opcode == dt_X86_INS_XSAVEOPT64 ||
+                        opcode == dt_X86_INS_XRSTOR || opcode == dt_X86_INS_XRSTOR64;
+        }
         if (x87_insn && !x87_fcsr_active) {
-            gen_softfpu_x87_fcsr_enter();
+            x87_enter();
             x87_fcsr_active = true;
         } else if (!x87_insn && x87_fcsr_active) {
-            gen_softfpu_x87_fcsr_exit();
+            x87_exit();
             x87_fcsr_active = false;
         }
 
@@ -2719,7 +2739,7 @@ int tr_ir2_generate(struct TranslationBlock *tb)
     emit_ymmh_zeros();
     lsenv->tr_data->ymmh_zero_pending = 0;
     if (x87_fcsr_active) {
-        gen_softfpu_x87_fcsr_exit();
+        x87_exit();
     }
 #ifdef CONFIG_LATX_DEBUG
     if (option_dump_ir1) {
@@ -4530,6 +4550,12 @@ static void tr_gen_call_to_helper_prologue(int use_fp)
                              options_to_save());
 #ifdef TARGET_X86_64
     tr_save_x64_8_registers_to_env(GPR_USEDEF_TO_SAVE >> 8, XMM_USEDEF_TO_SAVE >> 8);
+#endif
+#if defined(CONFIG_LATX_WOW64) || defined(CONFIG_LATX_WOW64_PE)
+    if (lat_wow64_split_native_fcsr()) {
+        /* A helper can raise a guest exception without a host signal frame. */
+        tr_save_fcsr_to_env();
+    }
 #endif
     if (use_fp) {
         IR2_OPND func_addr_opnd = ra_alloc_dbt_arg2();

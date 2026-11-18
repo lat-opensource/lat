@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <dlfcn.h>
 #include <errno.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <pthread.h>
 #include <signal.h>
@@ -700,12 +701,13 @@ int main(int argc, char **argv)
             0xf3, 0x0f, 0x5e, 0xc1,       /* divss xmm0,xmm1 */
             0xcd, 0x80,
         };
+        const char *softfpu = getenv("LATX_SOFTFPU");
+        bool use_softfpu = softfpu && (!strcmp(softfpu, "1") || !strcmp(softfpu, "2"));
         for (unsigned int simd = 0; simd < 2; ++simd) {
             ok(api->get_context(thread, &context));
             memset(context.fxsave, 0, sizeof(context.fxsave));
-            /* Matching masks isolate fault conversion from the existing
-             * translator limitation with independent x87/SSE controls. */
-            context.fxsave[0] = 0x7b;
+            /* The default translator must honor MXCSR with x87 masked. */
+            context.fxsave[0] = simd && !use_softfpu ? 0x7f : 0x7b;
             context.fxsave[1] = 3;
             context.fxsave[24] = 0x80;
             context.fxsave[25] = simd ? 0x1d : 0x1f;

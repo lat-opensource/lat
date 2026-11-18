@@ -15,6 +15,17 @@ static uint32_t segment_flags(bool code)
     return flags | (code ? DESC_CS_MASK | DESC_R_MASK : DESC_W_MASK);
 }
 
+static uint32_t sse_fcsr(uint32_t mxcsr)
+{
+    static const uint8_t rounding_map[4] = { 0, 3, 2, 1 };
+    uint32_t masks = mxcsr >> 7;
+    uint32_t enables = ((masks >> 5) & 1) | ((masks >> 3) & 2) |
+                       ((masks >> 1) & 4) | ((masks << 1) & 8) |
+                       ((masks << 4) & 16);
+
+    return (rounding_map[(mxcsr >> 13) & 3] << 8) | (enables ^ 0x1f);
+}
+
 static void set_segment_descriptor(CPUX86State *env, uint16_t selector,
                                    uint32_t base)
 {
@@ -70,7 +81,10 @@ void lat_wow64_context_to_cpu(CPUX86State *env,
     env->fpip = ldl_le_p(fxsave + 8);
     env->fpdp = ldl_le_p(fxsave + 16);
     cpu_x86_sync_latx_fcsr(env);
-    if (latx_softfpu_sse_sync_enabled()) {
+    if (lat_wow64_split_native_fcsr()) {
+        env->wow64_x87_fcsr = env->fcsr;
+        env->fcsr = sse_fcsr(env->mxcsr);
+    } else if (latx_softfpu_sse_sync_enabled()) {
         /* SoftFloat owns x87 flags. Native FCSR carries only SSE flags. */
         env->fcsr &= ~(0x1fu << 16);
     }
@@ -121,7 +135,22 @@ void lat_wow64_context_from_cpu(LatWow64Context *context,
         /* An unmasked fault can set Cause without setting sticky Flags. */
         fcsr |= (fcsr >> 8) & (0x1fu << 16);
     }
-    if (trap == 19) {
+    if (lat_wow64_split_native_fcsr()) {
+        bool x87_live = env->wow64_x87_fcsr & LAT_WOW64_X87_FCSR_LIVE;
+        uint32_t x87 = x87_live ? fcsr : env->wow64_x87_fcsr;
+
+        env->fpus |= lat_wow64_fcsr_exceptions(x87);
+        if (trap == EXCP10_COPR && float_status) {
+            env->fpus |= float_status | 0x8080; /* x87 ES and B. */
+            env->fpip = env->eip;
+        }
+        if (!x87_live && trap != EXCP10_COPR) {
+            env->mxcsr |= lat_wow64_fcsr_exceptions(fcsr);
+        }
+        if (trap == 19) {
+            env->mxcsr |= float_status;
+        }
+    } else if (trap == 19) {
         env->mxcsr |= lat_wow64_fcsr_exceptions(fcsr) | float_status;
     } else if (!option_softfpu) {
         env->fpus |= lat_wow64_fcsr_exceptions(fcsr) | float_status;
@@ -150,6 +179,9 @@ int lat_wow64_float_trap(CPUX86State *env, int trap)
 {
     if (trap != EXCP10_COPR) {
         return trap;
+    }
+    if (lat_wow64_split_native_fcsr()) {
+        return env->wow64_x87_fcsr & LAT_WOW64_X87_FCSR_LIVE ? EXCP10_COPR : 19;
     }
     mmap_lock();
     for (unsigned int i = 0; i < 15; ++i) {

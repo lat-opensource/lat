@@ -9,6 +9,9 @@
 #include "lsenv.h"
 #include "latx-options.h"
 #include "translate.h"
+#if defined(CONFIG_LATX_WOW64) || defined(CONFIG_LATX_WOW64_PE)
+#include "../wow64-x86-state.h"
+#endif
 
 /*
  * Map LoongArch FCSR0 sticky Flags V/Z/O/U/I to the common x86
@@ -223,6 +226,76 @@ void update_fcsr_rm(IR2_OPND control_word, IR2_OPND fcsr)
     ra_free_temp(temp_cw);
 }
 
+#if defined(CONFIG_LATX_WOW64) || defined(CONFIG_LATX_WOW64_PE)
+/* Keep LBT TOP mode when switching the native floating-point environment. */
+static void move_fcsr_preserving_top(IR2_OPND value, IR2_OPND scratch)
+{
+    la_movfcsr2gr(scratch, fcsr_ir2_opnd);
+    la_bstrpick_w(scratch, scratch, 6, 6);
+    la_bstrins_w(value, scratch, 6, 6);
+    la_movgr2fcsr(fcsr_ir2_opnd, value);
+}
+
+static void gen_wow64_sse_fcsr(void)
+{
+    IR2_OPND mxcsr = ra_alloc_itemp();
+    IR2_OPND fcsr = ra_alloc_itemp();
+    IR2_OPND temp = ra_alloc_itemp();
+
+    la_ld_wu(mxcsr, env_ir2_opnd, lsenv_offset_of_mxcsr(lsenv));
+    /* MXCSR PM/UM/OM/ZM/IM masks become FCSR I/U/O/Z/V enables. */
+    la_bitrev_w(fcsr, mxcsr);
+    la_bstrpick_w(fcsr, fcsr, 22, 19);
+    la_bstrpick_w(temp, mxcsr, 7, 7);
+    la_bstrins_w(fcsr, temp, FCSR_OFF_EN_V, FCSR_OFF_EN_V);
+    la_xori(fcsr, fcsr, 0x1f);
+    la_srli_w(temp, mxcsr, 3); /* Align MXCSR.RC with x87 FCW.RC. */
+    update_fcsr_rm(temp, fcsr);
+    move_fcsr_preserving_top(fcsr, temp);
+    ra_free_temp(temp);
+    ra_free_temp(fcsr);
+    ra_free_temp(mxcsr);
+}
+
+void gen_wow64_x87_fcsr_enter(void)
+{
+    const int offset = offsetof(CPUX86State, wow64_x87_fcsr);
+    IR2_OPND fcsr = ra_alloc_itemp();
+    IR2_OPND temp = ra_alloc_itemp();
+
+    submit_sse_flags_to_mxcsr(fcsr);
+    la_ld_w(fcsr, env_ir2_opnd, offset);
+    move_fcsr_preserving_top(fcsr, temp);
+    li_wu(temp, LAT_WOW64_X87_FCSR_LIVE);
+    la_st_w(temp, env_ir2_opnd, offset);
+    ra_free_temp(temp);
+    ra_free_temp(fcsr);
+}
+
+void gen_wow64_x87_fcsr_exit(void)
+{
+    IR2_OPND fcsr = ra_alloc_itemp();
+
+    la_movfcsr2gr(fcsr, fcsr_ir2_opnd);
+    /* Cause is transient. Keep the control bits and sticky flags. */
+    la_bstrpick_w(fcsr, fcsr, FCSR_OFF_FLAGS_V, 0);
+    la_st_w(fcsr, env_ir2_opnd, offsetof(CPUX86State, wow64_x87_fcsr));
+    ra_free_temp(fcsr);
+    gen_wow64_sse_fcsr();
+}
+
+void gen_wow64_x87_fcsr_restore(void)
+{
+    IR2_OPND value = ra_alloc_itemp();
+
+    la_ld_h(value, env_ir2_opnd, lsenv_offset_of_control_word(lsenv));
+    update_fcsr_by_cw(value);
+    la_ld_h(value, env_ir2_opnd, lsenv_offset_of_status_word(lsenv));
+    update_fcsr_by_sw(value);
+    ra_free_temp(value);
+}
+#endif
+
 void gen_softfpu_x87_fcsr_exit(void)
 {
     IR2_OPND mxcsr_opnd = ra_alloc_itemp();
@@ -340,7 +413,11 @@ bool translate_stmxcsr(IR1_INST *pir1)
     /* 1. load the value of the mxcsr register state from env */
     IR2_OPND mxcsr_opnd = ra_alloc_itemp();
 
-    if (latx_softfpu_sse_sync_enabled()) {
+    if (latx_softfpu_sse_sync_enabled()
+#if defined(CONFIG_LATX_WOW64) || defined(CONFIG_LATX_WOW64_PE)
+        || lat_wow64_split_native_fcsr()
+#endif
+    ) {
         /* Merge the pending SSE native FCSR flags into env->mxcsr, then
          * clear the native sticky flags so they are not re-merged. */
         submit_sse_flags_to_mxcsr(mxcsr_opnd);
@@ -383,6 +460,11 @@ bool translate_ldmxcsr(IR1_INST *pir1)
     if (option_softfpu) {
         gen_softfpu_x87_fcsr_exit();
     }
+#if defined(CONFIG_LATX_WOW64) || defined(CONFIG_LATX_WOW64_PE)
+    if (lat_wow64_split_native_fcsr()) {
+        gen_wow64_sse_fcsr();
+    }
+#endif
 
     return true;
 }
@@ -1068,6 +1150,12 @@ bool translate_fninit(IR1_INST *pir1) {
     /* RM = 00 */
     li_wu(temp, FCSR_RM_CLEAR);
     la_and(fcsr0, fcsr0, temp);
+#if defined(CONFIG_LATX_WOW64) || defined(CONFIG_LATX_WOW64_PE)
+    if (lat_wow64_split_native_fcsr()) {
+        la_bstrins_w(fcsr0, zero_ir2_opnd, FCSR_OFF_FLAGS_V, FCSR_OFF_FLAGS_I);
+        la_bstrins_w(fcsr0, zero_ir2_opnd, FCSR_OFF_CAUSE_V, FCSR_OFF_CAUSE_I);
+    }
+#endif
     la_movgr2fcsr(fcsr_ir2_opnd, fcsr0);
 
     ra_free_temp(temp);
