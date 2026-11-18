@@ -24,3 +24,18 @@ make -j -C latxbuild/wow64 wowlatx.dll WINE_SRC=/path/to/hangover/wine \
 The DLL and generated build files go in `OUT`, which defaults to
 `build-wowlatx` under the LATX root. Set `WINCC` to the full path of the
 Loong64 MinGW Clang driver if the tools are outside `PATH`.
+
+## Build the Unix-mode adapter
+
+Use the `unix` target with the same Wine headers, PE import libraries and
+MinGW compiler. Set `CC` to a LoongArch Linux compiler for the Unix adapter.
+
+```sh
+make -j -C latxbuild/wow64 unix WINE_SRC=/path/to/hangover/wine \
+    WINE_PE_BUILD=/path/to/wine-build OUT=/path/to/build-wowlatx
+```
+
+This produces `wowlatx-unix.dll` and `wowlatx-unix.so` in `OUT`. When using
+separate build hosts, build either file by passing its full output path as
+the target. Build `liblatx-wow64.so` in a [native LATX build](../../docs/wow64.md).
+Hangover installs the three files and selects the mode with `HODLL`.

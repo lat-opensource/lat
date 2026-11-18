@@ -28,6 +28,7 @@ CROSS := $(OUT)/loong64-windows.ini
 PE_IMPORTS := $(WINE_PE_BUILD)/dlls/ntdll/loong64-windows/libntdll.a \
               $(WINE_PE_BUILD)/dlls/wow64/loong64-windows/libwow64.a
 WINEBUILD := $(WINE_PE_BUILD)/tools/winebuild/winebuild
+WINE_INCLUDES := -I$(WINE_SRC)/include -I$(ROOT)/include
 
 # This profile uses the same translator sources as the Linux build. The
 # translator directory contains only the common instruction generators.
@@ -61,6 +62,7 @@ CAPSTONE_OBJS := $(addprefix $(OUT)/obj/,$(CAPSTONE:.c=.o))
 CPU_OBJ := $(OUT)/obj/$(LATX)/wow64-cpu.o
 
 PE_CFLAGS := -O2 -flto -ffunction-sections -fdata-sections
+PE_LDFLAGS := -shared -Wl,--exclude-all-symbols,--gc-sections,--image-base,0x7a400000
 CORE_CPPFLAGS := -DNEED_CPU_H -DNDEBUG -DNOMINMAX -D__USE_MINGW_ANSI_STDIO=1 \
                  -DG_STATIC_COMPILATION -DCONFIG_TARGET=\"config-target.h\" \
                  -I$(HERE) -I$(GEN) -I$(GEN)/include -I$(GEN)/trace -I$(GEN)/qapi \
@@ -73,18 +75,32 @@ CORE_CPPFLAGS := -DNEED_CPU_H -DNDEBUG -DNOMINMAX -D__USE_MINGW_ANSI_STDIO=1 \
 CORE_CFLAGS := $(PE_CFLAGS) -std=gnu11 -Werror=implicit-function-declaration \
                -Werror=incompatible-pointer-types
 
-.PHONY: wowlatx.dll FORCE
+.PHONY: wowlatx.dll unix FORCE
 wowlatx.dll: $(OUT)/wowlatx.dll
+unix: $(OUT)/wowlatx-unix.dll $(OUT)/wowlatx-unix.so
 
 $(OUT)/wowlatx.dll: $(CPU_OBJ) $(CORE_OBJS) $(CAPSTONE_OBJS) $(GLIB_BUILD)/.built $(PE_IMPORTS) $(WINEBUILD)
-	$(WINCC) $(PE_CFLAGS) -shared -Wl,--exclude-all-symbols,--gc-sections,--image-base,0x7a400000 \
+	$(WINCC) $(PE_CFLAGS) $(PE_LDFLAGS) \
 	    -o "$@" $(CPU_OBJ) $(CORE_OBJS) $(CAPSTONE_OBJS) $(GLIB_LIB) $(INTL_LIB) $(PE_IMPORTS) \
 	    -lole32 -lshell32 -luuid -ladvapi32 -luser32 -lws2_32
 	"$(WINEBUILD)" --builtin "$@"
 
 $(CPU_OBJ): $(ROOT)/$(LATX)/wow64-cpu.c $(CROSS)
 	@mkdir -p "$(@D)"
-	$(WINCC) $(PE_CFLAGS) -I$(WINE_SRC)/include -I$(ROOT)/include -MMD -MP -c "$<" -o "$@"
+	$(WINCC) $(PE_CFLAGS) $(WINE_INCLUDES) -MMD -MP -c "$<" -o "$@"
+
+$(OUT)/wowlatx-unix.dll: $(ROOT)/$(LATX)/wow64-cpu.c $(HERE)/Makefile $(HERE)/config-host.h $(PE_IMPORTS) $(WINEBUILD)
+	@mkdir -p "$(@D)"
+	$(WINCC) -fsyntax-only -include "$(HERE)/config-host.h" -x c /dev/null
+	$(WINCC) -O2 -ffunction-sections -fdata-sections $(WINE_INCLUDES) -D__WINESRC__ -DLATX_CPU_UNIX \
+	    $(PE_LDFLAGS) -nostdlib -Wl,--entry,DllMain -MMD -MP -MF "$@.d" \
+	    -o "$@" "$<" $(PE_IMPORTS) -lmsvcrt
+	"$(WINEBUILD)" --builtin "$@"
+
+$(OUT)/wowlatx-unix.so: $(ROOT)/$(LATX)/wow64-unixlib.c $(HERE)/Makefile
+	@mkdir -p "$(@D)"
+	$(CC) $(CPPFLAGS) $(CFLAGS) $(WINE_INCLUDES) -DWINE_UNIX_LIB -fPIC -fvisibility=hidden \
+	    -shared $(LDFLAGS) -Wl,-rpath,'$$ORIGIN' -MMD -MP -MF "$@.d" -o "$@" "$<" -ldl -pthread
 
 $(GEN)/ir2/la-append.c: $(GEN)/.built ;
 
@@ -130,3 +146,4 @@ $(GLIB_BUILD)/.built: $(GLIB_COPY)/.copied $(CROSS) $(HERE)/Makefile
 	touch "$@"
 
 -include $(CPU_OBJ:.o=.d) $(CORE_OBJS:.o=.d) $(CAPSTONE_OBJS:.o=.d)
+-include $(OUT)/wowlatx-unix.dll.d $(OUT)/wowlatx-unix.so.d
