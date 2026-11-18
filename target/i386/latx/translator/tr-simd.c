@@ -2561,6 +2561,164 @@ bool translate_blendvpd(IR1_INST *pir1)
     return true;
 }
 
+/*
+ * Round a normal IEEE value using its sign, exponent and fraction. No
+ * floating-point operation runs here, so neither guest flags nor the host
+ * FCSR need updating. An inexact result can only use this path with imm[3].
+ */
+static void emit_round_fixed_lane(IR2_OPND bits, uint8_t imm, bool is_double,
+                                  IR2_OPND slow)
+{
+    const unsigned mantissa = is_double ? 52 : 23;
+    const unsigned bias = is_double ? 1023 : 127;
+    const unsigned sign_bit = is_double ? 63 : 31;
+    const unsigned max_exp = 2 * bias + 1;
+    const unsigned mode = imm & 3;
+    const bool suppress_inexact = imm & 8;
+    IR2_OPND exp = ra_alloc_itemp();
+    IR2_OPND mask = ra_alloc_itemp();
+    IR2_OPND nonzero_exp = ra_alloc_label();
+    IR2_OPND small = suppress_inexact ? ra_alloc_label() : slow;
+    IR2_OPND done = ra_alloc_label();
+
+    la_bstrpick_d(exp, bits, sign_bit - 1, mantissa);
+    la_bnez(exp, nonzero_exp);
+    /* Signed zero can pass unchanged; subnormals depend on guest DAZ. */
+    la_bstrpick_d(mask, bits, mantissa - 1, 0);
+    la_bnez(mask, slow);
+    la_b(done);
+
+    la_label(nonzero_exp);
+    la_addi_d(mask, exp, -max_exp);
+    la_beqz(mask, slow);             /* Infinity and all NaNs. */
+    la_addi_d(mask, exp, -bias);
+    la_blt(mask, zero_ir2_opnd, small);
+    la_addi_d(mask, zero_ir2_opnd, bias + mantissa);
+    la_sub_d(exp, mask, exp);
+    la_bge(zero_ir2_opnd, exp, done); /* Already integral. */
+
+    la_ori(mask, zero_ir2_opnd, 1);
+    la_sll_d(mask, mask, exp);
+    la_addi_d(mask, mask, -1);
+    if (!suppress_inexact) {
+        la_and(exp, bits, mask);
+        la_bnez(exp, slow);
+    } else {
+        switch (mode) {
+        case 0:
+            /* Add half minus one, plus the parity of the retained value. */
+            la_srl_d(exp, bits, exp);
+            la_andi(exp, exp, 1);
+            la_add_d(bits, bits, exp);
+            la_srli_d(exp, mask, 1);
+            la_add_d(bits, bits, exp);
+            break;
+        case 1:
+        case 2:
+            la_srai_d(exp, bits, 63);
+            if (mode == 2) {
+                la_andn(exp, mask, exp);
+            } else {
+                la_and(exp, exp, mask);
+            }
+            la_add_d(bits, bits, exp);
+            break;
+        default:
+            break;
+        }
+        la_andn(bits, bits, mask);
+    }
+    la_b(done);
+
+    if (suppress_inexact) {
+        IR2_OPND signed_zero = ra_alloc_label();
+
+        la_label(small);            /* 0 < abs(src) < 1. */
+        switch (mode) {
+        case 0:
+            la_bstrpick_d(exp, bits, sign_bit - 1, 0);
+            li_d(mask, (uint64_t)(bias - 1) << mantissa);
+            la_bgeu(mask, exp, signed_zero);
+            break;
+        case 1:
+            la_bge(bits, zero_ir2_opnd, signed_zero);
+            break;
+        case 2:
+            la_blt(bits, zero_ir2_opnd, signed_zero);
+            break;
+        default:
+            la_b(signed_zero);
+            break;
+        }
+        la_bstrins_d(bits, zero_ir2_opnd, sign_bit - 1, 0);
+        li_d(mask, (uint64_t)bias << mantissa);
+        la_or(bits, bits, mask);
+        la_b(done);
+        la_label(signed_zero);
+        la_bstrins_d(bits, zero_ir2_opnd, sign_bit - 1, 0);
+    }
+
+    la_label(done);
+    ra_free_temp(mask);
+    ra_free_temp(exp);
+}
+
+bool can_emit_round_fixed(uint8_t imm, unsigned lanes)
+{
+    TranslationBlock *tb = lsenv->tr_data->curr_tb;
+
+    /*
+     * Bound the per-lane expansion across a block to the lane count of a
+     * full scalar block. IR2 links and host instruction offsets are 16-bit.
+     */
+    return !(imm & 4) && tb->icount * lanes <= MAX_IR1_NUM_PER_TB;
+}
+
+/*
+ * Packed callers pass a temporary result: if any lane branches to slow,
+ * the original instruction must see its unmodified source and destination.
+ * Scalar callers can write the destination after the only lane passes.
+ */
+void emit_round_fixed(IR2_OPND result, IR2_OPND src, uint8_t imm,
+                      bool is_double, unsigned lanes, IR2_OPND slow)
+{
+    IR2_OPND bits = ra_alloc_itemp();
+
+    for (unsigned i = 0; i < lanes; i++) {
+        if (is_double) {
+            if (option_enable_lasx) {
+                la_xvpickve2gr_d(bits, src, i);
+            } else {
+                la_vpickve2gr_d(bits, src, i);
+            }
+        } else {
+            if (option_enable_lasx) {
+                la_xvpickve2gr_w(bits, src, i);
+            } else {
+                la_vpickve2gr_w(bits, src, i);
+            }
+        }
+
+        emit_round_fixed_lane(bits, imm, is_double, slow);
+
+        if (is_double) {
+            if (option_enable_lasx) {
+                la_xvinsgr2vr_d(result, bits, i);
+            } else {
+                la_vinsgr2vr_d(result, bits, i);
+            }
+        } else {
+            if (option_enable_lasx) {
+                la_xvinsgr2vr_w(result, bits, i);
+            } else {
+                la_vinsgr2vr_w(result, bits, i);
+            }
+        }
+    }
+
+    ra_free_temp(bits);
+}
+
 bool translate_roundps(IR1_INST *pir1)
 {
     IR1_OPND *opnd0 = ir1_get_opnd(pir1, 0);
@@ -2571,6 +2729,24 @@ bool translate_roundps(IR1_INST *pir1)
     IR2_OPND src = load_freg128_from_ir1(opnd1);
     IR2_OPND result = option_enable_lasx ? ra_alloc_ftemp() : dest;
     uint8_t imm = ir1_opnd_uimm(opnd2);
+
+    bool use_fast_round = can_emit_round_fixed(imm, 4);
+    IR2_OPND done;
+
+    if (use_fast_round) {
+        IR2_OPND slow = ra_alloc_label();
+        done = ra_alloc_label();
+        IR2_OPND fast_result = ra_alloc_ftemp();
+        emit_round_fixed(fast_result, src, imm, false, 4, slow);
+        if (option_enable_lasx) {
+            store_sse_result128(dest, fast_result);
+        } else {
+            la_vori_b(dest, fast_result, 0);
+        }
+        ra_free_temp(fast_result);
+        la_b(done);
+        la_label(slow);
+    }
 
     IR2_OPND temp = ra_alloc_ftemp();
     IR2_OPND fcsr = ra_alloc_itemp();
@@ -2624,6 +2800,9 @@ bool translate_roundps(IR1_INST *pir1)
     ra_free_temp(fcsr);
     ra_free_temp(fcsr_save);
     ra_free_temp(mxcsr);
+    if (use_fast_round) {
+        la_label(done);
+    }
     return true;
 }
 
@@ -2636,6 +2815,18 @@ bool translate_roundss(IR1_INST *pir1)
     IR2_OPND dest = load_freg128_from_ir1(opnd0);
     IR2_OPND src1 = load_freg128_from_ir1(opnd1);
     uint8_t imm = ir1_opnd_uimm(opnd2);
+
+    bool use_fast_round = can_emit_round_fixed(imm, 1);
+    IR2_OPND done;
+
+    if (use_fast_round) {
+        IR2_OPND slow = ra_alloc_label();
+        done = ra_alloc_label();
+        emit_round_fixed(dest, src1, imm, false, 1, slow);
+        la_b(done);
+        la_label(slow);
+    }
+
     /* SHBR proves only XMM lanes dead, not the physical YMM upper half. */
     bool dead_high = SHBR_ON_32(pir1) && !option_enable_lasx;
 
@@ -2711,6 +2902,9 @@ bool translate_roundss(IR1_INST *pir1)
     ra_free_temp(fcsr);
     ra_free_temp(fcsr_save);
     ra_free_temp(mxcsr);
+    if (use_fast_round) {
+        la_label(done);
+    }
     return true;
 }
 
@@ -2724,6 +2918,24 @@ bool translate_roundpd(IR1_INST *pir1)
     IR2_OPND src = load_freg128_from_ir1(opnd1);
     IR2_OPND result = option_enable_lasx ? ra_alloc_ftemp() : dest;
     uint8_t imm = ir1_opnd_uimm(opnd2);
+
+    bool use_fast_round = can_emit_round_fixed(imm, 2);
+    IR2_OPND done;
+
+    if (use_fast_round) {
+        IR2_OPND slow = ra_alloc_label();
+        done = ra_alloc_label();
+        IR2_OPND fast_result = ra_alloc_ftemp();
+        emit_round_fixed(fast_result, src, imm, true, 2, slow);
+        if (option_enable_lasx) {
+            store_sse_result128(dest, fast_result);
+        } else {
+            la_vori_b(dest, fast_result, 0);
+        }
+        ra_free_temp(fast_result);
+        la_b(done);
+        la_label(slow);
+    }
 
     IR2_OPND temp = ra_alloc_ftemp();
     IR2_OPND fcsr = ra_alloc_itemp();
@@ -2777,6 +2989,9 @@ bool translate_roundpd(IR1_INST *pir1)
     ra_free_temp(fcsr);
     ra_free_temp(fcsr_save);
     ra_free_temp(mxcsr);
+    if (use_fast_round) {
+        la_label(done);
+    }
     return true;
 }
 
@@ -2789,6 +3004,18 @@ bool translate_roundsd(IR1_INST *pir1)
     IR2_OPND dest = load_freg128_from_ir1(opnd0);
     IR2_OPND src1 = load_freg128_from_ir1(opnd1);
     uint8_t imm = ir1_opnd_uimm(opnd2);
+
+    bool use_fast_round = can_emit_round_fixed(imm, 1);
+    IR2_OPND done;
+
+    if (use_fast_round) {
+        IR2_OPND slow = ra_alloc_label();
+        done = ra_alloc_label();
+        emit_round_fixed(dest, src1, imm, true, 1, slow);
+        la_b(done);
+        la_label(slow);
+    }
+
     /* SHBR proves only XMM lanes dead, not the physical YMM upper half. */
     bool dead_high = SHBR_ON_64(pir1) && !option_enable_lasx;
 
@@ -2865,6 +3092,9 @@ bool translate_roundsd(IR1_INST *pir1)
     ra_free_temp(fcsr);
     ra_free_temp(fcsr_save);
     ra_free_temp(mxcsr);
+    if (use_fast_round) {
+        la_label(done);
+    }
     return true;
 }
 
