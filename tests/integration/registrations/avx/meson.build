@@ -1,7 +1,7 @@
 if 'CONFIG_LATX_AVX_OPT' in config_host
   foreach guest : [['x86_64', '64'], ['i386', '32']]
     if guest[0] + '-linux-user' in target_dirs
-      foreach group : ['permissions', 'xsave', 'mask']
+      foreach group : ['permissions', 'xsave', 'mask', 'gather']
         foreach lsx : [false, true]
           latx_integration_tests += [{
             'name': 'test-avx-memory-' + group + '-' + guest[0] + (lsx ? '-lsx' : ''),
@@ -10,10 +10,10 @@ if 'CONFIG_LATX_AVX_OPT' in config_host
                      emulators['latx-' + guest[0]], files('../../avx-memory-access.asm'),
                      '--guest-bits', guest[1], '--group', group] +
                     (lsx ? ['--lsx'] : []),
-            'timeout': lsx ? 300 : 120,
+            'timeout': lsx ? 600 : 120,
           }]
         endforeach
-        if group == 'mask'
+        if group == 'mask' or group == 'gather'
           foreach lsx : [false, true]
             latx_integration_tests += [{
               'name': 'test-avx-memory-' + group + '-' + guest[0] + '-bulk' + (lsx ? '-lsx' : ''),

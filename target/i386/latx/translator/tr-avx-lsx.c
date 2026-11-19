@@ -4769,11 +4769,13 @@ static void translate_avx_gather_lane_lsx(IR2_OPND dest,
                                           int lane,
                                           int index_lane,
                                           bool index64,
-                                          bool value64)
+                                          bool value64,
+                                          int dest_index,
+                                          int mask_index,
+                                          bool high)
 {
     IR2_OPND mask_value = ra_alloc_itemp();
     IR2_OPND index_value = ra_alloc_itemp();
-    IR2_OPND loaded = ra_alloc_itemp();
     IR2_OPND select = ra_alloc_label();
     IR2_OPND done = ra_alloc_label();
 
@@ -4799,6 +4801,10 @@ static void translate_avx_gather_lane_lsx(IR2_OPND dest,
     la_label(select);
     /* x86 gathers access memory only for lanes with a negative mask. */
     adjust_vsib_index(address, base_addr, index_value, scale);
+    ra_free_temp(index_value);
+    ra_free_temp(mask_value);
+    gen_test_page_flag(address, 0, PAGE_READ, value64 ? 8 : 4);
+    IR2_OPND loaded = ra_alloc_itemp();
     if (value64) {
         la_ld_d(loaded, address, 0);
     } else {
@@ -4806,14 +4812,19 @@ static void translate_avx_gather_lane_lsx(IR2_OPND dest,
     }
     if (value64) {
         la_vinsgr2vr_d(dest, loaded, lane);
+        la_vinsgr2vr_d(mask_values, zero_ir2_opnd, lane);
     } else {
         la_vinsgr2vr_w(dest, loaded, lane);
+        la_vinsgr2vr_w(mask_values, zero_ir2_opnd, lane);
+    }
+    if (high) {
+        /* Signal recovery reads LSX YMM upper halves from the shadow. */
+        store_ymm_high128_shadow(dest, dest_index);
+        store_ymm_high128_shadow(mask_values, mask_index);
     }
 
     la_label(done);
     ra_free_temp(loaded);
-    ra_free_temp(index_value);
-    ra_free_temp(mask_value);
 }
 
 static bool translate_avx_gather_lsx(IR1_INST *pir1,
@@ -4834,10 +4845,10 @@ static bool translate_avx_gather_lsx(IR1_INST *pir1,
     IR2_OPND address = ra_alloc_itemp();
     IR2_OPND index_low = ra_alloc_ftemp();
     IR2_OPND index_high_values = { 0 };
-    IR2_OPND mask_low_values = ra_alloc_ftemp();
-    IR2_OPND mask_high_values = { 0 };
     IR2_OPND mask_low_store = ra_alloc_xmm(mask_index);
-    IR2_OPND dest_low = ra_alloc_ftemp();
+    IR2_OPND mask_low_values = mask_low_store;
+    IR2_OPND mask_high_values = { 0 };
+    IR2_OPND dest_low = ra_alloc_xmm(dest_index);
     IR2_OPND dest_high_values = { 0 };
     bool index_ymm;
 
@@ -4859,8 +4870,6 @@ static bool translate_avx_gather_lsx(IR1_INST *pir1,
         la_add(base_addr, base_addr, base);
     }
     la_vori_b(index_low, ra_alloc_xmm(index_index), 0);
-    la_vori_b(mask_low_values, mask_low_store, 0);
-    la_vori_b(dest_low, ra_alloc_xmm(dest_index), 0);
     if (index_ymm) {
         index_high_values = load_ymm_high128_shadow(index_index);
     }
@@ -4907,12 +4916,11 @@ static bool translate_avx_gather_lsx(IR1_INST *pir1,
             translate_avx_gather_lane_lsx(
                 dest, mask_values, index_values, base_addr,
                 address, ir1_opnd_scale(opnd1), lane, index_lane,
-                index64, value64);
+                index64, value64, dest_index, mask_index, high);
         }
     }
 
     /* A successfully completed gather clears every mask element. */
-    la_vori_b(ra_alloc_xmm(dest_index), dest_low, 0);
     la_vxor_v(mask_low_store, mask_low_store, mask_low_store);
     if (ymm) {
         store_ymm_high128_shadow(dest_high_values, dest_index);
@@ -4928,8 +4936,6 @@ static bool translate_avx_gather_lsx(IR1_INST *pir1,
     if (index_ymm) {
         ra_free_temp(index_high_values);
     }
-    ra_free_temp(dest_low);
-    ra_free_temp(mask_low_values);
     ra_free_temp(index_low);
     ra_free_temp(address);
     ra_free_temp(base_addr);
