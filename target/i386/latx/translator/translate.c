@@ -4581,9 +4581,6 @@ void gen_test_page_flag(IR2_OPND mem_opnd, int mem_imm, uint32_t flag,
     }
 
     IR2_OPND label_exit = ra_alloc_label();
-    IR2_OPND label0 = ra_alloc_label();
-    IR2_OPND label1 = ra_alloc_label();
-    IR2_OPND label2 = ra_alloc_label();
     IR2_OPND label_fault = ra_alloc_label();
 #if TARGET_ABI_BITS == 32
     IR2_OPND label_check_end = ra_alloc_label();
@@ -4696,37 +4693,55 @@ void gen_test_page_flag(IR2_OPND mem_opnd, int mem_imm, uint32_t flag,
     } else
 #endif
     {
-        aot_load_host_addr(itemp0, (ADDR) (&pageflags_root),
-                           LOAD_PAGEFLAGS_ROOT, 0);
-        la_addi_d(itemp0, itemp0,
-                 offsetof(IntervalTreeRoot, rb_root) +
-                 offsetof(RBRoot, rb_node));
-        la_ld_d(itemp0, itemp0, 0);
-        la_beq(itemp0, zero_ir2_opnd, label_exit);
+        for (int end = 0; end < (mem_size > 1 ? 2 : 1); ++end) {
+            IR2_OPND label0 = ra_alloc_label();
+            IR2_OPND label1 = ra_alloc_label();
+            IR2_OPND label2 = ra_alloc_label();
+            IR2_OPND next = ra_alloc_label();
 
-        la_label(label0);
-        la_ld_d(itemp1, itemp0, 0x10);
-        la_beq(itemp1, zero_ir2_opnd, label1);
-        la_ld_d(itemp2, itemp1, 0x28);
-        la_bltu(itemp2, mem_addr, label1);
-        la_mov64(itemp0, itemp1);
-        la_b(label0);
+            if (end) {
+                la_addi_d(itemp0, mem_addr, mem_size - 1);
+                la_xor(itemp1, mem_addr, itemp0);
+                la_srli_d(itemp1, itemp1, TARGET_PAGE_BITS);
+                la_beq(itemp1, zero_ir2_opnd, label_exit);
+                /* Report the first byte of the inaccessible final page. */
+                la_bstrins_d(itemp0, zero_ir2_opnd, TARGET_PAGE_BITS - 1, 0);
+                la_mov64(mem_addr, itemp0);
+            }
+            aot_load_host_addr(itemp0, (ADDR) (&pageflags_root),
+                               LOAD_PAGEFLAGS_ROOT, 0);
+            la_addi_d(itemp0, itemp0,
+                     offsetof(IntervalTreeRoot, rb_root) +
+                     offsetof(RBRoot, rb_node));
+            la_ld_d(itemp0, itemp0, 0);
+            la_beq(itemp0, zero_ir2_opnd, next);
 
-        la_label(label1);
-        la_ld_d(itemp1, itemp0, 0x18);
-        la_bltu(mem_addr, itemp1, label_exit);
-        la_ld_d(itemp1, itemp0, 0x20);
-        la_bgeu(itemp1, mem_addr, label2);
-        la_ld_d(itemp0, itemp0, 0x8);
-        la_beq(itemp0, zero_ir2_opnd, label_exit);
-        la_ld_d(itemp1, itemp0, 0x28);
-        la_bgeu(itemp1, mem_addr, label0);
+            la_label(label0);
+            la_ld_d(itemp1, itemp0, 0x10);
+            la_beq(itemp1, zero_ir2_opnd, label1);
+            la_ld_d(itemp2, itemp1, 0x28);
+            la_bltu(itemp2, mem_addr, label1);
+            la_mov64(itemp0, itemp1);
+            la_b(label0);
+
+            la_label(label1);
+            la_ld_d(itemp1, itemp0, 0x18);
+            la_bltu(mem_addr, itemp1, next);
+            la_ld_d(itemp1, itemp0, 0x20);
+            la_bgeu(itemp1, mem_addr, label2);
+            la_ld_d(itemp0, itemp0, 0x8);
+            la_beq(itemp0, zero_ir2_opnd, next);
+            la_ld_d(itemp1, itemp0, 0x28);
+            la_bgeu(itemp1, mem_addr, label0);
+            la_b(next);
+
+            la_label(label2);
+            la_ld_w(itemp0, itemp0, 0x30);
+            la_andi(itemp0, itemp0, flag & 0xff);
+            la_beq(itemp0, zero_ir2_opnd, label_fault);
+            la_label(next);
+        }
         la_b(label_exit);
-
-        la_label(label2);
-        la_ld_w(itemp0, itemp0, 0x30);
-        la_andi(itemp0, itemp0, flag & 0xff);
-        la_bne(itemp0, zero_ir2_opnd, label_exit);
     }
 
     la_label(label_fault);

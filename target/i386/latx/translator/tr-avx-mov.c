@@ -324,7 +324,9 @@ bool translate_vmovss(IR1_INST *pir1)
     } else if (ir1_opnd_is_mem(opnd0) && ir1_opnd_is_xmm(opnd1)) {
         int little_disp;
         IR2_OPND mem_opnd = convert_mem(opnd0, &little_disp);
+        gen_test_page_flag(mem_opnd, little_disp, PAGE_WRITE | PAGE_WRITE_ORG, 4);
         la_fst_s(src1, mem_opnd, little_disp);
+        ra_free_mem_temp(mem_opnd);
     } else {
         lsassert(0);
     }
