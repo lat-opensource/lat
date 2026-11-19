@@ -48,6 +48,9 @@ static inline bool ir1_can_pattern(IR1_INST *pir1)
     case WRAP(CDQ):
     case WRAP(TEST):
     case WRAP(UCOMISD):
+#ifdef CONFIG_LATX_AVX_OPT
+    case WRAP(VUCOMISD):
+#endif
 #ifdef CONFIG_LATX_SMC_OPT
     case WRAP(MOVAPS):
     case WRAP(MOVDQA):
@@ -101,6 +104,9 @@ static inline bool ir1_is_pattern_head(IR1_INST *pir1)
     case WRAP(CDQ):
     case WRAP(TEST):
     case WRAP(UCOMISD):
+#ifdef CONFIG_LATX_AVX_OPT
+    case WRAP(VUCOMISD):
+#endif
 #ifdef CONFIG_LATX_SMC_OPT
     case WRAP(MOVAPS):
     case WRAP(MOVDQA):
@@ -333,6 +339,9 @@ static int inst_pattern(TranslationBlock *tb,
             return 0;
         }
     case WRAP(UCOMISD):
+#ifdef CONFIG_LATX_AVX_OPT
+    case WRAP(VUCOMISD):
+#endif
         SCAN_CHECK(scan, 0);
         instptn_check_ucomisd_seta_0();
 
@@ -443,6 +452,34 @@ bool insts_pattern_scan_jcc_end(TranslationBlock *tb, IR1_INST *pir1, int pir1_i
     IR1_OPND *opnd0 = NULL;
     IR1_OPND *opnd1 = NULL;
     switch (ir1_opcode(pir1)) {
+    case WRAP(PTEST):
+#ifdef CONFIG_LATX_AVX_OPT
+    case WRAP(VPTEST):
+    case WRAP(VTESTPS):
+    case WRAP(VTESTPD):
+#endif
+        SCAN_CHECK(scan, 0);
+        ir1_jcc = SCAN_IR1(tb, scan, 0);
+        if ((ir1_opcode(pir1) != WRAP(PTEST) && !option_enable_lasx) ||
+            pir1_index + 1 != SCAN_IDX(scan, 0)) {
+            return false;
+        }
+        switch (ir1_opcode(ir1_jcc)) {
+        case WRAP(JE):
+        case WRAP(JNE):
+        case WRAP(JB):
+        case WRAP(JAE):
+        case WRAP(JBE):
+        case WRAP(JA):
+            instptn_check_test_jcc_0();
+            pir1->instptn.opc = INSTPTN_OPC_TEST_JCC;
+            pir1->instptn.next = ir1_jcc;
+            ir1_jcc->instptn.opc = INSTPTN_OPC_NOP;
+            break;
+        default:
+            break;
+        }
+        return false;
         case WRAP(CMP):
         SCAN_CHECK(scan, 0);
         ir1_jcc = SCAN_IR1(tb, scan, 0);

@@ -595,6 +595,8 @@ TRANS_FUNC_DEF(pmovzxwq);
 TRANS_FUNC_DEF(pmovsxdq);
 TRANS_FUNC_DEF(pmovzxdq);
 TRANS_FUNC_DEF(ptest);
+void generate_vector_test_flags(IR1_INST *, IR2_OPND, IR2_OPND, IR2_OPND,
+                                uint8_t);
 TRANS_FUNC_DEF(pcmpeqq);
 TRANS_FUNC_DEF(packusdw);
 TRANS_FUNC_DEF(movntdqa);
