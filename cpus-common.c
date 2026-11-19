@@ -112,7 +112,9 @@ CPUState *qemu_get_cpu(int index)
 }
 
 /* current CPU in the current thread. It is only valid inside cpu_exec() */
+#ifndef CONFIG_LATX_WOW64_PE
 __thread CPUState *current_cpu;
+#endif
 
 struct qemu_work_item {
     QSIMPLEQ_ENTRY(qemu_work_item) node;

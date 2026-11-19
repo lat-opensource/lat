@@ -4,8 +4,12 @@
  * SPDX-License-Identifier: GPL-2.0-only
  */
 
-#include "ir2.h"
-#include "translate.h"
+#ifdef _WIN32
+#include <assert.h>
+#define lsassert(cond) assert(cond)
+#else
+#include "common.h"
+#endif
 #include "ir2-la-assemble.h"
 
 void set_operand_into_instruction(GM_OPERAND_TYPE operand_type,
@@ -93,17 +97,18 @@ GM_LA_OPCODE_FORMAT lisa_format_table[] = {
  */
 uint32 ir2_assemble(const IR2_INST *ir2)
 {
-    if (ir2_opcode(ir2) == LISA_CODE) {
-        lsassert(ir2_opnd_is_pseudo(&ir2->_opnd[0]));
+    IR2_OPCODE opcode = ir2->_opcode;
+
+    if (opcode == LISA_CODE) {
+        lsassert(ir2->_opnd[0]._type == IR2_OPND_PSEUDO);
         return ir2->_opnd[0]._val;
     }
-    lsassert(ir2_opcode(ir2) > LISA_PSEUDO_END);
-    GM_LA_OPCODE_FORMAT format = lisa_format_table[ir2_opcode(ir2) - LISA_INVALID];
-    lsassert(format.type == ir2_opcode(ir2));
+    lsassert(opcode > LISA_PSEUDO_END);
+    GM_LA_OPCODE_FORMAT format = lisa_format_table[opcode - LISA_INVALID];
+    lsassert(format.type == opcode);
     lsassert(format.opcode != 0);
 
     uint32_t ins = format.opcode;
-    lsassertm(ins, "Cannot use a pseudo opcode!");
     for (int i = 0; i < 4; i++) {
         GM_OPERAND_TYPE opnd_type = format.opnd[i];
         if (opnd_type == OPD_INVALID)
@@ -119,8 +124,8 @@ uint32 ir2_assemble(const IR2_INST *ir2)
         int val = ir2->_opnd[i]._val;
         int mask = (1 << bit_len) - 1;
 
-        lsassert(!(ir2_opnd_is_pseudo(&ir2->_opnd[i]) ||
-                   ir2_opnd_is_data(&ir2->_opnd[i])));
+        lsassert(ir2->_opnd[i]._type != IR2_OPND_PSEUDO &&
+                 ir2->_opnd[i]._type != IR2_OPND_DATA);
 
         ins |= (val & mask) << start;
 

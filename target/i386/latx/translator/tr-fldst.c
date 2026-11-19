@@ -217,9 +217,8 @@ bool translate_fild(IR1_INST *pir1)
         lsassert(0);
     }
 
-    tr_fpu_push();
-
-    IR2_OPND dest_opnd = ra_alloc_st(0);
+    /* Match FLD: do not commit the push before a faulting load/conversion. */
+    IR2_OPND dest_opnd = ra_alloc_st(7);
 
     IR1_OPND *opnd0 = ir1_get_opnd(pir1, index);
     load_freg_from_ir1_2(dest_opnd, opnd0, IS_INTEGER);
@@ -229,6 +228,7 @@ bool translate_fild(IR1_INST *pir1)
         la_ffint_d_w(dest_opnd, dest_opnd);
     }
 
+    tr_fpu_push();
     return true;
 }
 

@@ -7,6 +7,8 @@
 #ifndef __LA_IR2_H_
 #define __LA_IR2_H_
 
+#include "latx-types.h"
+
 //0-byte 1-half 2-word 3-double
 #define VLDI_IMM_TYPE0(mode, imm) ((mode&0x3)<<10|(imm&0x3ff))
 //vseti
@@ -137,4 +139,16 @@ typedef struct IR2_OPND {
         };
     };
 } IR2_OPND;
+
+typedef struct IR2_INST {
+    int16 _opcode;
+    int16 _id;
+    int16 _prev;
+    int16 _next;
+    int op_count;
+    IR2_OPND _opnd[4]; /*LA has 4 opnds*/
+} IR2_INST;
+
+uint32 ir2_assemble(const IR2_INST *);
+
 #endif

@@ -54,6 +54,9 @@ extern struct elfheader_s * elf_header;
 #include "sysemu/replay.h"
 #include "internal.h"
 #include "qemu/cacheflush.h"
+#ifdef CONFIG_LATX_WOW64
+#include "qemu.h"
+#endif
 #ifdef CONFIG_LATX_AOT
 #include "aot_recover_tb.h"
 #endif
@@ -216,7 +219,13 @@ cpu_tb_exec(CPUState *cpu, TranslationBlock *itb, int *tb_exit)
         qemu_log_mask_and_addr(CPU_LOG_EXEC, itb->pc,
                "pid(%d) - tid(%" PRIuPTR ") Trace cpu%d: %p [ "
                TARGET_FMT_lx "/%#x] %s\n",
-               getpid(), (uintptr_t)pthread_self(), cpu->cpu_index, itb->tc.ptr,
+               getpid(),
+#ifdef CONFIG_LATX_WOW64_PE
+               (uintptr_t)qemu_get_thread_id(),
+#else
+               (uintptr_t)pthread_self(),
+#endif
+               cpu->cpu_index, itb->tc.ptr,
                itb->pc, itb->flags, lookup_symbol(itb->pc));
 #endif
     }
@@ -269,7 +278,21 @@ cpu_tb_exec(CPUState *cpu, TranslationBlock *itb, int *tb_exit)
 #ifdef CONFIG_LATX
 
     env->fpu_clobber = false;
+#ifdef CONFIG_LATX_WOW64
+    if (lat_wow64_provider_plugin_active) {
+        lat_wow64_provider_tb_enter(itb);
+        if (qatomic_read(&cpu->exit_request)) {
+            lat_wow64_provider_tb_enter(NULL);
+            if (env->insn_save[0]) link_indirect_jmp(env);
+            cpu->exception_index = EXCP_INTERRUPT;
+            cpu_loop_exit(cpu);
+        }
+    }
+#endif
     ret = tcg_qemu_tb_exec(env, tb_ptr);
+#ifdef CONFIG_LATX_WOW64
+    if (lat_wow64_provider_plugin_active) lat_wow64_provider_tb_enter(NULL);
+#endif
 
     int tbexit = ret & TB_EXIT_MASK;
     uintptr_t tc_ptr = ret & ~TB_EXIT_MASK;
@@ -819,6 +842,12 @@ static inline TranslationBlock *tb_find(CPUState *cpu,
         mmap_unlock();
         return NULL;
     }
+#ifdef CONFIG_LATX_WOW64_PE
+        if (tb_page_addr0(tb) == -1) {
+            mmap_unlock();
+            return tb;
+        }
+#endif
         /* We add the TB in the virtual pc hash table for the fast lookup */
         int hash_value = tb_jmp_cache_hash_func(pc);
 #ifdef CONFIG_LATX_FAST_JMPCACHE
@@ -1118,6 +1147,11 @@ static inline void cpu_loop_exec_tb(CPUState *cpu, TranslationBlock *tb,
     trace_exec_tb(tb, tb->pc);
     tb = cpu_tb_exec(cpu, tb, tb_exit);
     if (*tb_exit != TB_EXIT_REQUESTED) {
+#ifdef CONFIG_LATX_WOW64_PE
+        if (tb && tb_page_addr0(tb) == -1) {
+            tb = NULL;
+        }
+#endif
         *last_tb = tb;
         return;
     }
@@ -1209,6 +1243,12 @@ int cpu_exec(CPUState *cpu)
 
 #ifdef CONFIG_LATX
         CPUArchState *env = cpu->env_ptr;
+#ifdef CONFIG_LATX_WOW64
+        if (lat_wow64_provider_plugin_active) {
+            lat_wow64_provider_tb_enter(NULL);
+            if (env->insn_save[0]) link_indirect_jmp(env);
+        }
+#endif
 
         /*
          * Some exits bypass the translated cleanup and siglongjmp restores a

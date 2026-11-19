@@ -18,6 +18,9 @@
  */
 
 #include "qemu/osdep.h"
+#ifdef CONFIG_LATX_WOW64_PE
+#include <ntsecapi.h>
+#endif
 #include "cpu.h"
 #include "exec/exec-all.h"
 #include "qemu/host-utils.h"
@@ -476,13 +479,18 @@ void helper_cr4_testbit(CPUX86State *env, uint32_t bit)
 
 target_ulong HELPER(rdrand)(CPUX86State *env)
 {
-    Error *err = NULL;
     target_ulong ret;
+
+#ifdef CONFIG_LATX_WOW64_PE
+    if (!RtlGenRandom(&ret, sizeof(ret))) {
+#else
+    Error *err = NULL;
 
     if (qemu_guest_getrandom(&ret, sizeof(ret), &err) < 0) {
         qemu_log_mask(LOG_UNIMP, "rdrand: Crypto failure: %s",
                       error_get_pretty(err));
         error_free(err);
+#endif
         /* Failure clears CF and all other flags, and returns 0.  */
         env->cc_src = 0;
         return 0;

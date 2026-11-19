@@ -67,6 +67,10 @@ add_project_arguments('-iquote', '.',
 link_language = meson.get_external_property('link_language', 'cpp')
 add_languages('cpp', required: true, native: false)
 
+if 'CONFIG_LATX_WOW64' in config_host
+  add_project_arguments('-fPIC', language: ['c', 'cpp'])
+endif
+
 ###########################################
 # Target-specific checks and dependencies #
 ###########################################
@@ -829,6 +833,24 @@ foreach target : target_dirs
       'sources': [],
       'dependencies': []
     }]
+  if target_name == 'x86_64' and 'CONFIG_LATX_WOW64' in config_host
+    wow64_provider = shared_library(
+      'latx-wow64',
+      objects: lib.extract_all_objects(recursive: true),
+      dependencies: arch_deps + deps,
+      c_args: c_args,
+      link_language: link_language,
+      link_args: link_args + [
+        '-Wl,-Bsymbolic',
+        '-Wl,--version-script=' + project_source_root /
+          'target/i386/latx/wow64.map',
+      ],
+      link_depends: files('target/i386/latx/wow64.map'),
+      install: true,
+    )
+    install_headers('include/latx-wow64.h')
+  endif
+
   foreach exe: execs
     exe_name = exe['name']
     latx_link_depends = exe.get('link_depends', [])

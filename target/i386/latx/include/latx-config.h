@@ -40,7 +40,12 @@ void latx_guest_stack_init(CPUArchState *env);
 
 void latx_init_fpu_regs(CPUArchState *env);
 void latx_lsenv_init(CPUArchState *env);
+#ifdef CONFIG_LATX_WOW64_PE
+struct ENV;
+void latx_lsenv_destroy(struct ENV *env);
+#else
 void latx_lsenv_destroy(void);
+#endif
 void latx_dt_init(void);
 void ht_pc_thunk_insert(uint32_t thunk_addr, int reg_index);
 int ht_pc_thunk_lookup(uint32_t thunk_addr);

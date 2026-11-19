@@ -21,7 +21,9 @@
 #include "jrra.h"
 #include "reg-alloc.h"
 #include "latx-options.h"
+#if !defined(CONFIG_LATX_WOW64_PE) || defined(CONFIG_LATX_AOT)
 #include "aot_page.h"
+#endif
 #ifdef CONFIG_LATX_AOT
 #include "aot.h"
 #endif

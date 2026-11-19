@@ -280,7 +280,11 @@ void qemu_cpu_kick(CPUState *cpu)
 {
 #ifdef CONFIG_LATX
     /* start_exclusive() has already counted this vCPU as a waiter. */
-    if (option_fork_unlink && cpu->has_waiter) {
+    if ((option_fork_unlink && cpu->has_waiter)
+#ifdef CONFIG_LATX_WOW64
+        || lat_wow64_provider_plugin_active
+#endif
+       ) {
         TaskState *ts = cpu->opaque;
 
         if (ts && ts->ts_tid > 0) {

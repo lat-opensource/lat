@@ -94,6 +94,7 @@ int cpu_x86_support_mca_broadcast(CPUX86State *env)
 /* x86 mmu */
 /* XXX: add PGE support */
 
+#ifndef CONFIG_LATX_WOW64_PE
 void x86_cpu_set_a20(X86CPU *cpu, int a20_state)
 {
     CPUX86State *env = &cpu->env;
@@ -113,6 +114,8 @@ void x86_cpu_set_a20(X86CPU *cpu, int a20_state)
         env->a20_mask = ~(1 << 20) | (a20_state << 20);
     }
 }
+
+#endif
 
 void cpu_x86_update_cr0(CPUX86State *env, uint32_t new_cr0)
 {
@@ -514,6 +517,7 @@ void cpu_report_tpr_access(CPUX86State *env, TPRAccess access)
 }
 #endif /* !CONFIG_USER_ONLY */
 
+#ifndef CONFIG_LATX_WOW64_PE
 int cpu_x86_get_descr_debug(CPUX86State *env, unsigned int selector,
                             target_ulong *base, unsigned int *limit,
                             unsigned int *flags)
@@ -543,6 +547,8 @@ int cpu_x86_get_descr_debug(CPUX86State *env, unsigned int selector,
 
     return 1;
 }
+
+#endif
 
 #if !defined(CONFIG_USER_ONLY)
 void do_cpu_init(X86CPU *cpu)

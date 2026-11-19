@@ -720,7 +720,11 @@ static inline bool temp_readonly(TCGTemp *ts)
 }
 
 extern TCGContext tcg_init_ctx;
+#ifdef CONFIG_LATX_WOW64_PE
+extern TCGContext *tcg_ctx;
+#else
 extern __thread TCGContext *tcg_ctx;
+#endif
 extern const void *tcg_code_gen_epilogue;
 extern uintptr_t tcg_splitwx_diff;
 extern TCGv_env cpu_env;

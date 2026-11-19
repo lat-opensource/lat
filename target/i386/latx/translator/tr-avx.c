@@ -11,6 +11,9 @@
 #include "hbr.h"
 #include "tr-vpaes.h"
 #include "pclmul.h"
+#if defined(CONFIG_LATX_WOW64) || defined(CONFIG_LATX_WOW64_PE)
+#include "../wow64-x86-state.h"
+#endif
 
 #ifdef CONFIG_LATX_AVX_OPT
 bool translate_vaddpd(IR1_INST * pir1) {
@@ -3664,6 +3667,14 @@ bool translate_xsetbv(IR1_INST *pir1)
 
 bool translate_xsave(IR1_INST *pir1)
 {
+#if defined(CONFIG_LATX_WOW64) || defined(CONFIG_LATX_WOW64_PE)
+    if (lat_wow64_split_native_fcsr()) {
+        IR2_OPND status = ra_alloc_itemp();
+
+        update_sw_by_fcsr(status);
+        ra_free_temp(status);
+    }
+#endif
     IR2_OPND eax_opnd = ra_alloc_gpr(eax_index);
     IR2_OPND edx_opnd = ra_alloc_gpr(edx_index);
     IR2_OPND temp_rfbm = ra_alloc_itemp();
@@ -3682,6 +3693,14 @@ bool translate_xsave(IR1_INST *pir1)
 
 bool translate_xsaveopt(IR1_INST *pir1)
 {
+#if defined(CONFIG_LATX_WOW64) || defined(CONFIG_LATX_WOW64_PE)
+    if (lat_wow64_split_native_fcsr()) {
+        IR2_OPND status = ra_alloc_itemp();
+
+        update_sw_by_fcsr(status);
+        ra_free_temp(status);
+    }
+#endif
     IR2_OPND eax_opnd = ra_alloc_gpr(eax_index);
     IR2_OPND edx_opnd = ra_alloc_gpr(edx_index);
     IR2_OPND temp_rfbm = ra_alloc_itemp();
@@ -3700,6 +3719,14 @@ bool translate_xsaveopt(IR1_INST *pir1)
 
 bool translate_xrstor(IR1_INST *pir1)
 {
+#if defined(CONFIG_LATX_WOW64) || defined(CONFIG_LATX_WOW64_PE)
+    if (lat_wow64_split_native_fcsr()) {
+        IR2_OPND status = ra_alloc_itemp();
+
+        update_sw_by_fcsr(status);
+        ra_free_temp(status);
+    }
+#endif
     IR2_OPND eax_opnd = ra_alloc_gpr(eax_index);
     IR2_OPND edx_opnd = ra_alloc_gpr(edx_index);
     IR2_OPND temp_rfbm = ra_alloc_itemp();
@@ -3710,6 +3737,11 @@ bool translate_xrstor(IR1_INST *pir1)
     la_bstrins_d(temp_rfbm, edx_opnd, 63, 32);
     tr_gen_call_to_helper_vfll((ADDR)helper_xrstor, mem_opnd, temp_rfbm, 1,
             LOAD_HELPER_XRSTOR);
+#if defined(CONFIG_LATX_WOW64) || defined(CONFIG_LATX_WOW64_PE)
+    if (lat_wow64_split_native_fcsr()) {
+        gen_wow64_x87_fcsr_restore();
+    }
+#endif
     tr_load_ymm_high_from_env(UINT16_MAX);
     return true;
 }

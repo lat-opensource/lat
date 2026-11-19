@@ -8,7 +8,9 @@
 #define _TYPES_H_
 
 #include <inttypes.h>
+#ifndef _WIN32
 #include "qemu/osdep.h"
+#endif
 
 typedef char int8;
 typedef short int16;
@@ -27,8 +29,8 @@ typedef unsigned long uint64;
 #else
 typedef unsigned long long uint64;
 #endif
-typedef unsigned long ADDR;
-#define PRIADDR "lx"
+typedef uintptr_t ADDR;
+#define PRIADDR PRIxPTR
 
 #ifndef N64
 #define N64

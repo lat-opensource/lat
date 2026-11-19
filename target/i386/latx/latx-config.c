@@ -312,12 +312,20 @@ int target_latx_emit_fixed_callback_bridge(
 
 void latx_interpret_glue_init(void)
 {
+#ifdef CONFIG_LATX_WOW64_PE
+    interpret_glue = VirtualAlloc(NULL, qemu_host_page_size,
+                                  MEM_RESERVE | MEM_COMMIT, PAGE_EXECUTE_READWRITE);
+    if (!interpret_glue) {
+        fprintf(stderr, "[LATX-LOG] alloc interpret_glue error!\n");
+    }
+#else
     interpret_glue = mmap(NULL, qemu_host_page_size,
                             PROT_EXEC | PROT_READ | PROT_WRITE,
                             MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     if (interpret_glue == MAP_FAILED) {
         fprintf(stderr, "[LATX-LOG] alloc interpret_glue error!\n");
     }
+#endif
 }
 
 /*
@@ -535,11 +543,13 @@ static void __attribute__((__constructor__)) latx_init(void)
     ht_pc_thunk_init();
 }
 
+#ifndef CONFIG_LATX_WOW64_PE
 static __thread ENV lsenv_real;
 static __thread TRANSLATION_DATA tr_data_real;
 
 /* global lsenv defined here */
 __thread ENV *lsenv;
+#endif
 
 #ifdef CONFIG_LATX_FAST_JMPCACHE
 typedef struct LatxFastJmpCache {
@@ -723,9 +733,15 @@ void latx_init_fpu_regs(CPUArchState *env)
     }
 }
 
+#ifdef CONFIG_LATX_WOW64_PE
+void latx_lsenv_destroy(ENV *env)
+{
+    TRANSLATION_DATA *t = env->tr_data;
+#else
 void latx_lsenv_destroy(void)
 {
     TRANSLATION_DATA *t = &tr_data_real;
+#endif
 
     free(t->ir2_inst_array);
     if (t->imm_cache) {
@@ -736,15 +752,19 @@ void latx_lsenv_destroy(void)
 #ifdef CONFIG_LATX_TU
     tu_control_destroy();
 #endif
+#ifndef CONFIG_LATX_WOW64_PE
     memset(&lsenv_real, 0, sizeof(lsenv_real));
     lsenv = NULL;
+#endif
 }
 
 void latx_lsenv_init(CPUArchState *env)
 {
+#ifndef CONFIG_LATX_WOW64_PE
     lsenv = &lsenv_real;
-    lsenv->cpu_state = env;
     lsenv->tr_data = &tr_data_real;
+#endif
+    lsenv->cpu_state = env;
 #ifdef CONFIG_LATX_TU
     tu_control_init();
 #endif
@@ -757,7 +777,7 @@ void latx_lsenv_init(CPUArchState *env)
     env->insn_save[0] = 0;
     env->insn_save[1] = 0;
 #ifdef CONFIG_LATX
-#ifdef TARGET_X86_64
+#if defined(TARGET_X86_64) && !defined(CONFIG_LATX_WOW64_PE)
     env->sys.codemode = LATX_DT_X64;
 #else
     env->sys.codemode = LATX_DT_X86;

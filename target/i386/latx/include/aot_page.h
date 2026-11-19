@@ -11,7 +11,9 @@
  */
 #ifndef __AOT_PAGE_H_
 #define __AOT_PAGE_H_
+#ifndef CONFIG_LATX_WOW64_PE
 #include "aot.h"
+#endif
 #include "qemu-def.h"
 
 typedef enum page_state_type{
@@ -46,6 +48,7 @@ typedef struct PageDesc {
 
 PageDesc *page_find_alloc(tb_page_addr_t index, int alloc);
 
+#ifndef CONFIG_LATX_WOW64_PE
 typedef struct page_info {
     target_ulong start, end;
     void *buffer;
@@ -61,5 +64,6 @@ gint get_page_num(void);
 void do_page_record(page_info **page_info_vector);
 page_info *page_tree_lookup(target_ulong page);
 void page_tree_remove(target_ulong start, target_ulong end);
+#endif
 
 #endif

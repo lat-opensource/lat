@@ -64,7 +64,9 @@ static inline int rcu_gp_ongoing(unsigned long *ctr)
 /* Written to only by each individual reader. Read by both the reader and the
  * writers.
  */
+#ifndef CONFIG_LATX_WOW64_PE
 __thread struct rcu_reader_data rcu_reader;
+#endif
 
 /* Protected by rcu_registry_lock.  */
 typedef QLIST_HEAD(, rcu_reader_data) ThreadList;
@@ -354,20 +356,60 @@ void drain_call_rcu(void)
 
 }
 
+#ifdef CONFIG_LATX_WOW64_PE
+bool *lat_wow64_pe_rcu_registered(void);
+#define rcu_registered (*lat_wow64_pe_rcu_registered())
+#else
+static __thread bool rcu_registered;
+#endif
+
+#ifdef CONFIG_LATX_WOW64
+static void rcu_implicit_thread_exit(void *unused)
+{
+    if (rcu_thread_registered()) {
+        rcu_unregister_thread();
+    }
+}
+
+/* A shared-library constructor may run on a short-lived host thread. */
+static GPrivate rcu_implicit_registration =
+    G_PRIVATE_INIT(rcu_implicit_thread_exit);
+#endif
+
+bool rcu_thread_registered(void)
+{
+    return rcu_registered;
+}
+
 void rcu_register_thread(void)
 {
     assert(rcu_reader.ctr == 0);
     qemu_mutex_lock(&rcu_registry_lock);
     QLIST_INSERT_HEAD(&registry, &rcu_reader, node);
+    rcu_registered = true;
     qemu_mutex_unlock(&rcu_registry_lock);
 }
 
 void rcu_unregister_thread(void)
 {
+#ifdef CONFIG_LATX_WOW64
+    g_private_set(&rcu_implicit_registration, NULL);
+#endif
     qemu_mutex_lock(&rcu_registry_lock);
     QLIST_REMOVE(&rcu_reader, node);
+    rcu_registered = false;
     qemu_mutex_unlock(&rcu_registry_lock);
 }
+
+#ifdef CONFIG_LATX_WOW64_PE
+void lat_wow64_pe_remove_rcu_reader(struct rcu_reader_data *reader)
+{
+    /* The CPU is parked outside cpu_exec and can no longer use the registry. */
+    qemu_mutex_lock(&rcu_registry_lock);
+    QLIST_REMOVE(reader, node);
+    qemu_mutex_unlock(&rcu_registry_lock);
+}
+#endif
 
 static void rcu_start_call_thread(void)
 {
@@ -396,6 +438,9 @@ static void rcu_init_complete(bool start_thread)
     }
 
     rcu_register_thread();
+#ifdef CONFIG_LATX_WOW64
+    g_private_set(&rcu_implicit_registration, GINT_TO_POINTER(1));
+#endif
 }
 
 static int atfork_depth = 1;
@@ -496,7 +541,11 @@ void rcu_raw_clone_child(void)
 }
 #endif
 
+#ifdef CONFIG_LATX_WOW64_PE
+void lat_wow64_pe_rcu_init(void)
+#else
 static void __attribute__((__constructor__)) rcu_init(void)
+#endif
 {
     smp_mb_global_init();
 #ifdef CONFIG_POSIX
