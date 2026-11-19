@@ -165,70 +165,37 @@ bool translate_maskmovq(IR1_INST *pir1)
     IR2_OPND mask = ra_alloc_ftemp();
     load_freg_from_ir1_2(src, ir1_get_opnd(pir1, 0), IS_INTEGER);
     load_freg_from_ir1_2(mask, ir1_get_opnd(pir1, 1), IS_INTEGER);
-    IR2_OPND zero = ra_alloc_ftemp();
-    la_vxor_v(zero, zero, zero);
-    /*
-     * Mapping to LA 23 -> 30
-     */
-    IR2_OPND base_opnd = ra_alloc_gpr(edi_index);
-    IR2_OPND temp_mask = ra_alloc_ftemp();
-    la_vandi_b(temp_mask, mask, 0x80);
-    IR2_OPND mem_mask = ra_alloc_ftemp();
-    la_vseq_b(mem_mask, temp_mask, zero);
-    la_vnor_v(temp_mask, mem_mask, zero);
-    IR2_OPND mem_data = ra_alloc_ftemp();
-    IR2_OPND xmm_data = ra_alloc_ftemp();
+    IR2_OPND address = ra_alloc_itemp();
+    la_mov64(address, ra_alloc_gpr(edi_index));
 #ifndef TARGET_X86_64
-       la_bstrpick_d(base_opnd, base_opnd, 31, 0);
+    la_bstrpick_d(address, address, 31, 0);
 #else
     if(!CODEIS64) {
-        la_bstrpick_d(base_opnd, base_opnd, 31, 0);
+        la_bstrpick_d(address, address, 31, 0);
     }
 #endif
-    la_fld_d(mem_data, base_opnd, 0);
-    la_vand_v(xmm_data, src, temp_mask);
-    la_vand_v(mem_data, mem_data, mem_mask);
-    la_vor_v(mem_data, mem_data, xmm_data);
-    la_fst_d(mem_data, base_opnd, 0);
+    gen_masked_vector_memory(src, mask, address, 8, 1, true);
+    ra_free_temp(address);
+    ra_free_temp(mask);
+    ra_free_temp(src);
     return true;
 }
 
 bool translate_maskmovdqu(IR1_INST *pir1)
 {
-#ifdef CONFIG_LATX_AVX_OPT
-    if (!option_enable_lasx &&
-        ir1_opcode(pir1) == dt_X86_INS_VMASKMOVDQU) {
-        return translate_maskmovdqu_lsx(pir1);
-    }
-#endif
-
     IR2_OPND src = load_freg128_from_ir1(ir1_get_opnd(pir1, 0));
     IR2_OPND mask = load_freg128_from_ir1(ir1_get_opnd(pir1, 1));
-    IR2_OPND zero = ra_alloc_ftemp();
-    la_vxor_v(zero, zero, zero);
-    /*
-     * Mapping to LA 23 -> 30
-     */
-    IR2_OPND base_opnd = ra_alloc_gpr(edi_index);
+    IR2_OPND address = ra_alloc_itemp();
+    la_mov64(address, ra_alloc_gpr(edi_index));
 #ifndef TARGET_X86_64
-    la_bstrpick_d(base_opnd, base_opnd, 31, 0);
+    la_bstrpick_d(address, address, 31, 0);
 #else
     if(!CODEIS64) {
-        la_bstrpick_d(base_opnd, base_opnd, 31, 0);
+        la_bstrpick_d(address, address, 31, 0);
     }
 #endif
-    IR2_OPND temp_mask = ra_alloc_ftemp();
-    la_vandi_b(temp_mask, mask, 0x80);
-    IR2_OPND mem_mask = ra_alloc_ftemp();
-    la_vseq_b(mem_mask, temp_mask, zero);
-    la_vnor_v(temp_mask, mem_mask, zero);
-    IR2_OPND mem_data = ra_alloc_ftemp();
-    IR2_OPND xmm_data = ra_alloc_ftemp();
-    la_vld(mem_data, base_opnd, 0);
-    la_vand_v(xmm_data, src, temp_mask);
-    la_vand_v(mem_data, mem_data, mem_mask);
-    la_vor_v(mem_data, mem_data, xmm_data);
-    la_vst(mem_data, base_opnd, 0);
+    gen_masked_vector_memory(src, mask, address, 16, 1, true);
+    ra_free_temp(address);
     return true;
 }
 

@@ -1407,6 +1407,193 @@ IR2_OPND load_freg256_from_ir1(IR1_OPND * opnd1) {
     g_assert_not_reached();
 }
 
+static void gen_masked_vector_memory_bulk(IR2_OPND value, IR2_OPND mask,
+                                         IR2_OPND address, int bytes,
+                                         int element_bytes, bool store)
+{
+    bool wide = bytes == 32;
+    IR2_OPND selected = ra_alloc_ftemp();
+    IR2_OPND memory = store ? ra_alloc_ftemp() : value;
+
+    if (wide) {
+        if (element_bytes == 4) {
+            la_xvslti_w(selected, mask, 0);
+        } else {
+            la_xvslti_d(selected, mask, 0);
+        }
+    } else if (element_bytes == 1) {
+        la_vslti_b(selected, mask, 0);
+    } else if (element_bytes == 4) {
+        la_vslti_w(selected, mask, 0);
+    } else {
+        la_vslti_d(selected, mask, 0);
+    }
+    /* Compatibility mode intentionally reads masked-off elements too. */
+    gen_test_page_flag(address, 0, PAGE_READ, bytes);
+    if (wide) {
+        la_xvld(memory, address, 0);
+    } else if (bytes == 8) {
+        la_fld_d(memory, address, 0);
+    } else {
+        la_vld(memory, address, 0);
+    }
+    if (store) {
+        if (wide) {
+            la_xvbitsel_v(memory, memory, value, selected);
+        } else {
+            la_vbitsel_v(memory, memory, value, selected);
+        }
+        gen_test_page_flag(address, 0, PAGE_WRITE | PAGE_WRITE_ORG, bytes);
+        if (wide) {
+            la_xvst(memory, address, 0);
+        } else if (bytes == 8) {
+            la_fst_d(memory, address, 0);
+        } else {
+            la_vst(memory, address, 0);
+        }
+        ra_free_temp(memory);
+    } else if (wide) {
+        la_xvand_v(value, memory, selected);
+    } else {
+        la_vand_v(value, memory, selected);
+    }
+    ra_free_temp(selected);
+}
+
+void gen_masked_vector_memory(IR2_OPND value, IR2_OPND mask,
+                              IR2_OPND address, int bytes, int element_bytes,
+                              bool store)
+{
+    if (!option_masked_memory) {
+        gen_masked_vector_memory_bulk(value, mask, address, bytes,
+                                      element_bytes, store);
+        return;
+    }
+    bool wide = bytes == 32;
+    int lanes = bytes / element_bytes;
+    IR2_OPND selected = ra_alloc_ftemp();
+    IR2_OPND bits = ra_alloc_itemp();
+    IR2_OPND temp = ra_alloc_itemp();
+    IR2_OPND full = ra_alloc_label();
+    IR2_OPND done = ra_alloc_label();
+    uint32_t permission = store ? PAGE_WRITE | PAGE_WRITE_ORG : PAGE_READ;
+
+    lsassert(bytes == 8 || bytes == 16 || (wide && option_enable_lasx));
+    lsassert(element_bytes == 1 || element_bytes == 4 || element_bytes == 8);
+    if (element_bytes == 1) {
+        lsassert(!wide);
+        la_vmskltz_b(selected, mask);
+    } else if (element_bytes == 4) {
+        if (wide) {
+            la_xvmskltz_w(selected, mask);
+        } else {
+            la_vmskltz_w(selected, mask);
+        }
+    } else if (wide) {
+        la_xvmskltz_d(selected, mask);
+    } else {
+        la_vmskltz_d(selected, mask);
+    }
+    la_movfr2gr_d(bits, selected);
+    if (bytes == 8) {
+        la_andi(bits, bits, 0xff);
+    }
+    if (wide) {
+        la_xvpickve2gr_du(temp, selected, 2);
+        la_slli_d(temp, temp, lanes / 2);
+        la_or(bits, bits, temp);
+    }
+    ra_free_temp(selected);
+
+    la_beq(bits, zero_ir2_opnd, store ? done : full);
+    li_d(temp, (UINT32_C(1) << lanes) - 1);
+    IR2_OPND vector = ra_alloc_label();
+    la_beq(bits, temp, vector);
+
+    /* Snapshot the mask before initializing the partial load result. */
+    if (!store) {
+        if (wide) {
+            la_xvxor_v(value, value, value);
+        } else {
+            la_vxor_v(value, value, value);
+        }
+    }
+    for (int lane = 0; lane < lanes; ++lane) {
+        IR2_OPND skip = ra_alloc_label();
+        int offset = lane * element_bytes;
+
+        la_bstrpick_d(temp, bits, lane, lane);
+        la_beq(temp, zero_ir2_opnd, skip);
+        gen_test_page_flag(address, offset, permission, element_bytes);
+        if (store) {
+            if (element_bytes == 1) {
+                la_vpickve2gr_bu(temp, value, lane);
+                la_st_b(temp, address, offset);
+            } else if (element_bytes == 4) {
+                if (wide) {
+                    la_xvpickve2gr_w(temp, value, lane);
+                } else {
+                    la_vpickve2gr_w(temp, value, lane);
+                }
+                la_st_w(temp, address, offset);
+            } else {
+                if (wide) {
+                    la_xvpickve2gr_d(temp, value, lane);
+                } else {
+                    la_vpickve2gr_d(temp, value, lane);
+                }
+                la_st_d(temp, address, offset);
+            }
+        } else if (element_bytes == 4) {
+            la_ld_w(temp, address, offset);
+            if (wide) {
+                la_xvinsgr2vr_w(value, temp, lane);
+            } else {
+                la_vinsgr2vr_w(value, temp, lane);
+            }
+        } else {
+            lsassert(element_bytes == 8);
+            la_ld_d(temp, address, offset);
+            if (wide) {
+                la_xvinsgr2vr_d(value, temp, lane);
+            } else {
+                la_vinsgr2vr_d(value, temp, lane);
+            }
+        }
+        la_label(skip);
+    }
+    la_b(done);
+
+    /* A full-width access is safe only when every element is selected. */
+    la_label(vector);
+    gen_test_page_flag(address, 0, permission, bytes);
+    if (store) {
+        if (wide) {
+            la_xvst(value, address, 0);
+        } else if (bytes == 8) {
+            la_fst_d(value, address, 0);
+        } else {
+            la_vst(value, address, 0);
+        }
+    } else if (wide) {
+        la_xvld(value, address, 0);
+    } else {
+        la_vld(value, address, 0);
+    }
+    if (!store) {
+        la_b(done);
+        la_label(full);
+        if (wide) {
+            la_xvxor_v(value, value, value);
+        } else {
+            la_vxor_v(value, value, value);
+        }
+    }
+    la_label(done);
+    ra_free_temp(temp);
+    ra_free_temp(bits);
+}
+
 void clear_xmm_high64(IR2_OPND opnd)
 {
     lsassert(ir2_opnd_is_freg(&opnd));

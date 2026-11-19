@@ -6,6 +6,7 @@
 
 int qemu_loglevel;
 int option_aot_pe_profile;
+int option_masked_memory;
 const char *aot_process_profile = "browser";
 
 int qemu_log(const char *fmt G_GNUC_UNUSED, ...)
@@ -63,6 +64,15 @@ int main(void)
     get_cache_name(&same_page_pe_seg, second_name);
     g_assert(g_str_has_suffix(second_name, "-140000080"));
     g_assert(strcmp(first_name, second_name) != 0);
+
+    option_masked_memory = 1;
+    get_cache_name(&pe_seg, second_name);
+    g_assert(g_str_has_prefix(second_name, "v2-02-mask1-"));
+    g_assert(strcmp(first_name, second_name) != 0);
+    get_cache_name(&elf_seg, colliding_cache_name);
+    g_assert(g_str_has_prefix(colliding_cache_name, "v2-01-mask1-"));
+    g_assert(strcmp(elf_cache_name, colliding_cache_name) != 0);
+    option_masked_memory = 0;
 
     relocated_pe_seg.seg_begin = 0x180000000;
     get_cache_name(&relocated_pe_seg, second_name);

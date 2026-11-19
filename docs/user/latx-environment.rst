@@ -142,6 +142,15 @@ Meson 安装目标会把模板安装到 configure 指定的 ``sysconfdir``。默
      - ``1``
      - 仅 AVX 构建可用。设为 ``0`` 会改变 AVX 相关 CPUID 上报，但不会关闭
        已编译的 AVX 翻译；必须在 guest 启动前设置。
+   * - ``LATX_MASKED_MEMORY``
+     - ``0``
+     - 设为 ``1`` 时，掩码访存只访问选中元素，避免未选中地址不可访问时误报
+       访存错误。覆盖 ``MASKMOVQ``、``MASKMOVDQU``、``VMASKMOVDQU``、
+       ``VMASKMOVPS/PD``、``VPMASKMOVD/Q``。全零掩码不访问
+       内存，全选掩码可整块访问，部分掩码逐元素访问，可能降低性能。默认的
+       ``0`` 保留整块读取后筛选、整块读改写等实现，可能访问未选中地址。
+       该开关独立于 ``LATX_MT``，不改变页权限检查模式。AOT 缓存按开关值
+       分开保存。
    * - ``LAT_LD_PREFIX``
      - ABI 路径
      - 覆盖动态链接 guest 的运行时根目录，等价于 ``-L <path>``。先用

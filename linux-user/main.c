@@ -714,6 +714,17 @@ static void handle_arg_latx_softfpu_fast(const char *arg)
     option_softfpu_fast = strtol(arg, NULL, 0);
 }
 
+static void handle_arg_latx_masked_memory(const char *arg)
+{
+    int value;
+
+    if (qemu_strtoi(arg, NULL, 0, &value) || (value != 0 && value != 1)) {
+        fprintf(stderr, "LATX_MASKED_MEMORY must be 0 or 1\n");
+        exit(EXIT_FAILURE);
+    }
+    option_masked_memory = value;
+}
+
 static void handle_arg_latx_prlimit(const char *arg)
 {
     option_prlimit = strtol(arg, NULL, 0);
@@ -1078,6 +1089,9 @@ static const struct qemu_argument arg_table[] = {
     "",           "enable imm reg optimization"},
     {"latx-mem-test",    "LATX_MT",     true,  handle_arg_latx_mem_test,
     "0|1|2",      "16K checks: sparse fast or strict fast"},
+    {"latx-masked-memory", "LATX_MASKED_MEMORY", true,
+    handle_arg_latx_masked_memory, "0|1",
+    "access only selected masked-memory elements (default: 0)"},
     {"latx-minke-16k-page-check", "LATX_MINKE_16K_PAGE_CHECK", true,
     handle_arg_latx_minke_16k_page_check, "0|1",
     "enable Minke-specific mixed 16K write checks"},
