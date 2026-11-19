@@ -403,13 +403,16 @@ void gen_softfpu_x87_fcsr_enter(void)
 {
     IR2_OPND cw_opnd = ra_alloc_itemp();
     IR2_OPND fcsr_opnd = ra_alloc_itemp();
+    IR2_OPND previous_fcsr = ra_alloc_itemp();
 
     la_ld_hu(cw_opnd, env_ir2_opnd,
              lsenv_offset_of_control_word(lsenv));
-    la_movfcsr2gr(fcsr_opnd, fcsr_ir2_opnd);
+    la_movfcsr2gr(previous_fcsr, fcsr_ir2_opnd);
+    la_mov64(fcsr_opnd, previous_fcsr);
     update_fcsr_rm(cw_opnd, fcsr_opnd);
-    la_movgr2fcsr(fcsr_ir2_opnd, fcsr_opnd);
+    gen_softfpu_fcsr_write_if_changed(fcsr_opnd, previous_fcsr);
 
+    ra_free_temp(previous_fcsr);
     ra_free_temp(cw_opnd);
     ra_free_temp(fcsr_opnd);
 }
