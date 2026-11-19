@@ -52,7 +52,7 @@ def check_aot_mask_modes(emulator, guest, env):
                 pass
 
 
-def fixtures():
+def fixtures(guest_bits):
     for op, element in (("vmaskmovps", 4), ("vmaskmovpd", 8),
                         ("vpmaskmovd", 4), ("vpmaskmovq", 8)):
         for wide in (0, 1):
@@ -79,8 +79,11 @@ def fixtures():
     yield "vmovss", dict(KIND=4), "vw"
     for wide in (0, 1):
         yield f"vmovdqu-{wide}", dict(KIND=6, WIDE=wide), "vtrw"
-    for op in ("xsave", "xsaveopt", "xrstor"):
-        yield op, dict(KIND=5, OP=op), "vuri" if op == "xrstor" else "vuw"
+    state_ops = ["xsave", "xsaveopt", "xrstor"]
+    if guest_bits == 64:
+        state_ops += ["xsave64", "xsaveopt64", "xrstor64"]
+    for op in state_ops:
+        yield op, dict(KIND=5, OP=op), "vuri" if op.startswith("xrstor") else "vuw"
 
 
 def main():
@@ -113,7 +116,7 @@ def main():
         groups = {"permissions": (4, 6), "xsave": (5,),
                   "mask": (0, 1, 7), "gather": (2,)}
         selected = 0
-        for name, defines, cases in fixtures():
+        for name, defines, cases in fixtures(args.guest_bits):
             if args.group != "all" and defines["KIND"] not in groups[args.group]:
                 continue
             if args.filter and args.filter not in name:
