@@ -39,6 +39,13 @@ static void load_avx_cvt_value_lsx(IR1_OPND *opnd, bool ymm,
 
             wide.size = 32;
             load_v256_from_ir1_mem_exact(&wide, low, high);
+        } else if (ir1_opnd_size(opnd) == 64) {
+            /* XMM VCVTPS2PD/VCVTDQ2PD consume only two 32-bit elements. */
+            IR2_OPND value = load_u64_from_ir1_mem_exact(opnd);
+
+            *low = ra_alloc_ftemp();
+            la_vreplgr2vr_d(*low, value);
+            ra_free_temp(value);
         } else {
             *low = load_v128_from_ir1_mem_exact(opnd);
         }
