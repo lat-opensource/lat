@@ -63,6 +63,9 @@ struct rcu_reader_data {
 
     /* Data used by reader only */
     unsigned depth;
+    /* Lazy callbacks retired by this reader until its outermost unlock. */
+    struct rcu_head *deferred;
+    void (*flush_deferred)(void);
 
     /* Data used for registry, protected by rcu_registry_lock */
     QLIST_ENTRY(rcu_reader_data) node;
@@ -108,6 +111,9 @@ static inline void rcu_read_unlock(void)
         qatomic_set(&p_rcu_reader->waiting, false);
         qemu_event_set(&rcu_gp_event);
     }
+    if (unlikely(p_rcu_reader->deferred)) {
+        p_rcu_reader->flush_deferred();
+    }
 }
 
 extern void synchronize_rcu(void);
@@ -140,6 +146,13 @@ struct rcu_head {
 };
 
 extern void call_rcu1(struct rcu_head *head, RCUCBFunc *func);
+/*
+ * Preserve a sole reader's single-threaded process when retiring memory.
+ * The callback may run synchronously without the iothread lock.
+ */
+void call_rcu1_lazy(struct rcu_head *node,
+                    void (*func)(struct rcu_head *node));
+
 extern void drain_call_rcu(void);
 
 /* The operands of the minus operator must have the same type,
