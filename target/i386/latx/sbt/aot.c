@@ -1278,6 +1278,7 @@ static void* relkind_to_fixup_addr[] = {
 #endif
 
     [LOAD_HOST_POW] = pow,
+    [LOAD_HELPER_FCVT_SOFT] = latx_fcvt_soft,
     [LOAD_HOST_SIN] = sin,
     [LOAD_HOST_COS] = cos,
     [LOAD_HOST_ATAN2] = atan2,

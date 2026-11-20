@@ -3626,7 +3626,7 @@ int generate_native_rotate_fpu_by(void *code_buf_addr)
 /* we have no inst to mov from gpr to top, so we have to be silly */
 void tr_load_top_from_env(void)
 {
-    if (option_softfpu) {
+    if (option_softfpu || !option_enable_lbt) {
         return;
     }
 
@@ -3650,6 +3650,9 @@ void tr_load_top_from_env(void)
 
 void tr_gen_top_mode_init(void)
 {
+    if (!option_enable_lbt) {
+        return;
+    }
     latx_write_top_const(0);
     la_x86settm();
 }
@@ -3888,6 +3891,9 @@ void tr_fpu_pop(void) { tr_fpu_inc(); }
 
 void tr_fpu_inc(void)
 {
+    if (!option_enable_lbt) {
+        return;
+    }
     if (option_fputag) {
         IR2_OPND tag_addr_opnd = ra_alloc_itemp();
         IR2_OPND temp = ra_alloc_itemp();
@@ -3910,6 +3916,9 @@ void tr_fpu_inc(void)
 
 void tr_fpu_dec(void)
 {
+    if (!option_enable_lbt) {
+        return;
+    }
     /* 1. top = top - 1 */
     latx_dec_top();
 
@@ -3930,11 +3939,17 @@ void tr_fpu_dec(void)
 
 void tr_fpu_enable_top_mode(void)
 {
+    if (option_softfpu || !option_enable_lbt) {
+        return;
+    }
     la_x86settm();
 }
 
 void tr_fpu_disable_top_mode(void)
 {
+    if (option_softfpu || !option_enable_lbt) {
+        return;
+    }
     la_x86clrtm();
 }
 

@@ -864,7 +864,7 @@ void load_64_bit_freg_from_ir1_80_bit_mem(IR2_OPND opnd2,
     la_movgr2fcsr(fcsr_ir2_opnd, itemp_reg);
     la_label(label_no_excp1);
 
-    la_fcvt_d_ld(opnd2, ir2_fraction, ir2_sign_exp);
+    latx_fcvt_d_ld(opnd2, ir2_fraction, ir2_sign_exp);
     ra_free_temp(ir2_sign_exp);
     ra_free_temp(ir2_fraction);
 
@@ -923,9 +923,9 @@ static void load_freg_from_ir1_mem(IR2_OPND opnd2, IR1_OPND *opnd1,
         la_fld_d(opnd2, mem_opnd, mem_imm);
         //64->80->64 to handle the implicit SNAN->QNAN of fld
         if (!is_integer) {
-            la_fcvt_ld_d(ftemp, opnd2);
-            la_fcvt_ud_d(opnd2, opnd2);
-            la_fcvt_d_ld(opnd2, ftemp, opnd2);
+            latx_fcvt_ld_d(ftemp, opnd2);
+            latx_fcvt_ud_d(opnd2, opnd2);
+            latx_fcvt_d_ld(opnd2, ftemp, opnd2);
         }
         ra_free_temp(ftemp);
     } else if (ir1_opnd_size(opnd1) == 16) {
@@ -1130,8 +1130,8 @@ void store_64_bit_freg_to_ir1_80_bit_mem(IR2_OPND opnd2,
     la_label(label_no_excp1);
 
     lsassert(mem_imm + 8 <= 2047);
-    la_fcvt_ld_d(ir2_fraction, opnd2);
-    la_fcvt_ud_d(ir2_sign_exp, opnd2);
+    latx_fcvt_ld_d(ir2_fraction, opnd2);
+    latx_fcvt_ud_d(ir2_sign_exp, opnd2);
     la_movfcsr2gr(itemp, fcsr_ir2_opnd);
     /* unmask V if necessary */
     la_beq(itemp1, zero_ir2_opnd, label_no_excp2);

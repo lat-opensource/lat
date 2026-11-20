@@ -161,22 +161,68 @@ void latx_set_eflag_condition(IR2_OPND dest, int condition)
     ra_free_temp(rhs);
 }
 
+void latx_write_top(IR2_OPND value)
+{
+    int top_offset = lsenv_offset_of_top(lsenv);
+
+    lsassert(!option_enable_lbt);
+    lsassert(top_offset >= -2048 && top_offset <= 2047);
+    la_andi(value, value, 0x7);
+    la_st_w(value, env_ir2_opnd, top_offset);
+}
+
 void latx_write_top_const(int value)
 {
-    la_x86mttop(value);
+    if (option_enable_lbt) {
+        la_x86mttop(value);
+        return;
+    }
+
+    IR2_OPND top = ra_alloc_itemp();
+
+    li_d(top, value);
+    latx_write_top(top);
+    ra_free_temp(top);
 }
 
 void latx_read_top(IR2_OPND value)
 {
-    la_x86mftop(value);
+    int top_offset = lsenv_offset_of_top(lsenv);
+
+    if (option_enable_lbt) {
+        la_x86mftop(value);
+        return;
+    }
+
+    lsassert(top_offset >= -2048 && top_offset <= 2047);
+    la_ld_wu(value, env_ir2_opnd, top_offset);
+}
+
+static void latx_adjust_top(int delta)
+{
+    IR2_OPND top = ra_alloc_itemp();
+
+    latx_read_top(top);
+    la_addi_w(top, top, delta);
+    la_andi(top, top, 0x7);
+    latx_write_top(top);
+    ra_free_temp(top);
 }
 
 void latx_inc_top(void)
 {
-    la_x86inctop();
+    if (option_enable_lbt) {
+        la_x86inctop();
+        return;
+    }
+    latx_adjust_top(1);
 }
 
 void latx_dec_top(void)
 {
-    la_x86dectop();
+    if (option_enable_lbt) {
+        la_x86dectop();
+        return;
+    }
+    latx_adjust_top(-1);
 }

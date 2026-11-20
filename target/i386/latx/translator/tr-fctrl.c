@@ -1101,7 +1101,9 @@ bool translate_fninit(IR1_INST *pir1) {
 
     /* clear top */
     latx_write_top_const(0);
-    la_x86settm();
+    if (option_enable_lbt) {
+        la_x86settm();
+    }
 
     /* set fptags */
     offset = lsenv_offset_of_tag_word(lsenv);

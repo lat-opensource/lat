@@ -114,7 +114,9 @@ static void restore_eflags(IR1_INST *pir1)
     case dt_X86_INS_FUCOMI:
     case dt_X86_INS_FUCOMIP:
         latx_write_eflags(eflags_opnd, 0x3f);
-        la_andi(eflags_opnd, eflags_opnd, 0x702);
+        if (option_enable_lbt) {
+            la_andi(eflags_opnd, eflags_opnd, 0x702);
+        }
         break;
     default:
         break;
@@ -605,11 +607,11 @@ static void la_calcute_float64(IR1_INST *pir1, IR2_OPND float80_dest,
     IR2_OPND ftemp = ra_alloc_ftemp();
 
     la_vextrins_h(ftemp, float80_dest, 0x4);
-    la_fcvt_d_ld(float80_dest, float80_dest, ftemp);
+    latx_fcvt_d_ld(float80_dest, float80_dest, ftemp);
 
     if (src_is_float80) {
         la_vextrins_h(ftemp, src_opnd, 0x4);
-        la_fcvt_d_ld(src_opnd, src_opnd, ftemp);
+        latx_fcvt_d_ld(src_opnd, src_opnd, ftemp);
     }
 
     switch (ir1_opcode(pir1)) {
@@ -658,8 +660,8 @@ static void la_calcute_float64(IR1_INST *pir1, IR2_OPND float80_dest,
         break;
     }
 
-    la_fcvt_ud_d(ftemp, float80_dest);
-    la_fcvt_ld_d(float80_dest, float80_dest);
+    latx_fcvt_ud_d(ftemp, float80_dest);
+    latx_fcvt_ld_d(float80_dest, float80_dest);
     la_vextrins_h(float80_dest, ftemp, 0x40);
 
     ra_free_temp(ftemp);
@@ -1458,7 +1460,7 @@ static bool translate_fild_softfpu(IR1_INST *pir1)
     int opnd_size = ir1_opnd_size(opnd0);
     IR2_OPND mem_opnd = convert_mem_no_offset(opnd0);
 
-    if (option_softfpu == 2) {
+    if (option_enable_lbt && option_softfpu == 2) {
         IR2_OPND src_opnd = ra_alloc_itemp();
         IR2_OPND src_ftemp = ra_alloc_ftemp();
 
@@ -1511,8 +1513,8 @@ static bool translate_fild_softfpu(IR1_INST *pir1)
             la_ffint_d_w(src_ftemp, src_ftemp);
         }
 
-        la_fcvt_ld_d(st0_opnd, src_ftemp);
-        la_fcvt_ud_d(ftemp_opnd, src_ftemp);
+        latx_fcvt_ld_d(st0_opnd, src_ftemp);
+        latx_fcvt_ud_d(ftemp_opnd, src_ftemp);
         la_vextrins_h(st0_opnd, ftemp_opnd, 0x40);
 
         la_fpu_push();
@@ -1621,13 +1623,13 @@ static bool translate_fist_softfpu(IR1_INST *pir1)
         la_bge(itemp, itemp2, label_softfpu);
 
         if (opnd_size == 16) {
-            la_fcvt_d_ld(st0_opnd, fpr_st0_low_opnd, fpr_st0_high_opnd);
+            latx_fcvt_d_ld(st0_opnd, fpr_st0_low_opnd, fpr_st0_high_opnd);
             la_ftint_w_d(st0_opnd, st0_opnd);
             la_movfr2gr_s(itemp, st0_opnd);
             la_st_h(itemp, mem_opnd, 0);
 
         } else if (opnd_size == 32) {
-            la_fcvt_d_ld(st0_opnd, fpr_st0_low_opnd, fpr_st0_high_opnd);
+            latx_fcvt_d_ld(st0_opnd, fpr_st0_low_opnd, fpr_st0_high_opnd);
             la_ftint_w_d(st0_opnd, st0_opnd);
             la_movfr2gr_s(itemp, st0_opnd);
             la_st_w(itemp, mem_opnd, 0);
@@ -1709,7 +1711,7 @@ static bool translate_fistp_softfpu(IR1_INST *pir1)
             li_d(itemp2, FLOAT80_EXPONENT_MAX + FLOAT32_EXPONENT_MAX + 1);
             la_bge(itemp, itemp2, label_softfpu);
 
-            la_fcvt_d_ld(st0_opnd, fpr_st0_low_opnd, fpr_st0_high_opnd);
+            latx_fcvt_d_ld(st0_opnd, fpr_st0_low_opnd, fpr_st0_high_opnd);
             la_ftint_w_d(st0_opnd, st0_opnd);
             la_movfr2gr_s(itemp, st0_opnd);
             la_st_h(itemp, mem_opnd, 0);
@@ -1718,7 +1720,7 @@ static bool translate_fistp_softfpu(IR1_INST *pir1)
             li_d(itemp2, FLOAT80_EXPONENT_MAX + FLOAT32_EXPONENT_MAX + 1);
             la_bge(itemp, itemp2, label_softfpu);
 
-            la_fcvt_d_ld(st0_opnd, fpr_st0_low_opnd, fpr_st0_high_opnd);
+            latx_fcvt_d_ld(st0_opnd, fpr_st0_low_opnd, fpr_st0_high_opnd);
             la_ftint_w_d(st0_opnd, st0_opnd);
             la_movfr2gr_s(itemp, st0_opnd);
             la_st_w(itemp, mem_opnd, 0);
@@ -1727,7 +1729,7 @@ static bool translate_fistp_softfpu(IR1_INST *pir1)
             li_d(itemp2, FLOAT80_EXPONENT_MAX + FLOAT64_EXPONENT_MAX + 1);
             la_bge(itemp, itemp2, label_softfpu);
 
-            la_fcvt_d_ld(st0_opnd, fpr_st0_low_opnd, fpr_st0_high_opnd);
+            latx_fcvt_d_ld(st0_opnd, fpr_st0_low_opnd, fpr_st0_high_opnd);
             la_ftint_l_d(st0_opnd, st0_opnd);
             la_movfr2gr_d(itemp, st0_opnd);
             la_st_d(itemp, mem_opnd, 0);
@@ -1887,7 +1889,7 @@ static bool translate_fld1_softfpu(IR1_INST *pir1)
 
 static bool translate_fld_softfpu(IR1_INST *pir1)
 {
-    if (option_softfpu == 2) {
+    if (option_enable_lbt && option_softfpu == 2) {
         int index = get_src_index(pir1);
         IR1_OPND *opnd0 = ir1_get_opnd(pir1, index);
         int opnd_size = ir1_opnd_size(opnd0);
@@ -1908,13 +1910,13 @@ static bool translate_fld_softfpu(IR1_INST *pir1)
                 la_fld_s(src_opnd, mem_opnd, 0);
 
                 la_fcvt_d_s(src_opnd, src_opnd);
-                la_fcvt_ud_d(ftemp, src_opnd);
-                la_fcvt_ld_d(st0_opnd, src_opnd);
+                latx_fcvt_ud_d(ftemp, src_opnd);
+                latx_fcvt_ld_d(st0_opnd, src_opnd);
                 la_vextrins_h(st0_opnd, ftemp, 0x40);
             } else if (opnd_size == 64) {
                 la_fld_d(src_opnd, mem_opnd, 0);
-                la_fcvt_ud_d(ftemp, src_opnd);
-                la_fcvt_ld_d(st0_opnd, src_opnd);
+                latx_fcvt_ud_d(ftemp, src_opnd);
+                latx_fcvt_ld_d(st0_opnd, src_opnd);
                 la_vextrins_h(st0_opnd, ftemp, 0x40);
             } else if (opnd_size == 80) {
                 IR2_OPND high_itemp = ra_alloc_itemp();
@@ -2766,11 +2768,11 @@ static bool translate_fst_softfpu(IR1_INST *pir1)
             }
 
             if (opnd_size == 32) {
-                la_fcvt_d_ld(low_opnd, low_opnd, high_opnd);
+                latx_fcvt_d_ld(low_opnd, low_opnd, high_opnd);
                 la_fcvt_s_d(low_opnd, low_opnd);
                 la_fst_s(low_opnd, mem_opnd, 0);
             } else if (opnd_size == 64) {
-                la_fcvt_d_ld(low_opnd, low_opnd, high_opnd);
+                latx_fcvt_d_ld(low_opnd, low_opnd, high_opnd);
                 la_fst_d(low_opnd, mem_opnd, 0);
             }
         }
