@@ -1411,6 +1411,11 @@ typedef struct HVFX86LazyFlags {
     target_ulong auxbits;
 } HVFX86LazyFlags;
 
+#if defined(CONFIG_LATX) && defined(CONFIG_LATX_FAST_TRANSLATOR) && \
+    defined(TARGET_X86_64) && !defined(CONFIG_SOFTMMU)
+enum { QT_X87_ENV_HARD64, QT_X87_ENV_X80, QT_X87_ENV_MMX64 };
+#endif
+
 typedef struct CPUX86State {
 #ifdef CONFIG_LATX
     void*  checksum_fail_tb;
@@ -1435,6 +1440,13 @@ typedef struct CPUX86State {
  #endif
     uint8_t mode_fpu;
     bool fpu_clobber;
+#if defined(CONFIG_LATX_FAST_TRANSLATOR) && defined(TARGET_X86_64) && \
+    !defined(CONFIG_SOFTMMU)
+#define LATX_QUICKTRANS_BCD_HARD64_ABI 1
+#define LATX_QUICKTRANS_X87_SIGNAL_ABI 1
+/* Quicktrans search data[1] is the deferred guest RSP correction. */
+#define LATX_QUICKTRANS_RSP_SEARCH_ABI 1
+#endif
 #endif
     /* standard registers */
     uint64_t regs[CPU_NB_REGS];
@@ -1587,6 +1599,14 @@ typedef struct CPUX86State {
     uint8_t nmi_pending;
 
     uintptr_t retaddr;
+
+#ifdef LATX_QUICKTRANS_X87_SIGNAL_ABI
+    /* Keep these outside mode_fpu's legacy eight-byte stores. */
+    bool qt_hard_signal_protocol_enabled;
+    bool qt_helper_env_saved;
+    bool qt_bcd_helper_env_hard64;
+    uint8_t qt_x87_env_format;
+#endif
 
     /* Fields up to this point are cleared by a CPU reset */
     struct {} end_reset_fields;
@@ -2147,6 +2167,9 @@ static inline bool cpu_vmx_maybe_enabled(CPUX86State *env)
 
 /* fpu_helper.c */
 void update_fp_status(CPUX86State *env);
+#ifdef LATX_QUICKTRANS_X87_SIGNAL_ABI
+void latx_qt_x87_env_to_hard64(CPUX86State *env);
+#endif
 void update_mxcsr_status(CPUX86State *env);
 void update_mxcsr_from_sse_status(CPUX86State *env);
 

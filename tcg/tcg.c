@@ -1281,7 +1281,16 @@ TranslationBlock *tcg_tb_alloc(TCGContext *s)
  retry:
     if (option_split_tb) {
         tb = (void *)ROUND_UP((uintptr_t)s->tb_gen_ptr, align);
+#ifdef LATX_COMPACT_TB_METADATA
+        /* Preserve the pre-compaction allocation footprint in split mode.
+         * The live metadata fits in 256 bytes, but tightly packing entries
+         * changes address distribution and regresses cold block creation.
+         * MAX also keeps the high-water check safe if the structure grows. */
+        const size_t alloc_size = MAX(sizeof(*tb), (size_t)272);
+        void *next_tb = (void *)ROUND_UP((uintptr_t)tb + alloc_size, align);
+#else
         void *next_tb = (void *)ROUND_UP((uintptr_t)(tb + 1), align);
+#endif
         if (unlikely(next_tb > s->tb_gen_highwater)) {
             if (tcg_region_alloc(s)) {
                 return NULL;
