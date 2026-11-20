@@ -224,11 +224,13 @@ bool translate_maskmovdqu(IR1_INST *pir1)
     la_vnor_v(temp_mask, mem_mask, zero);
     IR2_OPND mem_data = ra_alloc_ftemp();
     IR2_OPND xmm_data = ra_alloc_ftemp();
-    la_vld(mem_data, base_opnd, 0);
+    gen_test_page_flag(base_opnd, 0,
+                       PAGE_READ | PAGE_WRITE | PAGE_WRITE_ORG, 16);
+    latx_load_v128(mem_data, base_opnd, 0);
     la_vand_v(xmm_data, src, temp_mask);
     la_vand_v(mem_data, mem_data, mem_mask);
     la_vor_v(mem_data, mem_data, xmm_data);
-    la_vst(mem_data, base_opnd, 0);
+    latx_store_v128(mem_data, base_opnd, 0);
     return true;
 }
 

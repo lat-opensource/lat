@@ -89,7 +89,7 @@ static void vpaes_load_tables_lsx(int kind, int start, int count)
     IR2_OPND addr = ra_alloc_itemp();
     vpaes_load_addr(addr, kind);
     for (int i = 0; i < count; ++i) {
-        la_vld(vreg(i), addr, (start + i) * 16);
+        latx_load_v128(vreg(i), addr, (start + i) * 16);
     }
     ra_free_temp(addr);
 }

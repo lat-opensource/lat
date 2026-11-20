@@ -1689,6 +1689,9 @@ void store_freg_to_ir1(IR2_OPND, IR1_OPND *, bool is_xmm_hi, bool is_convert);
 void store_64_bit_freg_to_ir1_80_bit_mem(IR2_OPND, IR2_OPND, int);
 void store_freg128_to_ir1_mem(IR2_OPND opnd2, IR1_OPND *opnd1);
 void load_freg128_from_ir1_mem(IR2_OPND opnd2, IR1_OPND *opnd1);
+void latx_load_v128(IR2_OPND dest, IR2_OPND base, int disp);
+void latx_load_f64(IR2_OPND dest, IR2_OPND base, int disp);
+void latx_store_v128(IR2_OPND src, IR2_OPND base, int disp);
 void load_64_bit_freg_from_ir1_80_bit_mem(IR2_OPND opnd2,
                                                  IR2_OPND mem_opnd, int mem_imm);
 

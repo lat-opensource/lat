@@ -40,7 +40,7 @@ static void sync_ymm_high128_from_env_lsx(int index)
 
     li_d(address, lsenv_offset_of_xmm(lsenv, index) + 16);
     la_add_d(address, env_ir2_opnd, address);
-    la_vld(high, address, 0);
+    latx_load_v128(high, address, 0);
     store_ymm_high128_shadow(high, index);
     ra_free_temp(high);
     ra_free_temp(address);

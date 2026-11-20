@@ -175,8 +175,8 @@ static void save_xmm(void)
     int save_no = 8;
 #endif
     for (int i = 0; i < save_no; i++) {
-        la_vst(ra_alloc_xmm(i), tmp_env,
-                lsenv_offset_of_xmm(lsenv, i) - 0x7f0);
+        latx_store_v128(ra_alloc_xmm(i), tmp_env,
+                        lsenv_offset_of_xmm(lsenv, i) - 0x7f0);
     }
     ra_free_temp(tmp_env);
 }
@@ -191,8 +191,8 @@ static void restore_xmm(void)
     int save_no = 8;
 #endif
     for (int i = 0; i < save_no; i++) {
-        la_vld(ra_alloc_xmm(i), tmp_env,
-                lsenv_offset_of_xmm(lsenv, i) - 0x7f0);
+        latx_load_v128(ra_alloc_xmm(i), tmp_env,
+                       lsenv_offset_of_xmm(lsenv, i) - 0x7f0);
     }
     ra_free_temp(tmp_env);
 }
@@ -308,7 +308,7 @@ static void save_float80_to_stn(IR2_OPND stm_opnd, int stn)
 {
     IR2_OPND stn_opnd_addr = get_stn_opnd_addr(stn);
 
-    la_vst(stm_opnd, stn_opnd_addr, 0);
+    latx_store_v128(stm_opnd, stn_opnd_addr, 0);
 
     ra_free_temp(stn_opnd_addr);
 }
@@ -317,7 +317,7 @@ static void get_float80_from_stn(IR2_OPND stm_opnd, int stn)
 {
     IR2_OPND stn_opnd_addr = get_stn_opnd_addr(stn);
 
-    la_vld(stm_opnd, stn_opnd_addr, 0);
+    latx_load_v128(stm_opnd, stn_opnd_addr, 0);
 
     ra_free_temp(stn_opnd_addr);
 }
@@ -675,7 +675,7 @@ static void gen_float64_ST0_MEM(IR1_INST *pir1, IR2_OPND mem_opnd,
     IR2_OPND src_opnd = ra_alloc_ftemp();
 
     if (opnd_size == 64) {
-        la_fld_d(src_opnd, mem_opnd, 0);
+        latx_load_f64(src_opnd, mem_opnd, 0);
         if (is_integer) {
             la_ffint_d_l(src_opnd, src_opnd);
         }
@@ -1914,13 +1914,13 @@ static bool translate_fld_softfpu(IR1_INST *pir1)
                 latx_fcvt_ld_d(st0_opnd, src_opnd);
                 la_vextrins_h(st0_opnd, ftemp, 0x40);
             } else if (opnd_size == 64) {
-                la_fld_d(src_opnd, mem_opnd, 0);
+                latx_load_f64(src_opnd, mem_opnd, 0);
                 latx_fcvt_ud_d(ftemp, src_opnd);
                 latx_fcvt_ld_d(st0_opnd, src_opnd);
                 la_vextrins_h(st0_opnd, ftemp, 0x40);
             } else if (opnd_size == 80) {
                 IR2_OPND high_itemp = ra_alloc_itemp();
-                la_fld_d(st0_opnd, mem_opnd, 0);
+                latx_load_f64(st0_opnd, mem_opnd, 0);
                 la_ld_hu(high_itemp, mem_opnd, 8);
                 la_movgr2fr_d(ftemp, high_itemp);
                 la_vextrins_h(st0_opnd, ftemp, 0x40);

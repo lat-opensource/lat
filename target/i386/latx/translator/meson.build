@@ -6,6 +6,7 @@ i386_ss.add(when: 'CONFIG_LATX', if_true: files(
   'tr-eflag-soft.c',
   'tr-state.c',
   'tr-fcvt.c',
+  'tr-memory.c',
   'tr-farith.c',
   'tr-fcmovcc.c',
   'tr-fctrl.c',

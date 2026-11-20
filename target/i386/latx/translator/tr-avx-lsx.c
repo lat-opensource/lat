@@ -2605,10 +2605,10 @@ bool translate_vpxor_lsx(IR1_INST * pir1) {
                 src2 = ra_alloc_ftemp();
                 src2_high = ra_alloc_ftemp();
                 gen_test_page_flag(mem_opnd, mem_imm, PAGE_READ, 16);
-                la_vld(src2, mem_opnd, mem_imm);
+                latx_load_v128(src2, mem_opnd, mem_imm);
                 mem_opnd = mem_imm_add_disp(mem_opnd, &mem_imm, 16);
                 gen_test_page_flag(mem_opnd, mem_imm, PAGE_READ, 16);
-                la_vld(src2_high, mem_opnd, mem_imm);
+                latx_load_v128(src2_high, mem_opnd, mem_imm);
             }
 
             la_vxor_v(dest, src1, src2);

@@ -245,8 +245,8 @@ static void gen_trace_helper(ADDR helper_method, IR1_INST *pir1)
                              sp_ir2_opnd, TRACE_REG_STACK_OFFSET + i * 8);
     }
     for (int j = 0; j < 8; j++) {
-        la_vst(ra_alloc_xmm(j), sp_ir2_opnd,
-                             TRACE_REG_STACK_OFFSET + i * 8);
+        latx_store_v128(ra_alloc_xmm(j), sp_ir2_opnd,
+                        TRACE_REG_STACK_OFFSET + i * 8);
         i += 2;
     }
 
@@ -308,8 +308,8 @@ static void gen_trace_helper(ADDR helper_method, IR1_INST *pir1)
     }
     /* xmm is 128bit */
     for (int j = 0; j < 8; j++) {
-        la_vld(ra_alloc_xmm(j), sp_ir2_opnd,
-                             TRACE_REG_STACK_OFFSET + i * 8);
+        latx_load_v128(ra_alloc_xmm(j), sp_ir2_opnd,
+                       TRACE_REG_STACK_OFFSET + i * 8);
         i += 2;
     }
     /* mmx is 128bit
