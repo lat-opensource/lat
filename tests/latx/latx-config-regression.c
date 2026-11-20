@@ -39,6 +39,11 @@ static void test_release_loader_prefix_config(void)
     g_assert_true(config_option_registered("LAT_LD_PREFIX"));
 }
 
+static void test_masked_memory_config(void)
+{
+    g_assert_true(config_option_registered("LATX_MASKED_MEMORY"));
+}
+
 static void test_runtime_prefix_source(void)
 {
     latx_runtime_reset();
@@ -187,6 +192,7 @@ int main(int argc, char **argv)
                     test_target_config_files);
     g_test_add_func("/latx/config/release-loader-prefix",
                     test_release_loader_prefix_config);
+    g_test_add_func("/latx/config/masked-memory", test_masked_memory_config);
     g_test_add_func("/latx/config/runtime-prefix-source",
                     test_runtime_prefix_source);
     g_test_add_func("/latx/config/user-config-path",
