@@ -17,3 +17,19 @@ if 'x86_64-linux-user' in target_dirs
     ],
   }]
 endif
+
+foreach arch : ['x86_64', 'i386']
+  if arch + '-linux-user' in target_dirs
+    source_name = 'netlink-multipart.c'
+    latx_integration_tests += [{
+      'name': 'test-netlink-multipart-' + arch,
+      'runner': find_program('../../test-netlink-multipart.sh'),
+      'args': [
+        emulators['latx-' + arch],
+        files('../../' + source_name),
+        arch,
+      ],
+      'timeout': 180,
+    }]
+  endif
+endforeach
