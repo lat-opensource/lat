@@ -1148,6 +1148,15 @@ static int getID(struct InternalInstruction *insn)
 	}
 
 	/* The following clauses compensate for limitations of the tables. */
+	if (insn->mode == MODE_64BIT &&
+			insn->vectorExtensionType == TYPE_VEX_3B &&
+			insn->opcodeType == THREEBYTE_3A &&
+			(insn->opcode & 0xfc) == 0x60) {
+		/* VPCMP{E,I}STR{I,M} share their opcode for both W values.
+		 * W selects the explicit length width, not another instruction.
+		 * Retain rexPrefix.W for the decoded length semantics. */
+		attrMask &= ~ATTR_REXW;
+	}
 	if (insn->mode != MODE_64BIT &&
 			insn->vectorExtensionType != TYPE_NO_VEX_XOP) {
 		if (getIDWithAttrMask(&instructionID, insn, attrMask)) {
