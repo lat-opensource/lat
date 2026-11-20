@@ -163,4 +163,9 @@ bool insts_pattern_scan_jcc_end(TranslationBlock *tb, IR1_INST *ir1, int index, 
 
 bool try_translate_instptn(IR1_INST *pir1);
 
+#ifdef CONFIG_LATX_INSTS_PATTERN
+unsigned instptn_flags_recovery(IR1_INST *pir1);
+void opt_instptn_fix(CPUArchState *env, unsigned recovery);
+#endif
+
 #endif
