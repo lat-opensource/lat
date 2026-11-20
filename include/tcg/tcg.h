@@ -912,6 +912,9 @@ size_t tcg_code_size(void);
 size_t tcg_code_capacity(void);
 
 void tcg_tb_insert(TranslationBlock *tb);
+#ifdef CONFIG_LATX_TU
+void tcg_tb_insert_tu(TranslationBlock **members, size_t count);
+#endif
 void tcg_tb_remove(TranslationBlock *tb);
 size_t tcg_tb_phys_invalidate_count(void);
 TranslationBlock *tcg_tb_lookup(uintptr_t tc_ptr);

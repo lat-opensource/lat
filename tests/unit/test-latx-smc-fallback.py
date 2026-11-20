@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-2.0-or-later
-"""Exercise allocation failure through production page_unprotect and signal dispatch.
+"""Exercise SMC fallback and TU write protection through page_unprotect.
 
 Page metadata, the TB index and CPU state are modelled; allocation, protection,
 shadow creation, SMC profiling, invalidation/unwind and store interpretation use
@@ -47,6 +47,8 @@ PRELUDE = r'''
 #define PAGE_ANON 128
 TB_FLAGS
 #define TARGET_HAS_PRECISE_SMC 1
+static bool cross_page_tu;
+static bool aot_cross_page_tu_enabled(void) { return cross_page_tu; }
 #define CONFIG_LATX_SMC_OPT 1
 #define CONFIG_LOONGARCH_NEW_WORLD 1
 #define HOST_PAGE_ALIGN(x) (((x) + qemu_host_page_size - 1) & qemu_host_page_mask)
@@ -58,7 +60,7 @@ typedef uintptr_t tb_page_addr_t;
 typedef struct { int flags; } PageFlagsNode;
 typedef struct { void *p_addr; int64_t access_off; int is_shmm; } ShadowPageDesc;
 typedef struct {
-    int flags, size, slot;
+    int flags, size, slot, tu;
     uintptr_t pc;
     unsigned smc_data;
     bool linked;
@@ -73,7 +75,7 @@ static ShadowPageDesc shadows[32];
 static TranslationBlock tbs[32];
 static int locks, fail_kind, fail_host, shared_mode;
 static int attempts, full_invalidations, selective_invalidations, private_shadows;
-static int restore_count, retrans_inserts;
+static int restore_count, retrans_inserts, remaining_tb_mask;
 #ifdef CONFIG_LATX_AOT
 static int option_aot = 1;
 static unsigned smc_pages;
@@ -128,10 +130,26 @@ static bool smc_retrans_insert(TranslationBlock *tb) {
     CHECK(tb == &active_tb);
     return retrans_inserts++ == 0;
 }
-static void tb_phys_invalidate__locked(TranslationBlock *tb) {
-    assert_memory_lock();
+static bool tb_same_tu(TranslationBlock *a, TranslationBlock *b) {
+    return a == b || (cross_page_tu && a->tu && a->tu == b->tu);
+}
+static void invalidate_tb(TranslationBlock *tb) {
     tb->flags |= CF_INVALID;
     tb->linked = false;
+}
+static void tb_phys_invalidate__locked(TranslationBlock *tb) {
+    assert_memory_lock();
+    invalidate_tb(tb);
+    if (cross_page_tu && tb->tu) {
+        for (unsigned i = 0; i < sizeof(tbs) / sizeof(tbs[0]); i++) {
+            if (tbs[i].linked && tb_same_tu(tb, &tbs[i])) {
+                invalidate_tb(&tbs[i]);
+            }
+        }
+        if (active_tb.linked && tb_same_tu(tb, &active_tb)) {
+            invalidate_tb(&active_tb);
+        }
+    }
 }
 static void cpu_restore_state_from_tb(CPUState *cpu, TranslationBlock *tb,
                                      uintptr_t pc, bool will_exit) {
@@ -157,17 +175,25 @@ static TranslationBlock *next_tb(int slot, uintptr_t start, uintptr_t end) {
     }
     return NULL;
 }
+static PageForEachNext foreach_tb_first(uintptr_t start, uintptr_t end) {
+    return next_tb(0, start, end);
+}
+static PageForEachNext foreach_tb_next(TranslationBlock *tb, uintptr_t start,
+                                       uintptr_t end) {
+    return tb ? next_tb(tb->slot + 1, start, end) : NULL;
+}
 /* Compute the successor before invalidation removes the current index entry. */
 #define PAGE_FOR_EACH_TB(start, end, unused, tb, next) \
-    for (tb = next_tb(0, start, end), \
-         next = tb ? next_tb(tb->slot + 1, start, end) : NULL; \
-         tb; tb = next, \
-         next = tb ? next_tb(tb->slot + 1, start, end) : NULL)
+    for (tb = foreach_tb_first(start, end), \
+         next = foreach_tb_next(tb, start, end); \
+         tb; tb = next, next = foreach_tb_next(tb, start, end))
 bool production_tb_invalidate_phys_page_unwind(uintptr_t, uintptr_t, int *);
 static bool tb_invalidate_phys_page_unwind(uintptr_t addr, uintptr_t pc, int *count) {
     if (count) selective_invalidations++;
     else full_invalidations++;
-    return production_tb_invalidate_phys_page_unwind(addr, pc, count);
+    bool unwind = production_tb_invalidate_phys_page_unwind(addr, pc, count);
+    if (count) remaining_tb_mask = *count;
+    return unwind;
 }
 static int latx_smc_shmm(void) { return shared_mode & 2; }
 static void latx_smc_shmm_disable(void) { shared_mode &= ~2; }
@@ -300,6 +326,62 @@ static void run_case(int kind, int failed_host, int cross, int current, int mode
     }
     CHECK(!munmap((void *)guest_base, 2 * qemu_host_page_size));
 }
+static void run_tu_case(bool cross, int survivor_mask) {
+    guest_base = (uintptr_t)mmap(NULL, 2 * qemu_host_page_size, PROT_READ,
+                                 MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    CHECK((void *)guest_base != MAP_FAILED);
+    memset(shadows, 0, sizeof(shadows));
+    memset(tbs, 0, sizeof(tbs));
+    active_tb = (TranslationBlock) { .slot = 32 };
+    const unsigned n = 2 * qemu_host_page_size / TARGET_PAGE_SIZE;
+    for (unsigned i = 0; i < n; i++) {
+        pages[i].flags = PAGE_READ | PAGE_WRITE_ORG | PAGE_VALID | PAGE_ANON;
+    }
+    uintptr_t second = guest_base + qemu_host_page_size;
+    uintptr_t address = cross ? second - 4 : guest_base + 64;
+    uintptr_t first = address & TARGET_PAGE_MASK;
+    tbs[0] = (TranslationBlock) {
+        .pc = (cross ? second : guest_base) + 32,
+        .size = 4, .slot = 0, .tu = 1, .linked = true,
+    };
+    tbs[1] = (TranslationBlock) {
+        .pc = address, .size = 4, .slot = 1, .tu = 1, .linked = true,
+    };
+    for (int i = 0; i < 2; i++) {
+        if (survivor_mask & (1 << i)) {
+            tbs[2 + i] = (TranslationBlock) {
+                .pc = (i ? second : first) + 16,
+                .size = 4, .slot = 2 + i, .linked = true,
+            };
+        }
+    }
+    cross_page_tu = true;
+    shared_mode = 2;
+    fail_kind = attempts = full_invalidations = selective_invalidations = 0;
+    int emu = cross ? 8 : 1;
+    CHECK(page_unprotect(address, 0x1000, &emu) == 1 && !locks);
+    CHECK(!tbs[0].linked && !tbs[1].linked);
+    CHECK(selective_invalidations == 1 && !full_invalidations);
+    if (remaining_tb_mask != survivor_mask) {
+        fprintf(stderr, "TU SMC: cross=%d expected=%d actual=%d\n",
+                cross, survivor_mask, remaining_tb_mask);
+    }
+    CHECK(remaining_tb_mask == survivor_mask);
+    CHECK(!!(page_get_flags(address) & PAGE_WRITE) == !survivor_mask);
+    if (cross) {
+        CHECK(!!(page_get_flags(second) & PAGE_WRITE) == !survivor_mask);
+    }
+    if (survivor_mask || qemu_host_page_size == TARGET_PAGE_SIZE) {
+        CHECK(emu == !!survivor_mask);
+    }
+    for (unsigned i = 0; i < n; i++) {
+        if (shadows[i].p_addr) {
+            CHECK(!munmap(shadows[i].p_addr, qemu_host_page_size));
+        }
+    }
+    CHECK(!munmap((void *)guest_base, 2 * qemu_host_page_size));
+    cross_page_tu = false;
+}
 int main(void) {
     qemu_host_page_size = sysconf(_SC_PAGESIZE);
     qemu_host_page_mask = ~(qemu_host_page_size - 1);
@@ -334,6 +416,13 @@ int main(void) {
         }
     }
     puts("SMC fallback: allocation failures, cross-host retry, store-helper thresholds and precise unwind passed");
+    run_tu_case(true, 0);
+    run_tu_case(false, 0);
+    run_tu_case(false, 1);
+    for (int mask = 1; mask < 4; mask++) {
+        run_tu_case(true, mask);
+    }
+    puts("SMC TU: same-page and cross-page write protection passed");
     return 0;
 }
 '''
@@ -362,6 +451,8 @@ def main():
         'bool page_is_shadow_not_shmm(', 'static inline int smc_shmm_check_page_anon(',
         'static int smc_create_shadow_page_shmm(', 'void create_shadow_page_chunk('))
     bodies += function(source, 'static inline bool tb_is_covered(')
+    if 'static bool page_has_valid_tb(' in source:
+        bodies += function(source, 'static bool page_has_valid_tb(')
     bodies += '#define tb_invalidate_phys_page_unwind production_tb_invalidate_phys_page_unwind\n'
     bodies += function(source, 'bool tb_invalidate_phys_page_unwind(')
     bodies += '#undef tb_invalidate_phys_page_unwind\n'
