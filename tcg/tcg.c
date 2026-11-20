@@ -45,6 +45,10 @@
 
 #include "exec/exec-all.h"
 
+#if defined(CONFIG_LATX_TU) && defined(CONFIG_LATX_AOT)
+#include "latx-options.h"
+#endif
+
 #if !defined(CONFIG_USER_ONLY)
 #include "hw/boards.h"
 #endif
@@ -200,6 +204,302 @@ struct tcg_region_state {
 };
 
 static struct tcg_region_state region;
+
+/*
+ * Only TUs need an index: their member table can be far from a native PC.
+ * A sparse two-level directory locates TU interval tables. Ordinary TBs keep
+ * their existing TBMini or GTree lookup. Index readers never lock or allocate.
+ */
+#define LATX_TB_INDEX_CHUNK_SHIFT 12
+#define LATX_TB_INDEX_DIRECTORY_SHIFT 17
+#define LATX_TB_INDEX_BUCKETS_PER_CHUNK \
+    (1U << (LATX_TB_INDEX_DIRECTORY_SHIFT - LATX_TB_INDEX_CHUNK_SHIFT))
+
+typedef struct LatxTBIndexRange {
+    uint32_t start;
+    uint32_t end;
+    /* Only identity can be tombstoned; interval geometry stays immutable. */
+    TranslationBlock *tb;
+} LatxTBIndexRange;
+
+typedef struct LatxTBIndexGroup {
+    struct LatxTBIndexGroup *next;
+    size_t begin;
+    size_t end;
+    size_t count;
+    LatxTBIndexRange ranges[];
+} LatxTBIndexGroup;
+
+typedef struct LatxTBIndexLink {
+    struct LatxTBIndexLink *next;
+    LatxTBIndexGroup *group;
+} LatxTBIndexLink;
+
+typedef struct LatxTBIndexChunk {
+    LatxTBIndexLink *buckets[LATX_TB_INDEX_BUCKETS_PER_CHUNK];
+} LatxTBIndexChunk;
+
+static QemuMutex latx_tb_index_lock;
+static LatxTBIndexChunk **latx_tb_index_chunks;
+static LatxTBIndexGroup *latx_tb_index_groups;
+static size_t latx_tb_index_chunk_count;
+static size_t latx_tb_index_buffer_size;
+
+static inline bool latx_tb_index_enabled(void)
+{
+#if defined(CONFIG_LATX_TU) && defined(CONFIG_LATX_AOT)
+    return aot_cross_page_tu_enabled();
+#else
+    return false;
+#endif
+}
+
+static void latx_tb_index_init(void)
+{
+    qemu_mutex_init(&latx_tb_index_lock);
+    latx_tb_index_buffer_size = (uintptr_t)region.end -
+                                (uintptr_t)region.start;
+    latx_tb_index_chunk_count = DIV_ROUND_UP(latx_tb_index_buffer_size,
+                                1U << LATX_TB_INDEX_DIRECTORY_SHIFT);
+}
+
+static bool latx_tb_index_locate(uintptr_t pc, size_t *offset)
+{
+    uintptr_t rw = pc;
+
+    if (!in_code_gen_buffer((void *)rw)) {
+        rw -= tcg_splitwx_diff;
+        if (!in_code_gen_buffer((void *)rw)) {
+            return false;
+        }
+    }
+    *offset = rw - (uintptr_t)region.start;
+    return *offset < latx_tb_index_buffer_size;
+}
+
+static TranslationBlock *latx_tb_index_get(uintptr_t pc, bool *covered)
+{
+    LatxTBIndexChunk **chunks;
+    size_t offset;
+
+    *covered = false;
+    if (!latx_tb_index_enabled() || !latx_tb_index_locate(pc, &offset)) {
+        return NULL;
+    }
+    chunks = qatomic_load_acquire(&latx_tb_index_chunks);
+    if (!chunks) {
+        return NULL;
+    }
+    LatxTBIndexChunk *chunk = qatomic_load_acquire(
+        &chunks[offset >> LATX_TB_INDEX_DIRECTORY_SHIFT]);
+    if (!chunk) {
+        return NULL;
+    }
+    size_t bucket = (offset >> LATX_TB_INDEX_CHUNK_SHIFT) &
+                    (LATX_TB_INDEX_BUCKETS_PER_CHUNK - 1);
+    LatxTBIndexLink *link = qatomic_load_acquire(&chunk->buckets[bucket]);
+
+    for (; link; link = link->next) {
+        LatxTBIndexGroup *group = link->group;
+        size_t lo = 0, hi = group->count;
+
+        if (offset < group->begin || offset >= group->end) {
+            continue;
+        }
+        *covered = true;
+        size_t key = offset - group->begin;
+        while (lo < hi) {
+            size_t mid = lo + (hi - lo) / 2;
+
+            if (group->ranges[mid].start <= key) {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+        if (lo && key < group->ranges[lo - 1].end) {
+            TranslationBlock *tb = qatomic_load_acquire(
+                &group->ranges[lo - 1].tb);
+
+            if (tb) {
+                return tb;
+            }
+        }
+    }
+    return NULL;
+}
+
+static int latx_tb_index_range_cmp(const void *ap, const void *bp)
+{
+    const LatxTBIndexRange *a = ap, *b = bp;
+
+    return (a->start > b->start) - (a->start < b->start);
+}
+
+static size_t latx_tb_index_member_ranges(TranslationBlock *tb,
+                                         size_t starts[2], size_t sizes[2])
+{
+    uintptr_t pc = (uintptr_t)tb->tc.ptr;
+    size_t count = 1;
+
+    sizes[0] = tb->tc.size;
+    if (!latx_tb_index_locate(pc, &starts[0])) {
+        g_assert_not_reached();
+    }
+#ifdef CONFIG_LATX_TU
+    if (tb->tu_cold_size) {
+        if (tb->tu_cold_offset > UINTPTR_MAX - pc ||
+            !latx_tb_index_locate(pc + tb->tu_cold_offset, &starts[1])) {
+            g_assert_not_reached();
+        }
+        sizes[1] = tb->tu_cold_size;
+        count++;
+    }
+#endif
+    for (size_t i = 0; i < count; i++) {
+        g_assert(sizes[i] && sizes[i] <=
+                 latx_tb_index_buffer_size - starts[i]);
+    }
+    return count;
+}
+
+/* Complete all intervals before publishing any member to QHT/direct links. */
+static void latx_tb_index_insert_group(TranslationBlock **members, size_t count)
+{
+    size_t begin = SIZE_MAX, end = 0, nr = 0;
+    size_t starts[2], sizes[2];
+    LatxTBIndexChunk **chunks;
+    LatxTBIndexGroup *group;
+
+    if (!latx_tb_index_enabled() || !count) {
+        return;
+    }
+    for (size_t i = 0; i < count; i++) {
+        size_t n = latx_tb_index_member_ranges(members[i], starts, sizes);
+
+        nr += n;
+        for (size_t j = 0; j < n; j++) {
+            begin = MIN(begin, starts[j]);
+            end = MAX(end, starts[j] + sizes[j]);
+        }
+    }
+    /* TU code sizes and cold offsets are bounded by the codegen TU limit. */
+    g_assert(end - begin <= UINT32_MAX);
+    size_t first = begin >> LATX_TB_INDEX_CHUNK_SHIFT;
+    size_t last = (end - 1) >> LATX_TB_INDEX_CHUNK_SHIFT;
+    size_t bytes = sizeof(*group) + nr * sizeof(group->ranges[0]);
+
+    group = g_malloc0(bytes + (last - first + 1) * sizeof(LatxTBIndexLink));
+    group->begin = begin;
+    group->end = end;
+    group->count = nr;
+    nr = 0;
+    for (size_t i = 0; i < count; i++) {
+        size_t n = latx_tb_index_member_ranges(members[i], starts, sizes);
+
+        for (size_t j = 0; j < n; j++) {
+            group->ranges[nr++] = (LatxTBIndexRange) {
+                .start = starts[j] - begin,
+                .end = starts[j] + sizes[j] - begin,
+                .tb = members[i],
+            };
+        }
+    }
+    qsort(group->ranges, nr, sizeof(group->ranges[0]), latx_tb_index_range_cmp);
+    for (size_t i = 1; i < nr; i++) {
+        g_assert(group->ranges[i - 1].end <= group->ranges[i].start);
+    }
+
+    qemu_mutex_lock(&latx_tb_index_lock);
+    chunks = qatomic_read(&latx_tb_index_chunks);
+    if (!chunks) {
+        chunks = g_new0(LatxTBIndexChunk *, latx_tb_index_chunk_count);
+        qatomic_store_release(&latx_tb_index_chunks, chunks);
+    }
+    group->next = latx_tb_index_groups;
+    latx_tb_index_groups = group;
+    LatxTBIndexLink *links = (void *)((char *)group + bytes);
+
+    for (size_t i = first; i <= last; i++) {
+        size_t ci = i / LATX_TB_INDEX_BUCKETS_PER_CHUNK;
+        size_t bi = i % LATX_TB_INDEX_BUCKETS_PER_CHUNK;
+        LatxTBIndexChunk *chunk = qatomic_read(&chunks[ci]);
+
+        if (!chunk) {
+            chunk = g_new0(LatxTBIndexChunk, 1);
+            qatomic_store_release(&chunks[ci], chunk);
+        }
+        links[i - first].group = group;
+        links[i - first].next = qatomic_read(&chunk->buckets[bi]);
+        qatomic_store_release(&chunk->buckets[bi], &links[i - first]);
+    }
+    qemu_mutex_unlock(&latx_tb_index_lock);
+}
+
+static void latx_tb_index_remove(TranslationBlock *tb)
+{
+    size_t offset;
+    LatxTBIndexChunk **chunks;
+
+    if (!latx_tb_index_enabled() ||
+        !latx_tb_index_locate((uintptr_t)tb->tc.ptr, &offset)) {
+        return;
+    }
+    qemu_mutex_lock(&latx_tb_index_lock);
+    chunks = qatomic_read(&latx_tb_index_chunks);
+    LatxTBIndexChunk *chunk = chunks ?
+        qatomic_read(&chunks[offset >> LATX_TB_INDEX_DIRECTORY_SHIFT]) : NULL;
+    if (chunk) {
+        size_t bucket = (offset >> LATX_TB_INDEX_CHUNK_SHIFT) &
+                        (LATX_TB_INDEX_BUCKETS_PER_CHUNK - 1);
+        LatxTBIndexLink *link = qatomic_read(&chunk->buckets[bucket]);
+
+        for (; link; link = link->next) {
+            LatxTBIndexGroup *group = link->group;
+
+            if (offset < group->begin || offset >= group->end) {
+                continue;
+            }
+            for (size_t i = 0; i < group->count; i++) {
+                if (qatomic_read(&group->ranges[i].tb) == tb) {
+                    qatomic_set(&group->ranges[i].tb, NULL);
+                }
+            }
+        }
+    }
+    qemu_mutex_unlock(&latx_tb_index_lock);
+}
+
+/* Safe-work context: no reader can retain a directory/table pointer here. */
+static void latx_tb_index_reset(void)
+{
+    /* Disabled modes never initialize the lock or publish a directory. */
+    if (!latx_tb_index_chunks) {
+        return;
+    }
+    qemu_mutex_lock(&latx_tb_index_lock);
+    if (latx_tb_index_chunks) {
+        for (size_t i = 0; i < latx_tb_index_chunk_count; i++) {
+            g_free(latx_tb_index_chunks[i]);
+            latx_tb_index_chunks[i] = NULL;
+        }
+    }
+    while (latx_tb_index_groups) {
+        LatxTBIndexGroup *group = latx_tb_index_groups;
+
+        latx_tb_index_groups = group->next;
+        g_free(group);
+    }
+    qemu_mutex_unlock(&latx_tb_index_lock);
+}
+
+#ifdef CONFIG_LATX_TU
+void tcg_tb_insert_tu(TranslationBlock **members, size_t count)
+{
+    latx_tb_index_insert_group(members, count);
+}
+#endif
+
 #ifndef CONFIG_LATX_TBMINI_ENABLE
 /*
  * This is an array of struct tcg_region_tree's, with padding.
@@ -569,6 +869,7 @@ void tcg_tb_remove(TranslationBlock *tb)
     struct tcg_region_tree *rt = tc_ptr_to_region_tree(tb->tc.ptr);
 
     g_assert(rt != NULL);
+    latx_tb_index_remove(tb);
     qemu_mutex_lock(&rt->lock);
     g_tree_remove(rt->tree, &tb->tc);
     qemu_mutex_unlock(&rt->lock);
@@ -581,10 +882,16 @@ void tcg_tb_remove(TranslationBlock *tb)
  */
 TranslationBlock *tcg_tb_lookup(uintptr_t tc_ptr)
 {
-    struct tcg_region_tree *rt = tc_ptr_to_region_tree((void *)tc_ptr);
-    TranslationBlock *tb;
+    bool covered;
+    TranslationBlock *tb = latx_tb_index_get(tc_ptr, &covered);
+    struct tcg_region_tree *rt;
     struct tb_tc s = { .ptr = (void *)tc_ptr };
 
+    /* A TU hole/tombstone must not fall through to the hot-only tree. */
+    if (covered) {
+        return tb;
+    }
+    rt = tc_ptr_to_region_tree((void *)tc_ptr);
     if (rt == NULL) {
         return NULL;
     }
@@ -671,7 +978,6 @@ static void tcg_region_tree_reset_all(void)
 #else
 
 #ifdef CONFIG_LATX_TU
-#define MAX_TBM_TABLE_LEN 1000
 static void *query_tu_tbm_table(TBMini *tbm, uintptr_t tc_ptr)
 {
     int tb_num = tbm->mtbp_uint64 &
@@ -697,29 +1003,46 @@ static void *tcg_tb_lookup_fast(uintptr_t tc_ptr)
     }
     TBMini *tbm = (TBMini *)(ROUND_DOWN((uintptr_t)tc_ptr - 4,
                 CODE_GEN_ALIGN));
-    while (tbm->mtbp_struct.magic != TB_MAGIC) {
+    while (tbm->mtbp_struct.magic != TB_MAGIC
+#ifdef CONFIG_LATX_TU
+           && tbm->mtbp_struct.magic != TU_TBM_TABLE_MAGIC
+#endif
+          ) {
         tbm = (TBMini *)((uint64_t)tbm - CODE_GEN_ALIGN);
         if (!in_code_gen_buffer((void *)tbm)) {
             return NULL;
         }
     }
-    void *tb = (void *)(tbm->mtbp_uint64 &
-                MAKE_64BIT_MASK(0, HOST_VIRT_ADDR_SPACE_BITS));
 #ifdef CONFIG_LATX_TU
-    if ((uintptr_t)tb <= MAX_TBM_TABLE_LEN) {
-        tb = query_tu_tbm_table(tbm, tc_ptr);
+    if (tbm->mtbp_struct.magic == TU_TBM_TABLE_MAGIC) {
+        /* Cross-page TU holes must not use the approximate legacy table. */
+        if (latx_tb_index_enabled()) {
+            return NULL;
+        }
+        return query_tu_tbm_table(tbm, tc_ptr);
     }
 #endif
+    void *tb = (void *)(tbm->mtbp_uint64 &
+                MAKE_64BIT_MASK(0, HOST_VIRT_ADDR_SPACE_BITS));
     return tb;
 }
 
 TranslationBlock *tcg_tb_lookup(uintptr_t tc_ptr)
 {
-    return tcg_tb_lookup_fast(tc_ptr);
+    bool covered;
+    TranslationBlock *tb = latx_tb_index_get(tc_ptr, &covered);
+
+    /* A TU hole/tombstone is an exact miss, not a legacy scan candidate. */
+    return covered ? tb : tcg_tb_lookup_fast(tc_ptr);
 }
 
+/* Ordinary TBs retain their in-buffer TBMini record. */
 void tcg_tb_insert(TranslationBlock *tb) {}
-void tcg_tb_remove(TranslationBlock *tb) {}
+
+void tcg_tb_remove(TranslationBlock *tb)
+{
+    latx_tb_index_remove(tb);
+}
 void tcg_tb_foreach(GTraverseFunc func, gpointer user_data) {}
 size_t tcg_nb_tbs(void) { return 0; }
 #endif
@@ -826,7 +1149,8 @@ void tcg_region_reset_all(void)
     }
     qemu_mutex_unlock(&region.lock);
 
-#if !defined(CONFIG_LATX_TBMINI_ENABLE)
+    latx_tb_index_reset();
+#ifndef CONFIG_LATX_TBMINI_ENABLE
     tcg_region_tree_reset_all();
 #endif
 }
@@ -938,6 +1262,10 @@ void tcg_region_init(void)
     region.end = QEMU_ALIGN_PTR_DOWN(buf + size, page_size);
     /* account for that last guard page */
     region.end -= page_size;
+
+    if (latx_tb_index_enabled()) {
+        latx_tb_index_init();
+    }
 
     /*
      * Set guard pages in the rw buffer, as that's the one into which

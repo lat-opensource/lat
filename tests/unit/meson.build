@@ -99,10 +99,51 @@ test(
 )
 
 test(
+  'test-latx-tu-restore',
+  python,
+  args: [files('test-latx-tu-restore.py'), project_source_root],
+  suite: 'lat-pr-fast',
+)
+
+test(
+  'test-latx-aot-page-recovery',
+  python,
+  args: [files('test-latx-aot-page-recovery.py'), project_source_root],
+  suite: 'lat-pr-fast',
+)
+
+# Each index fixture is compiled separately; give each case its own timeout.
+foreach backend : ['mini', 'tree']
+  foreach mode : ['protocol', 'threaded']
+    test(
+      'test-latx-tb-index-' + backend + '-' + mode,
+      python,
+      args: [files('test-latx-tb-index.py'), project_source_root, backend, mode],
+      suite: 'lat-pr-fast',
+    )
+  endforeach
+endforeach
+
+test(
+  'test-latx-tu-member-sort',
+  python,
+  args: [files('test-latx-tu-member-sort.py'), project_source_root],
+  suite: 'lat-pr-fast',
+)
+
+test(
+  'test-latx-tu-members',
+  python,
+  args: [files('test-latx-tu-members.py'), project_source_root],
+  suite: 'lat-pr-fast',
+)
+
+test(
   'test-latx-smc-fallback',
   python,
   args: [files('test-latx-smc-fallback.py'), project_source_root],
   suite: 'lat-pr-fast',
+  timeout: 120,
 )
 
 test(

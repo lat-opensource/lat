@@ -17,6 +17,6 @@
 #endif
 
 #define AOT_VERSION \
-    "Version: " LATX_VERSION "-" AOT_BUILD_FLAVOR "-" LATX_AOT_BUILD_ID
+    "Version: " LATX_VERSION "-" AOT_BUILD_FLAVOR "-" LATX_AOT_BUILD_ID "-v3"
 
 #endif

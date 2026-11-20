@@ -804,6 +804,20 @@ foreach target : target_dirs
     )
     test('latx-tb-missing-slot', tb_missing_slot_test, suite: 'lat-pr-fast')
 
+    tu_fallthrough_message_test = executable(
+      'test-latx-tu-fallthrough-message',
+      files(
+        'target/i386/latx/sbt/tests/tu-fallthrough-message-test.c',
+        'target/i386/latx/ir1/ir1.c',
+      ) + genh + tcg_trace_genh + [syscall_nr_generated],
+      c_args: smc_reload_test_c_args,
+      dependencies: [glib, capstone_git],
+      include_directories: target_inc,
+      link_args: smc_reload_test_link_args,
+    )
+    test('latx-tu-fallthrough-message', tu_fallthrough_message_test,
+         suite: 'lat-pr-fast')
+
     foreach variant : ['', '-no-tu']
       aot_merge_memory_test = executable(
         'test-latx-aot-merge-memory' + variant,
