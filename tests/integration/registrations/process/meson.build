@@ -1,5 +1,27 @@
 if 'x86_64-linux-user' in target_dirs
   latx_integration_tests += [{
+    'name': 'test-adcx-adox-no-lbt',
+    'runner': find_program('../../test-no-lbt-guest.sh'),
+    'args': [emulators['latx-x86_64'], files('../../adcx-adox-no-lbt.S')],
+  }]
+  latx_integration_tests += [{
+    'name': 'test-lbt-options',
+    'runner': find_program('../../test-lbt-options.sh'),
+    'args': [emulators['latx-x86_64'],
+             files('../../lua-number-conversion-no-lbt.S'),
+             files('../../host-cpuinfo-override.c')],
+    'timeout': 120,
+  }]
+  latx_integration_tests += [{
+    'name': 'test-eflags-differential-no-lbt',
+    'runner': find_program('../../test-eflags-differential-no-lbt.sh'),
+    'args': [emulators['latx-x86_64'],
+             files('../../latx-eflags-differential.S'),
+             files('../../latx-eflags-branch-differential.S'),
+             files('../../compare-latx-eflags-differential.py')],
+    'timeout': 120,
+  }]
+  latx_integration_tests += [{
     'name': 'test-proc-fd-closefrom-x86_64',
     'runner': find_program('../../test-proc-fd-closefrom.sh'),
     'args': [
@@ -241,6 +263,55 @@ if 'x86_64-linux-user' in target_dirs
       ],
     }]
   endif
+  latx_integration_tests += [{
+    'name': 'test-unaligned-v128',
+    'runner': find_program('../../test-no-lbt-guest.sh'),
+    'args': [
+      emulators['latx-x86_64'],
+      files('../../unaligned-v128.S'),
+    ],
+  }]
+  latx_integration_tests += [{
+    'name': 'test-lock-cmpxchg-no-lbt',
+    'runner': find_program('../../test-no-lbt-guest.sh'),
+    'args': [
+      emulators['latx-x86_64'],
+      files('../../lock-cmpxchg-no-lbt.S'),
+    ],
+  }]
+  latx_integration_tests += [{
+    'name': 'test-signal-xmm-no-lbt',
+    'runner': find_program('../../test-no-lbt-guest.sh'),
+    'args': [
+      emulators['latx-x86_64'],
+      files('../../signal-xmm-no-lbt.S'),
+    ],
+  }]
+  latx_integration_tests += [{
+    'name': 'test-lua-number-conversion-no-lbt',
+    'runner': find_program('../../test-no-lbt-guest.sh'),
+    'args': [
+      emulators['latx-x86_64'],
+      files('../../lua-number-conversion-no-lbt.S'),
+    ],
+  }]
+  latx_integration_tests += [{
+    'name': 'test-lock-ordering-no-lbt',
+    'runner': find_program('../../test-lock-ordering-no-lbt.sh'),
+    'args': [
+      emulators['latx-x86_64'],
+      files('../../latx-lock-xadd-stress.S'),
+      files('../../latx-lock-ordering-stress.S'),
+    ],
+  }]
+  latx_integration_tests += [{
+    'name': 'test-tso-ordering-no-lbt',
+    'runner': find_program('../../test-tso-ordering-no-lbt.sh'),
+    'args': [
+      emulators['latx-x86_64'],
+      files('../../latx-tso-ordering-no-lbt.S'),
+    ],
+  }]
   if 'CONFIG_LATX_KZT' in config_host
     latx_integration_tests += [{
       'name': 'test-int3-sigtrap-rip',
