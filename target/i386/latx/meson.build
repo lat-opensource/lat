@@ -186,6 +186,11 @@ i386_ss.add(when: 'CONFIG_LATX', if_true: files(
   'latx-signal.c',
 ) + latx_string_utils + latx_runtime + latx_host_features)
 
+if get_option('latx_host_scalar_libc')
+    i386_ss.add(when: 'CONFIG_LATX',
+                if_true: files('latx-host-libc-scalar.S'))
+endif
+
 lazydis_lib = static_library('lazydis',
                          build_by_default: false,
                          sources: files('latx-disassemble-trace/zydis.c'),
