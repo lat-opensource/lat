@@ -32,4 +32,6 @@ int flock_set(int fd, int type, bool wait);
 uint64_t aot_file_rmgroup(char *aotFile);
 int file_lock(const char *file_name, int *fd, int type, bool wait);
 int send_file_message(char *file_d, char *message);
+void aot_set_host_state_mode(int lbt, int lasx, int softfpu, int softfpu_fast);
+
 #endif

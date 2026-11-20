@@ -27,6 +27,15 @@ struct aot_info {
     time_t st_actime;
 };
 
+static char host_state_suffix[48];
+
+void aot_set_host_state_mode(int lbt, int lasx, int softfpu, int softfpu_fast)
+{
+    snprintf(host_state_suffix, sizeof(host_state_suffix),
+             "-lbt%d-lasx%d-fpu%d-fast%d", !!lbt, !!lasx,
+             softfpu, softfpu_fast);
+}
+
 int get_aot_path(const char *lib_name, char *file_path,
                  size_t file_path_size)
 {
@@ -47,8 +56,8 @@ int get_aot_path(const char *lib_name, char *file_path,
         }
     }
     home = getenv("HOME");
-    len = snprintf(file_path, file_path_size, "%s/.cache/latx/%s.aot2",
-                   home ? home : "", escaped_name);
+    len = snprintf(file_path, file_path_size, "%s/.cache/latx/%s%s.aot2",
+                   home ? home : "", escaped_name, host_state_suffix);
     g_free(escaped_name);
     if (len < 0 || (size_t)len >= file_path_size) {
         file_path[0] = '\0';

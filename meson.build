@@ -599,6 +599,16 @@ foreach target : target_dirs
   if get_option('tests').enabled() and \
      target in ['x86_64-linux-user', 'i386-linux-user'] and \
      'CONFIG_LATX_O1' in config_host
+    latx_host_features_test = executable(
+      'test-' + target + '-host-features',
+      files('tests/latx/host-features-test.c'),
+      objects: lib.extract_objects(latx_host_features),
+      c_args: c_args,
+      dependencies: [glib],
+      include_directories: target_inc,
+    )
+    test(target + '-host-features', latx_host_features_test,
+         suite: 'lat-pr-fast', timeout: 30)
     latx_config_regression_test = executable(
       'test-' + target + '-latx-config-regression',
       files('tests/latx/latx-config-regression.c'),

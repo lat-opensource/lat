@@ -22,6 +22,11 @@ static bool config_option_registered(const char *expected)
     return false;
 }
 
+static void test_lbt_option_registered(void)
+{
+    g_assert_true(config_option_registered("LATX_LBT"));
+}
+
 static void test_target_config_files(void)
 {
 #ifdef TARGET_X86_64
@@ -183,6 +188,7 @@ int main(int argc, char **argv)
                     test_single_byte_filename_buffer);
     g_test_add_func("/latx/config/filename-path-and-extension",
                     test_filename_path_and_extension);
+    g_test_add_func("/latx/config/lbt-option", test_lbt_option_registered);
     g_test_add_func("/latx/config/target-config-files",
                     test_target_config_files);
     g_test_add_func("/latx/config/release-loader-prefix",

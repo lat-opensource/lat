@@ -67,6 +67,7 @@ endif
 
 latx_string_utils = files('latx-string-utils.c')
 latx_runtime = files('latx-runtime.c')
+latx_host_features = files('host-features.c')
 
 latx_aot_directories = [
   'target/i386/latx/translator',
@@ -183,7 +184,7 @@ i386_ss.add(when: 'CONFIG_LATX', if_true: files(
   'latx-name-demangling.cpp',
   'latx-special-args.c',
   'latx-signal.c',
-) + latx_string_utils + latx_runtime)
+) + latx_string_utils + latx_runtime + latx_host_features)
 
 lazydis_lib = static_library('lazydis',
                          build_by_default: false,

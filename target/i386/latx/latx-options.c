@@ -12,6 +12,11 @@
 #include "latx-runtime.h"
 #include "latx-string-utils.h"
 #include "translate.h"
+#include "host-features.h"
+#include "file_ctx.h"
+#if defined(__loongarch__)
+#include <asm/hwcap.h>
+#endif
 #if defined(CONFIG_LATX_KZT)
 #include "kzt-groups.h"
 #endif
@@ -304,8 +309,78 @@ void options_init(void)
         option_fast_atomic = 0;
 }
 
+static bool host_has_lbt = true;
+
+void latx_host_features_init(unsigned long hwcap)
+{
+#if defined(__loongarch__)
+    FILE *cpuinfo = fopen("/proc/cpuinfo", "r");
+    LatxHostFeatures features = latx_cpuinfo_features(cpuinfo);
+
+    if (cpuinfo) {
+        fclose(cpuinfo);
+    }
+    /* HWCAP also checks kernel context-switch support. cpuinfo can only
+     * remove a capability; it must never add one the kernel did not expose.
+     */
+    host_has_lbt = (hwcap & HWCAP_LOONGARCH_LBT_X86) &&
+                   (!features.known || features.lbt);
+    option_enable_lasx = (hwcap & HWCAP_LOONGARCH_LASX) &&
+                         (!features.known || features.lasx);
+    if (!(hwcap & HWCAP_LOONGARCH_LSX) ||
+        (features.known && !features.lsx)) {
+        error_report("LAT needs LSX extension support from hardware and kernel");
+        exit(EXIT_FAILURE);
+    }
+#endif
+}
+
+bool latx_parse_lbt_option(const char *arg)
+{
+    if (!arg || (strcmp(arg, "0") && strcmp(arg, "1"))) {
+        return false;
+    }
+    option_enable_lbt = arg[0] == '1';
+    return true;
+}
+
+static void latx_apply_no_lbt_restrictions(void)
+{
+    /* x87 registers need LBT's TOP remapping; use the memory-backed backend. */
+    if (!option_softfpu) {
+        option_softfpu = 2;
+    }
+    option_jr_ra = 0;
+    option_jr_ra_stack = 0;
+    option_tunnel_lib = 0;
+    option_vpaes = 0;
+    option_fputag = 0;
+    option_fast_atomic = 0;
+    option_set_rounding_opt = 0;
+#ifdef CONFIG_LATX_INSTS_PATTERN
+    option_instptn = 0;
+#endif
+#if defined(CONFIG_LATX_KZT)
+    option_kzt = 0;
+#endif
+}
+
 bool latx_options_finalize(void)
 {
+    /* Apply once, after configuration and command-line options. */
+    option_enable_lbt = option_enable_lbt && host_has_lbt;
+    if (!option_enable_lbt) {
+        latx_apply_no_lbt_restrictions();
+    }
+#ifdef CONFIG_LATX_AVX_OPT
+    if (!option_enable_lasx) {
+        option_avx_cpuid = 0;
+    }
+#endif
+#ifdef CONFIG_LATX_AOT
+    aot_set_host_state_mode(option_enable_lbt, option_enable_lasx,
+                           option_softfpu, option_softfpu_fast);
+#endif
 #if defined(CONFIG_LATX_KZT)
     if (option_kzt_guest_tls_error) {
         kzt_groups_reject_configuration(option_kzt_guest_tls_error, true);

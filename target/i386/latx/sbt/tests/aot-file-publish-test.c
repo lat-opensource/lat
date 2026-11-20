@@ -81,6 +81,26 @@ int main(void)
     int old_fd;
     int current_fd;
 
+    {
+        char hardware[PATH_MAX], software[PATH_MAX], lsx[PATH_MAX];
+        char strict_fpu[PATH_MAX], fast_fpu[PATH_MAX];
+
+        aot_set_host_state_mode(1, 1, 0, 0);
+        g_assert_cmpint(get_aot_path("/test", hardware, sizeof(hardware)), ==, 0);
+        aot_set_host_state_mode(0, 1, 2, 0);
+        g_assert_cmpint(get_aot_path("/test", software, sizeof(software)), ==, 0);
+        aot_set_host_state_mode(0, 0, 2, 0);
+        g_assert_cmpint(get_aot_path("/test", lsx, sizeof(lsx)), ==, 0);
+        aot_set_host_state_mode(0, 0, 1, 0);
+        g_assert_cmpint(get_aot_path("/test", strict_fpu, sizeof(strict_fpu)), ==, 0);
+        aot_set_host_state_mode(0, 0, 1, -1);
+        g_assert_cmpint(get_aot_path("/test", fast_fpu, sizeof(fast_fpu)), ==, 0);
+        g_assert_cmpstr(hardware, !=, software);
+        g_assert_cmpstr(software, !=, lsx);
+        g_assert_cmpstr(lsx, !=, strict_fpu);
+        g_assert_cmpstr(strict_fpu, !=, fast_fpu);
+    }
+
     g_assert(aot_file_get_tmp_path("/tmp/cache.aot2", tmp_path,
                                    sizeof(tmp_path)) == 0);
     g_assert(strcmp(tmp_path, "/tmp/cache.aot2.tmp") == 0);
