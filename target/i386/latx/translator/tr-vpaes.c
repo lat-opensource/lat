@@ -114,7 +114,7 @@ static void vpaes_spill_low_fprs(void)
 {
     if (!option_softfpu) {
         IR2_OPND top = ra_alloc_itemp();
-        la_x86mftop(top);
+        latx_read_top(top);
         la_st_w(top, env_ir2_opnd, lsenv_offset_of_top(lsenv));
         ra_free_temp(top);
     }

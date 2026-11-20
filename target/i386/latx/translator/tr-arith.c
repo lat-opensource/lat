@@ -28,7 +28,7 @@ bool translate_das(IR1_INST *pir1)
     IR2_OPND label_exit = ra_alloc_label();
 
     /* read af and cf */
-    la_x86mfflag(eflag, 0x5);
+    latx_read_eflags(eflag, 0x5);
     /* af == 1 ? */
     la_andi(temp_opnd, eflag, 0x10);
     la_bne(temp_opnd, zero_ir2_opnd, label_al_sub_6);
@@ -38,14 +38,14 @@ bool translate_das(IR1_INST *pir1)
     la_or(new_al, zero_ir2_opnd, old_al);
     la_blt(temp_opnd, imm_opnd, label_next);
     /* al = (al - 0x6) & 0xff and set af */
-    la_x86mtflag(n4095_opnd, 0x4);
+    latx_write_eflags(n4095_opnd, 0x4);
     la_label(label_al_sub_6);
     la_ori(imm_opnd, zero_ir2_opnd, 0x6);
     la_sub_w(new_al, old_al, imm_opnd);
     la_andi(new_al, new_al, 0xff);
     /* old_al < 6 ? */
     la_bge(old_al, imm_opnd, label_next);
-    la_x86mtflag(n4095_opnd, 0x1);
+    latx_write_eflags(n4095_opnd, 0x1);
 
     /* cf == 1 ? */
     la_label(label_next);
@@ -54,7 +54,7 @@ bool translate_das(IR1_INST *pir1)
     /* old_AL > 99H ? */
     la_ori(imm_opnd, zero_ir2_opnd, 0x9a);
     la_blt(old_al, imm_opnd, label_zf);
-    la_x86mtflag(n4095_opnd, 0x1);
+    latx_write_eflags(n4095_opnd, 0x1);
     /* al = (al - 0x60) & 0xff */
     la_label(label_al_sub_60);
     la_ori(imm_opnd, zero_ir2_opnd, 0x60);
@@ -63,16 +63,16 @@ bool translate_das(IR1_INST *pir1)
     /* zf */
     la_label(label_zf);
     la_bne(new_al, zero_ir2_opnd, label_clear_zf);
-    la_x86mtflag(n4095_opnd, 0x8);
+    latx_write_eflags(n4095_opnd, 0x8);
     la_b(label_exit);
     la_label(label_clear_zf);
-    la_x86mtflag(zero_ir2_opnd, 0x8);
+    latx_write_eflags(zero_ir2_opnd, 0x8);
     /* exit */
     la_label(label_exit);
     store_ireg_to_ir1(new_al, reg_al, false);
     generate_eflag_calculation(new_al, old_al, old_al, pir1, true);
     /* clear OF */
-    la_x86mtflag(zero_ir2_opnd, 0x20);
+    latx_write_eflags(zero_ir2_opnd, 0x20);
 
     ra_free_num_4095(n4095_opnd);
     return true;
@@ -118,7 +118,7 @@ bool translate_aaa(IR1_INST *pir1)
     IR2_OPND ax = load_ireg_from_ir1(reg_ax, ZERO_EXTENSION, false);
 
     /* af */
-    la_x86mfflag(temp_opnd, 0x4);
+    latx_read_eflags(temp_opnd, 0x4);
     /* af == 1 ? */
     la_andi(temp_opnd, temp_opnd, 0x10);
     la_bne(temp_opnd, zero_ir2_opnd, set_af_cf);
@@ -127,11 +127,11 @@ bool translate_aaa(IR1_INST *pir1)
     la_ori(imm_opnd, zero_ir2_opnd, 0xa);
     la_bge(temp_opnd, imm_opnd, set_af_cf);
     /* clear af and cf*/
-    la_x86mtflag(zero_ir2_opnd, 0x5);
+    latx_write_eflags(zero_ir2_opnd, 0x5);
     la_b(label_exit);
     /* set clear af and cf*/
     la_label(set_af_cf);
-    la_x86mtflag(n4095_opnd, 0x5);
+    latx_write_eflags(n4095_opnd, 0x5);
     la_addi_d(ax, ax, 0x106);
     /* exit */
     la_label(label_exit);
@@ -159,7 +159,7 @@ bool translate_aas(IR1_INST *pir1)
     IR2_OPND ah_ir2 = load_ireg_from_ir1(reg_ah, ZERO_EXTENSION, false);
     IR2_OPND al_ir2 = load_ireg_from_ir1(reg_al, ZERO_EXTENSION, false);
 
-    la_x86mfflag(temp_opnd, 0x4);
+    latx_read_eflags(temp_opnd, 0x4);
     /* af == 1 ? */
     la_andi(temp_opnd, temp_opnd, 0x10);
     la_bne(temp_opnd, zero_ir2_opnd, label_set_af_cf);
@@ -168,7 +168,7 @@ bool translate_aas(IR1_INST *pir1)
     la_ori(imm_opnd, zero_ir2_opnd, 0xa);
     la_bge(temp_opnd, imm_opnd, label_set_af_cf);
     /* check eflags */
-    la_x86mtflag(zero_ir2_opnd, 0x5);
+    latx_write_eflags(zero_ir2_opnd, 0x5);
     la_b(label_exit);
     /* check if need sub carry */
     la_label(label_set_af_cf);
@@ -181,7 +181,7 @@ bool translate_aas(IR1_INST *pir1)
     la_addi_w(ax_ir2, ax_ir2, -6);
     la_addi_w(ah_ir2, ah_ir2, -1);
     /* set EFLAGS AF and CF flags */
-    la_x86mtflag(n4095_opnd, 0x5);
+    latx_write_eflags(n4095_opnd, 0x5);
     la_label(label_exit);
     la_andi(al_ir2, ax_ir2, 0xf);
     store_ireg_to_ir1(al_ir2, reg_al, false);
@@ -237,7 +237,7 @@ bool translate_daa(IR1_INST *pir1)
     IR2_OPND new_eax = ra_alloc_itemp();
 
     /* af */
-    la_x86mfflag(temp_opnd, 0x4);
+    latx_read_eflags(temp_opnd, 0x4);
     /* af == 1 ? */
     la_andi(temp_opnd, temp_opnd, 0x10);
     la_bne(temp_opnd, zero_ir2_opnd, not_clear_af);
@@ -246,17 +246,17 @@ bool translate_daa(IR1_INST *pir1)
     la_ori(imm_opnd, zero_ir2_opnd, 0xa);
     la_bge(temp_opnd, imm_opnd, not_clear_af);
     /* clear af */
-    la_x86mtflag(zero_ir2_opnd, 0x4);
+    latx_write_eflags(zero_ir2_opnd, 0x4);
     la_or(new_eax, zero_ir2_opnd, old_eax);
     la_b(label_cf);
     /* not clear af */
     la_label(not_clear_af);
-    la_x86mtflag(n4095_opnd, 0x4);
+    latx_write_eflags(n4095_opnd, 0x4);
     la_addi_w(new_eax, old_eax, 0x6);
 
     /* cf */
     la_label(label_cf);
-    la_x86mfflag(temp_opnd, 0x1);
+    latx_read_eflags(temp_opnd, 0x1);
     /* cf == 1 ? */
     la_andi(temp_opnd, temp_opnd, 0x1);
     la_bne(temp_opnd, zero_ir2_opnd, not_clear_cf);
@@ -264,21 +264,21 @@ bool translate_daa(IR1_INST *pir1)
     la_ori(imm_opnd, zero_ir2_opnd, 0x9a);
     la_bge(old_eax, imm_opnd, not_clear_cf);
     /* clear cf */
-    la_x86mtflag(zero_ir2_opnd, 0x1);
+    latx_write_eflags(zero_ir2_opnd, 0x1);
     la_b(label_zf);
     /* not clear cf */
     la_label(not_clear_cf);
-    la_x86mtflag(n4095_opnd, 0x1);
+    latx_write_eflags(n4095_opnd, 0x1);
     la_addi_w(new_eax, new_eax, 0x60);
     /* zf */
     la_label(label_zf);
     li_wu(temp_opnd, 0xffff);
     la_and(temp_opnd, temp_opnd, new_eax);
     la_bne(temp_opnd, zero_ir2_opnd, label_clear_zf);
-    la_x86mtflag(n4095_opnd, 0x8);
+    latx_write_eflags(n4095_opnd, 0x8);
     la_b(label_exit);
     la_label(label_clear_zf);
-    la_x86mtflag(zero_ir2_opnd, 0x8);
+    latx_write_eflags(zero_ir2_opnd, 0x8);
     /* exit */
     la_label(label_exit);
     store_ireg_to_ir1(new_eax, reg_al, false);

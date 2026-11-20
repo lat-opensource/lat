@@ -584,7 +584,7 @@ bool translate_fdecstp(IR1_INST *pir1)
 
     la_ld_h(value_status, env_ir2_opnd,
                       lsenv_offset_of_status_word(lsenv)); /* status_word */
-    la_x86mftop(value_status_temp);
+    latx_read_top(value_status_temp);
     la_bstrins_d(value_status, zero_ir2_opnd, 13, 11);
     la_slli_w(value_status_temp, value_status_temp, 11);
     la_or(value_status, value_status, value_status_temp);
@@ -604,7 +604,7 @@ bool translate_fincstp(IR1_INST *pir1)
     IR2_OPND value_status_temp = ra_alloc_itemp();
     la_ld_h(value_status, env_ir2_opnd,
                       lsenv_offset_of_status_word(lsenv)); /* status_word */
-    la_x86mftop(value_status_temp);
+    latx_read_top(value_status_temp);
     la_bstrins_d(value_status, zero_ir2_opnd, 13, 11);
     la_slli_w(value_status_temp, value_status_temp, 11);
     la_or(value_status, value_status, value_status_temp);
@@ -860,14 +860,14 @@ bool translate_fxam(IR1_INST *pir1)
         lsassert(tag_offset <= 0x7ff);
         la_ld_d(fpu_tag, env_ir2_opnd, tag_offset);
 
-        la_x86mftop(top_opnd);
+        latx_read_top(top_opnd);
         li_d(temp1, (uint64)(0xffULL));
         la_slli_d(top_opnd, top_opnd, 3);
         la_srl_d(fpu_tag, fpu_tag, top_opnd);
         la_and(fpu_tag, fpu_tag, temp1);
         la_beq(fpu_tag, zero_ir2_opnd, label_next);
     } else {
-        la_x86mftop(top_opnd);
+        latx_read_top(top_opnd);
         la_bne(top_opnd, zero_ir2_opnd, label_next);
     }
     li_wu(temp1, 0x4100UL);

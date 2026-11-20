@@ -2156,11 +2156,11 @@ bool translate_popcnt(IR1_INST *pir1) {
     ra_free_temp(temp);
 
     /* set O S Z A C P = 0 */
-    la_x86mtflag(zero_ir2_opnd, 0x3f);
+    latx_write_eflags(zero_ir2_opnd, 0x3f);
     la_bne(src_opnd, zero_ir2_opnd, label_exit);
     /* set zf = 1 */
     IR2_OPND n4095_opnd = ra_alloc_num_4095();
-    la_x86mtflag(n4095_opnd, 0x8);
+    latx_write_eflags(n4095_opnd, 0x8);
     ra_free_num_4095(n4095_opnd);
 
 /* label_exit: */

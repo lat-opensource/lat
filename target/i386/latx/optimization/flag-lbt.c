@@ -160,7 +160,7 @@ void get_eflag_condition(IR2_OPND *cond, IR1_INST *pir1) {
         case dt_X86_INS_FCMOVNB:
         case dt_X86_INS_JAE:
         {
-            la_setx86j(*cond, COND_AE);
+            latx_set_eflag_condition(*cond, COND_AE);
             break;
         }
         case dt_X86_INS_SETB:
@@ -168,12 +168,12 @@ void get_eflag_condition(IR2_OPND *cond, IR1_INST *pir1) {
         case dt_X86_INS_FCMOVB:
         case dt_X86_INS_JB:
         {
-            la_setx86j(*cond, COND_B);
+            latx_set_eflag_condition(*cond, COND_B);
             break;
         }
         case dt_X86_INS_RCL:
         case dt_X86_INS_RCR: {
-            la_x86mfflag(*cond, 0x1);
+            latx_read_eflags(*cond, 0x1);
             break;
         }
         /* PF */
@@ -182,7 +182,7 @@ void get_eflag_condition(IR2_OPND *cond, IR1_INST *pir1) {
         case dt_X86_INS_FCMOVNU:
         case dt_X86_INS_JNP:
         {
-            la_setx86j(*cond, COND_PO);
+            latx_set_eflag_condition(*cond, COND_PO);
             break;
         }
         case dt_X86_INS_SETP:
@@ -190,7 +190,7 @@ void get_eflag_condition(IR2_OPND *cond, IR1_INST *pir1) {
         case dt_X86_INS_FCMOVU:
         case dt_X86_INS_JP:
         {
-            la_setx86j(*cond, COND_PE);
+            latx_set_eflag_condition(*cond, COND_PE);
             break;
         }
         /* ZF */
@@ -199,7 +199,7 @@ void get_eflag_condition(IR2_OPND *cond, IR1_INST *pir1) {
         case dt_X86_INS_FCMOVE:
         case dt_X86_INS_JE:
         {
-            la_setx86j(*cond, COND_E);
+            latx_set_eflag_condition(*cond, COND_E);
             break;
         }
         case dt_X86_INS_SETNE:
@@ -207,7 +207,7 @@ void get_eflag_condition(IR2_OPND *cond, IR1_INST *pir1) {
         case dt_X86_INS_FCMOVNE:
         case dt_X86_INS_JNE:
         {
-            la_setx86j(*cond, COND_NE);
+            latx_set_eflag_condition(*cond, COND_NE);
             break;
         }
         /* SF */
@@ -215,14 +215,14 @@ void get_eflag_condition(IR2_OPND *cond, IR1_INST *pir1) {
         case dt_X86_INS_CMOVS:
         case dt_X86_INS_JS:
         {
-            la_setx86j(*cond, COND_S);
+            latx_set_eflag_condition(*cond, COND_S);
             break;
         }
         case dt_X86_INS_SETNS:
         case dt_X86_INS_CMOVNS:
         case dt_X86_INS_JNS:
         {
-            la_setx86j(*cond, COND_NS);
+            latx_set_eflag_condition(*cond, COND_NS);
             break;
         }
         /* OF */
@@ -230,14 +230,14 @@ void get_eflag_condition(IR2_OPND *cond, IR1_INST *pir1) {
         case dt_X86_INS_CMOVO:
         case dt_X86_INS_JO:
         {
-            la_setx86j(*cond, COND_O);
+            latx_set_eflag_condition(*cond, COND_O);
             break;
         }
         case dt_X86_INS_SETNO:
         case dt_X86_INS_CMOVNO:
         case dt_X86_INS_JNO:
         {
-            la_setx86j(*cond, COND_NO);
+            latx_set_eflag_condition(*cond, COND_NO);
             break;
         }
         /* CF ZF */
@@ -246,7 +246,7 @@ void get_eflag_condition(IR2_OPND *cond, IR1_INST *pir1) {
         case dt_X86_INS_FCMOVBE:
         case dt_X86_INS_JBE:
         {
-            la_setx86j(*cond, COND_BE);
+            latx_set_eflag_condition(*cond, COND_BE);
             break;
         }
         case dt_X86_INS_SETA:
@@ -254,12 +254,12 @@ void get_eflag_condition(IR2_OPND *cond, IR1_INST *pir1) {
         case dt_X86_INS_FCMOVNBE:
         case dt_X86_INS_JA:
         {
-            la_setx86j(*cond, COND_A);
+            latx_set_eflag_condition(*cond, COND_A);
             break;
         }
         case dt_X86_INS_LOOPE:
         case dt_X86_INS_LOOPNE: {
-            la_x86mfflag(*cond, 0x8);
+            latx_read_eflags(*cond, 0x8);
             la_slli_d(*cond, *cond, 63 - ZF_BIT_INDEX);
             la_srai_d(*cond, *cond, 63);
             break;
@@ -270,14 +270,14 @@ void get_eflag_condition(IR2_OPND *cond, IR1_INST *pir1) {
         case dt_X86_INS_CMOVL:
         case dt_X86_INS_JL:
         {
-            la_setx86j(*cond, COND_L);
+            latx_set_eflag_condition(*cond, COND_L);
             break;
         }
         case dt_X86_INS_SETGE:
         case dt_X86_INS_CMOVGE:
         case dt_X86_INS_JGE:
         {
-            la_setx86j(*cond, COND_GE);
+            latx_set_eflag_condition(*cond, COND_GE);
             break;
         }
         /* ZF SF OF */
@@ -285,14 +285,14 @@ void get_eflag_condition(IR2_OPND *cond, IR1_INST *pir1) {
         case dt_X86_INS_CMOVLE:
         case dt_X86_INS_JLE:
         {
-            la_setx86j(*cond, COND_LE);
+            latx_set_eflag_condition(*cond, COND_LE);
             break;
         }
         case dt_X86_INS_SETG:
         case dt_X86_INS_CMOVG:
         case dt_X86_INS_JG:
         {
-            la_setx86j(*cond, COND_G);
+            latx_set_eflag_condition(*cond, COND_G);
             break;
         }
     default: {

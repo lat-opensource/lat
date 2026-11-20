@@ -14,6 +14,7 @@
 #include "la-append.h"
 #include "ir2-relocate.h"
 #include "macro-inst.h"
+#include "flag-state.h"
 
 #include "aot.h"
 

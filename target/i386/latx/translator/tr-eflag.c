@@ -48,7 +48,7 @@ bool translate_popf(IR1_INST *pir1)
     tr_gen_call_to_helper1((ADDR)helper_eflagtf, 1, LOAD_HELPER_EFLAGTF);
 
     la_label(label_miss);
-    la_x86mtflag(eflags_opnd, 0x3f);
+    latx_write_eflags(eflags_opnd, 0x3f);
     /*
      * Some apps test eflags [22:12] bits for CPU feature detection.
      * Wine detect bit 21 to detemine whether CPU support SSE.
@@ -80,7 +80,7 @@ bool translate_pushf(IR1_INST *pir1)
     IR2_OPND eflags_opnd = ra_alloc_eflags();
     IR2_OPND esp_opnd = ra_alloc_gpr(esp_index);
     IR2_OPND temp   = ra_alloc_itemp();
-    la_x86mfflag(temp, 0x3f);
+    latx_read_eflags(temp, 0x3f);
     la_or(temp, eflags_opnd, temp);
 #ifndef TARGET_X86_64
     la_bstrpick_d(esp_opnd, esp_opnd, 31, 0);
@@ -98,7 +98,7 @@ bool translate_pushf(IR1_INST *pir1)
 }
 
 bool translate_clc(IR1_INST *pir1) {
-    la_x86mtflag(zero_ir2_opnd, 0x1);
+    latx_write_eflags(zero_ir2_opnd, 0x1);
     return true;
 }
 
@@ -113,7 +113,7 @@ bool translate_cld(IR1_INST *pir1)
 
 bool translate_stc(IR1_INST *pir1) {
     IR2_OPND n4095_opnd = ra_alloc_num_4095();
-    la_x86mtflag(n4095_opnd, 0x1);
+    latx_write_eflags(n4095_opnd, 0x1);
     ra_free_num_4095(n4095_opnd);
     return true;
 }

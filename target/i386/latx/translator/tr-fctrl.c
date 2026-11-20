@@ -322,7 +322,7 @@ void update_sw_by_fcsr(IR2_OPND sw_opnd)
     ra_free_temp(temp2);
 
     /* update top */
-    la_x86mftop(temp1);
+    latx_read_top(temp1);
 
     la_bstrins_d(sw_opnd, temp1, 13, 11);
 
@@ -449,7 +449,7 @@ static bool translate_fcomi_internal(IR1_INST *pir1, bool unordered)
         IR2_OPND eflags_temp;
         if (is_osa_def || is_zpc_def) {
             eflags_temp = ra_alloc_itemp();
-            la_x86mtflag(zero_ir2_opnd, 0x3f);
+            latx_write_eflags(zero_ir2_opnd, 0x3f);
         }
 
         /* calculate ZF, PF, CF */
@@ -482,7 +482,7 @@ static bool translate_fcomi_internal(IR1_INST *pir1, bool unordered)
             else
                 la_fcmp_cond_d(fcc0_ir2_opnd, sti, st0, FCMP_COND_SUN);
             la_bceqz(fcc0_ir2_opnd, label_for_not_unordered);
-            la_x86mtflag(eflags_temp, 0xb);
+            latx_write_eflags(eflags_temp, 0xb);
             la_b(label_for_exit);
 
             /* LABEL: label_for_not_unordered, if(st0>=sti) then jmp to label_for_sti_cle_st0 */
@@ -491,7 +491,7 @@ static bool translate_fcomi_internal(IR1_INST *pir1, bool unordered)
             la_bcnez(fcc0_ir2_opnd, label_for_sti_cle_st0);
 
             /* else if (st0<st1), set CF and exit*/
-            la_x86mtflag(eflags_temp, 0x1);
+            latx_write_eflags(eflags_temp, 0x1);
             la_b(label_for_exit);
 
             /* LABEL: label_for_sti_cle_st0 if(st0 == sti), set fcc0 then jmp to label label_for_sti_ceq_st0*/
@@ -504,7 +504,7 @@ static bool translate_fcomi_internal(IR1_INST *pir1, bool unordered)
 
             /* LABEL: label_for_sti_ceq_st0, set ZF if (st0 == sti) and exit*/
             la_label(label_for_sti_ceq_st0);
-            la_x86mtflag(eflags_temp, 0x8);
+            latx_write_eflags(eflags_temp, 0x8);
 
             la_label(label_for_exit);
             ra_free_temp(eflags_temp);
@@ -841,7 +841,7 @@ bool translate_ffree(IR1_INST *pir1)
     IR1_OPND *sti_reg = ir1_get_opnd(pir1, 0);
 
     /* get TOP */
-    la_x86mftop(top_opnd);
+    latx_read_top(top_opnd);
 
     /* get fpu tag word */
     int tag_offset = lsenv_offset_of_tag_word(lsenv);
@@ -1100,7 +1100,7 @@ bool translate_fninit(IR1_INST *pir1) {
     la_st_w(temp, env_ir2_opnd, offset);
 
     /* clear top */
-    la_x86mttop(0);
+    latx_write_top_const(0);
     la_x86settm();
 
     /* set fptags */

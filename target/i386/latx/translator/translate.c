@@ -3640,7 +3640,7 @@ void tr_load_top_from_env(void)
     la_ld_h(top_opnd, env_ir2_opnd, offset);
 
     for (i = 0; i < 8; i++) {
-        la_x86mttop(i);
+        latx_write_top_const(i);
         la_beq(top_opnd, zero_ir2_opnd, label_exit);
         la_addi_w(top_opnd, top_opnd, -1);
     }
@@ -3650,7 +3650,7 @@ void tr_load_top_from_env(void)
 
 void tr_gen_top_mode_init(void)
 {
-    la_x86mttop(0);
+    latx_write_top_const(0);
     la_x86settm();
 }
 
@@ -3896,7 +3896,7 @@ void tr_fpu_inc(void)
         int tag_offset = lsenv_offset_of_tag_word(lsenv);
         lsassert(tag_offset <= 0x7ff);
 
-        la_x86mftop(tag_addr_opnd);
+        latx_read_top(tag_addr_opnd);
         li_d(temp, (uint64)(0x1ULL));
         la_add_d(tag_addr_opnd, tag_addr_opnd, env_ir2_opnd);
         la_st_b(temp, tag_addr_opnd, tag_offset);
@@ -3905,13 +3905,13 @@ void tr_fpu_inc(void)
         ra_free_temp(tag_addr_opnd);
     }
     /* 2. top = top + 1 */
-    la_x86inctop();
+    latx_inc_top();
 }
 
 void tr_fpu_dec(void)
 {
     /* 1. top = top - 1 */
-    la_x86dectop();
+    latx_dec_top();
 
     if (option_fputag) {
         IR2_OPND tag_addr_opnd = ra_alloc_itemp();
@@ -3920,7 +3920,7 @@ void tr_fpu_dec(void)
         int tag_offset = lsenv_offset_of_tag_word(lsenv);
         lsassert(tag_offset <= 0x7ff);
 
-        la_x86mftop(tag_addr_opnd);
+        latx_read_top(tag_addr_opnd);
         la_add_d(tag_addr_opnd, tag_addr_opnd, env_ir2_opnd);
         la_st_b(zero_ir2_opnd, tag_addr_opnd, tag_offset);
 
@@ -4195,7 +4195,7 @@ void tr_save_registers_to_env(uint8 gpr_to_save, uint8 fpr_to_save,
     /* 2. FPR (MMX) */
     if (!option_softfpu) {
         IR2_OPND top_opnd = ra_alloc_itemp();
-        la_x86mftop(top_opnd);
+        latx_read_top(top_opnd);
         la_st_w(top_opnd, env_ir2_opnd,
                               lsenv_offset_of_top(lsenv));
         ra_free_temp(top_opnd);
@@ -4247,7 +4247,7 @@ void tr_save_registers_to_env(uint8 gpr_to_save, uint8 fpr_to_save,
     /* save eflags */
     IR2_OPND eflags_opnd = ra_alloc_eflags();
     IR2_OPND eflags_temp = ra_alloc_itemp();
-    la_x86mfflag(eflags_temp, 0x3f);
+    latx_read_eflags(eflags_temp, 0x3f);
     la_or(eflags_opnd, eflags_opnd, eflags_temp);
     ra_free_temp(eflags_temp);
     lsassert(lsenv_offset_of_eflags(lsenv) >= -2048 &&
@@ -4270,7 +4270,7 @@ void tr_load_registers_from_env(uint8 gpr_to_load, uint8 fpr_to_load,
     IR2_OPND eflags_opnd = ra_alloc_statics(S_EFLAGS);
     la_ld_w(eflags_opnd, env_ir2_opnd,
                         lsenv_offset_of_eflags(lsenv));
-    la_x86mtflag(eflags_opnd, 0x3f);
+    latx_write_eflags(eflags_opnd, 0x3f);
     la_andi(eflags_opnd, eflags_opnd, 0x702);
 
     /* 4. virtual registers */

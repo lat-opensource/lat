@@ -40,7 +40,7 @@ static void generate_cf(IR2_OPND dest, IR2_OPND src0,
     case dt_X86_INS_BTC:{
         IR2_OPND eflag_opnd = ra_alloc_itemp();
         la_srl_d(eflag_opnd, src0, src1);
-        la_x86mtflag(eflag_opnd, 0x1);
+        latx_write_eflags(eflag_opnd, 0x1);
         ra_free_temp(eflag_opnd);
         return;
     }
@@ -53,7 +53,7 @@ static void generate_cf(IR2_OPND dest, IR2_OPND src0,
             int count = ir2_opnd_imm(&src1);
             la_srli_d(t_dest_opnd, src0, mask + 1 - count);
 
-            la_x86mtflag(t_dest_opnd, 0x1);
+            latx_write_eflags(t_dest_opnd, 0x1);
             ra_free_temp(t_dest_opnd);
         } else {
 
@@ -64,7 +64,7 @@ static void generate_cf(IR2_OPND dest, IR2_OPND src0,
             la_sub_d(t_dest_opnd, t_dest_opnd, src1);
             la_srl_d(t_dest_opnd, src0, t_dest_opnd);
 
-            la_x86mtflag(t_dest_opnd, 0x1);
+            latx_write_eflags(t_dest_opnd, 0x1);
             ra_free_temp(t_dest_opnd);
         }
         return;
@@ -78,14 +78,14 @@ static void generate_cf(IR2_OPND dest, IR2_OPND src0,
             int count = ir2_opnd_imm(&src1) - 1;
             la_srli_d(t_dest_opnd, src0, count);
 
-            la_x86mtflag(t_dest_opnd, 0x1);
+            latx_write_eflags(t_dest_opnd, 0x1);
             ra_free_temp(t_dest_opnd);
         } else {
             IR2_OPND t_dest_opnd = ra_alloc_itemp();
             la_addi_d(t_dest_opnd, src1, -1);
             la_srl_d(t_dest_opnd, src0, t_dest_opnd);
 
-            la_x86mtflag(t_dest_opnd, 0x1);
+            latx_write_eflags(t_dest_opnd, 0x1);
             ra_free_temp(t_dest_opnd);
         }
         return;
@@ -106,7 +106,7 @@ static void generate_cf(IR2_OPND dest, IR2_OPND src0,
             la_bstrpick_d(cf, src1, opnd_size - 1, 0);
             la_maskeqz(cf, tmp, cf);
         }
-        la_x86mtflag(cf, CF_USEDEF_BIT);
+        latx_write_eflags(cf, CF_USEDEF_BIT);
 
         ra_free_temp(cf);
         ra_free_temp(tmp);
@@ -124,7 +124,7 @@ static void generate_cf(IR2_OPND dest, IR2_OPND src0,
             la_bstrpick_d(cf, src1, opnd_size - 1, 0);
             la_masknez(cf, tmp, cf);
         }
-        la_x86mtflag(cf, CF_USEDEF_BIT);
+        latx_write_eflags(cf, CF_USEDEF_BIT);
 
         ra_free_temp(cf);
         ra_free_temp(tmp);
@@ -138,11 +138,11 @@ static void generate_cf(IR2_OPND dest, IR2_OPND src0,
         li_d(temp_opnd, opnd_size);
         la_sub_d(temp_opnd, dest, temp_opnd);
         la_beq(temp_opnd, zero_ir2_opnd, label_temp);
-        la_x86mtflag(zero_ir2_opnd, 0x1);
+        latx_write_eflags(zero_ir2_opnd, 0x1);
         la_b(label_exit);
         la_label(label_temp);
         la_orn(temp_opnd, zero_ir2_opnd, zero_ir2_opnd);
-        la_x86mtflag(temp_opnd, 0x1);
+        latx_write_eflags(temp_opnd, 0x1);
         la_label(label_exit);
         return;
     }
@@ -169,7 +169,7 @@ static void generate_pf(IR2_OPND dest, IR2_OPND src0, IR2_OPND src1)
     la_andi(low_byte, dest, 0xff);
     la_add_d(low_byte, pf_opnd, low_byte);
     la_ld_bu(pf_opnd, low_byte, 0);
-    la_x86mtflag(pf_opnd, 0x2);
+    latx_write_eflags(pf_opnd, 0x2);
     ra_free_temp(pf_opnd);
     ra_free_temp(low_byte);
 }
@@ -179,7 +179,7 @@ static void generate_af(IR2_OPND dest, IR2_OPND src0,
 {
     if (ir1_opcode(pir1) == dt_X86_INS_SHLD ||
         ir1_opcode(pir1) == dt_X86_INS_SHRD) {
-        la_x86mtflag(zero_ir2_opnd, 0x4);
+        latx_write_eflags(zero_ir2_opnd, 0x4);
         return;
     }
     IR2_OPND af_opnd = ra_alloc_itemp();
@@ -190,7 +190,7 @@ static void generate_af(IR2_OPND dest, IR2_OPND src0,
         la_xor(af_opnd, src0, src1);
     la_xor(af_opnd, af_opnd, dest);
     la_andi(af_opnd, af_opnd, 0x10);
-    la_x86mtflag(af_opnd, 0x4);
+    latx_write_eflags(af_opnd, 0x4);
     ra_free_temp(af_opnd);
 
 }
@@ -213,7 +213,7 @@ static void generate_zf(IR2_OPND dest, IR2_OPND src0,
         la_masknez(zf, tmp, zf);
     }
 
-    la_x86mtflag(zf, ZF_USEDEF_BIT);
+    latx_write_eflags(zf, ZF_USEDEF_BIT);
     ra_free_temp(zf);
     ra_free_temp(tmp);
 }
@@ -229,7 +229,7 @@ static void generate_sf(IR2_OPND dest, IR2_OPND src0, IR2_OPND src1)
     } else
         la_andi(sf_opnd, dest, 0x80);
 
-    la_x86mtflag(sf_opnd, 0x10);
+    latx_write_eflags(sf_opnd, 0x10);
     ra_free_temp(sf_opnd);
 }
 
@@ -286,7 +286,7 @@ static void generate_of(IR2_OPND dest, IR2_OPND src0,
             la_xor(t_of_opnd, dest_old, dest);
             la_srli_d(t_of_opnd, t_of_opnd, ir1_opnd_size(ir1_get_opnd(pir1, 0)) - OF_BIT_INDEX - 1);
 
-            la_x86mtflag(t_of_opnd, 0x20);
+            latx_write_eflags(t_of_opnd, 0x20);
             ra_free_temp(dest_old);
             ra_free_temp(t_of_opnd);
             return;
@@ -327,7 +327,7 @@ static void generate_of(IR2_OPND dest, IR2_OPND src0,
             la_xor(t_of_opnd, dest_old, dest);
             la_srli_d(t_of_opnd, t_of_opnd, ir1_opnd_size(ir1_get_opnd(pir1, 0)) - OF_BIT_INDEX - 1);
 
-            la_x86mtflag(t_of_opnd, 0x20);
+            latx_write_eflags(t_of_opnd, 0x20);
             ra_free_temp(dest_old);
             ra_free_temp(t_of_opnd);
             return;

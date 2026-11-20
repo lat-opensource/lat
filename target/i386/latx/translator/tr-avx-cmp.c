@@ -51,7 +51,7 @@ static inline void xcomisx(IR1_INST *pir1, bool is_double, bool qnan_exp)
     la_bstrins_w(flag, flag_pf, PF_BIT_INDEX, PF_BIT_INDEX);
 
     /* 4. mov flag to EFLAGS */
-    la_x86mtflag(flag, 0x3f);
+    latx_write_eflags(flag, 0x3f);
 
     ra_free_temp(flag_pf);
     ra_free_temp(flag_zf);

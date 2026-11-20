@@ -532,7 +532,7 @@ void load_ireg_from_ir1_2(IR2_OPND opnd2, IR1_OPND *opnd1, EXTENSION_MODE em,
 void load_ireg_from_cf_opnd(IR2_OPND *opnd2)
 {
     lsassert(ir2_opnd_is_ireg(opnd2));
-    la_x86mfflag(*opnd2, 0x1);
+    latx_read_eflags(*opnd2, 0x1);
     return;
 }
 

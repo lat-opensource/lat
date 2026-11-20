@@ -83,7 +83,7 @@ static void save_eflags(IR1_INST *pir1)
     case dt_X86_INS_FUCOMI:
     case dt_X86_INS_FUCOMIP:
         eflags_temp = ra_alloc_itemp();
-        la_x86mfflag(eflags_temp, 0x3f);
+        latx_read_eflags(eflags_temp, 0x3f);
         la_or(eflags_opnd, eflags_opnd, eflags_temp);
         ra_free_temp(eflags_temp);
         break;
@@ -113,7 +113,7 @@ static void restore_eflags(IR1_INST *pir1)
     case dt_X86_INS_FCOMIP:
     case dt_X86_INS_FUCOMI:
     case dt_X86_INS_FUCOMIP:
-        la_x86mtflag(eflags_opnd, 0x3f);
+        latx_write_eflags(eflags_opnd, 0x3f);
         la_andi(eflags_opnd, eflags_opnd, 0x702);
         break;
     default:
@@ -843,7 +843,7 @@ static bool translate_fcmovnb_softfpu(IR1_INST *pir1)
 {
     IR2_OPND label_exit = ra_alloc_label();
     IR2_OPND flag_opnd = ra_alloc_itemp();
-    la_x86mfflag(flag_opnd, CF_USEDEF_BIT);
+    latx_read_eflags(flag_opnd, CF_USEDEF_BIT);
     la_bne(flag_opnd, zero_ir2_opnd, label_exit);
     IR1_OPND *opnd1 = ir1_get_opnd(pir1, 1);
 	int stn = ir1_opnd_base_reg_num(opnd1);
@@ -861,7 +861,7 @@ static bool translate_fcmovb_softfpu(IR1_INST *pir1)
 {
     IR2_OPND label_exit = ra_alloc_label();
     IR2_OPND flag_opnd = ra_alloc_itemp();
-    la_x86mfflag(flag_opnd, CF_USEDEF_BIT);
+    latx_read_eflags(flag_opnd, CF_USEDEF_BIT);
     la_beq(flag_opnd, zero_ir2_opnd, label_exit);
     IR1_OPND *opnd1 = ir1_get_opnd(pir1, 1);
 	int stn = ir1_opnd_base_reg_num(opnd1);
@@ -879,7 +879,7 @@ static bool translate_fcmovnu_softfpu(IR1_INST *pir1)
 {
     IR2_OPND label_exit = ra_alloc_label();
     IR2_OPND flag_opnd = ra_alloc_itemp();
-    la_x86mfflag(flag_opnd, PF_USEDEF_BIT);
+    latx_read_eflags(flag_opnd, PF_USEDEF_BIT);
     la_bne(flag_opnd, zero_ir2_opnd, label_exit);
     IR1_OPND *opnd1 = ir1_get_opnd(pir1, 1);
 	int stn = ir1_opnd_base_reg_num(opnd1);
@@ -897,7 +897,7 @@ static bool translate_fcmovu_softfpu(IR1_INST *pir1)
 {
     IR2_OPND label_exit = ra_alloc_label();
     IR2_OPND flag_opnd = ra_alloc_itemp();
-    la_x86mfflag(flag_opnd, PF_USEDEF_BIT);
+    latx_read_eflags(flag_opnd, PF_USEDEF_BIT);
     la_beq(flag_opnd, zero_ir2_opnd, label_exit);
     IR1_OPND *opnd1 = ir1_get_opnd(pir1, 1);
 	int stn = ir1_opnd_base_reg_num(opnd1);
@@ -915,7 +915,7 @@ static bool translate_fcmove_softfpu(IR1_INST *pir1)
 {
     IR2_OPND label_exit = ra_alloc_label();
     IR2_OPND flag_opnd = ra_alloc_itemp();
-    la_x86mfflag(flag_opnd, ZF_USEDEF_BIT);
+    latx_read_eflags(flag_opnd, ZF_USEDEF_BIT);
     la_beq(flag_opnd, zero_ir2_opnd, label_exit);
     IR1_OPND *opnd1 = ir1_get_opnd(pir1, 1);
 	int stn = ir1_opnd_base_reg_num(opnd1);
@@ -933,7 +933,7 @@ static bool translate_fcmovne_softfpu(IR1_INST *pir1)
 {
     IR2_OPND label_exit = ra_alloc_label();
     IR2_OPND flag_opnd = ra_alloc_itemp();
-    la_x86mfflag(flag_opnd, ZF_USEDEF_BIT);
+    latx_read_eflags(flag_opnd, ZF_USEDEF_BIT);
     la_bne(flag_opnd, zero_ir2_opnd, label_exit);
     IR1_OPND *opnd1 = ir1_get_opnd(pir1, 1);
 	int stn = ir1_opnd_base_reg_num(opnd1);
@@ -951,7 +951,7 @@ static bool translate_fcmovbe_softfpu(IR1_INST *pir1)
 {
     IR2_OPND label_exit = ra_alloc_label();
     IR2_OPND flag_opnd = ra_alloc_itemp();
-    la_x86mfflag(flag_opnd, ZF_USEDEF_BIT | CF_USEDEF_BIT);
+    latx_read_eflags(flag_opnd, ZF_USEDEF_BIT | CF_USEDEF_BIT);
     la_beq(flag_opnd, zero_ir2_opnd, label_exit);
     IR1_OPND *opnd1 = ir1_get_opnd(pir1, 1);
 	int stn = ir1_opnd_base_reg_num(opnd1);
@@ -969,7 +969,7 @@ static bool translate_fcmovnbe_softfpu(IR1_INST *pir1)
 {
     IR2_OPND label_exit = ra_alloc_label();
     IR2_OPND flag_opnd = ra_alloc_itemp();
-    la_x86mfflag(flag_opnd, ZF_USEDEF_BIT | CF_USEDEF_BIT);
+    latx_read_eflags(flag_opnd, ZF_USEDEF_BIT | CF_USEDEF_BIT);
     la_bne(flag_opnd, zero_ir2_opnd, label_exit);
     IR1_OPND *opnd1 = ir1_get_opnd(pir1, 1);
 	int stn = ir1_opnd_base_reg_num(opnd1);

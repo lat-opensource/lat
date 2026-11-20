@@ -164,16 +164,16 @@ bool translate_bextr(IR1_INST *pir1)
     la_beq(temp2_opnd, zero_ir2_opnd, label_zf1);
     /* set zf = 0 */
     la_label(label_zf0);
-    la_x86mtflag(zero_ir2_opnd, 0x8);
+    latx_write_eflags(zero_ir2_opnd, 0x8);
     la_b(label_exit);
     /* set zf = 1 */
     la_label(label_zf1);
     IR2_OPND n4095_opnd = ra_alloc_num_4095();
-    la_x86mtflag(n4095_opnd, 0x8);
+    latx_write_eflags(n4095_opnd, 0x8);
     ra_free_num_4095(n4095_opnd);
     la_label(label_exit);
     /* set cf = 0, of = 0 */
-    la_x86mtflag(zero_ir2_opnd, 0x21);
+    latx_write_eflags(zero_ir2_opnd, 0x21);
     /* 3. store result */
     store_ireg_to_ir1(temp2_opnd, ir1_get_opnd(pir1, 0), false);
     return true;
@@ -245,7 +245,7 @@ bool translate_bzhi(IR1_INST *pir1)
     la_bge(temp2_opnd, n_opnd, label_exit);
     /* set cf = 1 */
     IR2_OPND n4095_opnd = ra_alloc_num_4095();
-    la_x86mtflag(n4095_opnd, CF_USEDEF_BIT);
+    latx_write_eflags(n4095_opnd, CF_USEDEF_BIT);
     ra_free_num_4095(n4095_opnd);
 
     /* 3. store result */

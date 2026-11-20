@@ -268,7 +268,7 @@ static void gen_trace_helper(ADDR helper_method, IR1_INST *pir1)
     {
         IR2_OPND eflags_opnd = ra_alloc_eflags();
         IR2_OPND eflags_temp = ir2_opnd_new(IR2_OPND_GPR, 11);
-        la_x86mfflag(eflags_temp, 0x3f);
+        latx_read_eflags(eflags_temp, 0x3f);
         la_or(eflags_opnd, eflags_opnd, eflags_temp);
         la_st_d(eflags_opnd, sp_ir2_opnd,
                              TRACE_REG_STACK_OFFSET + i * 8);

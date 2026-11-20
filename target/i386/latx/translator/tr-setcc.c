@@ -73,7 +73,7 @@ bool translate_tzcnt(IR1_INST *pir1)
         la_ori(eflags, zero_ir2_opnd, 0x1);
         la_masknez(eflags, eflags, src_opnd);
         la_bstrins_w(eflags, src_opnd, 6, 6);
-        la_x86mtflag(eflags, ZF_USEDEF_BIT | CF_USEDEF_BIT);
+        latx_write_eflags(eflags, ZF_USEDEF_BIT | CF_USEDEF_BIT);
         ra_free_temp(eflags);
     }
 
