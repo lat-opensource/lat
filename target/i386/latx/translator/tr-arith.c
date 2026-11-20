@@ -11,6 +11,15 @@
 #include "latx-options.h"
 #include "hbr.h"
 
+static IR2_OPND latx_load_software_carry(void)
+{
+    IR2_OPND carry = ra_alloc_itemp();
+
+    latx_read_eflags(carry, CF_USEDEF_BIT);
+    la_andi(carry, carry, CF_BIT);
+    return carry;
+}
+
 bool translate_das(IR1_INST *pir1)
 {
     IR1_OPND *reg_al = &al_ir1_opnd;
@@ -414,7 +423,14 @@ bool translate_adc(IR1_INST *pir1)
     }
 
     /* calculate */
-    la_adc_d(dest, src0, src1);
+    if (option_enable_lbt) {
+        la_adc_d(dest, src0, src1);
+    } else {
+        IR2_OPND carry = latx_load_software_carry();
+        la_add_d(dest, src0, src1);
+        la_add_d(dest, dest, carry);
+        ra_free_temp(carry);
+    }
 #ifdef TARGET_X86_64
     if (!GHBR_ON(pir1) && CODEIS64 && ir1_opnd_is_gpr(opnd0) && opnd0_size == 32) {
         la_mov32_zx(dest, dest);
@@ -739,7 +755,14 @@ bool translate_sbb(IR1_INST *pir1)
     }
 
     /* calculate */
-    la_sbc_d(dest, src0, src1);
+    if (option_enable_lbt) {
+        la_sbc_d(dest, src0, src1);
+    } else {
+        IR2_OPND carry = latx_load_software_carry();
+        la_sub_d(dest, src0, src1);
+        la_sub_d(dest, dest, carry);
+        ra_free_temp(carry);
+    }
 #ifdef TARGET_X86_64
     if (!GHBR_ON(pir1) && CODEIS64 && ir1_opnd_is_gpr(opnd0) && opnd0_size == 32) {
         la_mov32_zx(dest, dest);

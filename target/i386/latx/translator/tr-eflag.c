@@ -55,7 +55,7 @@ bool translate_popf(IR1_INST *pir1)
      * To make this kind of apps happy, we not only store the bit 0 to 12
      * but also store bit 12 to 22.
      */
-    li_wu(eflags_temp_opnd, 0xfffff500);
+    li_wu(eflags_temp_opnd, option_enable_lbt ? 0xfffff500 : 0xfffffdd5);
     la_and(eflags_opnd, eflags_opnd, eflags_temp_opnd);
     la_ori(eflags_opnd, eflags_opnd, 0x202);
     ra_free_temp(eflags_temp_opnd);

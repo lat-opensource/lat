@@ -13,6 +13,10 @@
 bool generate_eflag_by_lbt(IR2_OPND dest, IR2_OPND src0, IR2_OPND src1,
                            IR1_INST *pir1, bool is_imm)
 {
+    if (!option_enable_lbt) {
+        return false;
+    }
+
     switch (ir1_opcode(pir1)) {
     case dt_X86_INS_XADD:
     case dt_X86_INS_ADD: {

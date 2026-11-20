@@ -98,6 +98,7 @@ int option_softfpu_fast;
 int option_prlimit;
 int option_fputag;
 int option_save_xmm;
+int option_enable_lbt;
 int option_enable_lasx;
 int option_vpaes;
 int option_split_tb;
@@ -244,6 +245,7 @@ void options_init(void)
     option_trace_tb = 0;
     option_trace_ir1 = 0;
     option_latx_disassemble_trace_cmp = 0;
+    option_enable_lbt = 1;
     option_enable_lasx = 1;
     option_vpaes = 0;
 

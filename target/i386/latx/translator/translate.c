@@ -4246,10 +4246,12 @@ void tr_save_registers_to_env(uint8 gpr_to_save, uint8 fpr_to_save,
 
     /* save eflags */
     IR2_OPND eflags_opnd = ra_alloc_eflags();
-    IR2_OPND eflags_temp = ra_alloc_itemp();
-    latx_read_eflags(eflags_temp, 0x3f);
-    la_or(eflags_opnd, eflags_opnd, eflags_temp);
-    ra_free_temp(eflags_temp);
+    if (option_enable_lbt) {
+        IR2_OPND eflags_temp = ra_alloc_itemp();
+        latx_read_eflags(eflags_temp, 0x3f);
+        la_or(eflags_opnd, eflags_opnd, eflags_temp);
+        ra_free_temp(eflags_temp);
+    }
     lsassert(lsenv_offset_of_eflags(lsenv) >= -2048 &&
             lsenv_offset_of_eflags(lsenv) <= 2047);
     la_st_w(eflags_opnd, env_ir2_opnd,
@@ -4270,8 +4272,10 @@ void tr_load_registers_from_env(uint8 gpr_to_load, uint8 fpr_to_load,
     IR2_OPND eflags_opnd = ra_alloc_statics(S_EFLAGS);
     la_ld_w(eflags_opnd, env_ir2_opnd,
                         lsenv_offset_of_eflags(lsenv));
-    latx_write_eflags(eflags_opnd, 0x3f);
-    la_andi(eflags_opnd, eflags_opnd, 0x702);
+    if (option_enable_lbt) {
+        latx_write_eflags(eflags_opnd, 0x3f);
+        la_andi(eflags_opnd, eflags_opnd, 0x702);
+    }
 
     /* 4. virtual registers */
     for (i = 0; i < STATIC_NUM; ++i) {

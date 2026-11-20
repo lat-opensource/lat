@@ -52,9 +52,9 @@ void ir2_opnd_convert_label_to_imm(IR2_OPND *, int imm);
 
 typedef struct IR2_INST {
     int16 _opcode;
-    int16 _id;
-    int16 _prev;
-    int16 _next;
+    int32 _id;
+    int32 _prev;
+    int32 _next;
     int op_count;
     IR2_OPND _opnd[4]; /*LA has 4 opnds*/
 } IR2_INST;

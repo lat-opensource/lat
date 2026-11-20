@@ -10,6 +10,7 @@
 #include "latx-options.h"
 #include "flag-lbt.h"
 #include "translate.h"
+#include "eflag-internal.h"
 char pf_table[256] = {
     4, 0, 0, 4, 0, 4, 4, 0, 0, 4, 4, 0, 4, 0, 0, 4, 0, 4, 4, 0, 4, 0,
     0, 4, 4, 0, 0, 4, 0, 4, 4, 0, 0, 4, 4, 0, 4, 0, 0, 4, 4, 0, 0, 4,
@@ -28,7 +29,7 @@ char pf_table[256] = {
     0, 4, 4, 0, 4, 0, 0, 4, 0, 4, 4, 0, 0, 4, 4, 0, 4, 0, 0, 4,
 };
 
-static void generate_cf(IR2_OPND dest, IR2_OPND src0,
+void generate_cf(IR2_OPND dest, IR2_OPND src0,
                         IR2_OPND src1, IR1_INST *pir1)
 {
     /* IR2_OPND eflags_opnd = ra_alloc_eflags(); */
@@ -155,7 +156,7 @@ static void generate_cf(IR2_OPND dest, IR2_OPND src0,
               ir1_name(ir1_opcode(pir1)));
 }
 
-static void generate_pf(IR2_OPND dest, IR2_OPND src0, IR2_OPND src1)
+void generate_pf(IR2_OPND dest, IR2_OPND src0, IR2_OPND src1)
 {
     
     IR2_OPND pf_opnd = ra_alloc_itemp();
@@ -169,12 +170,12 @@ static void generate_pf(IR2_OPND dest, IR2_OPND src0, IR2_OPND src1)
     la_andi(low_byte, dest, 0xff);
     la_add_d(low_byte, pf_opnd, low_byte);
     la_ld_bu(pf_opnd, low_byte, 0);
+    ra_free_temp(low_byte);
     latx_write_eflags(pf_opnd, 0x2);
     ra_free_temp(pf_opnd);
-    ra_free_temp(low_byte);
 }
 
-static void generate_af(IR2_OPND dest, IR2_OPND src0,
+void generate_af(IR2_OPND dest, IR2_OPND src0,
                         IR2_OPND src1, IR1_INST *pir1)
 {
     if (ir1_opcode(pir1) == dt_X86_INS_SHLD ||
@@ -183,11 +184,15 @@ static void generate_af(IR2_OPND dest, IR2_OPND src0,
         return;
     }
     IR2_OPND af_opnd = ra_alloc_itemp();
-    if (ir2_opnd_is_imm(&src1)) {
-        la_xori(af_opnd, src0, ir2_opnd_imm(&src1));
-    }
-    else
+    if (ir1_opcode(pir1) == dt_X86_INS_INC ||
+        ir1_opcode(pir1) == dt_X86_INS_DEC) {
+        la_xori(af_opnd, src0, 1);
+    } else if (ir2_opnd_is_imm(&src1)) {
+        /* AF only depends on bit 4; keep XORI's immediate encodable. */
+        la_xori(af_opnd, src0, ir2_opnd_imm(&src1) & 0x1f);
+    } else {
         la_xor(af_opnd, src0, src1);
+    }
     la_xor(af_opnd, af_opnd, dest);
     la_andi(af_opnd, af_opnd, 0x10);
     latx_write_eflags(af_opnd, 0x4);
@@ -195,7 +200,7 @@ static void generate_af(IR2_OPND dest, IR2_OPND src0,
 
 }
 
-static void generate_zf(IR2_OPND dest, IR2_OPND src0,
+void generate_zf(IR2_OPND dest, IR2_OPND src0,
                         IR2_OPND src1, IR1_INST *pir1)
 {
     IR2_OPND zf = ra_alloc_itemp();
@@ -213,12 +218,12 @@ static void generate_zf(IR2_OPND dest, IR2_OPND src0,
         la_masknez(zf, tmp, zf);
     }
 
+    ra_free_temp(tmp);
     latx_write_eflags(zf, ZF_USEDEF_BIT);
     ra_free_temp(zf);
-    ra_free_temp(tmp);
 }
 
-static void generate_sf(IR2_OPND dest, IR2_OPND src0, IR2_OPND src1)
+void generate_sf(IR2_OPND dest, IR2_OPND src0, IR2_OPND src1)
 {
     IR1_INST *pir1 = lsenv->tr_data->curr_ir1_inst;
     int operation_size = ir1_opnd_size(ir1_get_opnd(pir1, 0));
@@ -233,7 +238,7 @@ static void generate_sf(IR2_OPND dest, IR2_OPND src0, IR2_OPND src1)
     ra_free_temp(sf_opnd);
 }
 
-static void generate_of(IR2_OPND dest, IR2_OPND src0,
+void generate_of(IR2_OPND dest, IR2_OPND src0,
                         IR2_OPND src1, IR1_INST *pir1)
 {
     /* IR2_OPND eflags_opnd = ra_alloc_eflags(); */
@@ -447,6 +452,36 @@ static void generate_of_not_sx(IR2_OPND dest, IR2_OPND src0, IR2_OPND src1)
 }
 
 #define WRAP(ins) (dt_X86_INS_##ins)
+#ifdef CONFIG_LATX_XCOMISX_OPT
+static bool generate_xcomisx_eflags(IR2_OPND src0, IR2_OPND src1,
+                                    IR1_INST *pir1)
+{
+    uint8_t use_flags =
+        ir1_get_eflag_def(pir1) & (~lsenv->tr_data->curr_ir1_skipped_eflags);
+
+    switch (ir1_opcode(pir1)) {
+    case WRAP(COMISS):
+    case WRAP(VCOMISS):
+        generate_xcomisx(src0, src1, false, true, use_flags);
+        return true;
+    case WRAP(COMISD):
+    case WRAP(VCOMISD):
+        generate_xcomisx(src0, src1, true, true, use_flags);
+        return true;
+    case WRAP(UCOMISS):
+    case WRAP(VUCOMISS):
+        generate_xcomisx(src0, src1, false, false, use_flags);
+        return true;
+    case WRAP(UCOMISD):
+    case WRAP(VUCOMISD):
+        generate_xcomisx(src0, src1, true, false, use_flags);
+        return true;
+    default:
+        return false;
+    }
+}
+#endif
+
 void generate_eflag_calculation(IR2_OPND dest, IR2_OPND src0, IR2_OPND src1,
                                 IR1_INST *pir1, bool flags)
 {
@@ -473,6 +508,17 @@ void generate_eflag_calculation(IR2_OPND dest, IR2_OPND src0, IR2_OPND src1,
         return;
     }
 
+#ifdef CONFIG_LATX_XCOMISX_OPT
+    if (generate_xcomisx_eflags(src0, src1, pir1)) {
+        return;
+    }
+#endif
+
+    if (!option_enable_lbt) {
+        generate_eflags_soft(dest, src0, src1, pir1);
+        return;
+    }
+
     if (use_lbt) {
         if (ir1_opcode(pir1) == dt_X86_INS_SBB) {
             generate_af(dest, src0, src1, pir1);
@@ -483,30 +529,6 @@ void generate_eflag_calculation(IR2_OPND dest, IR2_OPND src0, IR2_OPND src1,
         }
         return;
     }
-#ifdef CONFIG_LATX_XCOMISX_OPT
-    uint8_t use_flags =
-        ir1_get_eflag_def(pir1) & (~(lsenv->tr_data->curr_ir1_skipped_eflags));
-    switch (ir1_opcode(pir1)) {
-    case WRAP(COMISS):
-    case WRAP(VCOMISS):
-        generate_xcomisx(src0, src1, false, true, use_flags);
-        return;
-    case WRAP(COMISD):
-    case WRAP(VCOMISD):
-        generate_xcomisx(src0, src1, true, true, use_flags);
-        return;
-    case WRAP(UCOMISS):
-    case WRAP(VUCOMISS):
-        generate_xcomisx(src0, src1, false, false, use_flags);
-        return;
-    case WRAP(UCOMISD):
-    case WRAP(VUCOMISD):
-        generate_xcomisx(src0, src1, true, false, use_flags);
-        return;
-    default:
-        break;
-    }
-#endif
     /* extension mode does not affect pf, af and zf */
     if (ir1_need_calculate_pf(pir1))
         generate_pf(dest, src0, src1);
