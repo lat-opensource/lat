@@ -5001,6 +5001,8 @@ IR2_OPND tr_lat_spin_lock(IR2_OPND mem_addr, int imm)
     la_bne(lat_lock_val, cpu_index, label_lat_lock);
     la_sc_w(lat_lock_val, lat_lock_addr, 0);
     la_beq(lat_lock_val, zero_ir2_opnd, label_lat_lock);
+    /* x86 LOCK operations are full barriers before the protected access. */
+    la_dbar(0);
 
     ra_free_temp(cpu_index);
     ra_free_temp(lat_lock_val);

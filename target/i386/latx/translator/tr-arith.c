@@ -310,7 +310,7 @@ bool translate_add(IR1_INST *pir1)
     }
 
 #ifdef CONFIG_LATX_LLSC
-    if (is_lock) {
+    if (is_lock && !latx_no_lbt_mode_enabled()) {
         return translate_lock_add(pir1);
     }
 #endif
@@ -392,7 +392,7 @@ bool translate_adc(IR1_INST *pir1)
     }
 
 #ifdef CONFIG_LATX_LLSC
-    if (is_lock) {
+    if (is_lock && !latx_no_lbt_mode_enabled()) {
         return translate_lock_adc(pir1);
     }
 #endif
@@ -464,7 +464,7 @@ bool translate_inc(IR1_INST *pir1)
     }
 
 #ifdef CONFIG_LATX_LLSC
-    if (is_lock) {
+    if (is_lock && !latx_no_lbt_mode_enabled()) {
         return translate_lock_inc(pir1);
     }
 #endif
@@ -545,7 +545,7 @@ bool translate_dec(IR1_INST *pir1)
     }
 
 #ifdef CONFIG_LATX_LLSC
-    if (is_lock) {
+    if (is_lock && !latx_no_lbt_mode_enabled()) {
         return translate_lock_dec(pir1);
     }
 #endif
@@ -627,7 +627,7 @@ bool translate_sub(IR1_INST *pir1)
     }
 
 #ifdef CONFIG_LATX_LLSC
-    if (is_lock) {
+    if (is_lock && !latx_no_lbt_mode_enabled()) {
         return translate_lock_sub(pir1);
     }
 #endif
@@ -725,7 +725,7 @@ bool translate_sbb(IR1_INST *pir1)
     }
 
 #ifdef CONFIG_LATX_LLSC
-    if (is_lock) {
+    if (is_lock && !latx_no_lbt_mode_enabled()) {
         return translate_lock_sbb(pir1);
     }
 #endif
@@ -796,7 +796,7 @@ bool translate_neg(IR1_INST *pir1)
     }
 
 #ifdef CONFIG_LATX_LLSC
-    if (is_lock) {
+    if (is_lock && !latx_no_lbt_mode_enabled()) {
         return translate_lock_neg(pir1);
     }
 #endif
@@ -1663,7 +1663,7 @@ bool translate_xadd(IR1_INST *pir1)
     }
 
 #ifdef CONFIG_LATX_LLSC
-    if (is_lock) {
+    if (is_lock && !latx_no_lbt_mode_enabled()) {
         return translate_lock_xadd(pir1);
     }
 #endif

@@ -1402,7 +1402,6 @@ bool translate_lea(IR1_INST *pir1)
     return true;
 }
 
-#ifndef CONFIG_LATX_LLSC
 static bool translate_xchg_spinlock(IR1_INST *pir1)
 {
     IR1_OPND *opnd0 = ir1_get_opnd(pir1, 0);
@@ -1444,7 +1443,6 @@ static bool translate_xchg_spinlock(IR1_INST *pir1)
     tr_lat_spin_unlock(lat_lock_addr);
     return true;
 }
-#endif
 
 bool translate_xchg(IR1_INST *pir1)
 {
@@ -1506,6 +1504,9 @@ bool translate_xchg(IR1_INST *pir1)
 #ifndef CONFIG_LATX_LLSC
     return translate_xchg_spinlock(pir1);
 #else
+    if (latx_no_lbt_mode_enabled()) {
+        return translate_xchg_spinlock(pir1);
+    }
     if (option_fast_atomic) {
         return translate_lock_xchg_fast_atomic(pir1);
     }
@@ -1652,7 +1653,7 @@ bool translate_cmpxchg(IR1_INST *pir1)
     }
 
 #ifdef CONFIG_LATX_LLSC
-    if (is_lock) {
+    if (is_lock && !latx_no_lbt_mode_enabled()) {
         return translate_lock_cmpxchg(pir1);
     }
 #endif
@@ -1867,12 +1868,53 @@ static bool translate_cmpxchg16b_scq(IR1_INST *pir1)
     return true;
 }
 
+static bool translate_cmpxchg16b_spinlock(IR1_INST *pir1)
+{
+    IR1_OPND *opnd0 = ir1_get_opnd(pir1, 0);
+    IR2_OPND mem_opnd = convert_mem_no_offset(opnd0);
+    IR2_OPND rax_opnd = ra_alloc_gpr(eax_index);
+    IR2_OPND rdx_opnd = ra_alloc_gpr(edx_index);
+    IR2_OPND rcx_opnd = ra_alloc_gpr(ecx_index);
+    IR2_OPND rbx_opnd = ra_alloc_gpr(ebx_index);
+    IR2_OPND mem_lo = ra_alloc_itemp();
+    IR2_OPND mem_hi = ra_alloc_itemp();
+    IR2_OPND zf = ra_alloc_itemp();
+    IR2_OPND label_unequal = ra_alloc_label();
+    IR2_OPND label_exit = ra_alloc_label();
+    IR2_OPND lat_lock_addr = tr_lat_spin_lock(mem_opnd, 0);
+
+    la_ld_d(mem_lo, mem_opnd, 0);
+    la_ld_d(mem_hi, mem_opnd, 8);
+    la_bne(mem_lo, rax_opnd, label_unequal);
+    la_bne(mem_hi, rdx_opnd, label_unequal);
+    la_st_d(rbx_opnd, mem_opnd, 0);
+    la_st_d(rcx_opnd, mem_opnd, 8);
+    li_wu(zf, ZF_BIT);
+    latx_write_eflags(zf, ZF_USEDEF_BIT);
+    la_b(label_exit);
+
+    la_label(label_unequal);
+    latx_write_eflags(zero_ir2_opnd, ZF_USEDEF_BIT);
+    la_or(rax_opnd, zero_ir2_opnd, mem_lo);
+    la_or(rdx_opnd, zero_ir2_opnd, mem_hi);
+
+    la_label(label_exit);
+    tr_lat_spin_unlock(lat_lock_addr);
+    ra_free_temp(zf);
+    ra_free_temp(mem_hi);
+    ra_free_temp(mem_lo);
+    return true;
+}
+
 /*
  * Note that CMPXCHG16B requires that the destination (memory)
  * operand be 16-byte aligned.
  */
 bool translate_cmpxchg16b(IR1_INST *pir1)
 {
+    if (latx_no_lbt_mode_enabled()) {
+        return translate_cmpxchg16b_spinlock(pir1);
+    }
     if (have_scq()) {
         return translate_cmpxchg16b_scq(pir1);
     }

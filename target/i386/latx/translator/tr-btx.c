@@ -181,7 +181,8 @@ bool translate_btx(IR1_INST *pir1)
      * lock btx -> translate_lock_btx()
      */
 #ifdef CONFIG_LATX_LLSC
-    if (is_lock && ir1_opnd_is_mem(opnd0)) {
+    if (is_lock && ir1_opnd_is_mem(opnd0) &&
+        !latx_no_lbt_mode_enabled()) {
         return translate_btx_llsc(pir1);
     }
 #endif
