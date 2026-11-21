@@ -2074,6 +2074,22 @@ bool ir1_translate(IR1_INST *ir1)
     }
 #endif
 
+#ifdef CONFIG_LATX
+    /* LEA has a memory-shaped operand but only computes an address.  It
+     * performs no memory access and adds no x86 ordering requirement.
+     */
+    if (unlikely(latx_no_lbt_mode_enabled()) &&
+        ir1_opcode(ir1) != dt_X86_INS_LEA) {
+        for (int i = 0; i < ir1_opnd_num(ir1); i++) {
+            if (ir1_opnd_is_mem(ir1_get_opnd(ir1, i))) {
+                /* Preserve x86 TSO on hosts that execute with weak ordering. */
+                la_dbar(0);
+                break;
+            }
+        }
+    }
+#endif
+
 #ifdef DEBUG_LATX_PER_INSN_DBAR
     la_dbar(0);
 #endif
