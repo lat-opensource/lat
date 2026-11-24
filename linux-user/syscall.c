@@ -9017,24 +9017,35 @@ static abi_long do_ioctl(int fd, int cmd, abi_ulong arg)
 #endif
     /* slow path to iterate the ioctl_entries */
     if (ie->target_cmd != cmd) {
-        if (TARGET_IOC_TYPE(cmd) == 'H' || TARGET_IOC_TYPE(cmd) == 'U') {
-            switch(TARGET_IOC_NR(cmd)) {
-                case TARGET_IOC_NR(TARGET_HIDIOCSFEATURE(0)):
-                case TARGET_IOC_NR(TARGET_HIDIOCGFEATURE(0)):
-                case TARGET_IOC_NR(TARGET_HIDIOCGRAWNAME(0)):
-                case TARGET_IOC_NR(TARGET_HIDIOCGRAWPHYS(0)):
-                case TARGET_IOC_NR(TARGET_HIDIOCGRAWUNIQ(0)):
-                case TARGET_IOC_NR(TARGET_HIDIOCSINPUT(0)):
-                case TARGET_IOC_NR(TARGET_HIDIOCGINPUT(0)):
-                case TARGET_IOC_NR(TARGET_HIDIOCSOUTPUT(0)):
-                case TARGET_IOC_NR(TARGET_HIDIOCGOUTPUT(0)):
-                case TARGET_IOC_NR(TARGET_HIDIOCREVOKE):
-                    return handle_hidfeature(fd, cmd, arg, TARGET_IOC_SIZE(cmd), 1);
-            }
-        }
         ie = ioctl_entries;
         for (i = 0; ; i++) {
             if (ie->target_cmd == 0) {
+                /*
+                 * 只有表里没有的命令字才走 HID 特征类兼容分支。这里历史上只比较
+                 * nr（且把 'U' 型命令字也放进来），会把 usbfs 的
+                 * USBDEVFS_SUBMITURB (nr=10 == HIDIOCGINPUT) /
+                 * USBDEVFS_REAPURB (nr=12 == HIDIOCGOUTPUT) 抢走：
+                 * 32 位 guest 的 URB 未经 do_ioctl_usbdevfs_* 的 thunk 转换就
+                 * 下发给内核，异步 USB 传输全部失败（Wine 下表现为
+                 * "Failed to submit GET_DESCRIPTOR transfer: Input/Output Error"，
+                 * 驱动等不到完成通知而卡死）。因此必须先查表、表里没有才兼容。
+                 */
+                if (TARGET_IOC_TYPE(cmd) == 'H' || TARGET_IOC_TYPE(cmd) == 'U') {
+                    switch(TARGET_IOC_NR(cmd)) {
+                        case TARGET_IOC_NR(TARGET_HIDIOCSFEATURE(0)):
+                        case TARGET_IOC_NR(TARGET_HIDIOCGFEATURE(0)):
+                        case TARGET_IOC_NR(TARGET_HIDIOCGRAWNAME(0)):
+                        case TARGET_IOC_NR(TARGET_HIDIOCGRAWPHYS(0)):
+                        case TARGET_IOC_NR(TARGET_HIDIOCGRAWUNIQ(0)):
+                        case TARGET_IOC_NR(TARGET_HIDIOCSINPUT(0)):
+                        case TARGET_IOC_NR(TARGET_HIDIOCGINPUT(0)):
+                        case TARGET_IOC_NR(TARGET_HIDIOCSOUTPUT(0)):
+                        case TARGET_IOC_NR(TARGET_HIDIOCGOUTPUT(0)):
+                        case TARGET_IOC_NR(TARGET_HIDIOCREVOKE):
+                            return handle_hidfeature(fd, cmd, arg,
+                                                     TARGET_IOC_SIZE(cmd), 1);
+                    }
+                }
 #ifdef TARGET_X86_64
                 ioctl_cache_unsupported_cmd[hash] = cmd;
                 ret = get_errno(safe_ioctl(fd, cmd, arg));
