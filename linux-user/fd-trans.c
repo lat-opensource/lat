@@ -16,6 +16,8 @@
 #include "qemu/osdep.h"
 
 #include <sys/signalfd.h>
+#include <sys/file.h>
+#include <dirent.h>
 #include <linux/unistd.h>
 #include <linux/audit.h>
 #include <linux/cryptouser.h>
@@ -294,6 +296,287 @@ enum {
     QEMU_RTA_DPORT,
     QEMU___RTA_MAX
 };
+
+/*
+ * A socket cookie identifies the same socket after exec or SCM_RIGHTS.
+ * Store only its cursor in a protected per-user tmpfs directory. Packet
+ * bytes stay in the kernel. A new receiver opens the same shared mapping.
+ */
+#define NETLINK_CURSOR_MAGIC 0x4e4c4351
+
+static int netlink_cursor_directory(void)
+{
+    char path[80];
+    struct stat st;
+    int fd;
+
+    if (geteuid() != getuid() || getegid() != getgid()) {
+        errno = EACCES;
+        return -1;
+    }
+    snprintf(path, sizeof(path), "/dev/shm/latx-netlink-%lu",
+             (unsigned long)geteuid());
+    if (mkdir(path, 0700) && errno != EEXIST) {
+        return -1;
+    }
+    fd = open(path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+    if (fd < 0) {
+        return -1;
+    }
+    if (fstat(fd, &st) || st.st_uid != geteuid() || (st.st_mode & 077)) {
+        close(fd);
+        errno = EACCES;
+        return -1;
+    }
+    return fd;
+}
+
+/*
+ * Only collect records in our current network namespace. A record is first
+ * created after the socket is bound, so /proc/net/netlink includes every
+ * live socket for which we have published a cursor, including queued FDs.
+ */
+static void netlink_cursor_collect(int directory, unsigned long long netns)
+{
+    GHashTable *live;
+    GPtrArray *candidates;
+    FILE *input;
+    DIR *dir;
+    struct dirent *entry;
+    char line[1024], prefix[40];
+    int scanfd;
+    unsigned int i;
+
+    /*
+     * Snapshot names before live sockets: a concurrently published record
+     * must never be judged against an older /proc snapshot.
+     */
+    scanfd = openat(directory, ".", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    dir = scanfd < 0 ? NULL : fdopendir(scanfd);
+    if (!dir) {
+        if (scanfd >= 0) {
+            close(scanfd);
+        }
+        return;
+    }
+    candidates = g_ptr_array_new_with_free_func(g_free);
+    snprintf(prefix, sizeof(prefix), "%llx-", netns);
+    while ((entry = readdir(dir))) {
+        unsigned long long ns, cookie, inode;
+        char extra;
+        if (!strncmp(entry->d_name, prefix, strlen(prefix)) &&
+            sscanf(entry->d_name, "%llx-%llx-%llx%c",
+                   &ns, &cookie, &inode, &extra) == 3) {
+            g_ptr_array_add(candidates, g_strdup(entry->d_name));
+        }
+    }
+    closedir(dir);
+    input = fopen("/proc/net/netlink", "r");
+    if (!input) {
+        g_ptr_array_free(candidates, true);
+        return;
+    }
+    live = g_hash_table_new_full(g_int64_hash, g_int64_equal, g_free, NULL);
+    if (!fgets(line, sizeof(line), input)) {
+        goto done;
+    }
+    while (fgets(line, sizeof(line), input)) {
+        unsigned long long inode;
+        if (sscanf(line, "%*s %*u %*u %*s %*u %*u %*u %*u %*u %llu",
+                   &inode) == 1) {
+            guint64 *key = g_new(guint64, 1);
+            *key = inode;
+            g_hash_table_add(live, key);
+        }
+    }
+    if (ferror(input)) {
+        goto done;
+    }
+    for (i = 0; i < candidates->len; i++) {
+        const char *name = g_ptr_array_index(candidates, i);
+        unsigned long long ns, cookie, inode;
+        guint64 key;
+        if (sscanf(name, "%llx-%llx-%llx", &ns, &cookie, &inode) != 3) {
+            continue;
+        }
+        key = inode;
+        if (!g_hash_table_contains(live, &key)) {
+            unlinkat(directory, name, 0);
+        }
+    }
+done:
+    fclose(input);
+    g_hash_table_destroy(live);
+    g_ptr_array_free(candidates, true);
+}
+
+int fd_trans_netlink_attach(int fd, NetlinkRecvState *state)
+{
+    struct sockaddr_nl address;
+    struct stat socket_stat, namespace_stat, file_stat;
+    socklen_t length = sizeof(address);
+    uint64_t cookie;
+    char name[100], source[64];
+    int directory = -1, backing = -1, error;
+    bool created = false;
+    pthread_mutexattr_t attr;
+
+    if (state->shared) {
+        return 0;
+    }
+    if (getsockname(fd, (void *)&address, &length)) {
+        return -1;
+    }
+    if (!address.nl_pid) {
+        /* Attach after autobind has assigned a kernel port ID. */
+        return 0;
+    }
+    length = sizeof(cookie);
+    if (getsockopt(fd, SOL_SOCKET, SO_COOKIE, &cookie, &length) ||
+        fstat(fd, &socket_stat) || stat("/proc/self/ns/net", &namespace_stat)) {
+        return -1;
+    }
+    directory = netlink_cursor_directory();
+    if (directory < 0) {
+        return -1;
+    }
+    snprintf(name, sizeof(name), "%llx-%llx-%llx",
+             (unsigned long long)namespace_stat.st_ino,
+             (unsigned long long)cookie,
+             (unsigned long long)socket_stat.st_ino);
+    backing = openat(directory, name, O_RDWR | O_NOFOLLOW | O_CLOEXEC);
+    if (backing < 0 && errno == ENOENT) {
+        /*
+         * Initialize an unnamed inode before publishing it. Concurrent
+         * receivers either publish their own complete record or open the
+         * winner. A killed initializer leaves no named partial record.
+         */
+        backing = openat(directory, ".", O_TMPFILE | O_RDWR | O_CLOEXEC, 0600);
+        if (backing < 0 || ftruncate(backing, sizeof(*state->shared))) {
+            goto fail;
+        }
+        state->shared = mmap(NULL, sizeof(*state->shared),
+                             PROT_READ | PROT_WRITE, MAP_SHARED, backing, 0);
+        if (state->shared == MAP_FAILED) {
+            state->shared = NULL;
+            goto fail;
+        }
+        error = pthread_mutexattr_init(&attr);
+        if (!error) {
+            error = pthread_mutexattr_setpshared(&attr,
+                                                PTHREAD_PROCESS_SHARED);
+            if (!error) {
+                error = pthread_mutexattr_setrobust(&attr,
+                                                   PTHREAD_MUTEX_ROBUST);
+            }
+            if (!error) {
+                error = pthread_mutex_init(&state->shared->mutex, &attr);
+            }
+            pthread_mutexattr_destroy(&attr);
+        }
+        if (error) {
+            errno = error;
+            goto fail;
+        }
+        state->shared->magic = NETLINK_CURSOR_MAGIC;
+        /*
+         * Following /proc/self/fd permits unprivileged O_TMPFILE linking;
+         * AT_EMPTY_PATH would require CAP_DAC_READ_SEARCH on older kernels.
+         */
+        snprintf(source, sizeof(source), "/proc/self/fd/%d", backing);
+        if (!linkat(AT_FDCWD, source, directory, name, AT_SYMLINK_FOLLOW)) {
+            created = true;
+        } else if (errno == EEXIST) {
+            pthread_mutex_destroy(&state->shared->mutex);
+            munmap(state->shared, sizeof(*state->shared));
+            state->shared = NULL;
+            close(backing);
+            backing = openat(directory, name,
+                             O_RDWR | O_NOFOLLOW | O_CLOEXEC);
+        } else {
+            goto fail;
+        }
+    }
+    if (backing < 0 || fstat(backing, &file_stat)) {
+        goto fail;
+    }
+    if (!S_ISREG(file_stat.st_mode) || file_stat.st_uid != geteuid() ||
+        (file_stat.st_mode & 077) || file_stat.st_nlink != 1 ||
+        file_stat.st_size != sizeof(*state->shared)) {
+        errno = EACCES;
+        goto fail;
+    }
+    if (!state->shared) {
+        state->shared = mmap(NULL, sizeof(*state->shared),
+                             PROT_READ | PROT_WRITE, MAP_SHARED, backing, 0);
+        if (state->shared == MAP_FAILED) {
+            state->shared = NULL;
+            goto fail;
+        }
+    }
+    if (state->shared->magic != NETLINK_CURSOR_MAGIC) {
+        errno = EINVAL;
+        goto fail;
+    }
+    close(backing);
+    /*
+     * Collection is best effort, never a prerequisite for receiving data.
+     * Serialize collectors only; an unrelated directory lock cannot make
+     * a nonblocking receive wait. All named records are fully initialized.
+     */
+    if (created && !flock(directory, LOCK_EX | LOCK_NB)) {
+        netlink_cursor_collect(directory, namespace_stat.st_ino);
+    }
+    close(directory);
+    return 0;
+fail:
+    error = errno;
+    if (state->shared) {
+        munmap(state->shared, sizeof(*state->shared));
+        state->shared = NULL;
+    }
+    if (backing >= 0) {
+        close(backing);
+    }
+    if (directory >= 0) {
+        close(directory);
+    }
+    errno = error;
+    return -1;
+}
+
+NetlinkRecvState *fd_trans_netlink_acquire(int fd)
+{
+    NetlinkRecvState *state;
+    int domain, protocol;
+    socklen_t length = sizeof(domain);
+
+    if (qemu_real_host_page_size <= 4096 ||
+        getsockopt(fd, SOL_SOCKET, SO_DOMAIN, &domain, &length) ||
+        domain != AF_NETLINK) {
+        return NULL;
+    }
+    length = sizeof(protocol);
+    if (getsockopt(fd, SOL_SOCKET, SO_PROTOCOL, &protocol, &length) ||
+        protocol != NETLINK_ROUTE) {
+        return NULL;
+    }
+    state = g_new0(NetlinkRecvState, 1);
+    if (fd_trans_netlink_attach(fd, state)) {
+        state->error = errno;
+    }
+    return state;
+}
+
+void fd_trans_netlink_release(NetlinkRecvState *state)
+{
+    if (state) {
+        if (state->shared) {
+            munmap(state->shared, sizeof(*state->shared));
+        }
+        g_free(state);
+    }
+}
 
 static TargetFdTrans **target_fd_trans;
 static unsigned int target_fd_max;
