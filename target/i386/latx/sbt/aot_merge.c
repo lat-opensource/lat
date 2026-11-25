@@ -13,6 +13,7 @@
 #include "aot-version.h"
 #include "latx-options.h"
 #include "file_ctx.h"
+#include "hardware-ras.h"
 
 #ifdef CONFIG_LATX_AOT
 
@@ -464,7 +465,9 @@ static bool merge_aot_generate(void)
     char *last_name = aot_x86_lib_names;
     char *curr_name = aot_x86_lib_names;
     uint8_t aot_file_type = get_file_type(merge_seg_info_vector[0]->file_name);
-    p_header->aot_file_type = aot_file_type;
+    p_header->generation_policy = aot_generation_policy();
+    p_header->aot_file_type = aot_file_type |
+        (aot_cross_page_tu_enabled() ? CROSS_PAGE_TU_AOT : 0);
     int page_index = 0;
     for (int i = 0; i < seg_info_num; i++) {
         seg_info *curr_seg_info = merge_seg_info_vector[i]->s_info;
@@ -531,7 +534,14 @@ static bool merge_aot_generate(void)
 		            }
                 }
                 memcpy(curr_aot_tb, cur_aot_tb_vector[j], sizeof(aot_tb));
+#ifdef CONFIG_LATX_TU
+                if (!aot_cross_page_tu_enabled() ||
+                    curr_aot_tb->is_first_tb) {
+                    total_code_cache_size += curr_aot_tb->tu_size;
+                }
+#else
                 total_code_cache_size += curr_aot_tb->tu_size;
+#endif
                 fill_page_table(curr_seg, p_header, curr_aot_tb);
                 curr_aot_tb++;
             }
@@ -551,15 +561,47 @@ static bool merge_aot_generate(void)
     insn_buffer = (uint32_t *)malloc(total_code_cache_size);
     assert(insn_buffer && "insn_buffer malloc failed!");
 
-    uint64_t two_buffer_off = (void *)insn_buffer - (void *)p_insn;
     uint32_t *curr_insn = insn_buffer;
-    /* Fixup all tb_cache_offset. */
-    for (struct aot_tb *p = p_aot_tbs; p < curr_aot_tb; ++p) {
-        memcpy(curr_insn, p->tb_cache_addr, p->tu_size);
-        /* TODO! unlink this TB. */
-        p->tb_cache_offset =
-            (uintptr_t)curr_insn - two_buffer_off - (uintptr_t)p_header;
-        curr_insn += p->tu_size >> 2;
+#ifdef CONFIG_LATX_TU
+    if (aot_cross_page_tu_enabled()) {
+        GHashTable *tu_first = g_hash_table_new_full(aot_tu_key_hash,
+                aot_tu_key_equal, g_free, NULL);
+
+        /* Fix up every TB's code offset within its complete TU allocation. */
+        for (struct aot_tb *p = p_aot_tbs; p < curr_aot_tb; ++p) {
+            if (p->is_first_tb) {
+                memcpy(curr_insn, p->tb_cache_addr, p->tu_size);
+                p->tb_cache_offset = (uintptr_t)curr_insn -
+                    (uintptr_t)insn_buffer + (uintptr_t)p_insn -
+                    (uintptr_t)p_header;
+                curr_insn += p->tu_size >> 2;
+                AOTTUKey *key = g_new(AOTTUKey, 1);
+
+                *key = aot_tu_key(p_header, p);
+                lsassert(!g_hash_table_lookup(tu_first, key));
+                g_hash_table_insert(tu_first, key, p);
+            }
+        }
+        for (struct aot_tb *p = p_aot_tbs; p < curr_aot_tb; ++p) {
+            if (!p->is_first_tb) {
+                AOTTUKey key = aot_tu_key(p_header, p);
+                struct aot_tb *first = g_hash_table_lookup(tu_first, &key);
+
+                lsassert(first);
+                p->tb_cache_offset = first->tb_cache_offset + p->offset_in_tu;
+            }
+        }
+        g_hash_table_destroy(tu_first);
+    } else
+#endif
+    {
+
+        for (struct aot_tb *p = p_aot_tbs; p < curr_aot_tb; ++p) {
+            memcpy(curr_insn, p->tb_cache_addr, p->tu_size);
+            p->tb_cache_offset = (uintptr_t)curr_insn - (uintptr_t)insn_buffer
+                + (uintptr_t)p_insn - (uintptr_t)p_header;
+            curr_insn += p->tu_size >> 2;
+        }
     }
     assert((void *)curr_insn - (void *)insn_buffer == total_code_cache_size);
     if (total_code_cache_size == 0) {
@@ -755,7 +797,7 @@ static AOTLoadResult aot_load_no_lock(char *lib_name)
             fclose(pf);
             goto load_error;
         }
-        if ((size_t)file_end < strlen(AOT_VERSION)) {
+        if ((size_t)file_end < sizeof(aot_header) + strlen(AOT_VERSION)) {
             fclose(pf);
             if (i == 0) {
                 goto invalid_base;
@@ -800,6 +842,13 @@ static AOTLoadResult aot_load_no_lock(char *lib_name)
             goto load_error;
         }
         fclose(pf);
+        if (!aot_header_policy_matches(buffer)) {
+            free(buffer);
+            if (i == 0) {
+                goto invalid_base;
+            }
+            goto load_error;
+        }
         aot_buffer_all[j].p = buffer;
         aot_buffer_all[j].maplen = file_sz;
         j++;
@@ -839,6 +888,43 @@ static struct aot_segment *get_segment(struct aot_segment *p_segment,
     return NULL;
 }
 
+static void set_tb_message(tb_tmp_message *message,
+        const struct aot_tb *aot_tb, const seg_info *seg)
+{
+    target_ulong pc = seg->seg_begin + aot_tb->offset_in_segment;
+    target_ulong next_pc = 0;
+
+    memset(message, 0, sizeof(*message));
+    message->pc = pc;
+    message->cflags = aot_tb->cflags;
+    message->bool_flags = aot_tb->bool_flags;
+
+    if (!aot_tb->size) {
+        return;
+    }
+    if (!hras_unpack_call_offset(aot_tb->lazypc[1], pc, &next_pc)) {
+        switch (aot_tb->last_ir1_type) {
+        case IR1_TYPE_BRANCH:
+            if (aot_tb->next_tb_pc_offset >= 0) {
+                next_pc = seg->seg_begin + aot_tb->next_tb_pc_offset;
+            } else if (aot_tb->lazypc[0]) {
+                /* Older TU records kept this edge only in lazypc[0]. */
+                next_pc = pc + aot_tb->lazypc[0];
+            }
+            break;
+        case IR1_TYPE_CALL:
+        case IR1_TYPE_CALLIN:
+        case IR1_TYPE_NORMAL:
+        case IR1_TYPE_SYSCALL:
+            next_pc = pc + aot_tb->size;
+            break;
+        default:
+            break;
+        }
+    }
+    message->fallthrough_offset = tb_fallthrough_offset(pc, next_pc);
+}
+
 static void merge_seg(seg_info *curr_seg, void *buffer1, void *buffer2,
 		struct aot_segment *seg_in_aot1, struct aot_segment *seg_in_aot2)
 {
@@ -868,11 +954,10 @@ static void merge_seg(seg_info *curr_seg, void *buffer1, void *buffer2,
 		}
 		assert(curr_tb_num < all_tb_num);
 #endif
-		tb_message_vector[curr_tb_num].pc = 
-			p_aot_tbs1[i].offset_in_segment + curr_seg->seg_begin;	
+        set_tb_message(&tb_message_vector[curr_tb_num],
+                       &p_aot_tbs1[i], curr_seg);
 		assert(tb_message_vector[curr_tb_num].pc < curr_seg->seg_end);
-                tb_message_vector[curr_tb_num].bool_flags = p_aot_tbs1[i].bool_flags;
-		tb_message_vector[curr_tb_num++].cflags = p_aot_tbs1[i].cflags;
+        curr_tb_num++;
 	}
 	for (int i = 0; i < tb_num2; i++) {
 #ifdef CONFIG_LATX_DEBUG
@@ -881,10 +966,9 @@ static void merge_seg(seg_info *curr_seg, void *buffer1, void *buffer2,
 		}
 		assert(curr_tb_num < all_tb_num);
 #endif
-		tb_message_vector[curr_tb_num].pc = 
-			p_aot_tbs2[i].offset_in_segment + curr_seg->seg_begin;	
-                tb_message_vector[curr_tb_num].bool_flags = p_aot_tbs2[i].bool_flags;
-		tb_message_vector[curr_tb_num++].cflags = p_aot_tbs2[i].cflags;	
+        set_tb_message(&tb_message_vector[curr_tb_num],
+                       &p_aot_tbs2[i], curr_seg);
+        curr_tb_num++;
 	}
 }
 
@@ -899,9 +983,7 @@ static void get_seg_tb(int first_seg_id, int last_seg_id)
     	if ((tb_message_vector[end_id].pc != tb_message_vector[i].pc)
     			|| ((tb_message_vector[end_id].cflags & CF_PARALLEL)
     				!= (tb_message_vector[i].cflags & CF_PARALLEL))) {
-    		tb_message_vector[++end_id].pc = tb_message_vector[i].pc;		
-    		tb_message_vector[end_id].cflags = tb_message_vector[i].cflags;		
-                tb_message_vector[end_id].bool_flags = tb_message_vector[i].bool_flags;
+            tb_message_vector[++end_id] = tb_message_vector[i];
         }
     }
     curr_tb_num = end_id + 1;

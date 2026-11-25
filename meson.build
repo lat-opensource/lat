@@ -614,6 +614,20 @@ foreach target : target_dirs
       env: ['ASAN_OPTIONS=detect_leaks=0'],
       timeout: 30,
     )
+
+    hardware_ras_metadata_test = executable(
+      'test-' + target + '-latx-hardware-ras-metadata',
+      files('target/i386/latx/sbt/tests/hardware-ras-metadata-test.c') + genh,
+      c_args: c_args,
+      dependencies: [glib],
+      include_directories: target_inc,
+    )
+    test(
+      target + '-latx-hardware-ras-metadata',
+      hardware_ras_metadata_test,
+      suite: 'lat-pr-fast',
+      timeout: 30,
+    )
   endif
 
   if get_option('tests').enabled() and \
@@ -803,6 +817,20 @@ foreach target : target_dirs
       link_args: smc_reload_test_link_args,
     )
     test('latx-tb-missing-slot', tb_missing_slot_test, suite: 'lat-pr-fast')
+
+    tu_fallthrough_message_test = executable(
+      'test-latx-tu-fallthrough-message',
+      files(
+        'target/i386/latx/sbt/tests/tu-fallthrough-message-test.c',
+        'target/i386/latx/ir1/ir1.c',
+      ) + genh + tcg_trace_genh + [syscall_nr_generated],
+      c_args: smc_reload_test_c_args,
+      dependencies: [glib, capstone_git],
+      include_directories: target_inc,
+      link_args: smc_reload_test_link_args,
+    )
+    test('latx-tu-fallthrough-message', tu_fallthrough_message_test,
+         suite: 'lat-pr-fast')
 
     foreach variant : ['', '-no-tu']
       aot_merge_memory_test = executable(

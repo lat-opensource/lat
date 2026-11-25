@@ -24,5 +24,11 @@ typedef struct aot_link_info {
 void aot_link_tree_init(void);
 void aot_link_tree_insert(TranslationBlock *curr,
         target_ulong aim1_pc, target_ulong aim2_pc);
+bool aot_link_tree_reserve(size_t extra);
 void try_aot_link(void);
+/* Call once per direct exit of a newly published cross-page AOT TB. */
+void aot_link_direct_target(CPUState *cpu, TranslationBlock *curr,
+    target_ulong pc, uint32_t flags, uint32_t cflags, int exit_index);
+void aot_resolve_pending_links(CPUState *cpu, TranslationBlock *target);
+void aot_link_pending_reset(void);
 #endif

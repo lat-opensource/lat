@@ -94,6 +94,7 @@ void do_tb_flush(CPUState *cpu, run_on_cpu_data tb_flush_count)
     tb_flush_remove_all();
 #ifdef CONFIG_LATX_AOT
     aot_reset_tb_stats();
+    aot_link_pending_reset();
 #endif
 
     tcg_region_reset_all();
