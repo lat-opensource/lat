@@ -1,3 +1,68 @@
+if 'CONFIG_LATX_AVX_OPT' in config_host
+  foreach guest : [['x86_64', '64'], ['i386', '32']]
+    if guest[0] + '-linux-user' in target_dirs
+      foreach group : ['permissions', 'xsave', 'mask', 'gather']
+        foreach lsx : [false, true]
+          latx_integration_tests += [{
+            'name': 'test-avx-memory-' + group + '-' + guest[0] + (lsx ? '-lsx' : ''),
+            'runner': find_program('python3'),
+            'args': [files('../../test-avx-memory.py'),
+                     emulators['latx-' + guest[0]], files('../../avx-memory-access.asm'),
+                     '--guest-bits', guest[1], '--group', group] +
+                    (lsx ? ['--lsx'] : []),
+            'timeout': lsx ? 600 : 120,
+          }]
+        endforeach
+        if group == 'mask' or group == 'gather'
+          foreach lsx : [false, true]
+            latx_integration_tests += [{
+              'name': 'test-avx-memory-' + group + '-' + guest[0] + '-bulk' + (lsx ? '-lsx' : ''),
+              'runner': find_program('python3'),
+              'args': [files('../../test-avx-memory.py'),
+                       emulators['latx-' + guest[0]], files('../../avx-memory-access.asm'),
+                       '--guest-bits', guest[1], '--group', group,
+                       '--masked-memory', '0'] + (lsx ? ['--lsx'] : []),
+              'timeout': lsx ? 600 : 120,
+            }]
+          endforeach
+          foreach masked : ['0', '1']
+            latx_integration_tests += [{
+              'name': 'test-avx-memory-' + group + '-' + guest[0] + '-aot-' + masked,
+              'runner': find_program('python3'),
+              'args': [files('../../test-avx-memory.py'),
+                       emulators['latx-' + guest[0]], files('../../avx-memory-access.asm'),
+                       '--guest-bits', guest[1], '--group', group, '--aot',
+                       '--masked-memory', masked],
+              'timeout': 300,
+            }]
+          endforeach
+        endif
+      endforeach
+    endif
+  endforeach
+endif
+
+if 'CONFIG_LATX_AVX_OPT' in config_host
+  foreach guest : [['x86_64-linux-user', 'latx-x86_64', '64'],
+                   ['i386-linux-user', 'latx-i386', '32']]
+    if guest[0] in target_dirs
+      foreach mode : ['jit', 'lsx', 'aot']
+        mode_args = []
+        if mode != 'jit'
+          mode_args = ['--' + mode]
+        endif
+        latx_integration_tests += [{
+          'name': 'test-avx-load-width-' + guest[1] + '-' + mode,
+          'runner': find_program('../../test-avx-load-width.py'),
+          'args': [emulators[guest[1]], '--guest-bits', guest[2],
+                   files('../../avx-load-width.asm')] + mode_args,
+          'timeout': 300,
+        }]
+      endforeach
+    endif
+  endforeach
+endif
+
 if 'x86_64-linux-user' in target_dirs
   foreach cvt_option : ['0', '1']
     latx_integration_tests += [{

@@ -1613,6 +1613,9 @@ IR2_OPND convert_gpr_opnd(IR1_OPND *, EXTENSION_MODE);
 IR2_OPND load_freg128_from_ir1(IR1_OPND *);
 void load_imm_to_ir1_opnd_gpr(IR1_OPND *opnd0, uint64_t imm);
 IR2_OPND load_freg256_from_ir1(IR1_OPND *opnd1);
+void gen_masked_vector_memory(IR2_OPND value, IR2_OPND mask,
+                              IR2_OPND address, int bytes, int element_bytes,
+                              bool store);
 void clear_xmm_high64(IR2_OPND opnd);
 /* Request a logical upper zero: defer guest registers, clear temporaries now. */
 void set_high128_xreg_to_zero(IR2_OPND opnd);

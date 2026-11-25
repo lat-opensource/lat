@@ -2779,11 +2779,39 @@ void helper_frstor(CPUX86State *env, target_ulong ptr, int data32)
 
 #define XO(X)  offsetof(X86XSaveArea, X)
 
+static void xsave_check_access(CPUX86State *env, target_ulong ptr, int size,
+                               bool store, uintptr_t ra)
+{
+#if defined(CONFIG_LATX) && defined(CONFIG_USER_ONLY)
+    /* Signal-frame callers handle their own guest buffers. */
+    if (!ra) {
+        return;
+    }
+    while (size) {
+        int chunk = MIN(size, TARGET_PAGE_SIZE - (ptr & ~TARGET_PAGE_MASK));
+
+        if (!page_check_range(ptr, chunk, store ? PAGE_WRITE : PAGE_READ)) {
+            int error = PG_ERROR_U_MASK | (store ? PG_ERROR_W_MASK : 0);
+
+            if (page_get_flags(ptr) & PAGE_VALID) {
+                error |= PG_ERROR_P_MASK;
+            }
+            env->cr[2] = ptr;
+            raise_exception_err_ra(env, EXCP0E_PAGE, error, ra);
+        }
+        ptr += chunk;
+        size -= chunk;
+    }
+#endif
+}
+
 static void do_xsave_fpu(CPUX86State *env, target_ulong ptr, uintptr_t ra)
 {
     int fpus, fptag, i;
     target_ulong addr;
 
+    xsave_check_access(env, ptr, 24, true, ra);
+    xsave_check_access(env, ptr + XO(legacy.fpregs), 7 * 16 + 10, true, ra);
     fpus = (env->fpus & ~0x3800) | (env->fpstt & 0x7) << 11;
     fptag = 0;
     for (i = 0; i < 8; i++) {
@@ -2810,6 +2838,7 @@ static void do_xsave_fpu(CPUX86State *env, target_ulong ptr, uintptr_t ra)
 
 static void do_xsave_mxcsr(CPUX86State *env, target_ulong ptr, uintptr_t ra)
 {
+    xsave_check_access(env, ptr + XO(legacy.mxcsr), 8, true, ra);
     update_mxcsr_from_sse_status(env);
     cpu_stl_data_ra(env, ptr + XO(legacy.mxcsr), env->mxcsr, ra);
     cpu_stl_data_ra(env, ptr + XO(legacy.mxcsr_mask), 0x0000ffff, ra);
@@ -2827,6 +2856,7 @@ static void do_xsave_sse(CPUX86State *env, target_ulong ptr, uintptr_t ra)
     }
 
     addr = ptr + XO(legacy.xmm_regs);
+    xsave_check_access(env, addr, nb_xmm_regs * 16, true, ra);
     for (i = 0; i < nb_xmm_regs; i++) {
         cpu_stq_data_ra(env, addr, env->xmm_regs[i].ZMM_Q(0), ra);
         cpu_stq_data_ra(env, addr + 8, env->xmm_regs[i].ZMM_Q(1), ra);
@@ -2844,6 +2874,7 @@ static void do_xsave_ymmh(CPUX86State *env, target_ulong ptr, uintptr_t ra)
         nb_xmm_regs = 8;
     }
 
+    xsave_check_access(env, ptr, nb_xmm_regs * 16, true, ra);
     for (i = 0; i < nb_xmm_regs; i++, ptr += 16) {
         cpu_stq_data_ra(env, ptr, env->xmm_regs[i].ZMM_Q(2), ra);
         cpu_stq_data_ra(env, ptr + 8, env->xmm_regs[i].ZMM_Q(3), ra);
@@ -2855,6 +2886,7 @@ static void do_xsave_bndregs(CPUX86State *env, target_ulong ptr, uintptr_t ra)
     target_ulong addr = ptr + offsetof(XSaveBNDREG, bnd_regs);
     int i;
 
+    xsave_check_access(env, addr, 4 * 16, true, ra);
     for (i = 0; i < 4; i++, addr += 16) {
         cpu_stq_data_ra(env, addr, env->bnd_regs[i].lb, ra);
         cpu_stq_data_ra(env, addr + 8, env->bnd_regs[i].ub, ra);
@@ -2863,6 +2895,7 @@ static void do_xsave_bndregs(CPUX86State *env, target_ulong ptr, uintptr_t ra)
 
 static void do_xsave_bndcsr(CPUX86State *env, target_ulong ptr, uintptr_t ra)
 {
+    xsave_check_access(env, ptr, 16, true, ra);
     cpu_stq_data_ra(env, ptr + offsetof(XSaveBNDCSR, bndcsr.cfgu),
                     env->bndcs_regs.cfgu, ra);
     cpu_stq_data_ra(env, ptr + offsetof(XSaveBNDCSR, bndcsr.sts),
@@ -2871,6 +2904,7 @@ static void do_xsave_bndcsr(CPUX86State *env, target_ulong ptr, uintptr_t ra)
 
 static void do_xsave_pkru(CPUX86State *env, target_ulong ptr, uintptr_t ra)
 {
+    xsave_check_access(env, ptr, 8, true, ra);
     cpu_stq_data_ra(env, ptr, env->pkru, ra);
 }
 
@@ -2977,6 +3011,7 @@ static void do_xsave(CPUX86State *env, target_ulong ptr, uint64_t rfbm,
     }
 
     /* Update the XSTATE_BV field.  */
+    xsave_check_access(env, ptr + XO(header.xstate_bv), 8, true, ra);
     old_bv = cpu_ldq_data_ra(env, ptr + XO(header.xstate_bv), ra);
     new_bv = (old_bv & ~rfbm) | (inuse & rfbm);
     cpu_stq_data_ra(env, ptr + XO(header.xstate_bv), new_bv, ra);
@@ -2998,6 +3033,8 @@ static void do_xrstor_fpu(CPUX86State *env, target_ulong ptr, uintptr_t ra)
     int i, fpuc, fpus, fptag;
     target_ulong addr;
 
+    xsave_check_access(env, ptr, 6, false, ra);
+    xsave_check_access(env, ptr + XO(legacy.fpregs), 7 * 16 + 10, false, ra);
     fpuc = cpu_lduw_data_ra(env, ptr + XO(legacy.fcw), ra);
     fpus = cpu_lduw_data_ra(env, ptr + XO(legacy.fsw), ra);
     fptag = cpu_lduw_data_ra(env, ptr + XO(legacy.ftw), ra);
@@ -3018,6 +3055,7 @@ static void do_xrstor_fpu(CPUX86State *env, target_ulong ptr, uintptr_t ra)
 
 static void do_xrstor_mxcsr(CPUX86State *env, target_ulong ptr, uintptr_t ra)
 {
+    xsave_check_access(env, ptr + XO(legacy.mxcsr), 4, false, ra);
     cpu_set_mxcsr(env, cpu_ldl_data_ra(env, ptr + XO(legacy.mxcsr), ra));
 }
 
@@ -3033,6 +3071,7 @@ static void do_xrstor_sse(CPUX86State *env, target_ulong ptr, uintptr_t ra)
     }
 
     addr = ptr + XO(legacy.xmm_regs);
+    xsave_check_access(env, addr, nb_xmm_regs * 16, false, ra);
     for (i = 0; i < nb_xmm_regs; i++) {
         env->xmm_regs[i].ZMM_Q(0) = cpu_ldq_data_ra(env, addr, ra);
         env->xmm_regs[i].ZMM_Q(1) = cpu_ldq_data_ra(env, addr + 8, ra);
@@ -3066,6 +3105,7 @@ static void do_xrstor_ymmh(CPUX86State *env, target_ulong ptr, uintptr_t ra)
         nb_xmm_regs = 8;
     }
 
+    xsave_check_access(env, ptr, nb_xmm_regs * 16, false, ra);
     for (i = 0; i < nb_xmm_regs; i++, ptr += 16) {
         env->xmm_regs[i].ZMM_Q(2) = cpu_ldq_data_ra(env, ptr, ra);
         env->xmm_regs[i].ZMM_Q(3) = cpu_ldq_data_ra(env, ptr + 8, ra);
@@ -3093,6 +3133,7 @@ static void do_xrstor_bndregs(CPUX86State *env, target_ulong ptr, uintptr_t ra)
     target_ulong addr = ptr + offsetof(XSaveBNDREG, bnd_regs);
     int i;
 
+    xsave_check_access(env, addr, 4 * 16, false, ra);
     for (i = 0; i < 4; i++, addr += 16) {
         env->bnd_regs[i].lb = cpu_ldq_data_ra(env, addr, ra);
         env->bnd_regs[i].ub = cpu_ldq_data_ra(env, addr + 8, ra);
@@ -3101,6 +3142,7 @@ static void do_xrstor_bndregs(CPUX86State *env, target_ulong ptr, uintptr_t ra)
 
 static void do_xrstor_bndcsr(CPUX86State *env, target_ulong ptr, uintptr_t ra)
 {
+    xsave_check_access(env, ptr, 16, false, ra);
     /* FIXME: Extend highest implemented bit of linear address.  */
     env->bndcs_regs.cfgu
         = cpu_ldq_data_ra(env, ptr + offsetof(XSaveBNDCSR, bndcsr.cfgu), ra);
@@ -3110,6 +3152,7 @@ static void do_xrstor_bndcsr(CPUX86State *env, target_ulong ptr, uintptr_t ra)
 
 static void do_xrstor_pkru(CPUX86State *env, target_ulong ptr, uintptr_t ra)
 {
+    xsave_check_access(env, ptr, 8, false, ra);
     env->pkru = cpu_ldq_data_ra(env, ptr, ra);
 }
 
@@ -3154,6 +3197,7 @@ static void do_xrstor(CPUX86State *env, target_ulong ptr, uint64_t rfbm, uintptr
         raise_exception_ra(env, EXCP0D_GPF, ra);
     }
 
+    xsave_check_access(env, ptr + XO(header.xstate_bv), 8, false, ra);
     xstate_bv = cpu_ldq_data_ra(env, ptr + XO(header.xstate_bv), ra);
 
     if ((int64_t)xstate_bv < 0) {
@@ -3173,6 +3217,7 @@ static void do_xrstor(CPUX86State *env, target_ulong ptr, uint64_t rfbm, uintptr
        describes only XCOMP_BV, but the description of the standard form
        of XRSTOR (Vol 1, Sec 13.8.1) checks bytes 23:8 for zero, which
        includes the next 64-bit field.  */
+    xsave_check_access(env, ptr + XO(header.xcomp_bv), 16, false, ra);
     xcomp_bv = cpu_ldq_data_ra(env, ptr + XO(header.xcomp_bv), ra);
     reserve0 = cpu_ldq_data_ra(env, ptr + XO(header.reserve0), ra);
     if (xcomp_bv || reserve0) {

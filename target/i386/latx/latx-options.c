@@ -103,6 +103,7 @@ int option_vpaes;
 int option_split_tb;
 int option_anonym;
 int option_mem_test;
+int option_masked_memory;
 int option_minke_16k_page_check;
 int option_real_maps;
 int option_monitor_shared_mem;
@@ -279,6 +280,7 @@ void options_init(void)
 #endif
     option_anonym = 0;
     option_mem_test = 0;
+    option_masked_memory = 0;
     option_minke_16k_page_check = 0;
     option_real_maps = 0;
     option_monitor_shared_mem = 0;

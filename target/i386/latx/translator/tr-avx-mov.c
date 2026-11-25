@@ -324,7 +324,9 @@ bool translate_vmovss(IR1_INST *pir1)
     } else if (ir1_opnd_is_mem(opnd0) && ir1_opnd_is_xmm(opnd1)) {
         int little_disp;
         IR2_OPND mem_opnd = convert_mem(opnd0, &little_disp);
+        gen_test_page_flag(mem_opnd, little_disp, PAGE_WRITE | PAGE_WRITE_ORG, 4);
         la_fst_s(src1, mem_opnd, little_disp);
+        ra_free_mem_temp(mem_opnd);
     } else {
         lsassert(0);
     }
@@ -429,50 +431,62 @@ bool translate_vpmovmskb(IR1_INST * pir1) {
     return true;
 }
 
-bool translate_vmaskmovpx(IR1_INST * pir1) {
-    if (!option_enable_lasx) {
-        return translate_vmaskmovpx_lsx(pir1);
-    }
-    IR1_OPND * opnd0 = ir1_get_opnd(pir1, 0);
-    IR2_OPND src1 = load_freg256_from_ir1(ir1_get_opnd(pir1, 1));
-    IR2_OPND src2 = load_freg256_from_ir1(ir1_get_opnd(pir1, 2));
-    IR2_OPND mask = ra_alloc_ftemp();
-    IR2_OPND temp;
-    IR2_INST * ( * tr_slt)(IR2_OPND, IR2_OPND, int);
-    IR1_OPCODE op = ir1_opcode(pir1);
-    switch (op) {
-        case dt_X86_INS_VMASKMOVPS:
-            tr_slt = la_xvslti_w;
-            break;
-        case dt_X86_INS_VMASKMOVPD:
-            tr_slt = la_xvslti_d;
-            break;
-        default:
-            tr_slt = NULL;
-            lsassert(0);
-            break;
-    }
-    if (ir1_opnd_is_xmm(opnd0) || ir1_opnd_is_ymm(opnd0)) {
-        IR2_OPND dest = load_freg256_from_ir1(opnd0);
-        tr_slt(mask, src1, 0);
-        la_xvand_v(dest, src2, mask);
-        if (ir1_opnd_is_xmm(opnd0)) {
-            set_high128_xreg_to_zero(dest);
-        }
-    } else if (ir1_opnd_is_mem(opnd0)) {
-        temp = load_freg256_from_ir1(opnd0);
-        tr_slt(mask, src1, 0);
-        la_xvbitsel_v(temp, temp, src2, mask);
-        if (ir1_opnd_size(opnd0) == 128)
-            store_freg128_to_ir1_mem(temp, opnd0);
-        else if (ir1_opnd_size(opnd0) == 256)
-            store_freg256_to_ir1_mem(temp, opnd0);
-        else {
-            lsassert(0);
+bool translate_vmaskmovpx(IR1_INST *pir1)
+{
+    IR1_OPND *dest = ir1_get_opnd(pir1, 0);
+    IR1_OPND *mask_opnd = ir1_get_opnd(pir1, 1);
+    IR1_OPND *source = ir1_get_opnd(pir1, 2);
+    bool store = ir1_opnd_is_mem(dest);
+    bool ymm = ir1_opnd_is_ymm(mask_opnd);
+    bool quad = ir1_opcode(pir1) == dt_X86_INS_VMASKMOVPD ||
+                ir1_opcode(pir1) == dt_X86_INS_VPMASKMOVQ;
+    IR1_OPND *memory = store ? dest : source;
+    int value_index = ir1_opnd_base_reg_num(store ? source : dest);
+    IR2_OPND address = convert_mem_to_itemp(memory);
+    IR2_OPND mask = ymm && option_enable_lasx ?
+        load_freg256_from_ir1(mask_opnd) :
+        ra_alloc_xmm(ir1_opnd_base_reg_num(mask_opnd));
+    IR2_OPND value = store ? (ymm && option_enable_lasx ?
+        load_freg256_from_ir1(source) : ra_alloc_xmm(value_index)) :
+        ra_alloc_ftemp();
+
+    if (option_enable_lasx || !ymm) {
+        gen_masked_vector_memory(value, mask, address, ymm ? 32 : 16,
+                                 quad ? 8 : 4, store);
+        if (!store) {
+            if (ymm) {
+                la_xvori_b(ra_alloc_xmm(value_index), value, 0);
+            } else {
+                la_vori_b(ra_alloc_xmm(value_index), value, 0);
+                if (option_enable_lasx) {
+                    set_high128_xreg_to_zero(ra_alloc_xmm(value_index));
+                } else {
+                    clear_ymm_high128_shadow(value_index);
+                }
+            }
         }
     } else {
-        lsassert(0);
+        IR2_OPND mask_high = load_ymm_high128_shadow(
+            ir1_opnd_base_reg_num(mask_opnd));
+        IR2_OPND high = store ? load_ymm_high128_shadow(value_index) :
+                               ra_alloc_ftemp();
+
+        gen_masked_vector_memory(value, mask, address, 16, quad ? 8 : 4,
+                                 store);
+        la_addi_d(address, address, 16);
+        gen_masked_vector_memory(high, mask_high, address, 16, quad ? 8 : 4,
+                                 store);
+        if (!store) {
+            la_vori_b(ra_alloc_xmm(value_index), value, 0);
+            store_ymm_high128_shadow(high, value_index);
+        }
+        ra_free_temp(high);
+        ra_free_temp(mask_high);
     }
+    if (!store) {
+        ra_free_temp(value);
+    }
+    ra_free_temp(address);
     return true;
 }
 
