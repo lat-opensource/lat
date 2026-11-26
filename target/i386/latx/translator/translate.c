@@ -5,6 +5,7 @@
  */
 
 #include "lsenv.h"
+#include "qemu/error-report.h"
 #include "reg-alloc.h"
 #include "flag-lbt.h"
 #include <string.h>
@@ -1890,6 +1891,36 @@ static void reset_aes_table_cache_for_non_aes(IR1_INST *ir1)
     }
 }
 
+#ifndef CONFIG_LATX_AVX_OPT
+static bool is_vex_vector_instruction(IR1_INST *insn)
+{
+    /* Segment and address-size overrides may precede a VEX prefix. */
+    size_t i = 0;
+    while (i < insn->info->size) {
+        switch (insn->info->bytes[i++]) {
+        case 0x26: case 0x2e: case 0x36: case 0x3e:
+        case 0x64: case 0x65: case 0x67:
+            continue;
+        case 0xc4: case 0xc5:
+            /* BMI instructions also use VEX, but have no vector operands. */
+            for (int n = 0; n < ir1_get_opnd_num(insn); n++) {
+                IR1_OPND *opnd = ir1_get_opnd(insn, n);
+                if (ir1_opnd_is_xmm(opnd) || ir1_opnd_is_ymm(opnd)) {
+                    return true;
+                }
+            }
+            return ir1_opcode(insn) == dt_X86_INS_VLDMXCSR ||
+                   ir1_opcode(insn) == dt_X86_INS_VSTMXCSR ||
+                   ir1_opcode(insn) == dt_X86_INS_VZEROUPPER ||
+                   ir1_opcode(insn) == dt_X86_INS_VZEROALL;
+        default:
+            return false;
+        }
+    }
+    return false;
+}
+#endif
+
 bool ir1_translate(IR1_INST *ir1)
 {
     /* Pattern translators also overwrite the cached table's temporary GPR. */
@@ -2013,6 +2044,15 @@ bool ir1_translate(IR1_INST *ir1)
         }
     } else {
         if (translate_functions[tr_func_idx] == NULL) {
+#ifndef CONFIG_LATX_AVX_OPT
+            if (is_vex_vector_instruction(ir1)) {
+                warn_report_once("AVX instruction at 0x%" PRIx64
+                                 " requires AVX translation support. Rebuild LATX "
+                                 "with --enable-latx-avx-opt "
+                                 "(./latxbuild/build%d.sh -c -a).",
+                                 (uint64_t)ir1_addr(ir1), TARGET_LONG_BITS);
+            }
+#endif
             ir1_opcode_dump(ir1);
 #ifndef CONFIG_LATX_TU
             lsassertm(0, "%s %s %d error : this ins %d not implemented: %s\n",
