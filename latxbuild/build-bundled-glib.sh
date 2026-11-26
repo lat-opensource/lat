@@ -5,13 +5,20 @@ srcdir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 glib_src=$srcdir/third_party/glib
 glib_build=$srcdir/build-glib
 pc_dir=$glib_build/pkgconfig
+meson=meson
+
+if ! printf '%s\n%s\n' 0.60.0 "$(meson --version)" | sort -V -C; then
+    [ -e "$srcdir/meson/meson.py" ] ||
+        "$srcdir/scripts/git-submodule.sh" update meson
+    meson="python3 $srcdir/meson/meson.py"
+fi
 
 if [ -f "$glib_build/build.ninja" ]; then
-    meson setup --reconfigure "$glib_build" "$glib_src" \
+    $meson setup --reconfigure "$glib_build" "$glib_src" \
         -Ddefault_library=static -Dtests=false -Dman=false \
         -Dselinux=disabled -Dlibmount=disabled -Dnls=disabled
 else
-    meson setup "$glib_build" "$glib_src" \
+    $meson setup "$glib_build" "$glib_src" \
         -Ddefault_library=static -Dtests=false -Dman=false \
         -Dselinux=disabled -Dlibmount=disabled -Dnls=disabled
 fi
