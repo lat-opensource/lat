@@ -17,9 +17,20 @@ struct tb_tmp_message{
     target_ulong pc;
     uint32_t cflags;
     uint16_t bool_flags;
+    uint16_t fallthrough_offset; /* Zero if no known fallthrough. */
     TranslationBlock *tb;
 };
 typedef struct tb_tmp_message tb_tmp_message;
+
+static inline uint16_t tb_fallthrough_offset(target_ulong pc,
+                                            target_ulong next_pc)
+{
+    if (next_pc <= pc || next_pc - pc > UINT16_MAX) {
+        return 0;
+    }
+    return next_pc - pc;
+}
+
 void pre_translate(int begin_id, int end_id, CPUState *cpu,
 		tb_tmp_message *tb_pc_vector);
 TranslationBlock *aot_tb_lookup(target_ulong pc, int cflags);

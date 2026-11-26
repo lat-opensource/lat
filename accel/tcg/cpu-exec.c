@@ -684,6 +684,10 @@ inline void tb_add_jump(TranslationBlock *tb, int n,
 {
     uintptr_t old;
 
+    /*
+     * Resident AOT targets use normal tracked links, including across TUs.
+     * Missing targets still return through the dispatcher for demand loading.
+     */
     qemu_thread_jit_write();
     assert(n < ARRAY_SIZE(tb->jmp_list_next));
 #ifdef CONFIG_LATX_KZT
@@ -694,7 +698,10 @@ inline void tb_add_jump(TranslationBlock *tb, int n,
     }
 #endif
 #ifdef CONFIG_LATX
-    /* Inlined CALL-to-next and PC thunks have no host patch slot. */
+    /*
+     * CALL-to-next and recognized PC thunks can be fully inlined. AOT may
+     * still retain their guest edge, but there is no host slot to patch.
+     */
     if (!use_tu_jmp(tb) &&
         tb->jmp_target_arg[n] == TB_JMP_RESET_OFFSET_INVALID) {
         return;
@@ -757,6 +764,13 @@ inline void tb_add_jump(TranslationBlock *tb, int n,
     return;
 }
 
+#ifdef CONFIG_LATX_AOT
+void tb_add_jump_aot(TranslationBlock *tb, int n, TranslationBlock *tb_next)
+{
+    tb_add_jump(tb, n, tb_next);
+}
+#endif
+
 #ifdef CONFIG_LATX_TU
 #include "tu.h"
 #endif
@@ -788,8 +802,18 @@ static inline TranslationBlock *tb_find(CPUState *cpu,
 #endif
 #ifdef CONFIG_LATX_AOT
     if (tb == NULL && option_aot) {
+        int loaded;
+
         mmap_lock();
-        if (load_aot(pc, cflags)) {
+#ifdef CONFIG_LATX_TU
+        if (aot_tu_loading_enabled()) {
+            loaded = load_aot_tu(pc, cs_base, flags, cflags);
+        } else
+#endif
+        {
+            loaded = load_aot(pc, cflags);
+        }
+        if (loaded) {
             tb = tb_lookup(cpu, pc, cs_base, flags, cflags);
         }
         mmap_unlock();

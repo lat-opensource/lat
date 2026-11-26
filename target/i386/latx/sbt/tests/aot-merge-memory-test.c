@@ -24,6 +24,9 @@ void __wrap_free(void *ptr);
 
 __thread CPUState *thread_cpu;
 int qemu_loglevel;
+int option_fast_jmpcache_hash;
+int option_tu;
+int option_aot;
 int option_debug_aot;
 time_t aot_st_ctime;
 aot_file_info *aot_buffer_all;
@@ -159,6 +162,7 @@ static void write_cache(const char *path, const char *library,
     uint32_t *code = (uint32_t *)(tb + 1);
     char *name = (char *)(code + 1);
 
+    header->generation_policy = aot_generation_policy();
     header->aot_file_type = ELF_AOT_FILE;
     header->segment_table_offset = (uint8_t *)segment - contents;
     header->segments_num = 1;
@@ -272,6 +276,46 @@ static void test_merge_lifetime(void)
     seg_info_vector = NULL;
 }
 
+static void test_merge_hash_policy(void)
+{
+    char base[PATH_MAX], fragment[PATH_MAX];
+    char name[] = "policy-merge";
+
+    g_assert(__wrap_get_aot_path(name, base, sizeof(base)) == 0);
+    g_assert(aot_file_get_tmp_path(base, fragment, sizeof(fragment)) == 0);
+    for (int generated = 0; generated <= 1; generated++) {
+        for (int loaded = 0; loaded <= 1; loaded++) {
+            option_fast_jmpcache_hash = generated;
+            write_cache(base, "library", 0, true);
+            option_fast_jmpcache_hash = loaded;
+            write_cache(fragment, "library", 4, true);
+            track_allocations = true;
+            AOTLoadResult result = aot_load_no_lock(name);
+
+            g_assert(result == (generated == loaded ? AOT_LOAD_OK :
+                                                    AOT_LOAD_INVALID_BASE));
+            aot_merge_release_buffers();
+            track_allocations = false;
+            assert_released();
+            /* A current base must not admit a renamed incompatible fragment. */
+            write_cache(base, "library", 0, true);
+            option_fast_jmpcache_hash = generated;
+            write_cache(fragment, "library", 4, true);
+            option_fast_jmpcache_hash = loaded;
+            track_allocations = true;
+            result = aot_load_no_lock(name);
+            g_assert(result == (generated == loaded ? AOT_LOAD_OK :
+                                                    AOT_LOAD_ERROR));
+            aot_merge_release_buffers();
+            track_allocations = false;
+            assert_released();
+        }
+    }
+    option_fast_jmpcache_hash = 0;
+    g_assert(g_remove(base) == 0);
+    g_assert(g_remove(fragment) == 0);
+}
+
 static void test_merge_tree_lifetime(void)
 {
     GTree *tree;
@@ -288,6 +332,69 @@ static void test_merge_tree_lifetime(void)
     g_tree_destroy(tree);
     g_assert_cmpuint(live_bytes, ==, 0);
 }
+
+#ifdef CONFIG_LATX_TU
+static void test_branch_message_recovery(void)
+{
+    aot_tb tb = {
+        .size = 4,
+        .last_ir1_type = IR1_TYPE_BRANCH,
+    };
+    tb_tmp_message message;
+    seg_info seg = {
+        .seg_begin = 0x10000,
+        .seg_end = 0x11000,
+    };
+
+    tb.offset_in_segment = 0x100;
+    tb.next_tb_pc_offset = 0x120;
+    set_tb_message(&message, &tb, &seg);
+    g_assert(message.fallthrough_offset == 0x20);
+
+    /* Old cross-page caches only retained the relative fallthrough PC. */
+    tb.next_tb_pc_offset = -1;
+    tb.lazypc[0] = 7;
+    set_tb_message(&message, &tb, &seg);
+    g_assert(message.fallthrough_offset == 7);
+
+    /* A distant edge must not alias a nearby PC after narrowing. */
+    seg.seg_end = 0x30000;
+    tb.next_tb_pc_offset = 0x10120;
+    set_tb_message(&message, &tb, &seg);
+    g_assert(message.fallthrough_offset == 0);
+
+    /* A backward edge must not become a forward predecessor. */
+    tb.next_tb_pc_offset = 0x80;
+    set_tb_message(&message, &tb, &seg);
+    g_assert(message.fallthrough_offset == 0);
+
+    /* A record without guest bytes cannot establish a predecessor. */
+    tb.size = 0;
+    tb.next_tb_pc_offset = 0x120;
+    set_tb_message(&message, &tb, &seg);
+    g_assert(message.fallthrough_offset == 0);
+    tb.size = 4;
+
+    tb.last_ir1_type = IR1_TYPE_RET;
+    set_tb_message(&message, &tb, &seg);
+    g_assert(message.fallthrough_offset == 0);
+    tb.last_ir1_type = IR1_TYPE_JUMP;
+    set_tb_message(&message, &tb, &seg);
+    g_assert(message.fallthrough_offset == 0);
+    tb.last_ir1_type = IR1_TYPE_BRANCH;
+
+#if TARGET_ABI_BITS == 64
+    seg.seg_begin = UINT64_C(0x100000000) + 0x1000;
+    seg.seg_end = seg.seg_begin + 0x1000;
+    tb.offset_in_segment = 0x200;
+    tb.next_tb_pc_offset = -1;
+    tb.lazypc[0] = 5;
+    set_tb_message(&message, &tb, &seg);
+    g_assert(message.pc == UINT64_C(0x100000000) + 0x1200);
+    g_assert(message.fallthrough_offset == 5);
+#endif
+}
+#endif
 
 static void test_cache_directory_failure(void)
 {
@@ -312,9 +419,14 @@ int main(int argc, char **argv)
     test_dir = g_dir_make_tmp("latx-aot-merge-memory-XXXXXX", NULL);
     g_assert(test_dir != NULL);
     g_test_add_func("/aot-merge/buffer-lifetime", test_merge_lifetime);
+    g_test_add_func("/aot-merge/hash-policy", test_merge_hash_policy);
     g_test_add_func("/aot-merge/tree-lifetime", test_merge_tree_lifetime);
     g_test_add_func("/aot-merge/cache-directory-failure",
                     test_cache_directory_failure);
+#ifdef CONFIG_LATX_TU
+    g_test_add_func("/aot-merge/branch-message-recovery",
+                    test_branch_message_recovery);
+#endif
     result = g_test_run();
     g_assert_cmpint(g_rmdir(test_dir), ==, 0);
     g_free(test_dir);

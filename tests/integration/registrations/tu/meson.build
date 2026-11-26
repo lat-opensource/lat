@@ -1,0 +1,27 @@
+# Cross-page TU remains opt-in through AOT=3 inside these runtime runners.
+foreach tu_target : [['i386', '32'], ['x86_64', '64']]
+  if tu_target[0] + '-linux-user' in target_dirs
+    tu_cases = ['boundary', 'mode-cache', 'hash-cache', 'lifecycle', 'signal-fault',
+                'member-limit', 'search-buffer']
+    if tu_target[0] == 'i386'
+      tu_cases += ['late-thunk']
+    endif
+    foreach tu_case : tu_cases
+      latx_integration_tests += [{
+        'name': 'test-tu-' + tu_case + '-' + tu_target[0],
+        'runner': find_program('../../../latx/test-tu-runtime.sh'),
+        'args': [emulators['latx-' + tu_target[0]], tu_target[1], tu_case],
+        'timeout': 360,
+      }]
+    endforeach
+  endif
+endforeach
+
+if 'x86_64-linux-user' in target_dirs and config_host.has_key('CONFIG_LATX_KZT')
+  latx_integration_tests += [{
+    'name': 'test-tu-indirect-cold-x86_64',
+    'runner': find_program('../../../latx/test-tu-runtime.sh'),
+    'args': [emulators['latx-x86_64'], '64', 'indirect-cold'],
+    'timeout': 300,
+  }]
+endif

@@ -3,9 +3,14 @@
 #include "aot.h"
 #include "aot_lib.h"
 #include "segment.h"
+#include "latx-options.h"
 
 int qemu_loglevel;
 int option_aot_pe_profile;
+int option_aot;
+int option_fast_jmpcache_hash;
+int option_tu = 1;
+int option_load_aot = 1;
 const char *aot_process_profile = "browser";
 
 int qemu_log(const char *fmt G_GNUC_UNUSED, ...)
@@ -21,6 +26,97 @@ static void get_cache_name(seg_info *seg, char *name)
 {
     g_assert(segment_get_aot_file_name(seg, name, PATH_MAX) == 0);
 }
+
+static void check_cache_name_ignores_options(seg_info *seg)
+{
+    char plain[PATH_MAX];
+    char configured[PATH_MAX];
+
+    option_tu = 1;
+    get_cache_name(seg, plain);
+    option_tu = 0;
+    get_cache_name(seg, configured);
+    g_assert(strcmp(configured, plain) == 0);
+    option_tu = 1;
+    g_assert(segment_get_aot_file_name(seg, configured, strlen(plain)) ==
+             -ENAMETOOLONG);
+}
+
+static void check_hash_policy(seg_info *seg)
+{
+    char names[2][PATH_MAX], configured[PATH_MAX];
+
+    for (int hash = 0; hash <= 1; hash++) {
+        option_fast_jmpcache_hash = hash;
+        get_cache_name(seg, names[hash]);
+        option_load_aot = 0;
+        get_cache_name(seg, configured);
+        g_assert(strcmp(configured, names[hash]) == 0);
+        option_load_aot = 1;
+    }
+    g_assert(strcmp(names[0], names[1]) != 0);
+    option_fast_jmpcache_hash = 0;
+}
+
+static void check_cross_page_policy(seg_info *seg)
+{
+    char page[PATH_MAX], configured[PATH_MAX], cross[PATH_MAX];
+
+    option_tu = 1;
+    option_aot = 1;
+    get_cache_name(seg, page);
+    for (int mode = 0; mode <= 3; mode++) {
+        option_aot = mode;
+        g_assert(aot_cross_page_tu_enabled() == (mode == 3));
+        g_assert(aot_tu_loading_enabled() == (mode == 3));
+        get_cache_name(seg, configured);
+        g_assert(strcmp(configured, page) == 0);
+    }
+    option_aot = 3;
+    option_load_aot = 0;
+    g_assert(aot_cross_page_tu_enabled());
+    g_assert(!aot_tu_loading_enabled());
+    get_cache_name(seg, cross);
+    g_assert(strcmp(cross, page) == 0);
+    option_tu = 0;
+    g_assert(!aot_cross_page_tu_enabled());
+    g_assert(!aot_tu_loading_enabled());
+    option_load_aot = 1;
+    option_tu = 1;
+    option_aot = 1;
+}
+
+#ifdef CONFIG_LATX_TU
+typedef struct AOTKeyTestData {
+    aot_header header;
+    aot_segment segment;
+    aot_tb tbs[2];
+} AOTKeyTestData;
+
+static void check_tu_key_includes_flags(void)
+{
+    AOTKeyTestData data = { 0 };
+    AOTTUKey first, second;
+    GHashTable *table;
+
+    data.header.segment_table_offset = offsetof(AOTKeyTestData, segment);
+    data.header.segments_num = 1;
+    data.segment.segment_tbs_offset = offsetof(AOTKeyTestData, tbs);
+    data.segment.segment_tbs_num = G_N_ELEMENTS(data.tbs);
+    data.tbs[0].tu_id = data.tbs[1].tu_id = 0x1234;
+    data.tbs[0].cflags = data.tbs[1].cflags = 0;
+    data.tbs[0].flags = 0x100;
+    data.tbs[1].flags = 0x200;
+    first = aot_tu_key(&data.header, &data.tbs[0]);
+    second = aot_tu_key(&data.header, &data.tbs[1]);
+
+    g_assert(!aot_tu_key_equal(&first, &second));
+    table = g_hash_table_new(aot_tu_key_hash, aot_tu_key_equal);
+    g_hash_table_insert(table, &first, GINT_TO_POINTER(1));
+    g_assert(g_hash_table_lookup(table, &second) == NULL);
+    g_hash_table_destroy(table);
+}
+#endif
 
 int main(void)
 {
@@ -54,10 +150,20 @@ int main(void)
     get_cache_name(&elf_seg, elf_cache_name);
     get_cache_name(&pe_seg, first_name);
     get_cache_name(&colliding_elf_seg, colliding_cache_name);
-    g_assert(g_str_has_prefix(elf_cache_name, "v2-01-"));
-    g_assert(g_str_has_prefix(first_name, "v2-02-"));
+    g_assert(g_str_has_prefix(elf_cache_name, "v3-01-100-"));
+    g_assert(g_str_has_prefix(first_name, "v3-02-100-"));
     g_assert(g_str_has_suffix(first_name, "-140000000"));
     g_assert(strcmp(first_name, colliding_cache_name) != 0);
+
+    check_cache_name_ignores_options(&elf_seg);
+    check_cache_name_ignores_options(&pe_seg);
+    check_hash_policy(&elf_seg);
+    check_hash_policy(&pe_seg);
+    check_cross_page_policy(&elf_seg);
+    check_cross_page_policy(&pe_seg);
+#ifdef CONFIG_LATX_TU
+    check_tu_key_includes_flags();
+#endif
 
     same_page_pe_seg.seg_begin += 0x80;
     get_cache_name(&same_page_pe_seg, second_name);

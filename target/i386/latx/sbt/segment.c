@@ -39,13 +39,13 @@ int segment_get_aot_file_name(const seg_info *seg, char *name,
         profile_suffix = aot_process_profile;
     }
     if (seg->aot_file_type & (PE_AOT_FILE | CACHE_AOT_FILE)) {
-        len = snprintf(name, name_size, "v2-%02x-%s-%" PRIx64 "%s%s",
-                       seg->aot_file_type, path_hash,
+        len = snprintf(name, name_size, "v3-%02x-%x-%s-%" PRIx64 "%s%s",
+                       seg->aot_file_type, aot_generation_policy(), path_hash,
                        (uint64_t)seg->seg_begin,
                        profile_suffix[0] ? "-" : "", profile_suffix);
     } else {
-        len = snprintf(name, name_size, "v2-%02x-%s",
-                       seg->aot_file_type, path_hash);
+        len = snprintf(name, name_size, "v3-%02x-%x-%s",
+                       seg->aot_file_type, aot_generation_policy(), path_hash);
     }
     g_free(path_hash);
     if (len < 0 || (size_t)len >= name_size) {

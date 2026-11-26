@@ -20,6 +20,10 @@ int load_aot(target_ulong pc, uint32_t cflags);
 #ifdef CONFIG_LATX_AOT
 int smc_page_reload(target_ulong page_addr, uint32_t cflags);
 #endif
+#ifdef CONFIG_LATX_TU
+int load_aot_tu(target_ulong pc, target_ulong cs_base,
+                uint32_t flags, uint32_t cflags);
+#endif
 /* void print_tb(TranslationBlock *tb); */
 
 #endif
