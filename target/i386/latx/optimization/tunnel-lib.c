@@ -334,12 +334,23 @@ static void restore_reg(void)
 #define x86_save_reg save_reg
 #define x64_save_reg save_reg
 
-static void set_ret_location(TranslationBlock *tb, ADDR ret)
+static void gen_tunnel_return(TranslationBlock *tb)
 {
     IR2_OPND base = ra_alloc_data();
     IR2_OPND target = ra_alloc_data();
+    IR2_OPND resume = ra_alloc_label();
+    /* A signal may arrive in the host library outside translated code.
+     * The guest return PC and stack are committed before this check.
+     */
+    la_ld_h(target, env_ir2_opnd, (int)offsetof(ArchCPU, neg.icount_decr.u16.high)
+                                  - (int)offsetof(ArchCPU, env));
+    la_beqz(target, resume);
     la_data_li(base, (ADDR)tb->tc.ptr);
-    la_data_li(target, ret);
+    la_data_li(target, context_switch_native_to_bt_ret_0);
+    aot_la_append_ir2_jmp_far(target, base, B_EPILOGUE_RET_0, 0);
+    la_label(resume);
+    la_data_li(base, (ADDR)tb->tc.ptr);
+    la_data_li(target, indirect_jmp_glue);
     aot_la_append_ir2_jmp_far(target, base, B_NATIVE_JMP_GLUE2, 0);
 }
 
@@ -382,9 +393,7 @@ static size_t gen_tunnel_glue(TranslationBlock *tb,
     ARCH(restore_reg)();
     ARCH(gen_set_next_tb_code)(&esp_ir2_opnd);
     ARCH(gen_set_last_tb_code)(tb);
-    /* tunnel glue return to indirect_jmp_glue*/
-    set_ret_location(tb, indirect_jmp_glue);
-    /* set_ret_location(tb, context_switch_native_to_bt); */
+    gen_tunnel_return(tb);
     label_dispose(tb, lat_ctx);
     int code_nr = tr_ir2_assemble((void *)tb->tc.ptr, lat_ctx->first_ir2) + 1;
     int code_size = code_nr * 4;
