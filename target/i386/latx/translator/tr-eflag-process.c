@@ -304,8 +304,10 @@ static void generate_of(IR2_OPND dest, IR2_OPND src0,
 
             if (opnd_size == 16) {
                 IR1_OPND *opnd1 = ir1_get_opnd(pir1, 1);
-                IR2_OPND src0_old = ra_alloc_itemp();
+                /* A complex memory operand needs two address temporaries.
+                 * Delay the source temporary until that load is complete. */
                 load_ireg_from_ir1_2(dest_old, opnd0, ZERO_EXTENSION, false);
+                IR2_OPND src0_old = ra_alloc_itemp();
                 load_ireg_from_ir1_2(src0_old, opnd1, ZERO_EXTENSION, false);
                 la_bstrins_d(dest_old, src0_old, 31, 16);
                 la_bstrins_d(dest_old, dest_old, 47, 32);
@@ -316,9 +318,7 @@ static void generate_of(IR2_OPND dest, IR2_OPND src0,
             } else {
                 la_slli_d(dest_old, dest, 1);
             }
-            if (ir2_opnd_is_imm(&src1)) {
-                ra_free_temp(count_opnd);
-            }
+            ra_free_temp(count_opnd);
             /*
             * In x86 cpu, the undefined OF when shifting bits > 1
             * is designed the same behavior with shifting bit == 1

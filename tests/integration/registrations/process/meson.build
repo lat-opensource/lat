@@ -349,3 +349,14 @@ if 'i386-linux-user' in target_dirs
     ],
   }]
 endif
+
+if 'x86_64-linux-user' in target_dirs
+  latx_integration_tests += [{
+    'name': 'test-ptrace-code-invalidate-x86_64',
+    'runner': find_program('../../test-ptrace-code-invalidate.sh'),
+    'args': [
+      emulators['latx-x86_64'],
+      files('../../ptrace-code-invalidate.c'),
+    ],
+  }]
+endif

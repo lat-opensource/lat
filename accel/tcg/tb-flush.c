@@ -23,6 +23,8 @@
 #ifdef CONFIG_LATX
 #include "latx-options.h"
 #include "smc_reload.h"
+#include "latx-signal.h"
+#include "latx-config.h"
 #endif
 #ifdef CONFIG_LATX_AOT
 #include "aot.h"
@@ -51,6 +53,10 @@ static gboolean tb_host_size_iter(gpointer key, gpointer value, gpointer data)
 void do_tb_flush(CPUState *cpu, run_on_cpu_data tb_flush_count)
 {
     bool did_flush = false;
+#if defined(CONFIG_LATX) && defined(CONFIG_USER_ONLY) && \
+    defined(CONFIG_LATX_FAST_TRANSLATOR) && defined(TARGET_X86_64)
+    bool guard = false;
+#endif
 
 #ifdef CONFIG_LATX_AOT
     if (option_aot && in_pre_translate) {
@@ -67,6 +73,21 @@ void do_tb_flush(CPUState *cpu, run_on_cpu_data tb_flush_count)
         goto done;
     }
     did_flush = true;
+#if defined(CONFIG_LATX) && defined(CONFIG_USER_ONLY) && \
+    defined(CONFIG_LATX_FAST_TRANSLATOR) && defined(TARGET_X86_64)
+    guard = cpu_in_exclusive_context(cpu) && !option_aot &&
+            latx_quicktrans_compact_tb_enabled();
+#ifdef CONFIG_LATX_PROFILER
+    guard = guard && !qemu_loglevel_mask(LAT_LOG_PROFILE);
+#endif
+#ifdef CONFIG_LATX_KZT
+    guard = guard && !option_kzt;
+#endif
+    if (guard) {
+        g_assert(!latx_tb_flush_active);
+        latx_tb_flush_active = 1;
+    }
+#endif
 
 #ifdef CONFIG_LATX
     if (option_smc_reload) {
@@ -90,7 +111,14 @@ void do_tb_flush(CPUState *cpu, run_on_cpu_data tb_flush_count)
         cpu_tb_jmp_cache_clear(cpu);
     }
 
-    qht_reset_size(&tb_ctx.htable, CODE_GEN_HTABLE_SIZE);
+#if defined(CONFIG_LATX) && defined(CONFIG_USER_ONLY) && \
+    defined(CONFIG_LATX_FAST_TRANSLATOR) && defined(TARGET_X86_64)
+    if (!(guard && qht_try_reset_exclusive(&tb_ctx.htable,
+                                         CODE_GEN_HTABLE_SIZE)))
+#endif
+    {
+        qht_reset_size(&tb_ctx.htable, CODE_GEN_HTABLE_SIZE);
+    }
     tb_flush_remove_all();
 #ifdef CONFIG_LATX_AOT
     aot_reset_tb_stats();
@@ -101,6 +129,12 @@ void do_tb_flush(CPUState *cpu, run_on_cpu_data tb_flush_count)
      * XXX: flush processor icache at this point if cache flush is expensive.
      */
     qatomic_mb_set(&tb_ctx.tb_flush_count, tb_ctx.tb_flush_count + 1);
+#if defined(CONFIG_LATX) && defined(CONFIG_USER_ONLY) && \
+    defined(CONFIG_LATX_FAST_TRANSLATOR) && defined(TARGET_X86_64)
+    if (guard) {
+        latx_tb_flush_active = 0;
+    }
+#endif
 
 done:
     mmap_unlock();

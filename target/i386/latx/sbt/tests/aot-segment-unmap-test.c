@@ -12,6 +12,13 @@
 /* Exercise the actual guest mmap/munmap paths with real host mappings. */
 #include "../../../../../linux-user/mmap.c"
 
+#if defined(CONFIG_LATX_FAST_TRANSLATOR) && defined(TARGET_X86_64)
+bool latx_quicktrans_enabled(void)
+{
+    return false;
+}
+#endif
+
 int qemu_loglevel;
 int trace_events_enabled_count;
 uint16_t _TRACE_TARGET_MUNMAP_DSTATE;

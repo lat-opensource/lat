@@ -203,8 +203,10 @@ EXPORT void* my_glXGetProcAddress(void* name)
     k = kh_get(symbolmap, my_context->glmymap, rname);
     int is_my = (k==kh_end(my_context->glmymap))?0:1;
     void* native_symbol = NULL;
-    if (my_context->glxprocaddress)
-        native_symbol = my_context->glxprocaddress(rname);
+    /* EGL may initialize the shared fallback first. GLX entry points must
+     * be resolved by this GL library, not by eglGetProcAddress. */
+    if (my->glXGetProcAddress)
+        native_symbol = my->glXGetProcAddress((void *)rname);
     if(latx_wine && !native_symbol)
         native_symbol = dlsym(my_context->box64lib, rname);
     void* symbol = native_symbol;
