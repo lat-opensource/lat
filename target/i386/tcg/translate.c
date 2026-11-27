@@ -37,6 +37,10 @@
 #ifdef CONFIG_LATX
 #include "reg-map.h"
 #include "latx-options.h"
+#include "latx-unwind.h"
+#ifdef CONFIG_LATX_INSTS_PATTERN
+#include "insts-pattern.h"
+#endif
 #endif
 
 #define PREFIX_REPZ   0x01
@@ -8752,8 +8756,8 @@ static void restore_extcontext(CPUX86State *env, ucontext_t *uc)
 void restore_state_to_opc(CPUX86State *env, TranslationBlock *tb,
                           target_ulong *data)
 {
-    int cc_op = data[1] & 0xffff;
-    uint16_t ymmh_zero_pending = data[1] >> 16;
+    int cc_op = data[1] & LATX_UNWIND_CC_OP_MASK;
+    uint16_t ymmh_zero_pending = data[1] >> LATX_UNWIND_YMMH_SHIFT;
 
     /* env->eip = data[0] - tb->cs_base; */
     env->eip = data[0];
@@ -8788,6 +8792,10 @@ void restore_state_to_opc(CPUX86State *env, TranslationBlock *tb,
     env->regs[R_R15] = UC_GR(uc)[reg_gpr_map[r15_index]];
 #endif
     restore_extcontext(env, uc);
+#ifdef CONFIG_LATX_INSTS_PATTERN
+    opt_instptn_fix(env, (data[1] >> LATX_UNWIND_INSTPTN_SHIFT) &
+                        LATX_UNWIND_INSTPTN_MASK);
+#endif
     /* The saved host registers can still contain stale upper halves for
      * completed VEX.128 instructions whose clears were deferred. */
     if (option_enable_lasx) {
