@@ -21,6 +21,9 @@
 #include "sysemu/cpus.h"
 #include "sysemu/tcg.h"
 #include "exec/exec-all.h"
+#ifdef CONFIG_LATX_WOW64_PE
+#include "wow64-pe-host.h"
+#endif
 
 bool tcg_allowed;
 
@@ -63,6 +66,9 @@ void cpu_reloading_memory_map(void)
 
 void cpu_loop_exit(CPUState *cpu)
 {
+#ifdef CONFIG_LATX_WOW64_PE
+    lat_wow64_pe_prepare_exit();
+#endif
     /* Undo the setting in cpu_tb_exec.  */
     cpu->can_do_io = 1;
 #ifdef CONFIG_LATX

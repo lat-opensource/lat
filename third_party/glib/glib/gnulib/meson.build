@@ -328,6 +328,7 @@ if have_ldexpl
   subdir ('gl_cv_func_ldexpl_works')
 else
   gl_cv_func_ldexpl_works = false
+  gl_cv_func_ldexpl_decl = false
 endif
 math_h_config.set ('REPLACE_LDEXPL', gl_cv_func_ldexpl_works ? 0 : 1)
 math_h_config.set ('HAVE_DECL_LDEXPL', gl_cv_func_ldexpl_decl ? 0 : 1)

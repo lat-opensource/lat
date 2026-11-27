@@ -88,6 +88,35 @@ __thread volatile sig_atomic_t guest_fault_signal_requeue;
 static void host_signal_handler(int host_signum, siginfo_t *info,
                                 void *puc);
 
+#ifdef CONFIG_LATX_WOW64
+static struct sigaction lat_wow64_previous_sigaction[_NSIG];
+static bool lat_wow64_previous_sigaction_valid[_NSIG];
+
+static void lat_wow64_forward_host_signal(int host_signum, siginfo_t *info,
+                                       void *puc)
+{
+    const struct sigaction *act = &lat_wow64_previous_sigaction[host_signum];
+
+    if (!lat_wow64_previous_sigaction_valid[host_signum] ||
+        act->sa_handler == SIG_DFL) {
+        struct sigaction dfl = { .sa_handler = SIG_DFL };
+
+        sigemptyset(&dfl.sa_mask);
+        sigaction(host_signum, &dfl, NULL);
+        raise(host_signum);
+        return;
+    }
+    if (act->sa_handler == SIG_IGN) {
+        return;
+    }
+    if (act->sa_flags & SA_SIGINFO) {
+        act->sa_sigaction(host_signum, info, puc);
+    } else {
+        act->sa_handler(host_signum);
+    }
+}
+#endif
+
 /* Fallback addresses into sigtramp page. */
 abi_ulong default_sigreturn;
 abi_ulong default_rt_sigreturn;
@@ -673,6 +702,9 @@ void signal_init(void)
 
     sigfillset(&act.sa_mask);
     act.sa_flags = SA_SIGINFO;
+#ifdef CONFIG_LATX_WOW64
+    if (lat_wow64_provider_plugin_active) act.sa_flags |= SA_ONSTACK;
+#endif
     act.sa_sigaction = host_signal_handler;
 #ifndef CONFIG_LOONGARCH_NEW_WORLD
     for(i = 1; i <= TARGET_NSIG + 1; i++) {
@@ -685,6 +717,16 @@ void signal_init(void)
         }
 #endif
         host_sig = target_to_host_signal(i);
+#ifdef CONFIG_LATX_WOW64
+        /* Wine owns process and thread signals. Only intercept synchronous
+         * faults used by translated code and write-protected guest pages. */
+        if (lat_wow64_provider_plugin_active &&
+            host_sig != SIGSEGV && host_sig != SIGBUS &&
+            host_sig != SIGILL && host_sig != SIGFPE &&
+            host_sig != SIGRTMIN + 1) {
+            continue;
+        }
+#endif
         sigaction(host_sig, NULL, &oact);
         if (oact.sa_sigaction == (void *)SIG_IGN) {
             sigact_table[i - 1]._sa_handler = TARGET_SIG_IGN;
@@ -701,8 +743,21 @@ void signal_init(void)
            SIGSEGV and SIGBUS, to detect exceptions.  We can not just
            trap all signals because it affects syscall interrupt
            behavior.  But do trap all default-fatal signals.  */
-        if (fatal_signal (i))
+        if (fatal_signal(i)
+#ifdef CONFIG_LATX_WOW64
+            || (lat_wow64_provider_plugin_active && host_sig == SIGRTMIN + 1)
+#endif
+           ) {
+#ifdef CONFIG_LATX_WOW64
+            if (lat_wow64_provider_plugin_active && host_sig > 0 && host_sig < _NSIG) {
+                lat_wow64_previous_sigaction[host_sig] = oact;
+                lat_wow64_previous_sigaction_valid[host_sig] = true;
+                act.sa_flags = SA_SIGINFO | SA_ONSTACK |
+                               (oact.sa_flags & SA_RESTART);
+            }
+#endif
             sigaction(host_sig, &act, NULL);
+        }
     }
 }
 
@@ -1089,14 +1144,50 @@ static void Emulate_FTZ(ucontext_t *uc)
 static void host_signal_handler(int host_signum, siginfo_t *info,
                                 void *puc)
 {
-    CPUArchState *env = thread_cpu->env_ptr;
-    CPUState *cpu = env_cpu(env);
-    TaskState *ts = cpu->opaque;
-
+    CPUArchState *env;
+    CPUState *cpu = NULL;
+    TaskState *ts;
+#ifdef CONFIG_LATX_WOW64
+    uintptr_t *retaddr = NULL;
+#endif
     int sig;
     target_siginfo_t tinfo;
     ucontext_t *uc = puc;
     struct emulated_sigtable *k;
+
+#ifdef CONFIG_LATX_WOW64
+    if (lat_wow64_provider_plugin_active) {
+        if (host_signum == SIGRTMIN + 1 && info->si_code == SI_QUEUE &&
+            info->si_int == FORK_UNLINK_MAGIC) {
+            if (lat_wow64_provider_signal_state(&cpu, &retaddr)) {
+                cpu_exit(cpu);
+                tb_exit_to_qemu(cpu->env_ptr, uc);
+            }
+            return;
+        }
+        if (info->si_code <= 0) {
+            lat_wow64_forward_host_signal(host_signum, info, puc);
+            return;
+        }
+        if (!lat_wow64_provider_signal_state(&cpu, &retaddr)) {
+            if (host_signum == SIGSEGV && info->si_code == SEGV_ACCERR &&
+                h2g_valid(info->si_addr)) {
+                target_ulong address = h2g(info->si_addr);
+                int flags = page_get_flags(address);
+
+                if ((flags & PAGE_WRITE_ORG) && !(flags & PAGE_WRITE) &&
+                    page_unprotect(address, 0, NULL)) {
+                    return;
+                }
+            }
+            lat_wow64_forward_host_signal(host_signum, info, puc);
+            return;
+        }
+    }
+#endif
+    if (!cpu) cpu = thread_cpu;
+    env = cpu->env_ptr;
+    ts = cpu->opaque;
 
     if (host_signum == SIGSEGV) {
         if ((*(unsigned int *)UC_PC(uc) == WRITE_ILL_INST) || (*(unsigned int *)UC_PC(uc) == READ_ILL_INST)) {
@@ -1225,7 +1316,15 @@ static void host_signal_handler(int host_signum, siginfo_t *info,
 #ifdef CONFIG_LATX
         env->puc = uc;
 #endif
-        if (cpu_signal_handler(host_signum, info, puc)) {
+        int handled;
+#ifdef CONFIG_LATX_WOW64
+        if (lat_wow64_provider_plugin_active) {
+            handled = cpu_signal_handler_with_state(host_signum, info, puc,
+                                                    cpu, retaddr);
+        } else
+#endif
+            handled = cpu_signal_handler(host_signum, info, puc);
+        if (handled) {
 #ifdef CONFIG_LATX
             env->puc = NULL;
 #endif
@@ -1274,6 +1373,19 @@ static void host_signal_handler(int host_signum, siginfo_t *info,
         pc += GETPC_ADJ;
 #ifdef CONFIG_LATX
         env->puc = uc;
+#endif
+#ifdef CONFIG_LATX_WOW64
+        /* The provider returns directly to Wine, without the Linux guest
+         * signal loop. Undo the handler's mask before leaving by longjmp. */
+        if (lat_wow64_provider_plugin_active) {
+            lat_wow64_provider_record_sigfpe(info->si_code);
+#ifndef CONFIG_LOONGARCH_NEW_WORLD
+            sigset_t *old_set = (sigset_t *)((void *)&uc->uc_mcontext + 0x1540);
+            sigprocmask(SIG_SETMASK, old_set, NULL);
+#else
+            sigprocmask(SIG_SETMASK, &uc->uc_sigmask, NULL);
+#endif
+        }
 #endif
         cc = CPU_GET_CLASS(cpu);
         cc->tcg_ops->tlb_fill(cpu, address, 0, MMU_DATA_LOAD,

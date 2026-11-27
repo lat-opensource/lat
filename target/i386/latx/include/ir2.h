@@ -50,15 +50,6 @@ int ir2_opnd_to_string(const IR2_OPND *, char *, bool);
 
 void ir2_opnd_convert_label_to_imm(IR2_OPND *, int imm);
 
-typedef struct IR2_INST {
-    int16 _opcode;
-    int16 _id;
-    int16 _prev;
-    int16 _next;
-    int op_count;
-    IR2_OPND _opnd[4]; /*LA has 4 opnds*/
-} IR2_INST;
-
 void ir2_build(IR2_INST *, IR2_OPCODE, IR2_OPND, IR2_OPND, IR2_OPND);
 
 void ir2_set_id(IR2_INST *, int);
@@ -79,7 +70,6 @@ IR2_INST * ir2_insert_before(IR2_INST *ir2, int id);
 void ir2_insert_after(IR2_INST *ir2, int id);
 IR2_INST *ir2_allocate(void);
 
-uint32 ir2_assemble(const IR2_INST *);
 
 bool ir2_opcode_is_branch(IR2_OPCODE);
 bool ir2_opcode_is_branch_with_3opnds(IR2_OPCODE);

@@ -8,7 +8,9 @@
 #include "latx-options.h"
 #include "la-append.h"
 #include "reg-alloc.h"
+#if !defined(CONFIG_LATX_WOW64_PE) || defined(CONFIG_LATX_AOT)
 #include "aot.h"
+#endif
 
 IR2_INST *la_code_accl(IR2_OPND data_base, int ninst, uint32_t filling)
 {

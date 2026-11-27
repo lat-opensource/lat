@@ -15,7 +15,9 @@
 #include "latx-signal.h"
 #include "qemu/cacheflush.h"
 #include "exec/tb-lookup.h"
+#ifndef CONFIG_LATX_WOW64_PE
 #include "loongarch-extcontext.h"
+#endif
 
 #ifdef CONFIG_LATX_TU
 void unlink_tu_jmp(TranslationBlock *tb) 
@@ -104,6 +106,7 @@ void link_indirect_jmp(CPUArchState *env)
     flush_idcache_range(jmp_rw, jmp_rw, 4);
 }
 
+#ifndef CONFIG_LATX_WOW64_PE
 void unlink_indirect_jmp(CPUArchState *env, TranslationBlock *tb, ucontext_t *uc)
 {
     IR2_INST *pir2 = generate_andi(zero_ir2_opnd, zero_ir2_opnd, 0);
@@ -255,8 +258,14 @@ static void unlink_tb_jmp(CPUArchState *env, TranslationBlock *current_tb,
 void tb_exit_to_qemu(CPUArchState *env, ucontext_t *uc)
 {
     TranslationBlock *current_tb = NULL;
+    TranslationBlock *entry_tb = NULL;
     uintptr_t pc = (uintptr_t)UC_PC(uc);
 
+#ifdef CONFIG_LATX_WOW64
+    if (lat_wow64_provider_plugin_active) {
+        entry_tb = lat_wow64_provider_signal_entry_tb();
+    }
+#endif
     current_tb = tcg_tb_lookup(pc);
     if (current_tb) {
         unlink_tb_jmp(env, current_tb, uc);
@@ -270,6 +279,10 @@ void tb_exit_to_qemu(CPUArchState *env, ucontext_t *uc)
         current_tb = tcg_tb_lookup(UC_GR(uc)[1] - sizeof(uint32_t));
         if (current_tb) {
             unlink_tb_jmp(env, current_tb, uc);
+        } else if (entry_tb) {
+            /* The signal interrupted the C dispatcher or entry prologue,
+             * before reaching translated code. Its first TB must return. */
+            unlink_tb_jmp(env, entry_tb, uc);
         } else {
 #ifdef SIGNAL_UNLINK_DBG
             fprintf(stderr, "lhl-debug %s current_tb NULL pid %d\n", __func__, getpid());
@@ -277,3 +290,5 @@ void tb_exit_to_qemu(CPUArchState *env, ucontext_t *uc)
         }
     }
 }
+
+#endif

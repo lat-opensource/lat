@@ -204,7 +204,12 @@ void cpu_stq_le_data_ra(CPUArchState *env, abi_ptr ptr,
 
 #if defined(CONFIG_USER_ONLY)
 
+#ifdef CONFIG_LATX_WOW64_PE
+uintptr_t *lat_wow64_pe_helper_retaddr_slot(void);
+#define helper_retaddr (*lat_wow64_pe_helper_retaddr_slot())
+#else
 extern __thread uintptr_t helper_retaddr;
+#endif
 
 static inline void set_helper_retaddr(uintptr_t ra)
 {

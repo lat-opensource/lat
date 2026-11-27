@@ -377,10 +377,12 @@ typedef struct ShadowPageDesc {
 void *page_get_target_data(target_ulong address);
 void page_reset_target_data(target_ulong start, target_ulong end);
 void *set_shadow_page(target_ulong orig_page, void *shadow_p, int64_t access_off);
+#ifndef CONFIG_WIN32
 int shared_private_interpret(siginfo_t *info, ucontext_t *uc);
 int lock_interpret(siginfo_t *info, ucontext_t *uc);
 #if defined(CONFIG_LATX_KZT)
 int elf_data_interpret(siginfo_t *info, ucontext_t *uc);
+#endif
 #endif
 int hostpage_exist_shadow_page(uint64_t host_addr);
 int mprotect_one_shadow_page(abi_ulong addr, int prot);

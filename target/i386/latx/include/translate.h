@@ -14,8 +14,11 @@
 #include "la-append.h"
 #include "ir2-relocate.h"
 #include "macro-inst.h"
+#include "aot-reloc.h"
 
+#if !defined(CONFIG_LATX_WOW64_PE) || defined(CONFIG_LATX_AOT)
 #include "aot.h"
+#endif
 
 #if defined(CONFIG_LATX_KZT)
 #ifndef __BRIDGE_H_

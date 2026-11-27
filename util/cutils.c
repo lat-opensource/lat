@@ -996,6 +996,7 @@ int qemu_pstrcmp0(const char **str1, const char **str2)
     return g_strcmp0(*str1, *str2);
 }
 
+#ifndef CONFIG_LATX_WOW64_PE
 static inline bool starts_with_prefix(const char *dir)
 {
     size_t prefix_len = strlen(CONFIG_PREFIX);
@@ -1057,3 +1058,4 @@ char *get_relocated_path(const char *dir)
     }
     return result->str;
 }
+#endif

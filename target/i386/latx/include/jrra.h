@@ -24,7 +24,9 @@ bool jrra_preserve_current_tb_head(TranslationBlock *tb,
 void jrra_restore_current_tb_head(TranslationBlock *tb,
             TranslationBlock *current_tb,
             bool current_tb_modified, uint32_t inst);
+#ifndef CONFIG_WIN32
 bool jrra_handle_sigill(CPUArchState *env, ucontext_t *uc);
+#endif
 void jrra_pre_translate(void** list, int num, CPUState *cpu,
                         uint32_t flags, uint32_t cflags);
 void jrra_context_switch_bt_to_native(void);

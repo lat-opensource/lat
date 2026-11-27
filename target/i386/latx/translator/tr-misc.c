@@ -464,9 +464,9 @@ bool translate_clflushopt(IR1_INST *pir1)
 
 bool translate_ret_without_ss_opt(IR1_INST *pir1);
 
-static inline void set_CPUX86State_error_code(ENV *lsenv, int error_code)
+static inline void set_CPUX86State_error_code(ENV *state, int error_code)
 {
-    CPUX86State *cpu = (CPUX86State *)lsenv->cpu_state;
+    CPUX86State *cpu = (CPUX86State *)state->cpu_state;
     cpu->error_code = error_code;
 }
 
@@ -480,15 +480,15 @@ bool translate_ins(IR1_INST *pir1) {
     return true;
 }
 
-static inline void set_CPUX86State_exception_is_int(ENV *lsenv, int exception_is_int)
+static inline void set_CPUX86State_exception_is_int(ENV *state, int exception_is_int)
 {
-    CPUX86State *cpu = (CPUX86State *)lsenv->cpu_state;
+    CPUX86State *cpu = (CPUX86State *)state->cpu_state;
     cpu->exception_is_int = exception_is_int;
 }
 
-static inline void set_CPUState_can_do_io(ENV *lsenv, int can_do_io)
+static inline void set_CPUState_can_do_io(ENV *state, int can_do_io)
 {
-    CPUX86State *cpu = (CPUX86State *)lsenv->cpu_state;
+    CPUX86State *cpu = (CPUX86State *)state->cpu_state;
     CPUState *cs = env_cpu(cpu);
     cs->can_do_io = can_do_io;
 }

@@ -10,7 +10,6 @@
 #include "latx-options.h"
 #include "translate.h"
 #include "runtime-trace.h"
-#include "linux-user/qemu.h"
 #include <string.h>
 #include <stdlib.h>
 #include "ir1.h"

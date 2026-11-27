@@ -1419,6 +1419,9 @@ typedef struct CPUX86State {
     /* for debug,can be removed later */
     uint64_t mips_regs[32];
     int fcsr;
+#if defined(CONFIG_LATX_WOW64) || defined(CONFIG_LATX_WOW64_PE)
+    uint32_t wow64_x87_fcsr;
+#endif
     /* TODO: why? in new qemu has no next_eip member */
     target_ulong exception_next_eip;
     void *tb_jmp_cache_ptr; /* struct TranslationBlock ** */
@@ -1668,7 +1671,11 @@ typedef struct CPUX86State {
 
     unsigned nr_dies;
 #ifdef CONFIG_LATX
+#ifdef CONFIG_LATX_WOW64_PE
+    void *puc;
+#elif !defined(CONFIG_WIN32)
     ucontext_t *puc;
+#endif
     uintptr_t insn_save[2];
     target_ulong kzt_guest_stack_base;
 #ifdef CONFIG_LATX_KZT

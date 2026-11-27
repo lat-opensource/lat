@@ -1179,7 +1179,9 @@ typedef struct TCGHelperInfo {
 #include "exec/helper-proto.h"
 
 static const TCGHelperInfo all_helpers[] = {
+#ifndef CONFIG_LATX_WOW64_PE
 #include "exec/helper-tcg.h"
+#endif
 };
 static GHashTable *helper_table;
 
@@ -1741,6 +1743,7 @@ TCGTemp *tcg_constant_internal(TCGType type, int64_t val)
     return ts;
 }
 
+#ifndef CONFIG_LATX_WOW64_PE
 TCGv_vec tcg_constant_vec(TCGType type, unsigned vece, int64_t val)
 {
     val = dup_const(vece, val);
@@ -1786,6 +1789,8 @@ TCGv_i64 tcg_const_local_i64(int64_t val)
     tcg_gen_movi_i64(t0, val);
     return t0;
 }
+
+#endif
 
 #if defined(CONFIG_DEBUG_TCG)
 void tcg_clear_temp_count(void)
@@ -4729,6 +4734,7 @@ int64_t tcg_cpu_exec_time(void)
 #endif
 
 
+#ifndef CONFIG_LATX_WOW64_PE
 int tcg_gen_code(TCGContext *s, TranslationBlock *tb)
 {
 #ifdef CONFIG_PROFILER
@@ -4954,6 +4960,8 @@ int tcg_gen_code(TCGContext *s, TranslationBlock *tb)
 
     return tcg_current_code_size(s);
 }
+
+#endif
 
 #ifdef CONFIG_PROFILER
 void tcg_dump_info(void)

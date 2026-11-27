@@ -10,6 +10,9 @@
 #include "lsenv.h"
 #include "latx-options.h"
 #include "translate.h"
+#if defined(CONFIG_LATX_WOW64) || defined(CONFIG_LATX_WOW64_PE)
+#include "../wow64-x86-state.h"
+#endif
 
 bool translate_fadd(IR1_INST *pir1)
 {
@@ -1473,6 +1476,14 @@ bool translate_fbstp(IR1_INST *pir1)
  */
 bool translate_fxsave(IR1_INST *pir1)
 {
+#if defined(CONFIG_LATX_WOW64) || defined(CONFIG_LATX_WOW64_PE)
+    if (lat_wow64_split_native_fcsr()) {
+        IR2_OPND status = ra_alloc_itemp();
+
+        update_sw_by_fcsr(status);
+        ra_free_temp(status);
+    }
+#endif
     IR1_OPND *opnd0 = ir1_get_opnd(pir1, 0);
     IR2_OPND mem_opnd = convert_mem_no_offset(opnd0);
 
@@ -1516,6 +1527,11 @@ bool translate_fxrstor(IR1_INST *pir1)
     IR2_OPND mem_opnd = convert_mem_no_offset(opnd0);
 
     tr_gen_call_to_helper2((ADDR)helper_fxrstor, mem_opnd, 0, LOAD_HELPER_FXRSTOR);
+#if defined(CONFIG_LATX_WOW64) || defined(CONFIG_LATX_WOW64_PE)
+    if (lat_wow64_split_native_fcsr()) {
+        gen_wow64_x87_fcsr_restore();
+    }
+#endif
 
     return true;
 }

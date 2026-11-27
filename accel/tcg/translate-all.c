@@ -27,7 +27,10 @@
 #include "disas/disas.h"
 #include "exec/exec-all.h"
 #include "tcg/tcg.h"
-#if defined(CONFIG_USER_ONLY)
+#if defined(CONFIG_LATX_WOW64_PE)
+#include "cpu.h"
+#include "exec/cpu_ldst.h"
+#elif defined(CONFIG_USER_ONLY)
 #include "qemu.h"
 #if defined(__FreeBSD__) || defined(__FreeBSD_kernel__)
 #include <sys/param.h>
@@ -62,7 +65,9 @@
 #include "qapi/error.h"
 #include "hw/core/tcg-cpu-ops.h"
 #include "internal.h"
+#ifndef CONFIG_LATX_WOW64_PE
 #include "loongarch-extcontext.h"
+#endif
 
 #ifdef CONFIG_LATX_PERF
 #include "latx-perf.h"
@@ -70,15 +75,21 @@
 #ifdef CONFIG_LATX
 #include "qemu/cacheflush.h"
 #include "latx-options.h"
+#ifndef CONFIG_LATX_WOW64_PE
 #include "aot.h"
 #include "aot_merge.h"
+#endif
 #include "reg-map.h"
 #include "debug.h"
+#ifndef CONFIG_LATX_WOW64_PE
 #include "aot_smc.h"
+#endif
 #include "aot_page.h"
 #include "jrra.h"
 #include "accel/tcg/internal.h"
+#ifndef CONFIG_LATX_WOW64_PE
 #include "ts.h"
+#endif
 #include "latx-smc.h"
 #include "smc_reload.h"
 #endif
@@ -88,7 +99,9 @@
 #ifdef CONFIG_LATX_TU
 void tu_reset_tb(TranslationBlock *tb);
 #endif
+#ifndef CONFIG_LATX_WOW64_PE
 #include "linux/memfd.h"
+#endif
 /* #define DEBUG_TB_INVALIDATE */
 /* #define DEBUG_TB_FLUSH */
 /* make various TB consistency checks */
@@ -306,7 +319,11 @@ void *l1_map[V_L1_MAX_SIZE];
 
 /* code generation context */
 TCGContext tcg_init_ctx;
+#ifdef CONFIG_LATX_WOW64_PE
+TCGContext *tcg_ctx;
+#else
 __thread TCGContext *tcg_ctx;
+#endif
 TBContext tb_ctx;
 
 static void page_table_config_init(void)
@@ -413,7 +430,11 @@ int encode_search(TranslationBlock *tb, uint8_t *block)
            one row beginning below the high water mark cannot overrun
            the buffer completely.  Thus we can test for overflow after
            encoding a row without having to check during encoding.  */
-        if (!in_pre_translate && unlikely(p > highwater)) {
+        if (
+#ifdef CONFIG_LATX_AOT
+            !in_pre_translate &&
+#endif
+            unlikely(p > highwater)) {
             return -1;
         }
     }
@@ -538,6 +559,7 @@ static void page_init(void)
 }
 
 
+#ifndef CONFIG_LATX_WOW64_PE
 unsigned long shadow_page_map_start = -1;
 unsigned long shadow_page_map_end = 0;
 
@@ -583,6 +605,8 @@ bool page_is_shadow_not_shmm(target_ulong address)
     ShadowPageDesc *spd = page_get_target_data(address);
     return spd && !(spd->is_shmm);
 }
+
+#endif
 
 #ifndef CONFIG_USER_ONLY
 PageDesc *page_find_alloc(tb_page_addr_t index, int alloc)
@@ -1180,6 +1204,18 @@ static bool alloc_code_gen_buffer(size_t size, int splitwx, Error **errp)
     tcg_ctx->code_gen_buffer_size = size;
     return true;
 }
+#ifdef CONFIG_LATX_WOW64_PE
+static bool alloc_tb_gen_buffer(size_t size)
+{
+    uint8_t *buf = VirtualAlloc(NULL, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+    if (!buf) {
+        return false;
+    }
+    tcg_ctx->tb_gen_buffer = buf;
+    tcg_ctx->tb_gen_highwater = buf + size - 1024;
+    return true;
+}
+#endif
 #else
 static bool alloc_code_gen_buffer_anon(size_t size, int prot,
                                        int flags, Error **errp)
@@ -1654,7 +1690,9 @@ static void tb_page_check(void)
 
 #endif /* CONFIG_USER_ONLY */
 
+#ifndef CONFIG_LATX_WOW64_PE
 #include<sys/syscall.h>
+#endif
 
 /* remove @orig from its @n_orig-th jump list */
 static inline void tb_remove_from_jmp_list(TranslationBlock *orig, int n_orig)
@@ -2205,6 +2243,7 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
     ti = profile_getclock();
 #endif
 
+#ifndef CONFIG_LATX_WOW64_PE
     /*
      * remove write prot of the page in case of paralell code modification,
      * but the paired page cross 16K boundary is still not protected.
@@ -2213,6 +2252,8 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
     if ((p_flags & PAGE_WRITE) && !page_is_shadow_not_shmm(pc)) {
         mprotect((void*)(pc & qemu_host_page_mask), qemu_host_page_size, PROT_READ);
     }
+
+#endif
 
 #ifdef CONFIG_LATX_MONITOR_SHARED_MEM
     if (option_monitor_shared_mem) {
@@ -2302,6 +2343,18 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
         tb_reset_jump(tb, 1);
     }
 
+    phys_page2 = -1;
+    virt_page2 = (pc + tb->size - 1) & TARGET_PAGE_MASK;
+    if (phys_pc != -1 && (pc & TARGET_PAGE_MASK) != virt_page2) {
+        phys_page2 = get_page_addr_code(env, virt_page2);
+#ifdef CONFIG_LATX_WOW64_PE
+        /* Only the first instruction can span two pages. Its tail may be writable. */
+        if (phys_page2 == -1) {
+            phys_pc = -1;
+        }
+#endif
+    }
+
     /*
      * If the TB is not associated with a physical RAM page then
      * it must be a temporary one-insn TB, and we have nothing to do
@@ -2311,14 +2364,12 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
     if (phys_pc == -1) {
         tb_set_page_addr0(tb, -1);
         tb_set_page_addr1(tb, -1);
+#ifdef CONFIG_LATX_WOW64_PE
+        /* Register the generated address for exception recovery only. */
+        flush_idcache_range(0, 0, 0);
+        tcg_tb_insert(tb);
+#endif
         return tb;
-    }
-
-    /* check next page if needed */
-    virt_page2 = (pc + tb->size - 1) & TARGET_PAGE_MASK;
-    phys_page2 = -1;
-    if ((pc & TARGET_PAGE_MASK) != virt_page2) {
-        phys_page2 = get_page_addr_code(env, virt_page2);
     }
 
 #ifdef CONFIG_LATX
@@ -3323,6 +3374,7 @@ int page_get_flags(target_ulong address)
     return p ? p->flags : 0;
 }
 
+#ifndef CONFIG_LATX_WOW64_PE
 static bool pageflags_read_remote(pid_t pid, const void *remote_addr,
                                   void *local_addr, size_t len)
 {
@@ -3389,6 +3441,8 @@ bool page_get_flags_remote(pid_t pid, target_ulong address, int *flags)
     *flags = 0;
     return true;
 }
+
+#endif
 
 #define rb_to_itree(N)  container_of(N, IntervalTreeNode, rb)
 
@@ -3774,7 +3828,9 @@ void page_set_flags_tb_reload(target_ulong start, target_ulong end,
     }
 
     if (!flags || reset) {
+#ifndef CONFIG_LATX_WOW64_PE
         page_reset_target_data(start, end);
+#endif
         inval_tb |= pageflags_unset(start, last);
     }
 
@@ -3831,6 +3887,7 @@ void page_set_flags(target_ulong start, target_ulong end, int flags)
     page_set_flags_tb_reload(start, end, flags, false);
 }
 
+#ifndef CONFIG_LATX_WOW64_PE
 typedef struct TargetPageDataNode {
     IntervalTreeNode itree;
     void *target_data;
@@ -3948,6 +4005,8 @@ void *page_alloc_target_data(target_ulong address, size_t size)
     return ret;
 }
 
+#endif
+
 bool page_check_range(target_ulong start, target_ulong len, int flags)
 {
     target_ulong last;
@@ -4026,6 +4085,7 @@ bool page_check_range(target_ulong start, target_ulong len, int flags)
     return ret;
 }
 
+#ifndef CONFIG_LATX_WOW64_PE
 target_ulong page_find_range_empty(target_ulong min, target_ulong max,
                                    target_ulong len, target_ulong align)
 {
@@ -4071,8 +4131,11 @@ target_ulong page_find_range_empty(target_ulong min, target_ulong max,
     }
 }
 
+#endif
+
 void page_protect(tb_page_addr_t address)
 {
+#ifndef CONFIG_LATX_WOW64_PE
     PageFlagsNode *p;
     target_ulong start, last;
 
@@ -4100,8 +4163,10 @@ void page_protect(tb_page_addr_t address)
                     (prot & PAGE_BITS) & ~PAGE_WRITE);
         }
     }
+#endif
 }
 
+#ifndef CONFIG_LATX_WOW64_PE
 /*
  * SMC shared mmap strategy
  *
@@ -4786,7 +4851,31 @@ out:
     return current_tb_invalidated ? 2 : 1;
 }
 
+#else
+int page_unprotect(target_ulong address, uintptr_t pc, int *emu)
+{
+    target_ulong start = address & TARGET_PAGE_MASK;
+    PageFlagsNode *p;
+    bool modified;
+
+    mmap_lock();
+    p = pageflags_find(address, address);
+    if (!p || !(p->flags & PAGE_WRITE_ORG)) {
+        mmap_unlock();
+        return 0;
+    }
+    modified = tb_invalidate_phys_page_unwind(start, pc, NULL);
+    pageflags_set_clear(start, start + TARGET_PAGE_SIZE - 1, PAGE_WRITE, 0);
+    mmap_unlock();
+    if (emu) {
+        *emu = 0;
+    }
+    return modified ? 2 : 1;
+}
+#endif
+
 #ifdef CONFIG_LATX_AOT
+
 typedef struct PageStateNode {
     IntervalTreeNode itree;
     uint8 page_state;
@@ -5033,7 +5122,7 @@ void tcg_flush_softmmu_tlb(CPUState *cs)
 #endif
 }
 
-#ifdef CONFIG_USER_ONLY
+#if defined(CONFIG_USER_ONLY) && !defined(CONFIG_LATX_WOW64_PE)
 void *set_shadow_page(target_ulong orig_page, void *shadow_p, int64_t access_off)
 {
     ShadowPageDesc *shadow_pd = page_get_target_data(orig_page);
@@ -8045,6 +8134,9 @@ void update_shadow_page_chunk(abi_ulong start, abi_ulong end, int prot,
     }
 }
 
+#endif
+
+#ifdef CONFIG_USER_ONLY
 bool use_indirect_jmp(TranslationBlock *tb)
 {
     return (tb->bool_flags & IS_INDIRECT_JMP) ? true : false;

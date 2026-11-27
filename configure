@@ -478,6 +478,7 @@ ninja=""
 skip_meson=no
 gettext="auto"
 tests="auto"
+wow64="no"
 fuse="auto"
 fuse_lseek="auto"
 multiprocess="auto"
@@ -1535,6 +1536,10 @@ for opt do
   ;;
   --enable-replication) replication="yes"
   ;;
+  --enable-wow64) wow64="yes"
+  ;;
+  --disable-wow64) wow64="no"
+  ;;
   --disable-tests) tests="disabled"
   ;;
   --enable-tests) tests="enabled"
@@ -1951,6 +1956,7 @@ Advanced options (experts only):
   --gdb=GDB-path           gdb to use for gdbstub tests [$gdb_bin]
 
 Optional only for LATX:
+  --enable-wow64           build the i386 Wine execution library (requires LATX)
   --enable-new-world
   ======= Debug Optional =======
   --enable-latx-16k-debug enable 16k page debug
@@ -5681,6 +5687,16 @@ fi
 if test "$latx_new_world" = "yes" ; then
   echo "CONFIG_LOONGARCH_NEW_WORLD=y" >> $config_host_mak
 fi
+if test "$wow64" = "yes"; then
+  if test "$latx" != "yes" || test "$static" = "yes"; then
+    error_exit "WoW64 requires --enable-latx and a non-static build"
+  fi
+  case " $target_list " in
+    *" x86_64-linux-user "*) ;;
+    *) error_exit "WoW64 requires x86_64-linux-user in --target-list" ;;
+  esac
+  echo "CONFIG_LATX_WOW64=y" >> $config_host_mak
+fi
 if test "$latx" = "yes" ; then
   if test "$latx_kzt" = "yes" ; then
     echo "CONFIG_LATX_KZT=y" >> $config_host_mak
@@ -6645,6 +6661,9 @@ rm -rf meson-private meson-info meson-logs
 unset staticpic
 if ! version_ge "$($meson --version)" 0.56.0; then
   staticpic=$(if test "$pie" = yes; then echo true; else echo false; fi)
+fi
+if test "$wow64" = yes; then
+  staticpic=true
 fi
 NINJA=$ninja $meson setup \
         --prefix "$prefix" \

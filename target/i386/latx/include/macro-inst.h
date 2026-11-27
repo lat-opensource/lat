@@ -6,7 +6,9 @@
 
 #ifndef _MACRO_INST_H_
 #define _MACRO_INST_H_
+#if !defined(CONFIG_LATX_WOW64_PE) || defined(CONFIG_LATX_AOT)
 #include "aot.h"
+#endif
 
 /* Load immediate */
 void li_d(IR2_OPND opnd2, int64_t value);

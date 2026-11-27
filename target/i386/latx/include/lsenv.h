@@ -10,7 +10,9 @@
 #include "env.h"
 #include "qemu-def.h"
 
+#ifndef CONFIG_LATX_WOW64_PE
 extern __thread ENV *lsenv;
+#endif
 #define CODEIS64 (((CPUX86State *)lsenv->cpu_state)->sys.codemode)
 //#define CODEIS64 (assert(((CPUX86State *)lsenv->cpu_state)->sys.codemode),1)
 #define LATX_DT_X86    0
@@ -319,5 +321,10 @@ static inline int lsenv_offset_of_tr_data(ENV *lsenv)
 {
     return (ADDR)(&lsenv->tr_data) - (ADDR)lsenv;
 }
+
+#ifdef CONFIG_LATX_WOW64_PE
+ENV *lat_wow64_pe_get_lsenv(void);
+#define lsenv (lat_wow64_pe_get_lsenv())
+#endif
 
 #endif
