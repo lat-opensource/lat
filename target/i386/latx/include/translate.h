@@ -1762,6 +1762,7 @@ void gen_softfpu_helper_prologue(IR1_INST *pir1);
 void gen_softfpu_helper_epilogue(IR1_INST *pir1);
 void gen_softfpu_x87_fcsr_enter(void);
 void gen_softfpu_x87_fcsr_exit(void);
+void gen_softfpu_fcsr_write_if_changed(IR2_OPND value, IR2_OPND previous);
 void update_fcsr_rm(IR2_OPND control_word, IR2_OPND fcsr);
 
 bool ir1_need_reserve_h128(IR1_INST *ir1);
