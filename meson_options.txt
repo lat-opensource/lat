@@ -129,3 +129,5 @@ option('tests', type : 'feature', value : 'auto',
        description: 'Build tests only when explicitly enabled')
 option('latx_version', type: 'string', value: '',
        description: 'Custom version string')
+option('latx_host_scalar_libc', type: 'boolean', value: false,
+       description: 'Force baseline host libc string and memory routines')

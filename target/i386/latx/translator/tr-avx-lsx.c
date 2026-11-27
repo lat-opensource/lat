@@ -1396,15 +1396,15 @@ bool translate_vptest_lsx(IR1_INST *pir1)
     }
 
     /* VPTEST clears OF, SF, AF and PF, then sets only ZF and CF. */
-    la_x86mtflag(zero_ir2_opnd, 0x3f);
+    latx_write_eflags(zero_ir2_opnd, 0x3f);
     la_vseteqz_v(fcc0_ir2_opnd, and_result);
     la_bceqz(fcc0_ir2_opnd, zf_done);
-    la_x86mtflag(n4095_opnd, ZF_USEDEF_BIT);
+    latx_write_eflags(n4095_opnd, ZF_USEDEF_BIT);
     la_label(zf_done);
 
     la_vseteqz_v(fcc0_ir2_opnd, andn_result);
     la_bceqz(fcc0_ir2_opnd, cf_done);
-    la_x86mtflag(n4095_opnd, CF_USEDEF_BIT);
+    latx_write_eflags(n4095_opnd, CF_USEDEF_BIT);
     la_label(cf_done);
 
     ra_free_num_4095(n4095_opnd);
@@ -1470,14 +1470,14 @@ static bool translate_avx_vtest_lsx(IR1_INST *pir1, bool double_precision)
         la_vor_v(andn_result, andn_result, half_result);
     }
 
-    la_x86mtflag(zero_ir2_opnd, 0x3f);
+    latx_write_eflags(zero_ir2_opnd, 0x3f);
     la_vseteqz_v(fcc0_ir2_opnd, and_result);
     la_bceqz(fcc0_ir2_opnd, zf_done);
-    la_x86mtflag(n4095_opnd, ZF_USEDEF_BIT);
+    latx_write_eflags(n4095_opnd, ZF_USEDEF_BIT);
     la_label(zf_done);
     la_vseteqz_v(fcc0_ir2_opnd, andn_result);
     la_bceqz(fcc0_ir2_opnd, cf_done);
-    la_x86mtflag(n4095_opnd, CF_USEDEF_BIT);
+    latx_write_eflags(n4095_opnd, CF_USEDEF_BIT);
     la_label(cf_done);
 
     ra_free_num_4095(n4095_opnd);
@@ -2605,10 +2605,10 @@ bool translate_vpxor_lsx(IR1_INST * pir1) {
                 src2 = ra_alloc_ftemp();
                 src2_high = ra_alloc_ftemp();
                 gen_test_page_flag(mem_opnd, mem_imm, PAGE_READ, 16);
-                la_vld(src2, mem_opnd, mem_imm);
+                latx_load_v128(src2, mem_opnd, mem_imm);
                 mem_opnd = mem_imm_add_disp(mem_opnd, &mem_imm, 16);
                 gen_test_page_flag(mem_opnd, mem_imm, PAGE_READ, 16);
-                la_vld(src2_high, mem_opnd, mem_imm);
+                latx_load_v128(src2_high, mem_opnd, mem_imm);
             }
 
             la_vxor_v(dest, src1, src2);

@@ -191,8 +191,8 @@ bool translate_vmovaps_lsx(IR1_INST *pir1)
 
             address = convert_mem_to_itemp(src);
             gen_test_page_flag(address, 0, PAGE_READ, 32);
-            la_vld(low, address, 0);
-            la_vld(high, address, 16);
+            latx_load_v128(low, address, 0);
+            latx_load_v128(high, address, 16);
             la_vori_b(ra_alloc_xmm(dest_index), low, 0);
             store_ymm_high128_shadow(high, dest_index);
             ra_free_temp(address);
@@ -207,8 +207,8 @@ bool translate_vmovaps_lsx(IR1_INST *pir1)
             address = convert_mem_to_itemp(dest);
             gen_test_page_flag(address, 0,
                                PAGE_WRITE | PAGE_WRITE_ORG, 32);
-            la_vst(low, address, 0);
-            la_vst(high, address, 16);
+            latx_store_v128(low, address, 0);
+            latx_store_v128(high, address, 16);
             ra_free_temp(address);
             ra_free_temp(high);
         } else if (ir1_opnd_is_ymm(dest) && ir1_opnd_is_ymm(src)) {
@@ -226,7 +226,7 @@ bool translate_vmovaps_lsx(IR1_INST *pir1)
 
             address = convert_mem_to_itemp(src);
             gen_test_page_flag(address, 0, PAGE_READ, 16);
-            la_vld(value, address, 0);
+            latx_load_v128(value, address, 0);
             la_vori_b(ra_alloc_xmm(dest_index), value, 0);
             clear_ymm_high128_shadow(dest_index);
             ra_free_temp(address);
@@ -237,7 +237,7 @@ bool translate_vmovaps_lsx(IR1_INST *pir1)
             address = convert_mem_to_itemp(dest);
             gen_test_page_flag(address, 0,
                                PAGE_WRITE | PAGE_WRITE_ORG, 16);
-            la_vst(ra_alloc_xmm(ir1_opnd_base_reg_num(src)),
+            latx_store_v128(ra_alloc_xmm(ir1_opnd_base_reg_num(src)),
                    address, 0);
             ra_free_temp(address);
         } else if (ir1_opnd_is_xmm(dest) && ir1_opnd_is_xmm(src)) {

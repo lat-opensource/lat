@@ -1904,6 +1904,12 @@ bool translate_lock_cmpxchg(IR1_INST *pir1)
 #ifdef TARGET_X86_64
 tr_exit:
 #endif
+    /* Only src0 and eax_opnd remain live in the flag and exit blocks. */
+    ra_free_temp(dest);
+    ra_free_temp(tmp);
+    ra_free_temp_auto(src1);
+    ra_free_temp_auto(mem_opnd);
+
     /* unequal */
     la_label(label_unequal);
     la_dbar(0);
@@ -1917,5 +1923,7 @@ tr_exit:
     la_label(label_flag);
     generate_eflag_calculation(src0, eax_opnd, src0, pir1, true);
     la_label(label_exit);
+    ra_free_temp(src0);
+    ra_free_temp_auto(eax_opnd);
     return true;
 }

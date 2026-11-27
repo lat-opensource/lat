@@ -14,6 +14,7 @@
 #include "la-append.h"
 #include "ir2-relocate.h"
 #include "macro-inst.h"
+#include "flag-state.h"
 
 #include "aot.h"
 
@@ -1589,6 +1590,11 @@ void update_fcsr_by_sw(IR2_OPND sw);
 void tr_gen_call_to_helper(ADDR, enum aot_rel_kind);
 void convert_fpregs_64_to_x80(void);
 void convert_fpregs_x80_to_64(void);
+void latx_fcvt_soft(void *frame, unsigned int operation,
+                    unsigned int dest, unsigned int src, unsigned int high);
+void latx_fcvt_d_ld(IR2_OPND dest, IR2_OPND low, IR2_OPND high);
+void latx_fcvt_ld_d(IR2_OPND dest, IR2_OPND src);
+void latx_fcvt_ud_d(IR2_OPND dest, IR2_OPND src);
 void helper_raise_int(void);
 void helper_raise_illop(void);
 void helper_raise_trapop(void);
@@ -1683,6 +1689,9 @@ void store_freg_to_ir1(IR2_OPND, IR1_OPND *, bool is_xmm_hi, bool is_convert);
 void store_64_bit_freg_to_ir1_80_bit_mem(IR2_OPND, IR2_OPND, int);
 void store_freg128_to_ir1_mem(IR2_OPND opnd2, IR1_OPND *opnd1);
 void load_freg128_from_ir1_mem(IR2_OPND opnd2, IR1_OPND *opnd1);
+void latx_load_v128(IR2_OPND dest, IR2_OPND base, int disp);
+void latx_load_f64(IR2_OPND dest, IR2_OPND base, int disp);
+void latx_store_v128(IR2_OPND src, IR2_OPND base, int disp);
 void load_64_bit_freg_from_ir1_80_bit_mem(IR2_OPND opnd2,
                                                  IR2_OPND mem_opnd, int mem_imm);
 

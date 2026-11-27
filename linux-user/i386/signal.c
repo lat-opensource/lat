@@ -318,6 +318,16 @@ __asm__(".macro xvld reg, src, offs \n\t"
                 :                                                       \
                 : "memory"                                               \
             );                                                          \
+        } else if (latx_no_lbt_mode_enabled()) {                         \
+            uint64_t tmp[2] QEMU_ALIGNED(16);                            \
+            asm volatile (                                              \
+                "vst $vr"#map",%0\r\n"                                  \
+                : "=m" (tmp)                                            \
+                :                                                       \
+                : "memory"                                               \
+            );                                                          \
+            env->xmm_regs[n].ZMM_Q(0) = tmp[0];                          \
+            env->xmm_regs[n].ZMM_Q(1) = tmp[1];                          \
         } else {                                                        \
             asm volatile (                                              \
                 "vst $vr"#map",%0\r\n"                                  \
@@ -335,6 +345,16 @@ __asm__(".macro xvld reg, src, offs \n\t"
                 "xvld $xr"#map",%0\r\n"                                 \
                 :                                                       \
                 : "m" (env->xmm_regs[n])                                 \
+                :                                                       \
+            );                                                          \
+        } else if (latx_no_lbt_mode_enabled()) {                         \
+            uint64_t tmp[2] QEMU_ALIGNED(16);                            \
+            tmp[0] = env->xmm_regs[n].ZMM_Q(0);                          \
+            tmp[1] = env->xmm_regs[n].ZMM_Q(1);                          \
+            asm volatile (                                              \
+                "vld $vr"#map",%0\r\n"                                  \
+                :                                                       \
+                : "m" (tmp)                                             \
                 :                                                       \
             );                                                          \
         } else {                                                        \

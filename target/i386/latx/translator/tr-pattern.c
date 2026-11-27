@@ -1426,7 +1426,7 @@ static bool translate_ucomisd_seta(IR1_INST *pir1)
     ra_free_temp(flag_pf);
     ra_free_temp(flag_zf);
     /* 4. mov flag to EFLAGS */
-    la_x86mtflag(flag, 0x3f);
+    latx_write_eflags(flag, 0x3f);
 
     lsenv->tr_data->curr_ir1_inst = next;
     lsenv->tr_data->curr_ir1_count++;

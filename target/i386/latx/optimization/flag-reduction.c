@@ -458,7 +458,7 @@ void flag_reduction(IR1_INST *pir1, uint8 *pending_use)
      * unaffected.
      */
     if (rotate_need_of(pir1)) {
-        curr_usedef.def &= ~__OF;
+        curr_usedef.def &= ~(__OF | __CF);
     }
 
     /*
@@ -469,7 +469,7 @@ void flag_reduction(IR1_INST *pir1, uint8 *pending_use)
      * the AF flag is undefined.
      */
     if (shift_need_oszpcf(pir1)) {
-        curr_usedef.def &= ~(__OSZPF | __CF);
+        curr_usedef.def &= ~__ALL_EFLAGS;
     }
 
     /*
@@ -477,7 +477,7 @@ void flag_reduction(IR1_INST *pir1, uint8 *pending_use)
      * If the count operand is 0, the flags are not affected.
      */
     if (double_shift_need_all(pir1)) {
-        curr_usedef.def &= ~(__OSZPF);
+        curr_usedef.def &= ~__ALL_EFLAGS;
     }
 
     current_def &= *pending_use;

@@ -83,7 +83,7 @@ static void save_eflags(IR1_INST *pir1)
     case dt_X86_INS_FUCOMI:
     case dt_X86_INS_FUCOMIP:
         eflags_temp = ra_alloc_itemp();
-        la_x86mfflag(eflags_temp, 0x3f);
+        latx_read_eflags(eflags_temp, 0x3f);
         la_or(eflags_opnd, eflags_opnd, eflags_temp);
         ra_free_temp(eflags_temp);
         break;
@@ -113,8 +113,10 @@ static void restore_eflags(IR1_INST *pir1)
     case dt_X86_INS_FCOMIP:
     case dt_X86_INS_FUCOMI:
     case dt_X86_INS_FUCOMIP:
-        la_x86mtflag(eflags_opnd, 0x3f);
-        la_andi(eflags_opnd, eflags_opnd, 0x702);
+        latx_write_eflags(eflags_opnd, 0x3f);
+        if (option_enable_lbt) {
+            la_andi(eflags_opnd, eflags_opnd, 0x702);
+        }
         break;
     default:
         break;
@@ -173,8 +175,8 @@ static void save_xmm(void)
     int save_no = 8;
 #endif
     for (int i = 0; i < save_no; i++) {
-        la_vst(ra_alloc_xmm(i), tmp_env,
-                lsenv_offset_of_xmm(lsenv, i) - 0x7f0);
+        latx_store_v128(ra_alloc_xmm(i), tmp_env,
+                        lsenv_offset_of_xmm(lsenv, i) - 0x7f0);
     }
     ra_free_temp(tmp_env);
 }
@@ -189,8 +191,8 @@ static void restore_xmm(void)
     int save_no = 8;
 #endif
     for (int i = 0; i < save_no; i++) {
-        la_vld(ra_alloc_xmm(i), tmp_env,
-                lsenv_offset_of_xmm(lsenv, i) - 0x7f0);
+        latx_load_v128(ra_alloc_xmm(i), tmp_env,
+                       lsenv_offset_of_xmm(lsenv, i) - 0x7f0);
     }
     ra_free_temp(tmp_env);
 }
@@ -306,7 +308,7 @@ static void save_float80_to_stn(IR2_OPND stm_opnd, int stn)
 {
     IR2_OPND stn_opnd_addr = get_stn_opnd_addr(stn);
 
-    la_vst(stm_opnd, stn_opnd_addr, 0);
+    latx_store_v128(stm_opnd, stn_opnd_addr, 0);
 
     ra_free_temp(stn_opnd_addr);
 }
@@ -315,7 +317,7 @@ static void get_float80_from_stn(IR2_OPND stm_opnd, int stn)
 {
     IR2_OPND stn_opnd_addr = get_stn_opnd_addr(stn);
 
-    la_vld(stm_opnd, stn_opnd_addr, 0);
+    latx_load_v128(stm_opnd, stn_opnd_addr, 0);
 
     ra_free_temp(stn_opnd_addr);
 }
@@ -605,11 +607,11 @@ static void la_calcute_float64(IR1_INST *pir1, IR2_OPND float80_dest,
     IR2_OPND ftemp = ra_alloc_ftemp();
 
     la_vextrins_h(ftemp, float80_dest, 0x4);
-    la_fcvt_d_ld(float80_dest, float80_dest, ftemp);
+    latx_fcvt_d_ld(float80_dest, float80_dest, ftemp);
 
     if (src_is_float80) {
         la_vextrins_h(ftemp, src_opnd, 0x4);
-        la_fcvt_d_ld(src_opnd, src_opnd, ftemp);
+        latx_fcvt_d_ld(src_opnd, src_opnd, ftemp);
     }
 
     switch (ir1_opcode(pir1)) {
@@ -658,8 +660,8 @@ static void la_calcute_float64(IR1_INST *pir1, IR2_OPND float80_dest,
         break;
     }
 
-    la_fcvt_ud_d(ftemp, float80_dest);
-    la_fcvt_ld_d(float80_dest, float80_dest);
+    latx_fcvt_ud_d(ftemp, float80_dest);
+    latx_fcvt_ld_d(float80_dest, float80_dest);
     la_vextrins_h(float80_dest, ftemp, 0x40);
 
     ra_free_temp(ftemp);
@@ -673,7 +675,7 @@ static void gen_float64_ST0_MEM(IR1_INST *pir1, IR2_OPND mem_opnd,
     IR2_OPND src_opnd = ra_alloc_ftemp();
 
     if (opnd_size == 64) {
-        la_fld_d(src_opnd, mem_opnd, 0);
+        latx_load_f64(src_opnd, mem_opnd, 0);
         if (is_integer) {
             la_ffint_d_l(src_opnd, src_opnd);
         }
@@ -843,7 +845,7 @@ static bool translate_fcmovnb_softfpu(IR1_INST *pir1)
 {
     IR2_OPND label_exit = ra_alloc_label();
     IR2_OPND flag_opnd = ra_alloc_itemp();
-    la_x86mfflag(flag_opnd, CF_USEDEF_BIT);
+    latx_read_eflags(flag_opnd, CF_USEDEF_BIT);
     la_bne(flag_opnd, zero_ir2_opnd, label_exit);
     IR1_OPND *opnd1 = ir1_get_opnd(pir1, 1);
 	int stn = ir1_opnd_base_reg_num(opnd1);
@@ -861,7 +863,7 @@ static bool translate_fcmovb_softfpu(IR1_INST *pir1)
 {
     IR2_OPND label_exit = ra_alloc_label();
     IR2_OPND flag_opnd = ra_alloc_itemp();
-    la_x86mfflag(flag_opnd, CF_USEDEF_BIT);
+    latx_read_eflags(flag_opnd, CF_USEDEF_BIT);
     la_beq(flag_opnd, zero_ir2_opnd, label_exit);
     IR1_OPND *opnd1 = ir1_get_opnd(pir1, 1);
 	int stn = ir1_opnd_base_reg_num(opnd1);
@@ -879,7 +881,7 @@ static bool translate_fcmovnu_softfpu(IR1_INST *pir1)
 {
     IR2_OPND label_exit = ra_alloc_label();
     IR2_OPND flag_opnd = ra_alloc_itemp();
-    la_x86mfflag(flag_opnd, PF_USEDEF_BIT);
+    latx_read_eflags(flag_opnd, PF_USEDEF_BIT);
     la_bne(flag_opnd, zero_ir2_opnd, label_exit);
     IR1_OPND *opnd1 = ir1_get_opnd(pir1, 1);
 	int stn = ir1_opnd_base_reg_num(opnd1);
@@ -897,7 +899,7 @@ static bool translate_fcmovu_softfpu(IR1_INST *pir1)
 {
     IR2_OPND label_exit = ra_alloc_label();
     IR2_OPND flag_opnd = ra_alloc_itemp();
-    la_x86mfflag(flag_opnd, PF_USEDEF_BIT);
+    latx_read_eflags(flag_opnd, PF_USEDEF_BIT);
     la_beq(flag_opnd, zero_ir2_opnd, label_exit);
     IR1_OPND *opnd1 = ir1_get_opnd(pir1, 1);
 	int stn = ir1_opnd_base_reg_num(opnd1);
@@ -915,7 +917,7 @@ static bool translate_fcmove_softfpu(IR1_INST *pir1)
 {
     IR2_OPND label_exit = ra_alloc_label();
     IR2_OPND flag_opnd = ra_alloc_itemp();
-    la_x86mfflag(flag_opnd, ZF_USEDEF_BIT);
+    latx_read_eflags(flag_opnd, ZF_USEDEF_BIT);
     la_beq(flag_opnd, zero_ir2_opnd, label_exit);
     IR1_OPND *opnd1 = ir1_get_opnd(pir1, 1);
 	int stn = ir1_opnd_base_reg_num(opnd1);
@@ -933,7 +935,7 @@ static bool translate_fcmovne_softfpu(IR1_INST *pir1)
 {
     IR2_OPND label_exit = ra_alloc_label();
     IR2_OPND flag_opnd = ra_alloc_itemp();
-    la_x86mfflag(flag_opnd, ZF_USEDEF_BIT);
+    latx_read_eflags(flag_opnd, ZF_USEDEF_BIT);
     la_bne(flag_opnd, zero_ir2_opnd, label_exit);
     IR1_OPND *opnd1 = ir1_get_opnd(pir1, 1);
 	int stn = ir1_opnd_base_reg_num(opnd1);
@@ -951,7 +953,7 @@ static bool translate_fcmovbe_softfpu(IR1_INST *pir1)
 {
     IR2_OPND label_exit = ra_alloc_label();
     IR2_OPND flag_opnd = ra_alloc_itemp();
-    la_x86mfflag(flag_opnd, ZF_USEDEF_BIT | CF_USEDEF_BIT);
+    latx_read_eflags(flag_opnd, ZF_USEDEF_BIT | CF_USEDEF_BIT);
     la_beq(flag_opnd, zero_ir2_opnd, label_exit);
     IR1_OPND *opnd1 = ir1_get_opnd(pir1, 1);
 	int stn = ir1_opnd_base_reg_num(opnd1);
@@ -969,7 +971,7 @@ static bool translate_fcmovnbe_softfpu(IR1_INST *pir1)
 {
     IR2_OPND label_exit = ra_alloc_label();
     IR2_OPND flag_opnd = ra_alloc_itemp();
-    la_x86mfflag(flag_opnd, ZF_USEDEF_BIT | CF_USEDEF_BIT);
+    latx_read_eflags(flag_opnd, ZF_USEDEF_BIT | CF_USEDEF_BIT);
     la_bne(flag_opnd, zero_ir2_opnd, label_exit);
     IR1_OPND *opnd1 = ir1_get_opnd(pir1, 1);
 	int stn = ir1_opnd_base_reg_num(opnd1);
@@ -1458,7 +1460,7 @@ static bool translate_fild_softfpu(IR1_INST *pir1)
     int opnd_size = ir1_opnd_size(opnd0);
     IR2_OPND mem_opnd = convert_mem_no_offset(opnd0);
 
-    if (option_softfpu == 2) {
+    if (option_enable_lbt && option_softfpu == 2) {
         IR2_OPND src_opnd = ra_alloc_itemp();
         IR2_OPND src_ftemp = ra_alloc_ftemp();
 
@@ -1511,8 +1513,8 @@ static bool translate_fild_softfpu(IR1_INST *pir1)
             la_ffint_d_w(src_ftemp, src_ftemp);
         }
 
-        la_fcvt_ld_d(st0_opnd, src_ftemp);
-        la_fcvt_ud_d(ftemp_opnd, src_ftemp);
+        latx_fcvt_ld_d(st0_opnd, src_ftemp);
+        latx_fcvt_ud_d(ftemp_opnd, src_ftemp);
         la_vextrins_h(st0_opnd, ftemp_opnd, 0x40);
 
         la_fpu_push();
@@ -1621,13 +1623,13 @@ static bool translate_fist_softfpu(IR1_INST *pir1)
         la_bge(itemp, itemp2, label_softfpu);
 
         if (opnd_size == 16) {
-            la_fcvt_d_ld(st0_opnd, fpr_st0_low_opnd, fpr_st0_high_opnd);
+            latx_fcvt_d_ld(st0_opnd, fpr_st0_low_opnd, fpr_st0_high_opnd);
             la_ftint_w_d(st0_opnd, st0_opnd);
             la_movfr2gr_s(itemp, st0_opnd);
             la_st_h(itemp, mem_opnd, 0);
 
         } else if (opnd_size == 32) {
-            la_fcvt_d_ld(st0_opnd, fpr_st0_low_opnd, fpr_st0_high_opnd);
+            latx_fcvt_d_ld(st0_opnd, fpr_st0_low_opnd, fpr_st0_high_opnd);
             la_ftint_w_d(st0_opnd, st0_opnd);
             la_movfr2gr_s(itemp, st0_opnd);
             la_st_w(itemp, mem_opnd, 0);
@@ -1709,7 +1711,7 @@ static bool translate_fistp_softfpu(IR1_INST *pir1)
             li_d(itemp2, FLOAT80_EXPONENT_MAX + FLOAT32_EXPONENT_MAX + 1);
             la_bge(itemp, itemp2, label_softfpu);
 
-            la_fcvt_d_ld(st0_opnd, fpr_st0_low_opnd, fpr_st0_high_opnd);
+            latx_fcvt_d_ld(st0_opnd, fpr_st0_low_opnd, fpr_st0_high_opnd);
             la_ftint_w_d(st0_opnd, st0_opnd);
             la_movfr2gr_s(itemp, st0_opnd);
             la_st_h(itemp, mem_opnd, 0);
@@ -1718,7 +1720,7 @@ static bool translate_fistp_softfpu(IR1_INST *pir1)
             li_d(itemp2, FLOAT80_EXPONENT_MAX + FLOAT32_EXPONENT_MAX + 1);
             la_bge(itemp, itemp2, label_softfpu);
 
-            la_fcvt_d_ld(st0_opnd, fpr_st0_low_opnd, fpr_st0_high_opnd);
+            latx_fcvt_d_ld(st0_opnd, fpr_st0_low_opnd, fpr_st0_high_opnd);
             la_ftint_w_d(st0_opnd, st0_opnd);
             la_movfr2gr_s(itemp, st0_opnd);
             la_st_w(itemp, mem_opnd, 0);
@@ -1727,7 +1729,7 @@ static bool translate_fistp_softfpu(IR1_INST *pir1)
             li_d(itemp2, FLOAT80_EXPONENT_MAX + FLOAT64_EXPONENT_MAX + 1);
             la_bge(itemp, itemp2, label_softfpu);
 
-            la_fcvt_d_ld(st0_opnd, fpr_st0_low_opnd, fpr_st0_high_opnd);
+            latx_fcvt_d_ld(st0_opnd, fpr_st0_low_opnd, fpr_st0_high_opnd);
             la_ftint_l_d(st0_opnd, st0_opnd);
             la_movfr2gr_d(itemp, st0_opnd);
             la_st_d(itemp, mem_opnd, 0);
@@ -1887,7 +1889,7 @@ static bool translate_fld1_softfpu(IR1_INST *pir1)
 
 static bool translate_fld_softfpu(IR1_INST *pir1)
 {
-    if (option_softfpu == 2) {
+    if (option_enable_lbt && option_softfpu == 2) {
         int index = get_src_index(pir1);
         IR1_OPND *opnd0 = ir1_get_opnd(pir1, index);
         int opnd_size = ir1_opnd_size(opnd0);
@@ -1908,17 +1910,17 @@ static bool translate_fld_softfpu(IR1_INST *pir1)
                 la_fld_s(src_opnd, mem_opnd, 0);
 
                 la_fcvt_d_s(src_opnd, src_opnd);
-                la_fcvt_ud_d(ftemp, src_opnd);
-                la_fcvt_ld_d(st0_opnd, src_opnd);
+                latx_fcvt_ud_d(ftemp, src_opnd);
+                latx_fcvt_ld_d(st0_opnd, src_opnd);
                 la_vextrins_h(st0_opnd, ftemp, 0x40);
             } else if (opnd_size == 64) {
-                la_fld_d(src_opnd, mem_opnd, 0);
-                la_fcvt_ud_d(ftemp, src_opnd);
-                la_fcvt_ld_d(st0_opnd, src_opnd);
+                latx_load_f64(src_opnd, mem_opnd, 0);
+                latx_fcvt_ud_d(ftemp, src_opnd);
+                latx_fcvt_ld_d(st0_opnd, src_opnd);
                 la_vextrins_h(st0_opnd, ftemp, 0x40);
             } else if (opnd_size == 80) {
                 IR2_OPND high_itemp = ra_alloc_itemp();
-                la_fld_d(st0_opnd, mem_opnd, 0);
+                latx_load_f64(st0_opnd, mem_opnd, 0);
                 la_ld_hu(high_itemp, mem_opnd, 8);
                 la_movgr2fr_d(ftemp, high_itemp);
                 la_vextrins_h(st0_opnd, ftemp, 0x40);
@@ -2766,11 +2768,11 @@ static bool translate_fst_softfpu(IR1_INST *pir1)
             }
 
             if (opnd_size == 32) {
-                la_fcvt_d_ld(low_opnd, low_opnd, high_opnd);
+                latx_fcvt_d_ld(low_opnd, low_opnd, high_opnd);
                 la_fcvt_s_d(low_opnd, low_opnd);
                 la_fst_s(low_opnd, mem_opnd, 0);
             } else if (opnd_size == 64) {
-                la_fcvt_d_ld(low_opnd, low_opnd, high_opnd);
+                latx_fcvt_d_ld(low_opnd, low_opnd, high_opnd);
                 la_fst_d(low_opnd, mem_opnd, 0);
             }
         }

@@ -3507,17 +3507,17 @@ bool translate_ptest(IR1_INST *pir1)
     IR2_OPND label_2 = ra_alloc_label();
     IR2_OPND n4095_opnd = ra_alloc_num_4095();
 
-    la_x86mtflag(zero_ir2_opnd, 0x3f);
+    latx_write_eflags(zero_ir2_opnd, 0x3f);
     la_vand_v(temp, src, dest);
     la_vseteqz_v(fcc0_ir2_opnd, temp);
     la_bceqz(fcc0_ir2_opnd, label_1);
-    la_x86mtflag(n4095_opnd, ZF_USEDEF_BIT);
+    latx_write_eflags(n4095_opnd, ZF_USEDEF_BIT);
 
     la_label(label_1);
     la_vandn_v(temp, dest, src);
     la_vseteqz_v(fcc0_ir2_opnd, temp);
     la_bceqz(fcc0_ir2_opnd, label_2);
-    la_x86mtflag(n4095_opnd, CF_USEDEF_BIT);
+    latx_write_eflags(n4095_opnd, CF_USEDEF_BIT);
     la_label(label_2);
 
     ra_free_num_4095(n4095_opnd);

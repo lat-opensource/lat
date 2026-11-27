@@ -34,6 +34,7 @@ extern int option_tu_link;
 #ifdef CONFIG_LATX_KZT
 #include "kzt-runtime.h"
 
+extern int option_kzt;
 extern int option_kzt_log;
 extern char *option_kzt_libs;
 extern char *option_kzt_error;
@@ -55,6 +56,7 @@ extern int option_trace_tb;
 extern int option_trace_ir1;
 extern int option_enable_fcsr_exc;
 extern int option_latx_disassemble_trace_cmp;
+extern int option_enable_lbt;
 extern int option_jr_ra;
 #define SMC_ILL_INST 0x1
 /* ld.w      $a1,$zero,0 */
@@ -154,6 +156,7 @@ static inline int latx_smc_inv_tb(void) { return option_smc_opt != 0; }
 static inline int latx_smc_shmm(void) { return option_smc_opt & 0x2; }
 static inline void latx_smc_shmm_disable(void) { option_smc_opt &= ~0x2; }
 static inline int latx_smc_use_store_helper(void) { return option_smc_opt & 0x4; }
+static inline bool latx_no_lbt_mode_enabled(void) { return !option_enable_lbt; }
 
 extern unsigned long long counter_tb_exec;
 extern unsigned long long counter_tb_tr;
@@ -172,6 +175,7 @@ extern unsigned long long counter_mips_tr;
 #define ENVSUP_LATX \
     ENVSUP_I386_SHARED_MMAP \
     ENVFUN(LATX_OPTIMIZE, handle_arg_optimize) \
+    ENVFUN(LATX_LBT, handle_arg_latx_lbt) \
     ENVFUN(LATX_VPAES, handle_arg_latx_vpaes) \
     ENVFUN(LATX_SMC, handle_arg_latx_smc) \
     ENVFUN(LATX_CLOSE_PARALLEL, handle_arg_latx_parallel) \
@@ -291,6 +295,8 @@ extern unsigned long long counter_mips_tr;
 void options_init(void);
 bool latx_options_finalize(void);
 void options_parse_opt(const char *opt);
+void latx_host_features_init(unsigned long hwcap);
+bool latx_parse_lbt_option(const char *arg);
 void options_parse_imm_reg(const char *bits);
 void options_parse_dump(const char *bits);
 void options_parse_show_tb(const char *pc);

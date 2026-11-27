@@ -2609,30 +2609,30 @@ bool translate_vptest(IR1_INST * pir1) {
     IR2_OPND n4095_opnd = ra_alloc_num_4095();
 
     if (ir1_opnd_is_xmm(opnd0)) {
-        la_x86mtflag(zero_ir2_opnd, 0x3f);
+        latx_write_eflags(zero_ir2_opnd, 0x3f);
         la_vand_v(temp, src, dest);
         la_vseteqz_v(fcc0_ir2_opnd, temp);
         la_bceqz(fcc0_ir2_opnd, label_1);
-        la_x86mtflag(n4095_opnd, ZF_USEDEF_BIT);
+        latx_write_eflags(n4095_opnd, ZF_USEDEF_BIT);
 
         la_label(label_1);
         la_vandn_v(temp, dest, src);
         la_vseteqz_v(fcc0_ir2_opnd, temp);
         la_bceqz(fcc0_ir2_opnd, label_2);
-        la_x86mtflag(n4095_opnd, CF_USEDEF_BIT);
+        latx_write_eflags(n4095_opnd, CF_USEDEF_BIT);
         la_label(label_2);
     } else {
-        la_x86mtflag(zero_ir2_opnd, 0x3f);
+        latx_write_eflags(zero_ir2_opnd, 0x3f);
         la_xvand_v(temp, src, dest);
         la_xvseteqz_v(fcc0_ir2_opnd, temp);
         la_bceqz(fcc0_ir2_opnd, label_1);
-        la_x86mtflag(n4095_opnd, ZF_USEDEF_BIT);
+        latx_write_eflags(n4095_opnd, ZF_USEDEF_BIT);
 
         la_label(label_1);
         la_xvandn_v(temp, dest, src);
         la_xvseteqz_v(fcc0_ir2_opnd, temp);
         la_bceqz(fcc0_ir2_opnd, label_2);
-        la_x86mtflag(n4095_opnd, CF_USEDEF_BIT);
+        latx_write_eflags(n4095_opnd, CF_USEDEF_BIT);
         la_label(label_2);
     }
     ra_free_num_4095(n4095_opnd);
@@ -4818,19 +4818,19 @@ bool translate_vtestps(IR1_INST * pir1) {
         IR2_OPND label_1 = ra_alloc_label();
         IR2_OPND label_2 = ra_alloc_label();
 
-        la_x86mtflag(zero_ir2_opnd, 0x3f);
+        latx_write_eflags(zero_ir2_opnd, 0x3f);
         la_vand_v(temp, dest, src);
         la_vsrli_w(temp, temp, 0x1f);
         la_vseteqz_v(fcc0_ir2_opnd, temp); //temp==0 fcc=1;
         la_bceqz(fcc0_ir2_opnd, label_1); //fcc==1,not jump
-        la_x86mtflag(n4095_opnd, ZF_USEDEF_BIT);
+        latx_write_eflags(n4095_opnd, ZF_USEDEF_BIT);
 
         la_label(label_1);
         la_vandn_v(temp, dest, src);
         la_vsrli_w(temp, temp, 0x1f);
         la_vseteqz_v(fcc0_ir2_opnd, temp); //temp==0 fcc=1;
         la_bceqz(fcc0_ir2_opnd, label_2); //fcc==1,not jump
-        la_x86mtflag(n4095_opnd, CF_USEDEF_BIT);
+        latx_write_eflags(n4095_opnd, CF_USEDEF_BIT);
         la_label(label_2);
 
     } else {
@@ -4842,19 +4842,19 @@ bool translate_vtestps(IR1_INST * pir1) {
         IR2_OPND label_1 = ra_alloc_label();
         IR2_OPND label_2 = ra_alloc_label();
 
-        la_x86mtflag(zero_ir2_opnd, 0x3f);
+        latx_write_eflags(zero_ir2_opnd, 0x3f);
         la_xvand_v(temp, dest, src);
         la_xvsrli_w(temp, temp, 0x1f);
         la_xvseteqz_v(fcc0_ir2_opnd, temp); //temp==0 fcc=1;
         la_bceqz(fcc0_ir2_opnd, label_1); //fcc==1,not jump
-        la_x86mtflag(n4095_opnd, ZF_USEDEF_BIT);
+        latx_write_eflags(n4095_opnd, ZF_USEDEF_BIT);
 
         la_label(label_1);
         la_xvandn_v(temp, dest, src);
         la_xvsrli_w(temp, temp, 0x1f);
         la_xvseteqz_v(fcc0_ir2_opnd, temp); //temp==0 fcc=1;
         la_bceqz(fcc0_ir2_opnd, label_2); //fcc==1,not jump
-        la_x86mtflag(n4095_opnd, CF_USEDEF_BIT);
+        latx_write_eflags(n4095_opnd, CF_USEDEF_BIT);
         la_label(label_2);
     }
 
@@ -4877,19 +4877,19 @@ bool translate_vtestpd(IR1_INST * pir1) {
         IR2_OPND label_1 = ra_alloc_label();
         IR2_OPND label_2 = ra_alloc_label();
 
-        la_x86mtflag(zero_ir2_opnd, 0x3f);
+        latx_write_eflags(zero_ir2_opnd, 0x3f);
         la_vand_v(temp, dest, src);
         la_vsrli_d(temp, temp, 0x3f);
         la_vseteqz_v(fcc0_ir2_opnd, temp); //temp==0 fcc=1;
         la_bceqz(fcc0_ir2_opnd, label_1); //fcc==1,not jump
-        la_x86mtflag(n4095_opnd, ZF_USEDEF_BIT);
+        latx_write_eflags(n4095_opnd, ZF_USEDEF_BIT);
 
         la_label(label_1);
         la_vandn_v(temp, dest, src);
         la_vsrli_d(temp, temp, 0x3f);
         la_vseteqz_v(fcc0_ir2_opnd, temp); //temp==0 fcc=1;
         la_bceqz(fcc0_ir2_opnd, label_2); //fcc==1,not jump
-        la_x86mtflag(n4095_opnd, CF_USEDEF_BIT);
+        latx_write_eflags(n4095_opnd, CF_USEDEF_BIT);
         la_label(label_2);
 
     } else {
@@ -4901,19 +4901,19 @@ bool translate_vtestpd(IR1_INST * pir1) {
         IR2_OPND label_1 = ra_alloc_label();
         IR2_OPND label_2 = ra_alloc_label();
 
-        la_x86mtflag(zero_ir2_opnd, 0x3f);
+        latx_write_eflags(zero_ir2_opnd, 0x3f);
         la_xvand_v(temp, dest, src);
         la_xvsrli_d(temp, temp, 0x3f);
         la_xvseteqz_v(fcc0_ir2_opnd, temp); //temp==0 fcc=1;
         la_bceqz(fcc0_ir2_opnd, label_1); //fcc==1,not jump
-        la_x86mtflag(n4095_opnd, ZF_USEDEF_BIT);
+        latx_write_eflags(n4095_opnd, ZF_USEDEF_BIT);
 
         la_label(label_1);
         la_xvandn_v(temp, dest, src);
         la_xvsrli_d(temp, temp, 0x3f);
         la_xvseteqz_v(fcc0_ir2_opnd, temp); //temp==0 fcc=1;
         la_bceqz(fcc0_ir2_opnd, label_2); //fcc==1,not jump
-        la_x86mtflag(n4095_opnd, CF_USEDEF_BIT);
+        latx_write_eflags(n4095_opnd, CF_USEDEF_BIT);
         la_label(label_2);
 
     }

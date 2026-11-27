@@ -366,7 +366,7 @@ bool translate_into(IR1_INST *pir1)
     /* raise INTO , enabel when OF = 1 */
     IR2_OPND flag_opnd = ra_alloc_itemp();
     IR2_OPND label_z = ra_alloc_label();
-    la_x86mfflag(flag_opnd, OF_USEDEF_BIT);
+    latx_read_eflags(flag_opnd, OF_USEDEF_BIT);
     la_beq(flag_opnd, zero_ir2_opnd, label_z);
 
     IR2_OPND tmp_opnd = ra_alloc_itemp();
@@ -872,7 +872,7 @@ bool translate_iret(IR1_INST *pir1)
     store_ireg_to_ir1_seg(cs_opnd, &seg_opnd);
     ra_free_temp(cs_opnd);
 
-    la_x86mtflag(eflags_opnd, 0x3f);
+    latx_write_eflags(eflags_opnd, 0x3f);
     /* 2. adjust esp */
     la_addi_addrx(esp_opnd, esp_opnd, 12);
 
@@ -898,7 +898,7 @@ bool translate_iretq(IR1_INST *pir1)
     store_ireg_to_ir1_seg(tmp_opnd, &seg_opnd);
     /* eflags */
     la_ld_d(eflags_opnd, esp_opnd, 16);
-    la_x86mtflag(eflags_opnd, 0x3f);
+    latx_write_eflags(eflags_opnd, 0x3f);
     /* esp */
     la_ld_d(esp_tmp, esp_opnd, 24);
     /* ss */
@@ -1549,7 +1549,7 @@ bool translate_sahf(IR1_INST *pir1)
     IR2_OPND ah = ra_alloc_itemp();
     load_ireg_from_ir1_2(ah, &ah_ir1_opnd, ZERO_EXTENSION, false);
     if (ir1_need_calculate_any_flag(pir1)) {
-        la_x86mtflag(ah, SF_USEDEF_BIT | ZF_USEDEF_BIT |
+        latx_write_eflags(ah, SF_USEDEF_BIT | ZF_USEDEF_BIT |
                     AF_USEDEF_BIT | PF_USEDEF_BIT | CF_USEDEF_BIT);
     }
     ra_free_temp(ah);
@@ -1559,7 +1559,7 @@ bool translate_sahf(IR1_INST *pir1)
 bool translate_lahf(IR1_INST *pir1)
 {
     IR2_OPND ah = ra_alloc_itemp();
-    la_x86mfflag(ah, 0x1f);
+    latx_read_eflags(ah, 0x1f);
     la_ori(ah, ah, 0x2);
     store_ireg_to_ir1(ah, &ah_ir1_opnd, false);
     ra_free_temp(ah);
@@ -1771,9 +1771,9 @@ bool translate_cmc(IR1_INST *pir1)
 {
     if (ir1_need_calculate_any_flag(pir1)) {
         IR2_OPND cf = ra_alloc_itemp();
-        la_x86mfflag(cf, CF_USEDEF_BIT);
+        latx_read_eflags(cf, CF_USEDEF_BIT);
         la_xori(cf, cf, CF_USEDEF_BIT);
-        la_x86mtflag(cf, CF_USEDEF_BIT);
+        latx_write_eflags(cf, CF_USEDEF_BIT);
         ra_free_temp(cf);
     }
     return true;

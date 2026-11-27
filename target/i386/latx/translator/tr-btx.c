@@ -181,7 +181,8 @@ bool translate_btx(IR1_INST *pir1)
      * lock btx -> translate_lock_btx()
      */
 #ifdef CONFIG_LATX_LLSC
-    if (is_lock && ir1_opnd_is_mem(opnd0)) {
+    if (is_lock && ir1_opnd_is_mem(opnd0) &&
+        !latx_no_lbt_mode_enabled()) {
         return translate_btx_llsc(pir1);
     }
 #endif
@@ -329,7 +330,7 @@ bool translate_salc(IR1_INST *pir1)
     IR2_OPND src_opnd =
         load_ireg_from_ir1(&eax_ir1_opnd, ZERO_EXTENSION, false);
     IR2_OPND flag_opnd = ra_alloc_itemp();
-    la_x86mfflag(flag_opnd, CF_USEDEF_BIT);
+    latx_read_eflags(flag_opnd, CF_USEDEF_BIT);
     la_bne(flag_opnd, zero_ir2_opnd, label_1);
     la_bstrins_w(src_opnd, zero_ir2_opnd, 7, 0);
     la_b(label_2);

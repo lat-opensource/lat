@@ -690,6 +690,14 @@ static void handle_arg_optimize(const char *arg)
     options_parse_opt(arg);
 }
 
+static void handle_arg_latx_lbt(const char *arg)
+{
+    if (!latx_parse_lbt_option(arg)) {
+        fprintf(stderr, "LATX_LBT must be 0 (software) or 1 (auto)\n");
+        exit(EXIT_FAILURE);
+    }
+}
+
 static void handle_arg_latx_vpaes(const char *arg)
 {
     option_vpaes = strtol(arg, NULL, 0);
@@ -704,7 +712,6 @@ static void handle_arg_latx_softfpu(const char *arg)
 {
     option_softfpu = strtol(arg, NULL, 0);
     if (option_softfpu) {
-        option_aot = 0;
         option_set_rounding_opt = 0;
     }
 }
@@ -954,7 +961,7 @@ static void handle_arg_latx_fork_unlink(const char *arg)
 static void handle_arg_latx_aot(const char *arg)
 {
     option_aot = strtol(arg, NULL, 0);
-    if (option_softfpu || option_mem_test) {
+    if (option_mem_test) {
         option_aot = 0;
     }
 }
@@ -1035,6 +1042,8 @@ static const struct qemu_argument arg_table[] = {
 #ifdef CONFIG_LATX
     {"latx-optimize",   "LATX_OPTIMIZE",      false, handle_arg_optimize,
     "",           "specify enabled optimize type"},
+    {"latx-lbt", "LATX_LBT", true, handle_arg_latx_lbt,
+    "0|1",        "use software state (0) or detected LBT support (1, default)"},
     {"latx-vpaes",      "LATX_VPAES",         true,  handle_arg_latx_vpaes,
     "",           "enable vpaes AES translation"},
     {"latx-smc",        "LATX_SMC",         true,   handle_arg_latx_smc,
@@ -1493,26 +1502,7 @@ int main(int argc, char **argv, char **envp)
     }
 
 #if defined(CONFIG_LATX) && defined(__loongarch__)
-    /* Lets check hwcap */
-    #include <asm/hwcap.h>
-    int need_cap, hwcap;
-    need_cap = HWCAP_LOONGARCH_LSX | HWCAP_LOONGARCH_LBT_X86;
-    hwcap = qemu_getauxval(AT_HWCAP);
-    if (need_cap != (hwcap & need_cap)) {
-        fprintf(stderr, "LAT needs LSX/LASX and LBT extension support.\n");
-        fprintf(stderr, "Extension not found:");
-        if (!(hwcap & HWCAP_LOONGARCH_LSX))
-            fprintf(stderr, " LSX");
-        if (!(hwcap & HWCAP_LOONGARCH_LBT_X86))
-            fprintf(stderr, " LBT_X86");
-        fprintf(stderr, ". Please check KERNEL and HARDWARE.\n");
-    }
-    if (!(hwcap & HWCAP_LOONGARCH_LASX)) {
-        option_enable_lasx = 0;
-#ifdef CONFIG_LATX_AVX_OPT
-        option_avx_cpuid = 0;
-#endif
-    }
+    latx_host_features_init(qemu_getauxval(AT_HWCAP));
 #endif
 
     envlist = envlist_create();

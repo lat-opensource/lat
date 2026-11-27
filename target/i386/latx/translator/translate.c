@@ -2074,6 +2074,22 @@ bool ir1_translate(IR1_INST *ir1)
     }
 #endif
 
+#ifdef CONFIG_LATX
+    /* LEA has a memory-shaped operand but only computes an address.  It
+     * performs no memory access and adds no x86 ordering requirement.
+     */
+    if (unlikely(latx_no_lbt_mode_enabled()) &&
+        ir1_opcode(ir1) != dt_X86_INS_LEA) {
+        for (int i = 0; i < ir1_opnd_num(ir1); i++) {
+            if (ir1_opnd_is_mem(ir1_get_opnd(ir1, i))) {
+                /* Preserve x86 TSO on hosts that execute with weak ordering. */
+                la_dbar(0);
+                break;
+            }
+        }
+    }
+#endif
+
 #ifdef DEBUG_LATX_PER_INSN_DBAR
     la_dbar(0);
 #endif
@@ -3626,7 +3642,7 @@ int generate_native_rotate_fpu_by(void *code_buf_addr)
 /* we have no inst to mov from gpr to top, so we have to be silly */
 void tr_load_top_from_env(void)
 {
-    if (option_softfpu) {
+    if (option_softfpu || !option_enable_lbt) {
         return;
     }
 
@@ -3640,7 +3656,7 @@ void tr_load_top_from_env(void)
     la_ld_h(top_opnd, env_ir2_opnd, offset);
 
     for (i = 0; i < 8; i++) {
-        la_x86mttop(i);
+        latx_write_top_const(i);
         la_beq(top_opnd, zero_ir2_opnd, label_exit);
         la_addi_w(top_opnd, top_opnd, -1);
     }
@@ -3650,7 +3666,10 @@ void tr_load_top_from_env(void)
 
 void tr_gen_top_mode_init(void)
 {
-    la_x86mttop(0);
+    if (!option_enable_lbt) {
+        return;
+    }
+    latx_write_top_const(0);
     la_x86settm();
 }
 
@@ -3888,6 +3907,9 @@ void tr_fpu_pop(void) { tr_fpu_inc(); }
 
 void tr_fpu_inc(void)
 {
+    if (!option_enable_lbt) {
+        return;
+    }
     if (option_fputag) {
         IR2_OPND tag_addr_opnd = ra_alloc_itemp();
         IR2_OPND temp = ra_alloc_itemp();
@@ -3896,7 +3918,7 @@ void tr_fpu_inc(void)
         int tag_offset = lsenv_offset_of_tag_word(lsenv);
         lsassert(tag_offset <= 0x7ff);
 
-        la_x86mftop(tag_addr_opnd);
+        latx_read_top(tag_addr_opnd);
         li_d(temp, (uint64)(0x1ULL));
         la_add_d(tag_addr_opnd, tag_addr_opnd, env_ir2_opnd);
         la_st_b(temp, tag_addr_opnd, tag_offset);
@@ -3905,13 +3927,16 @@ void tr_fpu_inc(void)
         ra_free_temp(tag_addr_opnd);
     }
     /* 2. top = top + 1 */
-    la_x86inctop();
+    latx_inc_top();
 }
 
 void tr_fpu_dec(void)
 {
+    if (!option_enable_lbt) {
+        return;
+    }
     /* 1. top = top - 1 */
-    la_x86dectop();
+    latx_dec_top();
 
     if (option_fputag) {
         IR2_OPND tag_addr_opnd = ra_alloc_itemp();
@@ -3920,7 +3945,7 @@ void tr_fpu_dec(void)
         int tag_offset = lsenv_offset_of_tag_word(lsenv);
         lsassert(tag_offset <= 0x7ff);
 
-        la_x86mftop(tag_addr_opnd);
+        latx_read_top(tag_addr_opnd);
         la_add_d(tag_addr_opnd, tag_addr_opnd, env_ir2_opnd);
         la_st_b(zero_ir2_opnd, tag_addr_opnd, tag_offset);
 
@@ -3930,11 +3955,17 @@ void tr_fpu_dec(void)
 
 void tr_fpu_enable_top_mode(void)
 {
+    if (option_softfpu || !option_enable_lbt) {
+        return;
+    }
     la_x86settm();
 }
 
 void tr_fpu_disable_top_mode(void)
 {
+    if (option_softfpu || !option_enable_lbt) {
+        return;
+    }
     la_x86clrtm();
 }
 
@@ -4004,8 +4035,8 @@ void tr_save_xmm_to_env(uint8 xmm_to_save)
                 la_xvst(ra_alloc_xmm(i),
                                      env_ir2_opnd, lsenv_offset_of_xmm(lsenv, i));
             } else {
-                la_vst(ra_alloc_xmm(i),
-                                     env_ir2_opnd, lsenv_offset_of_xmm(lsenv, i));
+                latx_store_v128(ra_alloc_xmm(i), env_ir2_opnd,
+                                lsenv_offset_of_xmm(lsenv, i));
 
             }
         }
@@ -4020,8 +4051,8 @@ void tr_save_xmm_to_env(uint8 xmm_to_save)
                 la_xvst(ra_alloc_xmm(i),
                                      tmp_env_opnd, lsenv_offset_of_xmm(lsenv, i) - 0x7f0);
             } else {
-                la_vst(ra_alloc_xmm(i),
-                                     tmp_env_opnd, lsenv_offset_of_xmm(lsenv, i) - 0x7f0);
+                latx_store_v128(ra_alloc_xmm(i), tmp_env_opnd,
+                                lsenv_offset_of_xmm(lsenv, i) - 0x7f0);
             }
         }
     }
@@ -4037,7 +4068,8 @@ void tr_load_xmm_from_env(uint8 xmm_to_load)
             if (option_enable_lasx) {
                 la_xvld(ra_alloc_xmm(i), env_ir2_opnd, lsenv_offset_of_xmm(lsenv, i));
             } else {
-                la_vld(ra_alloc_xmm(i), env_ir2_opnd, lsenv_offset_of_xmm(lsenv, i));
+                latx_load_v128(ra_alloc_xmm(i), env_ir2_opnd,
+                               lsenv_offset_of_xmm(lsenv, i));
             }
         }
     }
@@ -4050,8 +4082,8 @@ void tr_load_xmm_from_env(uint8 xmm_to_load)
                 la_xvld(ra_alloc_xmm(i), tmp_env_opnd,
                                      lsenv_offset_of_xmm(lsenv, i) - 0x7f0);
             } else {
-                la_vld(ra_alloc_xmm(i), tmp_env_opnd,
-                                     lsenv_offset_of_xmm(lsenv, i) - 0x7f0);
+                latx_load_v128(ra_alloc_xmm(i), tmp_env_opnd,
+                               lsenv_offset_of_xmm(lsenv, i) - 0x7f0);
             }
         }
     }
@@ -4072,8 +4104,8 @@ void tr_save_xmm64_to_env(uint8 xmm_to_save)
                 la_xvst(ra_alloc_xmm(i + 8), tmp_env_opnd,
                     lsenv_offset_of_xmm(lsenv, i + 8) - 0x7f0);
             } else {
-                la_vst(ra_alloc_xmm(i + 8), tmp_env_opnd,
-                    lsenv_offset_of_xmm(lsenv, i + 8) - 0x7f0);
+                latx_store_v128(ra_alloc_xmm(i + 8), tmp_env_opnd,
+                                lsenv_offset_of_xmm(lsenv, i + 8) - 0x7f0);
             }
         }
     }
@@ -4091,8 +4123,8 @@ void tr_load_xmm64_from_env(uint8 xmm_to_load)
                 la_xvld(ra_alloc_xmm(i + 8), tmp_env_opnd,
                     lsenv_offset_of_xmm(lsenv, i + 8) - 0x7f0);
             } else {
-                la_vld(ra_alloc_xmm(i + 8), tmp_env_opnd,
-                    lsenv_offset_of_xmm(lsenv, i + 8) - 0x7f0);
+                latx_load_v128(ra_alloc_xmm(i + 8), tmp_env_opnd,
+                               lsenv_offset_of_xmm(lsenv, i + 8) - 0x7f0);
             }
         }
     }
@@ -4111,8 +4143,8 @@ static void tr_save_ymm_to_env_lsx(uint16 ymm_to_save)
     /* Keep the fixed env pointer out of the LSX fault-save scratch path. */
     for (int i = 0; i < 8; ++i) {
         if (ymm_to_save & (UINT16_C(1) << i)) {
-            la_vst(ra_alloc_xmm(i), env_ir2_opnd,
-                   lsenv_offset_of_xmm(lsenv, i));
+            latx_store_v128(ra_alloc_xmm(i), env_ir2_opnd,
+                            lsenv_offset_of_xmm(lsenv, i));
         }
     }
 #ifdef TARGET_X86_64
@@ -4120,8 +4152,8 @@ static void tr_save_ymm_to_env_lsx(uint16 ymm_to_save)
         la_addi_d(a1_ir2_opnd, env_ir2_opnd, 0x7f0);
         for (int i = 0; i < 8; ++i) {
             if (ymm_to_save & (UINT16_C(1) << (i + 8))) {
-                la_vst(ra_alloc_xmm(i + 8), a1_ir2_opnd,
-                       lsenv_offset_of_xmm(lsenv, i + 8) - 0x7f0);
+                latx_store_v128(ra_alloc_xmm(i + 8), a1_ir2_opnd,
+                                lsenv_offset_of_xmm(lsenv, i + 8) - 0x7f0);
             }
         }
     }
@@ -4136,10 +4168,10 @@ static void tr_save_ymm_to_env_lsx(uint16 ymm_to_save)
         high = ra_alloc_ftemp();
         li_d(a1_ir2_opnd, lsenv_offset_of_ymmh(lsenv, i));
         la_add_d(a1_ir2_opnd, env_ir2_opnd, a1_ir2_opnd);
-        la_vld(high, a1_ir2_opnd, 0);
+        latx_load_v128(high, a1_ir2_opnd, 0);
         li_d(a2_ir2_opnd, lsenv_offset_of_xmm(lsenv, i) + 16);
         la_add_d(a2_ir2_opnd, env_ir2_opnd, a2_ir2_opnd);
-        la_vst(high, a2_ir2_opnd, 0);
+        latx_store_v128(high, a2_ir2_opnd, 0);
         ra_free_temp(high);
     }
     /* $a2 maps guest r8 on x86-64.  It is used above as an address scratch
@@ -4179,7 +4211,7 @@ void tr_load_ymm_high_from_env(uint16 ymm_to_load)
         high = ra_alloc_ftemp();
         li_d(address, lsenv_offset_of_xmm(lsenv, i) + 16);
         la_add_d(address, env_ir2_opnd, address);
-        la_vld(high, address, 0);
+        latx_load_v128(high, address, 0);
         store_ymm_high128_shadow(high, i);
         ra_free_temp(address);
         ra_free_temp(high);
@@ -4195,7 +4227,7 @@ void tr_save_registers_to_env(uint8 gpr_to_save, uint8 fpr_to_save,
     /* 2. FPR (MMX) */
     if (!option_softfpu) {
         IR2_OPND top_opnd = ra_alloc_itemp();
-        la_x86mftop(top_opnd);
+        latx_read_top(top_opnd);
         la_st_w(top_opnd, env_ir2_opnd,
                               lsenv_offset_of_top(lsenv));
         ra_free_temp(top_opnd);
@@ -4246,10 +4278,12 @@ void tr_save_registers_to_env(uint8 gpr_to_save, uint8 fpr_to_save,
 
     /* save eflags */
     IR2_OPND eflags_opnd = ra_alloc_eflags();
-    IR2_OPND eflags_temp = ra_alloc_itemp();
-    la_x86mfflag(eflags_temp, 0x3f);
-    la_or(eflags_opnd, eflags_opnd, eflags_temp);
-    ra_free_temp(eflags_temp);
+    if (option_enable_lbt) {
+        IR2_OPND eflags_temp = ra_alloc_itemp();
+        latx_read_eflags(eflags_temp, 0x3f);
+        la_or(eflags_opnd, eflags_opnd, eflags_temp);
+        ra_free_temp(eflags_temp);
+    }
     lsassert(lsenv_offset_of_eflags(lsenv) >= -2048 &&
             lsenv_offset_of_eflags(lsenv) <= 2047);
     la_st_w(eflags_opnd, env_ir2_opnd,
@@ -4270,8 +4304,10 @@ void tr_load_registers_from_env(uint8 gpr_to_load, uint8 fpr_to_load,
     IR2_OPND eflags_opnd = ra_alloc_statics(S_EFLAGS);
     la_ld_w(eflags_opnd, env_ir2_opnd,
                         lsenv_offset_of_eflags(lsenv));
-    la_x86mtflag(eflags_opnd, 0x3f);
-    la_andi(eflags_opnd, eflags_opnd, 0x702);
+    if (option_enable_lbt) {
+        latx_write_eflags(eflags_opnd, 0x3f);
+        la_andi(eflags_opnd, eflags_opnd, 0x702);
+    }
 
     /* 4. virtual registers */
     for (i = 0; i < STATIC_NUM; ++i) {
@@ -4982,6 +5018,8 @@ IR2_OPND tr_lat_spin_lock(IR2_OPND mem_addr, int imm)
     la_bne(lat_lock_val, cpu_index, label_lat_lock);
     la_sc_w(lat_lock_val, lat_lock_addr, 0);
     la_beq(lat_lock_val, zero_ir2_opnd, label_lat_lock);
+    /* x86 LOCK operations are full barriers before the protected access. */
+    la_dbar(0);
 
     ra_free_temp(cpu_index);
     ra_free_temp(lat_lock_val);
@@ -5027,6 +5065,12 @@ void smc_store_helper_restore_cpu_state(void *_env)
     for (i = 0; i < nb_xmm_regs; i++) {
         if (option_enable_lasx) {
             __vst256_native_vreg(&(env->xmm_regs[i].ZMM_Q(0)), i);
+        } else if (latx_no_lbt_mode_enabled()) {
+            uint64_t tmp[2] QEMU_ALIGNED(16);
+
+            __vst128_native_vreg(tmp, i);
+            env->xmm_regs[i].ZMM_Q(0) = tmp[0];
+            env->xmm_regs[i].ZMM_Q(1) = tmp[1];
         } else {
             __vst128_native_vreg(&(env->xmm_regs[i].ZMM_Q(0)), i);
         }

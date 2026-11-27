@@ -746,6 +746,7 @@ void latx_lsenv_init(CPUArchState *env)
     lsenv->cpu_state = env;
     lsenv->tr_data = &tr_data_real;
 #ifdef CONFIG_LATX_TU
+    /* Non-TU translation still uses tu_data bookkeeping in get_ir1_list(). */
     tu_control_init();
 #endif
 

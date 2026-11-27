@@ -1135,7 +1135,7 @@ static void host_signal_handler(int host_signum, siginfo_t *info,
     }
 
 #ifdef CONFIG_LATX_FAST_JMPCACHE
-    if (host_signum == SIGILL) {
+    if (host_signum == SIGILL || host_signum == SIGTRAP) {
         TranslationBlock *current_tb = tcg_tb_lookup(UC_PC(uc));
         if (current_tb) {
             if (*(unsigned int *)UC_PC(uc) == FASTTB_ILLINST_MAGIC) {

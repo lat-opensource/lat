@@ -1252,6 +1252,12 @@ int translate_tb_in_tu(struct TranslationBlock *tb)
 #if defined(CONFIG_LATX_TU) && defined(CONFIG_LATX_INSTS_PATTERN)
 bool judge_tu_eflag_gen(void *tb_in_tu) {
     TranslationBlock *tb = tb_in_tu;
+    if (!option_enable_lbt) {
+        /* Software flags cannot use the one-instruction flag patch slots. */
+        tb->tu_jmp[TU_TB_INDEX_NEXT] = TB_JMP_RESET_OFFSET_INVALID;
+        tb->tu_jmp[TU_TB_INDEX_TARGET] = TB_JMP_RESET_OFFSET_INVALID;
+        return false;
+    }
     if (tb->s_data->next_tb[TU_TB_INDEX_NEXT] && tb->s_data->next_tb[TU_TB_INDEX_TARGET]) {
         /* when tb_next & tb_target exit, get eflags_target_arg */
         TranslationBlock *tb_target = tb->s_data->next_tb[TU_TB_INDEX_TARGET];
