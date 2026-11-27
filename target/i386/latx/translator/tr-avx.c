@@ -5431,6 +5431,169 @@ static void translate_vroundps_trunc_sae(IR2_OPND dest, IR2_OPND src,
     ra_free_temp(nan_mask);
 }
 
+static void emit_vround_ymm_constant(IR2_OPND dest, unsigned value,
+                                     bool is_double)
+{
+    if (is_double && value > 511) {
+        IR2_OPND temp = ra_alloc_itemp();
+
+        li_w(temp, value);
+        la_xvreplgr2vr_d(dest, temp);
+        ra_free_temp(temp);
+    } else {
+        la_xvldi(dest, VLDI_IMM_TYPE0(is_double ? 3 : 2, value));
+    }
+}
+
+static void emit_vround_ymm_sae(IR2_OPND dest, IR2_OPND src, uint8_t imm,
+                               bool is_double, IR2_OPND slow)
+{
+    const unsigned mode = imm & 3;
+    const bool dynamic = imm & 4;
+    const unsigned fraction = is_double ? 52 : 23;
+    const unsigned bias = is_double ? 1023 : 127;
+    const unsigned sign = is_double ? 63 : 31;
+    IR2_OPND abs = ra_alloc_ftemp();
+    IR2_OPND exponent = ra_alloc_ftemp();
+    IR2_OPND shift = ra_alloc_ftemp();
+    IR2_OPND mask = ra_alloc_ftemp();
+    IR2_OPND scratch = ra_alloc_ftemp();
+    IR2_OPND rounded = ra_alloc_ftemp();
+    IR2_OPND direction;
+    IR2_OPND directed_mask;
+    IR2_OPND bias_ready;
+
+#define ROUND_OP(op, ...) \
+    (is_double ? la_xv##op##_d(__VA_ARGS__) : la_xv##op##_w(__VA_ARGS__))
+#define ROUND_OP_U(op, ...) \
+    (is_double ? la_xv##op##_du(__VA_ARGS__) : la_xv##op##_wu(__VA_ARGS__))
+
+    ROUND_OP(slli, scratch, src, 1);
+    ROUND_OP(srli, abs, scratch, 1);
+    ROUND_OP(srli, exponent, scratch, fraction + 1);
+
+    /* Check every lane before writing dest, which can alias src. */
+    ROUND_OP(seqi, mask, exponent, 0);
+    la_xvand_v(mask, mask, abs);
+    emit_vround_ymm_constant(scratch, 2 * bias + 1, is_double);
+    ROUND_OP(seq, scratch, exponent, scratch);
+    la_xvor_v(mask, mask, scratch);
+    la_xvseteqz_v(fcc0_ir2_opnd, mask);
+    la_bceqz(fcc0_ir2_opnd, slow);
+
+    /* For |x| >= 1, clear the fractional bits after adding the bias. */
+    emit_vround_ymm_constant(scratch, bias + fraction, is_double);
+    ROUND_OP_U(min, shift, exponent, scratch);
+    ROUND_OP(sub, shift, scratch, shift);
+    if (!is_double) {
+        la_xvmini_wu(shift, shift, 23);
+    }
+    /* Shifts in lanes below one are immaterial to the final selection. */
+    ROUND_OP(seq, mask, exponent, exponent);
+    ROUND_OP(sll, mask, mask, shift);
+    la_xvnor_v(mask, mask, mask);
+    if (dynamic) {
+        IR2_OPND nearest = ra_alloc_label();
+
+        direction = ra_alloc_itemp();
+        directed_mask = ra_alloc_ftemp();
+        bias_ready = ra_alloc_label();
+        la_ld_wu(direction, env_ir2_opnd, lsenv_offset_of_mxcsr(lsenv));
+        la_bstrpick_d(direction, direction, 14, 13);
+        la_beqz(direction, nearest);
+        /* Floor adds a bias in negative lanes, ceil in positive lanes. */
+        ROUND_OP(srli, directed_mask, src, sign);
+        ROUND_OP(replgr2vr, scratch, direction);
+        ROUND_OP(add, directed_mask, directed_mask, scratch);
+        ROUND_OP(seqi, directed_mask, directed_mask, 2);
+        la_xvand_v(rounded, mask, directed_mask);
+        la_b(bias_ready);
+        la_label(nearest);
+    }
+    if (dynamic || mode == 0) {
+        /* Half minus one, plus the parity of the retained integer. */
+        ROUND_OP(srl, rounded, src, shift);
+        emit_vround_ymm_constant(scratch, 1, is_double);
+        la_xvand_v(rounded, rounded, scratch);
+        la_xvand_v(rounded, rounded, mask);
+        ROUND_OP(srli, scratch, mask, 1);
+        ROUND_OP(add, rounded, rounded, scratch);
+    } else if (mode != 3) {
+        ROUND_OP(slti, rounded, src, 0);
+        if (mode == 1) {
+            la_xvand_v(rounded, mask, rounded);
+        } else {
+            la_xvandn_v(rounded, rounded, mask);
+        }
+    }
+    if (dynamic) {
+        la_label(bias_ready);
+    }
+    if (dynamic || mode != 3) {
+        ROUND_OP(add, rounded, src, rounded);
+    }
+    la_xvandn_v(rounded, mask, !dynamic && mode == 3 ? src : rounded);
+
+    /* Below one the result is either signed zero or signed one. */
+    emit_vround_ymm_constant(shift, bias, is_double);
+    IR2_OPND directed_small;
+    IR2_OPND small_ready;
+    if (dynamic) {
+        directed_small = ra_alloc_label();
+        small_ready = ra_alloc_label();
+        la_bnez(direction, directed_small);
+    }
+    if (dynamic || mode == 0) {
+        emit_vround_ymm_constant(scratch, bias - 1, is_double);
+        ROUND_OP(slli, scratch, scratch, fraction);
+        ROUND_OP_U(slt, mask, scratch, abs);
+    } else if (mode != 3) {
+        ROUND_OP(slti, mask, src, 0);
+        if (mode == 2) {
+            la_xvnor_v(mask, mask, mask);
+        }
+        ROUND_OP(seqi, scratch, abs, 0);
+        la_xvandn_v(mask, scratch, mask);
+    }
+    if (dynamic) {
+        la_b(small_ready);
+        la_label(directed_small);
+        ROUND_OP(seqi, scratch, abs, 0);
+        la_xvandn_v(mask, scratch, directed_mask);
+        la_label(small_ready);
+        ra_free_temp(directed_mask);
+        ra_free_temp(direction);
+    }
+    ROUND_OP_U(slt, exponent, exponent, shift);
+    ROUND_OP(srli, scratch, src, sign);
+    ROUND_OP(slli, scratch, scratch, sign);
+    if (dynamic || mode != 3) {
+        ROUND_OP(slli, shift, shift, fraction);
+        la_xvand_v(mask, mask, shift);
+        la_xvor_v(scratch, mask, scratch);
+    }
+    la_xvbitsel_v(dest, rounded, scratch, exponent);
+
+#undef ROUND_OP_U
+#undef ROUND_OP
+
+    ra_free_temp(rounded);
+    ra_free_temp(scratch);
+    ra_free_temp(mask);
+    ra_free_temp(shift);
+    ra_free_temp(exponent);
+    ra_free_temp(abs);
+}
+
+static bool can_emit_vround_packed_fast(uint8_t imm, bool is_xmm, unsigned lanes)
+{
+    /* LASX checks all YMM lanes in parallel, retaining the fixed-path budget. */
+    if (!is_xmm && (imm & 8)) {
+        imm &= ~4;
+    }
+    return can_emit_round_fast(imm, lanes);
+}
+
 bool translate_vroundps(IR1_INST *pir1)
 {
     if (!option_enable_lasx) {
@@ -5459,11 +5622,31 @@ bool translate_vroundps(IR1_INST *pir1)
         return true;
     }
 
+    unsigned lanes = is_xmm ? 4 : 8;
+    bool use_fast_round = can_emit_vround_packed_fast(imm, is_xmm, lanes);
+    IR2_OPND done;
+    if (use_fast_round) {
+        IR2_OPND slow = ra_alloc_label();
+        done = ra_alloc_label();
+        if (!is_xmm && (imm & 8) && ((imm & 4) || (imm & 3) != 3)) {
+            emit_vround_ymm_sae(dest, src, imm, false, slow);
+        } else {
+            IR2_OPND result = ra_alloc_ftemp();
+            emit_round_fast(result, src, imm, false, lanes, slow);
+            la_xvori_b(dest, result, 0);
+            if (is_xmm) {
+                set_high128_xreg_to_zero(dest);
+            }
+            ra_free_temp(result);
+        }
+        la_b(done);
+        la_label(slow);
+    }
+
     IR2_OPND temp = ra_alloc_ftemp();
     IR2_OPND fcsr = ra_alloc_itemp();
     IR2_OPND fcsr_save = ra_alloc_itemp();
     IR2_OPND mxcsr = ra_alloc_itemp();
-
     if(imm & 0x8){
         IR2_INST * ( * tr_inst)(IR2_OPND, IR2_OPND, IR2_OPND, int);
         tr_inst = is_xmm ? la_vfcmp_cond_s : la_xvfcmp_cond_s;
@@ -5503,6 +5686,9 @@ bool translate_vroundps(IR1_INST *pir1)
         ra_free_temp(fcsr);
         ra_free_temp(fcsr_save);
         ra_free_temp(mxcsr);
+        if (use_fast_round) {
+            la_label(done);
+        }
         return true;
     }
     la_movgr2fcsr(fcsr_ir2_opnd, fcsr);
@@ -5532,6 +5718,9 @@ bool translate_vroundps(IR1_INST *pir1)
     ra_free_temp(fcsr);
     ra_free_temp(fcsr_save);
     ra_free_temp(mxcsr);
+    if (use_fast_round) {
+        la_label(done);
+    }
     return true;
 }
 
@@ -5549,11 +5738,32 @@ bool translate_vroundpd(IR1_INST *pir1)
     IR2_OPND src = load_freg256_from_ir1(opnd1);
     uint8_t imm = ir1_opnd_uimm(opnd2);
 
+    bool is_xmm = ir1_opnd_is_xmm(opnd0);
+    unsigned lanes = is_xmm ? 2 : 4;
+    bool use_fast_round = can_emit_vround_packed_fast(imm, is_xmm, lanes);
+    IR2_OPND done;
+    if (use_fast_round) {
+        IR2_OPND slow = ra_alloc_label();
+        done = ra_alloc_label();
+        if (!is_xmm && (imm & 8)) {
+            emit_vround_ymm_sae(dest, src, imm, true, slow);
+        } else {
+            IR2_OPND result = ra_alloc_ftemp();
+            emit_round_fast(result, src, imm, true, lanes, slow);
+            la_xvori_b(dest, result, 0);
+            if (is_xmm) {
+                set_high128_xreg_to_zero(dest);
+            }
+            ra_free_temp(result);
+        }
+        la_b(done);
+        la_label(slow);
+    }
+
     IR2_OPND temp = ra_alloc_ftemp();
     IR2_OPND fcsr = ra_alloc_itemp();
     IR2_OPND fcsr_save = ra_alloc_itemp();
     IR2_OPND mxcsr = ra_alloc_itemp();
-    bool is_xmm = ir1_opnd_is_xmm(opnd0);
     if(imm & 0x8){
         IR2_INST * ( * tr_inst)(IR2_OPND, IR2_OPND, IR2_OPND, int);
         tr_inst = is_xmm ? la_vfcmp_cond_d : la_xvfcmp_cond_d;
@@ -5593,6 +5803,9 @@ bool translate_vroundpd(IR1_INST *pir1)
         ra_free_temp(fcsr);
         ra_free_temp(fcsr_save);
         ra_free_temp(mxcsr);
+        if (use_fast_round) {
+            la_label(done);
+        }
         return true;
     }
     la_movgr2fcsr(fcsr_ir2_opnd, fcsr);
@@ -5622,6 +5835,9 @@ bool translate_vroundpd(IR1_INST *pir1)
     ra_free_temp(fcsr);
     ra_free_temp(fcsr_save);
     ra_free_temp(mxcsr);
+    if (use_fast_round) {
+        la_label(done);
+    }
     return true;
 }
 
@@ -5644,12 +5860,18 @@ bool translate_vroundss(IR1_INST *pir1)
     IR2_OPND temp = ra_alloc_ftemp();
     IR2_OPND temp_dest = ra_alloc_ftemp();
     IR2_OPND src = ra_alloc_ftemp();
+    bool is_xmm = ir1_opnd_is_xmm(opnd0);
+    IR2_OPND merge = ra_alloc_label();
+    if (can_emit_round_fast(imm, 1)) {
+        IR2_OPND original = ra_alloc_label();
+        emit_round_fast(temp_dest, src2, imm, false, 1, original);
+        la_b(merge);
+        la_label(original);
+    }
     IR2_OPND fcsr = ra_alloc_itemp();
     IR2_OPND fcsr_save = ra_alloc_itemp();
     IR2_OPND mxcsr = ra_alloc_itemp();
-    bool is_xmm = ir1_opnd_is_xmm(opnd0);
     la_xvreplve0_w(src, src2);
-    IR2_OPND merge = ra_alloc_label();
     if (!(imm & 0x4)) {
         IR2_OPND slow = ra_alloc_label();
         IR2_OPND sticky = ra_alloc_label();
@@ -5725,13 +5947,14 @@ bool translate_vroundss(IR1_INST *pir1)
         la_bstrins_w(fcsr, temp, 9, 8);
         la_movgr2fcsr(fcsr_ir2_opnd, fcsr);
         tr_inst(temp_dest, src);
+        la_movgr2fcsr(fcsr_ir2_opnd, fcsr_save);
+        la_label(merge);
         if (ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 0)) !=
             ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 1))) {
             la_xvori_b(dest, src1, 0);
         }
         la_xvinsve0_w(dest, temp_dest, 0);
         set_high128_xreg_to_zero(dest);
-        la_movgr2fcsr(fcsr_ir2_opnd, fcsr_save);
 
         ra_free_temp(temp);
         ra_free_temp(fcsr);
@@ -5792,12 +6015,18 @@ bool translate_vroundsd(IR1_INST *pir1)
     IR2_OPND temp = ra_alloc_ftemp();
     IR2_OPND temp_dest = ra_alloc_ftemp();
     IR2_OPND src = ra_alloc_ftemp();
+    bool is_xmm = ir1_opnd_is_xmm(opnd0);
+    IR2_OPND merge = ra_alloc_label();
+    if (can_emit_round_fast(imm, 1)) {
+        IR2_OPND original = ra_alloc_label();
+        emit_round_fast(temp_dest, src2, imm, true, 1, original);
+        la_b(merge);
+        la_label(original);
+    }
     IR2_OPND fcsr = ra_alloc_itemp();
     IR2_OPND fcsr_save = ra_alloc_itemp();
     IR2_OPND mxcsr = ra_alloc_itemp();
-    bool is_xmm = ir1_opnd_is_xmm(opnd0);
     la_xvreplve0_d(src, src2);
-    IR2_OPND merge = ra_alloc_label();
     if (!(imm & 0x4)) {
         IR2_OPND slow = ra_alloc_label();
         IR2_OPND sticky = ra_alloc_label();
@@ -5873,13 +6102,14 @@ bool translate_vroundsd(IR1_INST *pir1)
         la_bstrins_w(fcsr, temp, 9, 8);
         la_movgr2fcsr(fcsr_ir2_opnd, fcsr);
         tr_inst(temp_dest, src);
+        la_movgr2fcsr(fcsr_ir2_opnd, fcsr_save);
+        la_label(merge);
         if (ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 0)) !=
             ir1_opnd_base_reg_num(ir1_get_opnd(pir1, 1))) {
             la_xvori_b(dest, src1, 0);
         }
         la_xvinsve0_d(dest, temp_dest, 0);
         set_high128_xreg_to_zero(dest);
-        la_movgr2fcsr(fcsr_ir2_opnd, fcsr_save);
 
         ra_free_temp(temp);
         ra_free_temp(fcsr);

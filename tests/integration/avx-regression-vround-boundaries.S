@@ -48,9 +48,61 @@
     dec r10d
     jne .Lloop\@
 .endm
+.macro CHECK_MXCSR kind, source, mode
+    mov dword ptr [rip + mxcsr], (0x1f80 | (\mode << 13))
+    ldmxcsr [rip + mxcsr]
+    vmovdqu ymm0, [rip + \source]
+    vround\kind ymm1, ymm0, (8 | \mode)
+    vmovdqu [rip + mxcsr_expected], ymm1
+    lea rdi, [rip + mxcsr_expected]
+    vround\kind ymm0, ymm0, 0x0f
+    CHECK 0,8
+    vround\kind ymm1, [rip + \source], 0x0c
+    CHECK 1,8
+.endm
 _start:
     SWEEP xmm,4
     SWEEP ymm,8
+    vmovdqu ymm0, [rip + long_input]
+    vroundps ymm0, ymm0, 0x08
+    lea rdi, [rip + nearest_expected]
+    CHECK 0,8
+    vroundps ymm1, [rip + long_input], 0x0a
+    lea rdi, [rip + ceil_expected]
+    CHECK 1,8
+    vmovdqu ymm0, [rip + infinity_input]
+    vroundps ymm0, ymm0, 0x09
+    lea rdi, [rip + infinity_expected]
+    CHECK 0,8
+    vmovdqu ymm0, [rip + pd_input]
+    vroundpd ymm0, ymm0, 0x08
+    lea rdi, [rip + pd_nearest]
+    CHECK 0,8
+    vroundpd ymm1, [rip + pd_input], 0x0a
+    lea rdi, [rip + pd_ceil]
+    CHECK 1,8
+    vmovdqu ymm0, [rip + pd_large]
+    vroundpd ymm0, ymm0, 0x0b
+    lea rdi, [rip + pd_trunc]
+    CHECK 0,8
+    vmovdqu ymm0, [rip + pd_infinity]
+    vroundpd ymm0, ymm0, 0x09
+    lea rdi, [rip + pd_floor]
+    CHECK 0,8
+    .irp mode,0,1,2,3
+      CHECK_MXCSR ps, long_input, \mode
+      CHECK_MXCSR pd, pd_input, \mode
+    .endr
+    /* The final lane must enter the original path before any writeback. */
+    CHECK_MXCSR ps, infinity_input, 1
+    CHECK_MXCSR pd, pd_infinity, 1
+    /* A long block of wide rounds must fit the translator's IR2 limits. */
+    vmovdqu ymm0, [rip + long_input]
+    .rept 255
+      vroundps ymm1, ymm0, 0x09
+    .endr
+    lea rdi, [rip + long_expected]
+    CHECK 1,8
     xor edi, edi
     jmp exit
 fail:
@@ -60,6 +112,32 @@ exit:
     syscall
 .section .rodata
 .p2align 5
+long_input:
+    .long 0x3fc00000,0x3f000000,0x80000000,0xbe800000,0xbfc00000,0,0x40000000,0xc0400000
+long_expected:
+    .long 0x3f800000,0,0x80000000,0xbf800000,0xc0000000,0,0x40000000,0xc0400000
+nearest_expected:
+    .long 0x40000000,0,0x80000000,0x80000000,0xc0000000,0,0x40000000,0xc0400000
+ceil_expected:
+    .long 0x40000000,0x3f800000,0x80000000,0x80000000,0xbf800000,0,0x40000000,0xc0400000
+infinity_input:
+    .long 0x3fc00000,0x3f000000,0x80000000,0xbe800000,0xbfc00000,0,0x40000000,0x7f800000
+infinity_expected:
+    .long 0x3f800000,0,0x80000000,0xbf800000,0xc0000000,0,0x40000000,0x7f800000
+pd_input:
+    .quad 0x3fe0000000000000,0x8000000000000000,0x3ff8000000000000,0xc004000000000000
+pd_nearest:
+    .quad 0,0x8000000000000000,0x4000000000000000,0xc000000000000000
+pd_ceil:
+    .quad 0x3ff0000000000000,0x8000000000000000,0x4000000000000000,0xc000000000000000
+pd_large:
+    .quad 0xbfefffffffffffff,0x432fffffffffffff,0x4330000000000000,0x7fefffffffffffff
+pd_trunc:
+    .quad 0x8000000000000000,0x432ffffffffffffe,0x4330000000000000,0x7fefffffffffffff
+pd_infinity:
+    .quad 0xbfe0000000000000,0x8000000000000000,0x3ff8000000000000,0x7ff0000000000000
+pd_floor:
+    .quad 0xbff0000000000000,0x8000000000000000,0x3ff0000000000000,0x7ff0000000000000
 input:
     .long 0x0,0x80000000,0x1,0x80000001,0x7fffff,0x807fffff,0x800000,0x80800000
     .long 0x3effffff,0xbeffffff,0x3f000000,0xbf000000,0x3f7fffff,0xbf7fffff,0x3f800000,0xbf800000
@@ -101,4 +179,6 @@ expected:
 .bss
 .p2align 5
 out: .skip 32
+mxcsr_expected: .skip 32
+mxcsr: .skip 4
 .section .note.GNU-stack,"",@progbits
